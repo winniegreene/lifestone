@@ -75,7 +75,7 @@ public enum DebuffSchool : byte
 /// <param name="Id">The spell id.</param>
 /// <param name="Name">The dat's name (level VII is a title, e.g. "Senescence").</param>
 /// <param name="Kind">What it does.</param>
-/// <param name="Level">6 or 7.</param>
+/// <param name="Level">1 to 7 (VI and VII are <see cref="FightDebuffs.Spells"/>; I to V are resolved from the SpellTable by <see cref="DebuffRows.FromSpellTable"/>, M6 1 f).</param>
 /// <param name="School">The casting and resisting school.</param>
 /// <param name="BaseMana">The dat's base mana.</param>
 /// <param name="Power">The dat's power.</param>
@@ -278,8 +278,8 @@ public static class FightDebuffs
     public const double LightWeaponsDivisor = 3, MagicDefenseDivisor = 7;
 
     /// <summary>
-    /// Health a point of Endurance gives, from the tusker's own numbers (250 + 300 / 2 = 400, the profile's health); the dat's SecondaryAttributeTable is not read here.
-    /// TODO(f11-maxhealth-formula): pin to the dat.
+    /// Health a point of Endurance gives (ACE: Endurance / 2 rounded half up, AttributeFormula.cs:55-71 @95ef426d). M6 3 a2: the target's maximum health is the ground profile's (<c>max_health</c>, ACE's current value, CreatureVital.cs:104-131),
+    /// which the picker reads; this slope is only what Frailty's Endurance drop takes off it. TODO(f11-maxhealth-formula) is narrowed to the slope: the dat's SecondaryAttributeTable is still not read for it.
     /// </summary>
     public const double HealthPerEndurance = 0.5;
 
@@ -291,7 +291,7 @@ public static class FightDebuffs
 
     private const string OwnSkillWhy = "it lowers a defence skill of the target against melee or missiles, which only OUR melee and missiles roll against (DamageEvent.cs:396-398); our spells roll Magic Defense";
 
-    private const string SwingWhy = "TODO(f11-swing-seconds): Slowness needs the target's attack animation length (DebuffTarget.SwingSeconds)";
+    private const string SwingWhy = "TODO(f11-swing-seconds): Slowness needs the target's attack animation length (DebuffTarget.SwingSeconds); M6 14 attack timing derives it from the dats (Vitals.AttackTiming.MeleeAnimSeconds and PowerupSeconds), which the fight scenario's options do not hold";
 
     private const string AlreadyWhy = "a Fire Vulnerability at least this strong is already on the target (the products of vulnerabilities above 1 stack, but the same family keeps the stronger: EnchantmentManager.cs:925-939)";
 
@@ -301,6 +301,30 @@ public static class FightDebuffs
 
     /// <summary>The debuffs and drains at levels VI and VII, in the order of the doc notes.</summary>
     public static IReadOnlyList<DebuffSpell> Spells { get; } = BuildSpells();
+
+    /// <summary>
+    /// M6 1 f: the effect numbers of levels I to V of every kind (ACE's world database spell table, the pinned world SQL v0.9.296 read offline; the dat holds the rest, <see cref="DebuffRows.FromSpellTable"/>). The attribute and
+    /// skill debuffs are -10, -15, -20, -25 and -30 (VI is -35); Fire Vulnerability Other multiplies the fire resistance by 1.1, 1.25, 1.5, 1.75 and 2.0 (VI 2.5; ACE <c>GetVulnerabilityResistanceMod</c>, EnchantmentManager.cs:925-939,
+    /// read by <c>Creature_Properties.GetResistanceMod</c>, :100-152, which a war bolt's damage multiplies by, SpellProjectile.cs:486-488); Imperil Other lowers the armour level by 20, 50, 75, 100 and 150.
+    /// </summary>
+    public static IReadOnlyList<DebuffEffect> LowerLevelEffects { get; } = BuildLowerEffects();
+
+    /// <summary>The effect row of <paramref name="kind"/> at <paramref name="level"/> (1 to 5), or null.</summary>
+    /// <param name="kind">The kind.</param>
+    /// <param name="level">The level.</param>
+    public static DebuffEffect? EffectOf(DebuffKind kind, int level)
+    {
+        var effects = LowerLevelEffects;
+        for (var i = 0; i < effects.Count; i++)
+        {
+            if (effects[i].Kind == kind && effects[i].Level == level)
+            {
+                return effects[i];
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>The spell of <paramref name="kind"/> at <paramref name="level"/> (6 or 7), or null.</summary>
     public static DebuffSpell? Find(DebuffKind kind, int level)
@@ -425,7 +449,8 @@ public static class FightDebuffs
             case DebuffKind.DrainStaminaOther:
                 return Drain(in spell, in caster, in target, landing, cost, mana, baseline, warLanding, health: false);
             default:
-                return NoValue("TODO(f11-unknown-kind): a debuff kind with no value rule", landing, cost, mana);
+                // M6 1 f (f11-unknown-kind closed): every DebuffKind has its rule above (FightDebuffsTests pins it kind by kind); only a value outside the enum reaches here, a programming error that fails loudly.
+                throw new ArgumentOutOfRangeException(nameof(spell), spell.Kind, "FightDebuffs.Evaluate: a debuff kind with no value rule");
         }
     }
 
@@ -527,6 +552,40 @@ public static class FightDebuffs
 
     private static uint ToSkill(double skill) => skill <= 0 ? 0u : (uint)Math.Round(skill);
 
+    private static DebuffEffect[] BuildLowerEffects()
+    {
+        var rows = new List<DebuffEffect>();
+        double[] attribute = [-10, -15, -20, -25, -30];
+        foreach (var kind in new[] { DebuffKind.Weakness, DebuffKind.Clumsiness, DebuffKind.Slowness, DebuffKind.Bafflement, DebuffKind.Feeblemind, DebuffKind.Frailty, DebuffKind.MagicYield, DebuffKind.LightWeaponsIneptitude, DebuffKind.Vulnerability, DebuffKind.Defenselessness })
+        {
+            for (var l = 1; l <= 5; l++)
+            {
+                rows.Add(new DebuffEffect(kind, l, attribute[l - 1]));
+            }
+        }
+
+        double[] fire = [1.1, 1.25, 1.5, 1.75, 2.0];
+        double[] imperil = [-20, -50, -75, -100, -150];
+        double[] exhaustion = [0.91, 0.8, 0.71, 0.65, 0.59];
+        (int Boost, int Variance)[] harm = [(-4, -2), (-7, -5), (-10, -9), (-16, -17), (-24, -23)];
+        double[] loss = [-1, -0.6, -0.33, 0, 0];
+        int[] cap = [60, 80, 100, 100, 120];
+        double[] healthShare = [0.25, 0.25, 0.25, 0.25, 0.3];
+        double[] staminaShare = [0.1, 0.15, 0.2, 0.25, 0.3];
+        for (var l = 1; l <= 5; l++)
+        {
+            var i = l - 1;
+            rows.Add(new DebuffEffect(DebuffKind.FireVulnerability, l, fire[i]));
+            rows.Add(new DebuffEffect(DebuffKind.Imperil, l, imperil[i]));
+            rows.Add(new DebuffEffect(DebuffKind.Exhaustion, l, exhaustion[i]));
+            rows.Add(new DebuffEffect(DebuffKind.HarmOther, l, 0, Boost: harm[i].Boost, BoostVariance: harm[i].Variance));
+            rows.Add(new DebuffEffect(DebuffKind.DrainHealthOther, l, 0, Proportion: healthShare[i], LossPercent: loss[i], TransferCap: cap[i]));
+            rows.Add(new DebuffEffect(DebuffKind.DrainStaminaOther, l, 0, Proportion: staminaShare[i], LossPercent: loss[i], TransferCap: cap[i]));
+        }
+
+        return [.. rows];
+    }
+
     private static DebuffSpell[] BuildSpells()
     {
         const DebuffSchool ce = DebuffSchool.CreatureEnchantment;
@@ -566,5 +625,125 @@ public static class FightDebuffs
             new(1254, "Drain Stamina Other VI", DebuffKind.DrainStaminaOther, 6, life, 60, 288, 0, 0, Proportion: 0.4, LossPercent: 0.25, TransferCap: 150),
             new(2330, "Vigor Siphon", DebuffKind.DrainStaminaOther, 7, life, 60, 325, 0, 0, Proportion: 0.5, LossPercent: 0.5, TransferCap: 180),
         ];
+    }
+}
+
+/// <summary>
+/// The effect numbers of one debuff or drain level that the dat does not hold (M6 1 f): ACE's world database spell table, read offline from the pinned world SQL v0.9.296 (<c>SELECT id, name, stat_Mod_Val, boost,
+/// boost_Variance, proportion, loss_Percent, transfer_Cap FROM spell WHERE name = '&lt;line&gt; &lt;I..V&gt;'</c>; the rows are named in the slice's doc notes). The same meaning as <see cref="DebuffSpell"/>'s fields.
+/// </summary>
+/// <param name="Kind">The kind.</param>
+/// <param name="Level">1 to 5.</param>
+/// <param name="Magnitude">The enchantment's <c>stat_Mod_Val</c>.</param>
+/// <param name="Boost">A Boost's <c>boost</c>.</param>
+/// <param name="BoostVariance">A Boost's <c>boost_Variance</c>.</param>
+/// <param name="Proportion">A Transfer's <c>proportion</c>.</param>
+/// <param name="LossPercent">A Transfer's <c>loss_Percent</c> (negative at I to III: the caster gets more than is drained, ACE's <c>1 - LossPercent</c>, WorldObject_Magic.cs:721-746).</param>
+/// <param name="TransferCap">A Transfer's <c>transfer_Cap</c>.</param>
+public readonly record struct DebuffEffect(DebuffKind Kind, int Level, double Magnitude, int Boost = 0, int BoostVariance = 0, double Proportion = 0, double LossPercent = 0, int TransferCap = 0);
+
+/// <summary>
+/// The debuff and drain rows the fight's picker scores (M6 1 f, <c>f10-debuff-levels</c> closed): VI and VII are <see cref="FightDebuffs.Spells"/> (unchanged); I to V are built at run time from the client's SpellTable, the id, name,
+/// school, base mana, power and duration of the spell named "&lt;the VI row's line&gt; &lt;numeral&gt;" in the VI row's school (the lowest id when the dat holds several, as for Light Weapon Ineptitude Other's quest copies), with the
+/// effect numbers of <see cref="FightDebuffs.LowerLevelEffects"/>. A level the table lacks is left out and named. Lookups are allocation-free.
+/// </summary>
+public sealed class DebuffRows
+{
+    private const int LevelSlots = 8;
+    private static readonly int Kinds = Enum.GetValues<DebuffKind>().Length;
+    private static readonly string[] Numerals = ["I", "II", "III", "IV", "V"];
+    private readonly DebuffSpell?[] _rows = new DebuffSpell?[Kinds * LevelSlots];
+    private readonly List<DebuffSpell> _all = [];
+
+    private DebuffRows(IEnumerable<DebuffSpell> rows)
+    {
+        foreach (var row in rows)
+        {
+            _rows[((int)row.Kind * LevelSlots) + row.Level] = row;
+            _all.Add(row);
+        }
+    }
+
+    /// <summary>The VI and VII rows alone (the unit tests' and the arena's default).</summary>
+    public static DebuffRows Standard { get; } = new(FightDebuffs.Spells);
+
+    /// <summary>Every row held.</summary>
+    public IReadOnlyList<DebuffSpell> All => _all;
+
+    /// <summary>The row of <paramref name="kind"/> at <paramref name="level"/> (1 to 7), or null.</summary>
+    /// <param name="kind">The kind.</param>
+    /// <param name="level">The level.</param>
+    public DebuffSpell? Find(DebuffKind kind, int level) => level is >= 1 and <= 7 && (int)kind < Kinds ? _rows[((int)kind * LevelSlots) + level] : null;
+
+    /// <summary>The row whose spell is named <paramref name="name"/>, or null.</summary>
+    /// <param name="name">The spell's name.</param>
+    public DebuffSpell? Named(string name)
+    {
+        for (var i = 0; i < _all.Count; i++)
+        {
+            if (string.Equals(_all[i].Name, name, StringComparison.Ordinal))
+            {
+                return _all[i];
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// VI and VII plus levels I to V resolved from <paramref name="spells"/> (the client's SpellTable): <paramref name="missing"/> names every level the table does not hold (that level is then not scored).
+    /// </summary>
+    /// <param name="spells">The SpellTable by id.</param>
+    /// <param name="missing">The levels left out, one text each ("Weakness Other III: not in the SpellTable").</param>
+    public static DebuffRows FromSpellTable(IReadOnlyDictionary<uint, Lifestone.Data.Magic.SpellInfo> spells, out IReadOnlyList<string> missing)
+    {
+        ArgumentNullException.ThrowIfNull(spells);
+        var wanted = new Dictionary<string, (DebuffKind Kind, int Level, DatReaderWriter.Enums.MagicSchool School)>(StringComparer.Ordinal);
+        foreach (var six in FightDebuffs.Spells)
+        {
+            if (six.Level != 6 || !six.Name.EndsWith(" VI", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var line = six.Name[..^3];
+            var school = six.School == DebuffSchool.LifeMagic ? DatReaderWriter.Enums.MagicSchool.LifeMagic : DatReaderWriter.Enums.MagicSchool.CreatureEnchantment;
+            for (var level = 1; level <= 5; level++)
+            {
+                wanted[line + " " + Numerals[level - 1]] = (six.Kind, level, school);
+            }
+        }
+
+        var found = new Dictionary<string, Lifestone.Data.Magic.SpellInfo>(StringComparer.Ordinal);
+        foreach (var info in spells.Values)
+        {
+            if (wanted.TryGetValue(info.Name, out var w) && info.School == w.School && (!found.TryGetValue(info.Name, out var held) || info.Id < held.Id))
+            {
+                found[info.Name] = info;
+            }
+        }
+
+        var rows = new List<DebuffSpell>(FightDebuffs.Spells);
+        var gaps = new List<string>();
+        foreach (var (name, w) in wanted)
+        {
+            if (!found.TryGetValue(name, out var info))
+            {
+                gaps.Add(name + ": not in the SpellTable");
+                continue;
+            }
+
+            if (FightDebuffs.EffectOf(w.Kind, w.Level) is not { } e)
+            {
+                gaps.Add(name + ": no effect row in FightDebuffs.LowerLevelEffects");
+                continue;
+            }
+
+            var school = w.School == DatReaderWriter.Enums.MagicSchool.LifeMagic ? DebuffSchool.LifeMagic : DebuffSchool.CreatureEnchantment;
+            rows.Add(new DebuffSpell(info.Id, info.Name, w.Kind, w.Level, school, info.BaseMana, info.Power, info.Duration, e.Magnitude, e.Boost, e.BoostVariance, e.Proportion, e.LossPercent, e.TransferCap));
+        }
+
+        missing = gaps;
+        return new DebuffRows(rows);
     }
 }

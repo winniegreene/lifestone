@@ -32,6 +32,8 @@ public sealed class HeadlessLoopbackTests(ITestOutputHelper output)
     // TODO(m4-headless-digest): this test failed on the digest in P4's round 1 (shared) and round 2 (per-test) and passed in the other two runs; the path it runs (HeadlessRunner.Start + LoginScenario, one login, no
     // Arm, no keep-alive, no StayInWorld) is none of P4's changes, so the cause is outside P4 and timing-dependent (the live digest is taken in GameSession.Dispose after the quit; a message or event that
     // reaches the state there and is not in the recording, or the reverse, would differ run to run). The failure carried no evidence, so it now carries the trailer and both digests; the next failure names the cause.
+    // M6 0 t: no recurrence is recorded in M4's or M5's plans since the per-part diagnosis (P5b F4). Kept as a Loopback fact, not tiered: a Timing run starts no backend. The lead runs this class a few times
+    // with the backend up; a failure now names the differing part, and a clean run of three closes the row.
     [LoopbackFact]
     public void Headless_login_enters_and_leaves_the_world()
     {

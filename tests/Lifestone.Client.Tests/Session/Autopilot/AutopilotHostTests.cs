@@ -191,7 +191,7 @@ public sealed partial class AutopilotHostTests(ITestOutputHelper output)
         Assert.Equal(AutopilotMode.Interrupted, rig.Host.Mode);
         Assert.Equal((1, 0), (rig.Host.Interrupted, rig.Host.Resumed));
         Assert.Contains("stopped by /stop", rig.Host.Status.LastDecision, StringComparison.Ordinal);
-        Assert.DoesNotContain("recall-home", AutopilotRig.Kinds(rig.World)); // no recall: he stops where he stands
+        Assert.DoesNotContain("recall-home", AutopilotRig.Kinds(rig.World)); // no recall: it stops where it stands
 
         // Paused: frames pass, the loop is not stepped (no new state, no new kill, no new line, no further arrow).
         var state = rig.Host.Status.State;

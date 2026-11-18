@@ -454,6 +454,24 @@ internal sealed partial class SessionMachine
         public void OnIdentifyResponse(in InboundContext context, in GameEventHeader header, IdentifyResponseMsg message) =>
             Sink.OnIdentifyResponse(context, header, message);
 
+        // M6 villa: the housing events.
+
+        public void OnHouseProfile(in InboundContext context, in GameEventHeader header, HouseProfileMsg message) => Sink.OnHouseProfile(context, header, message);
+
+        public void OnHouseData(in InboundContext context, in GameEventHeader header, HouseDataMsg message) => Sink.OnHouseData(context, header, message);
+
+        public void OnHouseStatus(in InboundContext context, in GameEventHeader header, in HouseStatusEvent message) => Sink.OnHouseStatus(context, header, message);
+
+        public void OnUpdateRentTime(in InboundContext context, in GameEventHeader header, in UpdateRentTimeEvent message) => Sink.OnUpdateRentTime(context, header, message);
+
+        public void OnUpdateRentPayment(in InboundContext context, in GameEventHeader header, UpdateRentPaymentMsg message) => Sink.OnUpdateRentPayment(context, header, message);
+
+        public void OnHouseRestrictions(in InboundContext context, in GameEventHeader header, HouseRestrictionsMsg message) => Sink.OnHouseRestrictions(context, header, message);
+
+        public void OnHouseTransaction(in InboundContext context, in GameEventHeader header, in HouseTransactionEvent message) => Sink.OnHouseTransaction(context, header, message);
+
+        public void OnAvailableHouses(in InboundContext context, in GameEventHeader header, AvailableHousesMsg message) => Sink.OnAvailableHouses(context, header, message);
+
         // M5 6 w1: the confirmation dialog, the login notices and the property updates.
 
         public void OnConfirmationRequest(in InboundContext context, in GameEventHeader header, ConfirmationRequestEvent message) =>

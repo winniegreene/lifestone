@@ -24,20 +24,20 @@ public sealed class AutopilotP7oTests(ITestOutputHelper output)
     private const uint Tusker = 0x80000F70;
 
     /// <summary>The spell table with the Heal Self line (the scripted caster's, in the real table's shape).</summary>
-    private static readonly Dictionary<uint, Lifestone.Data.Magic.SpellInfo> Table = new ScriptedCaster(new WorldActionRig(), 400, 200, withDrain: true).Table;
+    internal static readonly Dictionary<uint, Lifestone.Data.Magic.SpellInfo> Table = new ScriptedCaster(new WorldActionRig(), 400, 200, withDrain: true).Table;
 
     /// <summary>The autopilot over the world's context with the Heal Self table (the guard's spells).</summary>
-    private static AutopilotScenario Autopilot(ApWorld w, AutopilotOptions options)
+    internal static AutopilotScenario Autopilot(ApWorld w, AutopilotOptions options, IAutopilotSession? host = null)
     {
         var c = w.Trip.Context();
-        return new AutopilotScenario(options, w.Factory, new JourneyContext { Character = c.Character, Account = c.Account, Log = c.Log, Travel = c.Travel, Spells = Table, Dungeon = c.Dungeon }, null);
+        return new AutopilotScenario(options, w.Factory, new JourneyContext { Character = c.Character, Account = c.Account, Log = c.Log, Travel = c.Travel, Spells = Table, Dungeon = c.Dungeon }, null, host);
     }
 
     /// <summary>
     /// A PlayerDescription that keeps the pack and the worn set and gives the mage its attributes, its magic skills, its vitals (health <paramref name="healthPercent"/> of its maximum, mana 400) and Heal Self I to VII, then non-combat
     /// (the description replaces the integer properties).
     /// </summary>
-    private static void Wounded(ApWorld w, uint healthPercent)
+    internal static void Wounded(ApWorld w, uint healthPercent)
     {
         var h = w.Trip.Vendor.H;
         var inventory = h.State.Self.Inventory;
@@ -63,7 +63,7 @@ public sealed class AutopilotP7oTests(ITestOutputHelper output)
     }
 
     /// <summary>A living target creature of the ground <paramref name="metres"/> from the mage (a tusker in reach).</summary>
-    private static void Hostile(ApWorld w, float metres)
+    internal static void Hostile(ApWorld w, float metres)
     {
         var at = w.Trip.View.State.Self.Position!.Value;
         var r = w.Trip.Vendor.H.R;
@@ -72,7 +72,7 @@ public sealed class AutopilotP7oTests(ITestOutputHelper output)
     }
 
     /// <summary>The mode changes and casts the Action API was asked for (sent, or refused by the client's own guards: the scripted mage holds no caster).</summary>
-    private static int Asked(ApWorld w)
+    internal static int Asked(ApWorld w)
     {
         var log = w.Trip.View.ActionLog;
         return Enumerable.Range(0, log.Count).Count(i => log[i].Kind is ActionKind.SetCombatMode or ActionKind.CastSpell);

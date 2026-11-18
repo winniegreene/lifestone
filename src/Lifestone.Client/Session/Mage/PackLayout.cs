@@ -18,7 +18,7 @@ public enum PackJob
     /// <summary>The equipment the mage wears and rotates through, with its kit: a spare of a worn or wielded kit line, a piece the self-equip took off, the healing kits, the mana stones, the potions of the stock.</summary>
     Kit,
 
-    /// <summary>The finds kept for the owner to review: the keep-aside rule's "worth a look" (M5 7 F30) and any other find the self-equip judged interesting but did not wear.</summary>
+    /// <summary>The finds kept for the owner to review: the keep-aside rule's worth-a-look category (M5 7 F30) and any other find the self-equip judged interesting but did not wear.</summary>
     Review,
 }
 
@@ -130,7 +130,7 @@ public sealed class PackRules
 
     /// <summary>The job of the pack an item belongs in (see the class remarks).</summary>
     /// <param name="item">The item.</param>
-    /// <param name="keptAside">True when the keep-aside rule kept it as worth a look.</param>
+    /// <param name="keptAside">True for a piece the owner wants to see: the callers pass a great-cantrip piece (<see cref="CantripRoom.IsGreatPiece(GameState, uint, Func{uint, string})"/>, the owner, 2026-11-16), nothing else.</param>
     /// <param name="rotation">True when the self-equip took it off.</param>
     public PackJob JobOf(in PackItem item, bool keptAside, bool rotation)
     {
@@ -188,7 +188,7 @@ public sealed class PackRules
         return where switch
         {
             PackJob.Kit => (item.ItemType & EquipmentTypes) != 0 && job is PackJob.Main or PackJob.Review,
-            PackJob.Review => job == PackJob.Main && (item.ItemType & (MoneyType | NoteType)) == 0 && !_notes.Contains(item.Wcid),
+            PackJob.Review => false, // the owner, 2026-11-16: only the pieces the owner wants to see (the great-cantrip ones) stay in the review pack; anything else goes back to the main pack when it has room
             _ => false,
         };
     }
@@ -207,6 +207,24 @@ public sealed class PackLayout
     private static readonly PackJob[] SideJobs = [PackJob.Components, PackJob.Kit, PackJob.Review];
 
     private readonly SidePack?[] _packs = new SidePack?[4];
+
+    /// <summary>M6 8 D: the side packs the layout wants, one for each side job (components, kit, review). Fewer leave the last jobs to the main pack (<c>TODO(m5-pack-short)</c>); the resupply buys the rest (<see cref="Lifestone.Client.Session.Scenarios.Journey.ResupplyPlanner.PackBuy"/>).</summary>
+    public static int PacksWanted => SideJobs.Length;
+
+    /// <summary>M6 8 D: the side packs the player lacks of <see cref="PacksWanted"/> (containers only, the foci not counted).</summary>
+    /// <param name="state">The session's read model.</param>
+    public static int SidePacksShort(GameState state) => Math.Max(0, PacksWanted - SidePacks(state).Count);
+
+    /// <summary>
+    /// M6 8 D: the container slots free: ACE's <c>ContainerCapacity</c> of a player (7 plus the extra-pack-slot augmentation's, which this count does not know: <see cref="Lifestone.Client.Session.Mage.GearKit.ContainerCapacity"/>, a floor) less the side packs and the foci held
+    /// (<c>Container.GetFreeContainerSlots</c>, <c>Container.cs</c> 226-229 @95ef426d; a foci takes a slot, <c>CountContainers</c> 207-212).
+    /// </summary>
+    /// <param name="state">The session's read model.</param>
+    public static int ContainerRoom(GameState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        return Math.Max(0, GearKit.ContainerCapacity - state.Self.Inventory.SidePacks.Count);
+    }
 
     private PackLayout(uint owner, int mainCapacity, int mainCount, string why)
     {
@@ -249,7 +267,7 @@ public sealed class PackLayout
     }
 
     /// <summary>The free slots of the pack of <paramref name="job"/> (the main pack's for <see cref="PackJob.Main"/>, and for a job with no pack).</summary>
-    public int FreeSlots(PackJob job) => _packs[(int)job] is { } p ? p.Free : Math.Max(0, MainCapacity - MainCount);
+    public int FreeIn(PackJob job) => _packs[(int)job] is { } p ? p.Free : Math.Max(0, MainCapacity - MainCount);
 
     /// <summary>The word for a job in the log lines.</summary>
     public static string Word(PackJob job) => job switch
@@ -350,7 +368,7 @@ public sealed class PackLayout
         return Assign(state.Self.Guid, MainCapacityOf(state), state.Self.Inventory.Pack.Count, SidePacks(state), Items(state), rules, keptAside, rotation);
     }
 
-    /// <summary>The main pack's capacity: the player weenie's ItemsCapacity when it was sent, else <see cref="GearKit.PackCapacity"/> (as <see cref="MageLootRules.FreeSlots"/>).</summary>
+    /// <summary>The main pack's capacity: the player weenie's ItemsCapacity when it was sent, else <see cref="GearKit.PackCapacity"/> (as <see cref="Quartermaster.PackView.MainPackFree"/>).</summary>
     private static int MainCapacityOf(GameState state) =>
         state.Objects.TryGet(state.Self.Guid, out var self) && self.Weenie.ItemsCapacity is > 0 ? (int)self.Weenie.ItemsCapacity.Value : GearKit.PackCapacity;
 
@@ -421,7 +439,7 @@ public sealed class PackLayout
         var free = new int[4];
         for (var j = 0; j < 4; j++)
         {
-            free[j] = FreeSlots((PackJob)j);
+            free[j] = FreeIn((PackJob)j);
         }
 
         var moves = new List<PackMove>();
@@ -469,7 +487,7 @@ public sealed class PackLayout
     public string SlotsLine()
     {
         var sb = new StringBuilder("packs free: main=");
-        sb.Append(CultureInfo.InvariantCulture, $"{FreeSlots(PackJob.Main)}/{MainCapacity}");
+        sb.Append(CultureInfo.InvariantCulture, $"{FreeIn(PackJob.Main)}/{MainCapacity}");
         foreach (var job in SideJobs)
         {
             sb.Append(' ').Append(Word(job)).Append('=');
@@ -487,7 +505,7 @@ public sealed class PackLayout
     }
 
     /// <summary>Publishes the free slots per job to <see cref="PackTally"/> (the soak line reads them there, allocation-free).</summary>
-    public void Publish() => PackTally.Set(FreeSlots(PackJob.Components), FreeSlots(PackJob.Kit), FreeSlots(PackJob.Review));
+    public void Publish() => PackTally.Set(FreeIn(PackJob.Components), FreeIn(PackJob.Kit), FreeIn(PackJob.Review));
 }
 
 /// <summary>
@@ -497,8 +515,16 @@ public sealed class PackLayout
 /// <param name="rules">The ground's pack rules.</param>
 /// <param name="keptAside">True for a guid the keep-aside rule kept.</param>
 /// <param name="rotation">True for a guid the self-equip took off.</param>
-public sealed class LayoutTakeAll(PackRules rules, Func<uint, bool> keptAside, Func<uint, bool> rotation) : LootRules(LootOptions.AllTypes, 0, long.MaxValue, 0)
+/// <param name="replaced">M6 7 AH: true for a corpse entry whose slot the replacement the death handler bought already fills (<see cref="DeathReplace.LeftOnCorpse"/>): it is left, named, or null.</param>
+public sealed class LayoutTakeAll(PackRules rules, Func<uint, bool> keptAside, Func<uint, bool> rotation, Func<WorldObject, bool>? replaced = null) : LootRules(LootOptions.AllTypes, 0, long.MaxValue, 0)
 {
+    /// <inheritdoc/>
+    public override LootDecision Decide(WorldObject? item, in LootContext context)
+    {
+        var decision = base.Decide(item, in context);
+        return decision == LootDecision.Take && item is not null && replaced is not null && replaced(item) ? LootDecision.Replaced : decision;
+    }
+
     /// <inheritdoc/>
     public override uint DestinationOf(WorldObject item, GameState state)
     {
@@ -534,6 +560,12 @@ public sealed class PackMemory
 
     /// <summary>M5 7 D139 (d): the empty mana stones beyond the keep (<see cref="ItemManaKeeper.Shed"/>): loot to sell in the main pack, never moved back to the kit pack.</summary>
     public HashSet<uint> Shed { get; } = [];
+
+    /// <summary>
+    /// M6 14 (<c>m6-armour</c>): the armour, clothing and jewellery the wear pick keeps from the sale for the next visit's review (pack rule <c>gear-review</c>): a piece not appraised yet, one whose cantrips would be worth wearing behind a
+    /// requirement she does not meet yet, or a swap that waits for peace mode. Released at the next gear phase's start, where each is judged again.
+    /// </summary>
+    public HashSet<uint> WearReview { get; } = [];
 
     /// <summary>The memory of the run.</summary>
     public static PackMemory Shared { get; } = new();

@@ -2,6 +2,8 @@ using System.Globalization;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Mage;
+using Lifestone.Client.Session.Scenarios.Journey;
+using Lifestone.ServerTools;
 using Lifestone.Data.Magic;
 using Lifestone.Net.Types;
 
@@ -149,6 +151,9 @@ public sealed partial class DeathScenario
     /// <summary>The death handler that runs after the respawn with the fight on (the default), or null (before the respawn, or a stage list with none of the rebuff, corpse and fight stages).</summary>
     public DeathHandler? Handler => _handler;
 
+    /// <inheritdoc />
+    public void NoteHeld(double seconds) => _handler?.NoteHeld(seconds);
+
     /// <summary>
     /// The handler's verdict fields (additive at the end of the death's line, before the optional <c>frame_over_50=yes</c>: <c>deaths= corpse_recovered= route= items_back= vitae_grants= rebuffed= relines=</c>), or
     /// <see cref="DeathHandler.UnmeasuredFields"/> when no handler ran. <see cref="VerdictFields"/> appends them (closes <c>m5-death-handler-fields</c>).
@@ -173,8 +178,9 @@ public sealed partial class DeathScenario
         _handler = new DeathHandler(_ground, _tally, _seam.Travel, _fightFactory, _walk, _kit, _spells, _buffOptions, _fightOptions, effective, _log, _arrivalSeconds)
         {
             HoldBeforeFight = FightManaWaiting,
+            BeforeRebuff = BuffBotBeforeRebuff,
         };
-        _handler.Begin(session, clock, DeathFacts.From(_tally), BoundLifestone, respawned: true);
+        _handler.Begin(session, clock, DeathFacts.From(_tally), BoundLifestone, respawned: true, respawnRead: _enteredAgain);
         return HandlerStep(session, clock);
     }
 
@@ -261,6 +267,63 @@ public sealed partial class DeathScenario
     /// M4 P4 g3fix: the bounded precondition wait before the den (see <see cref="DeathOptions.FightManaWaitSeconds"/>): true while the mana is under the floor and the wait has time left. Logged once at its start and once at its end with the numbers;
     /// when the bound passes with the mana short the fight goes on (it waits for mana itself, as before) and a WARN names the numbers, so the cause stays on the log.
     /// </summary>
+    private IStationRun? _botRun;
+    private bool _botDone;
+
+    /// <summary>
+    /// M6 item 14 (the climb's third death, 2026-11-11 18:52 UTC): the stop at the buff bot before the death's rebuff. She respawns at the lifestone, ten metres from the bot; her own pass would cast her own levels and the
+    /// corpse trip would walk back into the ground on them. When the stop applies to the run (<see cref="JourneyFacts.BuffBotOn"/>) and a line is due (<see cref="BuffBotRule.Due"/>), the station runs first; her own pass
+    /// follows it either way and casts what the bot does not cover. A stop that fails is logged by name and never fails the death's order. True while the stop runs.
+    /// </summary>
+    internal bool BuffBotBeforeRebuff(IGameSessionView session, double now)
+    {
+        if (_botDone)
+        {
+            return false;
+        }
+
+        if (_botRun is null)
+        {
+            if (_options.Journey is not { } journey || journey.Facts.BuffBotOn?.Invoke() != true)
+            {
+                _botDone = true;
+                return false;
+            }
+
+            var reads = new List<BuffBotLineRead>();
+            var profile = journey.Facts.BuffBotProfile; // the run's profile (the option's word, 'all' by default): the stop is due by its lines and tells its key
+            BuffBotRule.Read(profile, session.State.Self.Qualities, session.Clock.Now, reads);
+            var least = BuffBotRule.MinRemaining(reads);
+            if (!BuffBotRule.Due(reads))
+            {
+                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"death: the buff bot is not due before the rebuff: every line of '{profile.Key}' has at least {BuffBotRule.RenewUnderSeconds:0} s left (the least {least:0})"));
+                _botDone = true;
+                return false;
+            }
+
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"death: the buff bot before the rebuff: {BuffBotRule.CountWith(reads, 1)} of {reads.Count} lines of '{profile.Key}' are up, the least {least:0} s left (under {BuffBotRule.RenewUnderSeconds:0})"));
+            _botRun = new BuffBotStation().Start(journey);
+        }
+
+        var status = _botRun.Step(session, session.Clock.Now);
+        if (status == ScenarioStatus.Running)
+        {
+            return true;
+        }
+
+        if (status == ScenarioStatus.Succeeded && _botRun.Ok)
+        {
+            _log.Info(LogCategory, $"death: the buff bot's stop ended {status}: {_botRun.VerdictFields()}: her own pass for what the bot does not cover");
+        }
+        else
+        {
+            _log.Warn(LogCategory, $"death: the buff bot's stop failed ({_botRun.VerdictFields()}): the order goes on with her own whole pass (m6-buffbot-fallback)");
+        }
+
+        (_botRun, _botDone) = (null, true);
+        return false;
+    }
+
     internal bool FightManaWaiting(IGameSessionView session)
     {
         if (_options.FightManaWaitSeconds <= 0 || _fightManaDone)

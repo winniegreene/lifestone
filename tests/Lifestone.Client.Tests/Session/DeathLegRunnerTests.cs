@@ -409,7 +409,9 @@ public sealed class DeathLegRunnerTests
         var runner = Runner;
 
         // The kit is the mage's own, the ground's (M5 3 d3: the decoys are retired, D51; GearKit.ForDeathLoop is gone); the one GearKit.Build in the runner.
-        Assert.Contains("GearKit.Build(table.Spells, LoginName(key), ground: runner._ground)", runner, StringComparison.Ordinal);
+        Assert.Contains("var login = LoginName(key);", runner, StringComparison.Ordinal); // M6 1 w: read once; the kit and the buff options (the account's formula) take it
+        Assert.Contains("GearKit.Build(table.Spells, login, ground: runner._ground)", runner, StringComparison.Ordinal);
+        Assert.Contains("runner._buffOptions with { AccountName = login }", runner, StringComparison.Ordinal);
         Assert.DoesNotContain("ForDeathLoop", runner, StringComparison.Ordinal);
         Assert.Single(Regex.Matches(runner, @"GearKit\.Build\("));
 
@@ -463,7 +465,7 @@ public sealed class DeathLegRunnerTests
         Assert.Contains("mode.ScenarioHost = walkHost", runner, StringComparison.Ordinal);
         Assert.Contains("DeathStages.All", runner, StringComparison.Ordinal);
         Assert.Contains("new GameApproachWalk(", runner, StringComparison.Ordinal); // the bind walks to the lifestone's use radius (ACE waits for the client to follow its MoveToObject)
-        Assert.Contains("DeathStages.All, approach, _buffOptions, _fightOptions)", runner, StringComparison.Ordinal); // M4 3.1 d2: the buff cycle's and the fight's options reach the scenario
+        Assert.Contains("DeathStages.All, approach, buff, _fightOptions)", runner, StringComparison.Ordinal); // M4 3.1 d2: the buff cycle's and the fight's options reach the scenario
         Assert.Contains("SessionJitWarmUp", runner, StringComparison.Ordinal); // the death messages' handlers are warmed there, said in the remarks
 
         // SampleFrame and StepShot run every frame: no LINQ, no string building and no lambda in them.

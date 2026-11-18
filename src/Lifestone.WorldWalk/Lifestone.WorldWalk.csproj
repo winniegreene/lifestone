@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The world walk (docs/world-walk.md): walks the whole of Asheron's Call offline, landblock by landblock, to prove the pathfinding. No server, no Godot.
+    Run as 'dotnet Lifestone.WorldWalk.dll'. UseAppHost=false, so the build writes no unsigned .exe.
+    The 8 GB heap cap is part of the owner's Light mode: past it a run stops with a named error instead of starving the machine's other work.
+    TargetFramework / Nullable / LangVersion come from ../../Directory.Build.props.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <UseAppHost>false</UseAppHost>
+    <RootNamespace>Lifestone.WorldWalk</RootNamespace>
+    <AssemblyName>Lifestone.WorldWalk</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.HeapHardLimit" Value="8589934592" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Lifestone.Data\Lifestone.Data.csproj" />
+    <ProjectReference Include="..\Lifestone.Client\Lifestone.Client.csproj" />
+  </ItemGroup>
+
+</Project>

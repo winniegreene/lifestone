@@ -175,7 +175,7 @@ public sealed class LifestoneHotkeys : IInputActionSink
                 }
                 else
                 {
-                    _log.Warn("lifestone", "Pause (the auto-buff toggle) was pressed but nothing is wired to it (TODO(m4-autobuff-key-unwired): the play host wires ToggleAutoBuff when it starts)");
+                    _log.Warn("lifestone", "Pause (the auto-buff toggle) was pressed but nothing is wired to it (the play host wires ToggleAutoBuff through RebuffDriverHost.WireKey; a host without the rebuff driver, such as a test scene or the login-check leg, has none; closed m4-autobuff-key-unwired, M6 6 L3)");
                 }
 
                 return true;

@@ -194,6 +194,24 @@ public enum ActionKind
 
     /// <summary><see cref="IActionApi.SetInscription"/> (M5 7 D137; appended).</summary>
     SetInscription,
+
+    /// <summary><see cref="IActionApi.UseRecipe"/> (M6 8 A; appended).</summary>
+    UseRecipe,
+
+    /// <summary><see cref="IActionApi.TalkDirect"/> (M6 14; appended).</summary>
+    TalkDirect,
+
+    /// <summary><see cref="IActionApi.BuyHouse"/> (M6 villa; appended).</summary>
+    BuyHouse,
+
+    /// <summary><see cref="IActionApi.PayRent"/> (M6 villa; appended).</summary>
+    PayRent,
+
+    /// <summary><see cref="IActionApi.RecallHouse"/> (M6 villa; appended).</summary>
+    RecallHouse,
+
+    /// <summary><see cref="IActionApi.QueryHouse"/> (M6 villa; appended).</summary>
+    QueryHouse,
 }
 
 /// <summary>The height of an attack (ACE's <c>AttackHeight</c>, the value on the wire; retail's group box 0x10000056 selects it).</summary>

@@ -208,7 +208,7 @@ public sealed class RoomGraphTests
     }
 
     [Fact]
-    public void A_goal_the_rooms_cannot_reach_or_a_missing_tile_is_named_not_guessed()
+    public void A_goal_the_rooms_cannot_reach_or_a_start_off_the_tiles_is_named_not_guessed()
     {
         var tile = DoorTile(2f);
         var map = new NavMap();
@@ -223,9 +223,55 @@ public sealed class RoomGraphTests
         var leanResult = IndoorOutdoorRoute.Plan(planner, new RoomGraph(S3RoomKit.Rooms(leaning: true), 0.3f), from, S3RoomKit.C, new Vector3(96f, 116f, 0f));
         Assert.Equal(IndoorOutdoorStatus.Found, leanResult.Status); // the leaning door's sill centre is 0.22 m out of the tile's lane: the same door
 
+        // No tile at all (M6 4 W1): the rooms' tile is missing, so the plan goes toward the rooms' land point, and the start's own tile is missing too: named by the planner.
         var noTile = IndoorOutdoorRoute.Plan(new PathPlanner(new NavMap()), new RoomGraph(S3RoomKit.Rooms()), from, S3RoomKit.C, Vector3.Zero);
-        Assert.Equal(IndoorOutdoorStatus.NoTile, noTile.Status);
-        Assert.Equal("no-tile", noTile.Reason);
+        Assert.Equal(IndoorOutdoorStatus.OutdoorFailed, noTile.Status);
+        Assert.Equal("start-not-attached", noTile.Reason);
+    }
+
+    /// <summary>
+    /// M6 4 W1 (m6-walk-goal-tile): a start whose tile is attached and a goal room whose landblock's tile is not plan a horizon toward the room's land point (its door's lane's outer end,
+    /// known from the rooms alone), never an arrival; once the tile attaches, the same plan is the whole route through the lane and the rooms.
+    /// </summary>
+    [Fact]
+    public void A_goal_room_past_the_attached_tiles_plans_a_horizon_toward_its_land_point_then_the_whole_route_once_its_tile_attaches()
+    {
+        var tile = DoorTile(2f);
+        var south = tile.LandblockId - 0x00010000u; // the landblock south of the rooms' (the door faces south)
+        var map = new NavMap();
+        map.Attach(new NavTile(south));
+        var planner = new PathPlanner(map);
+        var rooms = new RoomGraph(S3RoomKit.Rooms());
+        var from = NavPoint.At(south, 96f, 100f);
+        var goal = new Vector3(96f, 116f, 0f);
+
+        var land = IndoorOutdoorRoute.LandPoint(rooms.LandblockId, rooms.ExitsToOutside.Single());
+        Assert.Equal(96f, land.Local.X, Tolerance);
+        Assert.Equal(88.5f, land.Local.Y, Tolerance); // 2.5 m out of the sill at 91: the lane's outer end (as the tiled plan's lanePoints[0])
+
+        var toward = IndoorOutdoorRoute.Plan(planner, rooms, from, S3RoomKit.C, goal);
+        Assert.Equal(IndoorOutdoorStatus.Horizon, toward.Status);
+        Assert.Null(toward.Reason);
+        Assert.Null(toward.Lane);
+        Assert.Empty(toward.Inside);
+        Assert.Empty(toward.CellsEntered);
+        Assert.Equal(S3RoomKit.A, toward.Exit!.CellId);
+        Assert.Equal(NavStatus.Horizon, toward.Outdoor!.Status);
+        var end = toward.Outdoor.Route!.End;
+        Assert.Equal(south, end.LandblockId);
+        Assert.InRange(end.Local.Y, 191f, 192f); // the attached edge nearest the land point
+        Assert.InRange(end.Local.X, 96f - 1.5f, 96f + 1.5f);
+
+        // Once the rooms' tile attaches (the map's version moves: the runner's horizon replan), the same plan is the whole route through the lane and the rooms.
+        var version = map.Version;
+        map.Attach(tile);
+        Assert.NotEqual(version, map.Version);
+        var whole = IndoorOutdoorRoute.Plan(planner, rooms, from, S3RoomKit.C, goal);
+        Assert.Equal(IndoorOutdoorStatus.Found, whole.Status);
+        Assert.Same(tile.DoorwayLanes[0], whole.Lane);
+        Assert.Equal([S3RoomKit.A, S3RoomKit.B, S3RoomKit.C], whole.CellsEntered);
+        Assert.Equal(land.Local.X, whole.LanePoints[0].Local.X, 0.6f); // the land point planned toward is the lane's outer end
+        Assert.Equal(land.Local.Y, whole.LanePoints[0].Local.Y, 0.6f);
     }
 
     /// <summary>The kit's tile: the house of <see cref="S1TileKit.HouseWithSouthDoor"/> with a south door of the given width, its lane cut.</summary>

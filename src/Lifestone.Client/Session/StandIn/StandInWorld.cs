@@ -50,6 +50,7 @@ internal sealed partial class StandInWorld(GameStateReducer reducer, StandInVisi
             or Contracts.ActionKind.AddShortcut or Contracts.ActionKind.RemoveShortcut or Contracts.ActionKind.UseShortcut // M4 3.2: the vendor, appraisal and shortcut actions (s3 answers their sends)
             or Contracts.ActionKind.RespondToConfirmation or Contracts.ActionKind.SetCharacterOptions or Contracts.ActionKind.RecallLifestone or Contracts.ActionKind.RecallMarketplace
             or Contracts.ActionKind.Emote or Contracts.ActionKind.SetAfk or Contracts.ActionKind.Tell // M5 6 k1: the retail tranche (StandInWorld.Retail6.cs)
+            or Contracts.ActionKind.UseRecipe // M6 8 A: the recipe's UseWithTarget, as a kit's
             or Contracts.ActionKind.SetInscription; // M5 7 D137: the inscription (StandInWorld.Appraise.cs)
 
     private OutboundTicket Ticket() => new(0, _reducer.Clock.Time.GetTimestamp());

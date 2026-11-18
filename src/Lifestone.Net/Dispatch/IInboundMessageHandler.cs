@@ -377,6 +377,48 @@ public interface IInboundMessageHandler
     {
     }
 
+    // M6 villa: the housing events (decoded even where nothing acts on them yet).
+
+    /// <summary>GameEvent 0x021D HouseProfile: the guardian a Use opened and the dwelling's terms (M6 villa).</summary>
+    void OnHouseProfile(in InboundContext context, in GameEventHeader header, HouseProfileMsg message)
+    {
+    }
+
+    /// <summary>GameEvent 0x0225 HouseData: the house the player or the account owns (M6 villa).</summary>
+    void OnHouseData(in InboundContext context, in GameEventHeader header, HouseDataMsg message)
+    {
+    }
+
+    /// <summary>GameEvent 0x0226 HouseStatus {u32 notice}: no house, or an eviction (M6 villa).</summary>
+    void OnHouseStatus(in InboundContext context, in GameEventHeader header, in HouseStatusEvent message)
+    {
+    }
+
+    /// <summary>GameEvent 0x0227 UpdateRentTime {u32 time} (M6 villa; ACE never sends it).</summary>
+    void OnUpdateRentTime(in InboundContext context, in GameEventHeader header, in UpdateRentTimeEvent message)
+    {
+    }
+
+    /// <summary>GameEvent 0x0228 UpdateRentPayment {rent list} (M6 villa; ACE never sends it).</summary>
+    void OnUpdateRentPayment(in InboundContext context, in GameEventHeader header, UpdateRentPaymentMsg message)
+    {
+    }
+
+    /// <summary>GameEvent 0x0248 HouseUpdateRestrictions: a house's access list (M6 villa).</summary>
+    void OnHouseRestrictions(in InboundContext context, in GameEventHeader header, HouseRestrictionsMsg message)
+    {
+    }
+
+    /// <summary>GameEvent 0x0259 HouseTransaction {u32 notice} (M6 villa; ACE never sends it).</summary>
+    void OnHouseTransaction(in InboundContext context, in GameEventHeader header, in HouseTransactionEvent message)
+    {
+    }
+
+    /// <summary>GameEvent 0x0271 AvailableHouses: the answer to <c>/house available</c> (M6 villa).</summary>
+    void OnAvailableHouses(in InboundContext context, in GameEventHeader header, AvailableHousesMsg message)
+    {
+    }
+
     // M5 6 w1: the confirmation dialog, the login notices and the property updates.
 
     /// <summary>GameEvent 0x0274 CharacterConfirmationRequest {u32 type, u32 context, String16L text} (M5 6 w1).</summary>

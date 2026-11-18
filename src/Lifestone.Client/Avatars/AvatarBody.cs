@@ -236,6 +236,7 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
     private Vector3 _lastShortRequested;
     private Vector3 _lastShortReached;
     private bool _blipPending;
+    private bool _serverPositionMissed;
     private AvatarObstacleKind _blipCause;
 
     internal AvatarBody(uint guid, ModelAssembly setup, PartArrayAppearance appearance, AvatarSources sources, ITargetWorld world, IEffectRandom random, bool isCreature, double now)
@@ -660,7 +661,8 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
         if (teleportAdvanced || Position.CellId == 0)
         {
             TeleportHook();
-            if (PlaceSliding(target))
+            _serverPositionMissed = !PlaceSliding(target);
+            if (!_serverPositionMissed)
             {
                 _placement = AvatarPlacement.Teleport;
                 _shortTransits = 0;
@@ -669,18 +671,21 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
         }
         else if (!hasContact)
         {
+            _serverPositionMissed = true; // retail ignores it; the body no longer knows where the server has the object (m6-live-position)
             return false;
         }
         else if (PlayerDistance >= ActiveDistance)
         {
             Positions.StopInterpolating();
-            if (PlaceSliding(target))
+            _serverPositionMissed = !PlaceSliding(target);
+            if (!_serverPositionMissed)
             {
                 _placement = AvatarPlacement.Far;
             }
         }
         else
         {
+            _serverPositionMissed = false;
             if (!Positions.Interpolation.IsInterpolating)
             {
                 _shortTransits = 0;
@@ -1139,6 +1144,13 @@ public sealed class AvatarBody : IMotionInterpHost, IMoveToHost
 
     /// <summary>The last server position <see cref="MoveOrTeleport"/> took, or null.</summary>
     public CellFrame? ServerPosition => _serverPosition;
+
+    /// <summary>
+    /// M6 item 14 (<c>m6-live-position</c>): true while the body is known not to stand where the server last put the object, so nothing may take it for the object's place: the last teleport's or far position's sliding
+    /// placement was refused (the body stayed), the server's last position came without contact and was ignored (<see cref="MoveOrTeleport"/>), or a blip is due (<see cref="InterpolationManager.UseTime"/> asks for one; the call places nothing: the body is
+    /// about to be placed at the server's position, and a refused blip is asked again every step). The next position the body takes clears the first two.
+    /// </summary>
+    public bool ServerPositionPending => _serverPositionMissed || Positions.Interpolation.UseTime() is not null;
 
     /// <summary>Consecutive short transitions that raise the held-back report (<c>TODO(m5-creature-held-back)</c>).</summary>
     public const int HeldBackFrames = 10;

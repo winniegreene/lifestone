@@ -71,7 +71,7 @@ public interface IUiDragSourceOwner
     /// <summary>True when <paramref name="target"/> is one of the owner's own targets (the release is then an ordinary drop on it); false for any other target or none.</summary>
     bool OwnsTarget(IUiDropTarget? target);
 
-    /// <summary>The drag was released away from the owner's targets (<paramref name="target"/> is what was under the pointer, or null): the owner acts, through the Action API only.</summary>
+    /// <summary>The drag was released away from its owner's targets (<paramref name="target"/> is what was under the pointer, or null): the owner acts, through the Action API only.</summary>
     void DragReleasedAway(in UiDragPayload drag, IUiDropTarget? target);
 }
 

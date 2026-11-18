@@ -186,7 +186,7 @@ internal sealed class PickUpTracker(ActionHandle handle, uint item, uint contain
     /// <summary>
     /// M5 7 D141 ("check before"): an item seen when the pick-up was asked (in the object table or the viewed container) and in neither now is gone (a corpse that rotted, an item another took): <see cref="ActionReason.TargetGone"/>,
     /// as ACE's NoObject would answer; an item never seen is left to the server. A pick-up of an item that is not a pack needs a free pack slot (ACE never joins a stack at pick-up, see the class remarks): none by the client's count
-    /// (<see cref="BuyTracker.FreeSlots"/>, ACE's <c>Container.GetFreeInventorySlots</c>) is <see cref="ActionReason.NoFreeSlot"/>.
+    /// (<see cref="Quartermaster.PackView.AllPacksLessFociFree"/>, ACE's <c>Container.GetFreeInventorySlots</c>) is <see cref="ActionReason.NoFreeSlot"/>.
     /// </summary>
     protected override string? Precondition(ActionApi api)
     {
@@ -196,7 +196,7 @@ internal sealed class PickUpTracker(ActionHandle handle, uint item, uint contain
         }
 
         var isPack = api.State.Objects.TryGet(Item, out var o) && (o.ItemType & BuyTracker.ContainerItemType) != 0;
-        return !isPack && BuyTracker.FreeSlots(api.State) is { } free && free < 1
+        return !isPack && Quartermaster.PackView.AllPacksLessFociFree(api.State) is { } free && free < 1
             ? Refuse(ActionReason.NoFreeSlot, "no free pack slot: the pick-up of " + ActionText.Hex(Item) + " needs one and the packs have " + ActionText.Count(free) + " free")
             : null;
     }

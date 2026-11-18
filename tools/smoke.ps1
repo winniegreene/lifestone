@@ -103,7 +103,7 @@
                                legs_recovered= kills_unpaired= slots_expired= loot= looted= kept= loot_value=; the logistics station's trigger= granted= places= loot= sold= bought= spent= notes_sold= spent_xp= raises=; the death station's
                                deaths= corpse_recovered= route= items_back= vitae_grants= rebuffed= rebuffed_pretrip= relines= trip_abort= (n/a for a field a line lacks).
                                Judged from M5 item 4's gate (c1; m5-plan.md section 5 item 3, D55, D38, D56), on the MAGE journey only (the melee and archer journeys read the same fields report-only): places=0 on the done line and
-                               granted=0 places=0 on every station line that prints either; bought>=1 and spent_xp>0 on the logistics station's line (sold= stays report-only while looting is off); deaths=1 corpse_recovered=yes
+                               granted=0 places=0 on every station line that prints either; bought>=1 and spent_xp>0 (or spent_xp=0 with spend_why=pool-covers-nothing) on the logistics station's line (sold= stays report-only while looting is off); deaths=1 corpse_recovered=yes
                                vitae_grants=0 rebuffed=yes on the death station's line (rebuffed_pretrip= stays report-only). A miss, or an absent field or line, fails the journey naming the field and the line.
                                M5 item 5 c1: the den-fight station's physics fields creature_jumps= creature_flips= transit_ms_max= place_ms_max= transits_max= stay report-only
                                (the mage's journey, the Godot host's avatars; n/a headless), the vendor and vendor-facts stations' door_opened= (the melee journey; shown here, and JUDGED from M5 item 7's gate: door_opened=yes on a station that ran, or the journey fails, named; n/a for a station that did not run) and the recall-home station's stepped_off= (report-only)
@@ -801,7 +801,7 @@ function Get-JourneyVerdict([string] $Text, [bool] $FrameContended = $false) {
     # granted=0 stays the M4 judge above). A judged miss names the field, the line and the journey: a value that is wrong, or a field or line that is absent (a verdict that reads nothing is not a pass).
     #   D55: places=0 on the done line (granted=0 is judged above) and granted=0 places=0 on every station line that prints either (the logistics station's, the scripted stations' granted=; recovery_places= is another field).
     #   DoD 6 (D38): bought>=1 and spent_xp>0 on the logistics station's line; sold= stays report-only while looting is off (LogisticsFields).
-    #   DoD 7 (D56): deaths=1 corpse_recovered=yes vitae_grants=0 rebuffed=yes on the death station's line; rebuffed_pretrip= stays report-only (DeathFields).
+    #   DoD 7 (D56): deaths=1 corpse_recovered=yes vitae_grants=0 rebuffed=yes on the death station's line (M6 6: corpse_recovered=none-needed also passes: nothing left the pack); rebuffed_pretrip= stays report-only (DeathFields).
     if ($journeyName -eq 'mage') {
         $donePlacesValue = & $field 'places'
         if ($null -eq $donePlacesValue) { $why += 'places n/a on the done line, not 0 (mage)' } elseif ($donePlacesValue -ne 0) { $why += "places $donePlacesValue not 0 (mage done line)" }
@@ -821,14 +821,18 @@ function Get-JourneyVerdict([string] $Text, [bool] $FrameContended = $false) {
             return $null
         }
         foreach ($k in 'bought') { $miss = & $judgeAtLeast 'logistics' $logisticsLine $k 1; if ($miss) { $why += $miss } }
-        foreach ($k in 'spent_xp') { $miss = & $judgeAtLeast 'logistics' $logisticsLine $k 1; if ($miss) { $why += $miss } }
+        # M6 7 C: spent_xp=0 passes ONLY when the station's own spend_why= says the pool covered no planned next rank (XpSpendRule's PoolCoversNothing, not a failure); a spend that had something to cover and did not spend still fails, named.
+        $spendWhy = if ($logisticsLine.Success) { [regex]::Match($logisticsLine.Value, '(?<![\w])spend_why=(\S+)') } else { $null }
+        $spentXpZero = $logisticsLine.Success -and [regex]::IsMatch($logisticsLine.Value, '(?<![\w])spent_xp=0(?=\s|$)')
+        if ($spentXpZero -and $spendWhy -and $spendWhy.Success -and $spendWhy.Groups[1].Value -eq 'pool-covers-nothing') { }
+        else { $miss = & $judgeAtLeast 'logistics' $logisticsLine 'spent_xp' 1; if ($miss) { $why += $miss } }
         $deathLine = [regex]::Match($Text, '\[logincheck\] journey station=death [^\r\n]*')
         $deathValue = { param([string] $k) if ($deathLine.Success) { $f = [regex]::Match($deathLine.Value, '(?<![\w])' + $k + '=(\S+)'); if ($f.Success) { return $f.Groups[1].Value } }; return $null }
         foreach ($want in @(@('deaths', '1'), @('corpse_recovered', 'yes'), @('vitae_grants', '0'), @('rebuffed', 'yes'))) {
             $got = & $deathValue $want[0]
             if (-not $deathLine.Success) { $why += "$($want[0]) n/a, no death station line (mage), not $($want[1])" }
             elseif ($null -eq $got) { $why += "$($want[0]) n/a on the death station, not $($want[1]) (mage)" }
-            elseif ($got -ne $want[1]) { $why += "$($want[0]) $got not $($want[1]) (mage death station)" }
+            elseif ($got -ne $want[1] -and -not ($want[0] -eq 'corpse_recovered' -and $got -eq 'none-needed')) { $why += "$($want[0]) $got not $($want[1]) (mage death station)" }   # M6 6: none-needed (nothing left the pack at the death, ACE's level rule) is a recovery
         }
     }
     # M5 item 7's gate (m5-plan.md section 5 item 3, D36's neighbours): door_opened=yes is judged on the MELEE journey's vendor and vendor-facts stations. A station that ran (its line is there and is not a skip) with any other value, or with
@@ -1935,7 +1939,7 @@ try {
                 # The shell's review frames at two window sizes on the stand-in session (no backend). A frames run is not a timing run (the verdict says frame_time=reported).
                 # The ten frames and their judges are unchanged (M4 4.1 fix2b: --play-skip-scenarios is gone; the stand-in has no fight or death scenarios since t1).
                 $verdictPattern = 'shell frames done size=(?<size>\d+x\d+) scale=(?<scale>\d+) captured=(?<captured>\d+) failures=(?<failures>\d+) frame_time=reported'
-                $expectedFrames = 10 # ShellFramesPlan.FrameNames.Count (G7: 09 the automation inspector, 10 the tools panel)
+                $expectedFrames = 11 # ShellFramesPlan.FrameNames.Count (G7: 09 the automation inspector, 10 the tools panel; M6 6 MD2: 11 the automation menu)
                 $parts = [System.Collections.Generic.List[string]]::new()
                 $pass = $true; $errors = 0; $exitCode = 0; $firstLog = ''; $failedLog = ''
                 foreach ($size in $shellFrameSizes) {

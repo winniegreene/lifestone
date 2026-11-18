@@ -19,7 +19,8 @@ namespace Lifestone.Client.Session.Scenarios;
 /// the full stop:
 /// "You &lt;verb&gt; &lt;target&gt; for &lt;n&gt; points with &lt;spell&gt;." (dealt), "With &lt;spell&gt; you drain &lt;n&gt; points of
 /// &lt;vital&gt; from &lt;target&gt;." (dealt, stamina or mana: counted in <see cref="DrainDealt"/>, not in
-/// <see cref="DamageDealt"/>), "&lt;source&gt; &lt;verbs&gt; you for &lt;n&gt; points with &lt;spell&gt;." (taken) and
+/// <see cref="DamageDealt"/>; M6 14: of health, a landed Harm Other, <c>WorldObject_Magic.cs</c> 548: health taken is damage, counted in
+/// <see cref="DamageDealt"/> and <see cref="HarmDealt"/>), "&lt;source&gt; &lt;verbs&gt; you for &lt;n&gt; points with &lt;spell&gt;." (taken) and
 /// "&lt;source&gt; casts &lt;spell&gt; and drains &lt;n&gt; points of your &lt;vital&gt;." (taken, <see cref="DrainTaken"/>). A
 /// Magic line of any other shape (a resist, a cast notice, a buff expiry) is counted in <see cref="UnparsedMagicLines"/>
 /// and otherwise ignored, never guessed.</para>
@@ -70,6 +71,15 @@ public sealed class FightTally : IDisposable
 
     /// <summary>The points of stamina and mana the player's casts drained (not damage).</summary>
     public long DrainDealt { get; private set; }
+
+    /// <summary>
+    /// M6 14 (<c>m6-life-through</c>): the points of health the player's Harm Other casts took, the sum of the lines "With &lt;spell&gt; you drain &lt;n&gt; points of health from &lt;target&gt;." (ACE writes it for the
+    /// killing cast too, <c>WorldObject_Magic.cs</c> 548 before 600 @95ef426d). Also in <see cref="DamageDealt"/>; not in <see cref="DamageLinesDealt"/>, which counts the bolts' hits.
+    /// </summary>
+    public long HarmDealt { get; private set; }
+
+    /// <summary>M6 14: how many such lines arrived.</summary>
+    public int HarmLinesDealt { get; private set; }
 
     /// <summary>Spell damage taken plus the melee damage of the 0x01B2 notices.</summary>
     public long DamageTaken { get; private set; }
@@ -186,6 +196,8 @@ public sealed class FightTally : IDisposable
         DamageLinesDealt = 0;
         CriticalsDealt = 0;
         DrainDealt = 0;
+        HarmDealt = 0;
+        HarmLinesDealt = 0;
         DamageTaken = 0;
         HitMax = 0;
         TargetDiedMidCast = 0;
@@ -273,6 +285,111 @@ public sealed class FightTally : IDisposable
         return head.EndsWith(" you for ", StringComparison.Ordinal) && head.Length > " you for ".Length ? MagicLineKind.DamageTaken : MagicLineKind.Unparsed;
     }
 
+    /// <summary>
+    /// M6 14 the losing race: ACE's line of a drain cast on her by another, from her side: "You lose &lt;n&gt; points of health due to &lt;source&gt; casting &lt;spell&gt; on you" (<c>WorldObject_Magic.cs:844</c> @95ef426d, the target's
+    /// message of a transfer spell). False for the stamina and mana forms and every other line. Allocates only the source's name.
+    /// </summary>
+    /// <param name="text">The Magic-typed line.</param>
+    /// <param name="source">The caster's name.</param>
+    /// <param name="amount">The health lost.</param>
+    public static bool TryHealthLoss(string text, out string source, out long amount)
+    {
+        const string lead = "You lose ";
+        const string mid = " points of health due to ";
+        const string tail = " casting ";
+        (source, amount) = (string.Empty, 0);
+        if (text is null || !text.StartsWith(lead, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var at = text.IndexOf(mid, StringComparison.Ordinal);
+        var end = at < 0 ? -1 : text.IndexOf(tail, at + mid.Length, StringComparison.Ordinal);
+        if (at <= lead.Length || end <= at + mid.Length || !long.TryParse(text.AsSpan(lead.Length, at - lead.Length), NumberStyles.None, CultureInfo.InvariantCulture, out amount))
+        {
+            amount = 0;
+            return false;
+        }
+
+        source = text[(at + mid.Length)..end];
+        return true;
+    }
+
+    /// <summary>
+    /// M6 14 the walk's line (live ladder51 2026-11-17 03:48:21.594 UTC: "Dark Wisp cast Exhaustion Other II on you", nine seconds before the walk's watch first heard the Wisps): ACE's line of an enchantment another cast on her,
+    /// "&lt;caster&gt; cast &lt;spell&gt; on you[, refreshing ...]" (<c>WorldObject_Magic.cs:466</c> @95ef426d). ACE writes it for a beneficial spell as well (a buff from another), so it is not by itself an attack: the walk's watch
+    /// counts it only toward the attack timeline of a kind it hears attacking. False for "You cast ..." and every other line. Allocates only the caster's name.
+    /// </summary>
+    /// <param name="text">The Magic-typed line.</param>
+    /// <param name="caster">The caster's name.</param>
+    public static bool TryCastOnYou(string text, out string caster)
+    {
+        const string cast = " cast ";
+        const string onYou = " on you";
+        caster = string.Empty;
+        if (text is null || text.StartsWith("You ", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var at = text.IndexOf(cast, StringComparison.Ordinal);
+        var on = at <= 0 ? -1 : text.IndexOf(onYou, at + cast.Length, StringComparison.Ordinal);
+        if (on <= at + cast.Length || (on + onYou.Length < text.Length && text[on + onYou.Length] != ','))
+        {
+            return false;
+        }
+
+        caster = text[..at];
+        return true;
+    }
+
+    /// <summary>
+    /// M6 14 (<c>m6-life-through</c>): reads ACE's line of a landed Harm Other, "With &lt;spell&gt; you drain &lt;n&gt; points of health from &lt;target&gt;." (<c>WorldObject_Magic.cs</c> 548 @95ef426d: a Boost spell with a
+    /// negative amount on another creature; the vital is "health" in lower case). False for the stamina and mana forms and for every other line. Allocates nothing.
+    /// </summary>
+    /// <param name="text">The line.</param>
+    /// <param name="amount">The points of health taken.</param>
+    /// <param name="spell">The spell's name.</param>
+    /// <param name="target">The target's name.</param>
+    public static bool TryHarmDealt(ReadOnlySpan<char> text, out long amount, out ReadOnlySpan<char> spell, out ReadOnlySpan<char> target)
+    {
+        const string with = "With ";
+        const string lead = " you drain ";
+        const string trail = " points of health from ";
+        amount = 0;
+        spell = default;
+        target = default;
+        if (!text.StartsWith(with, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var at = text.IndexOf(lead, StringComparison.Ordinal);
+        if (at <= with.Length)
+        {
+            return false;
+        }
+
+        var rest = text[(at + lead.Length)..];
+        var end = rest.IndexOf(trail, StringComparison.OrdinalIgnoreCase); // ACE @95ef426d writes "health"; a server that writes "Health" is read as well
+        if (end <= 0 || !long.TryParse(rest[..end], NumberStyles.None, CultureInfo.InvariantCulture, out amount))
+        {
+            amount = 0;
+            return false;
+        }
+
+        var name = rest[(end + trail.Length)..];
+        if (name.Length < 2 || name[^1] != '.')
+        {
+            amount = 0;
+            return false;
+        }
+
+        spell = text[with.Length..at];
+        target = name[..^1];
+        return true;
+    }
+
     private static bool HasFullStop(ReadOnlySpan<char> text) => text.IndexOf('.') >= 0;
 
     /// <summary>The digits that follow <paramref name="lead"/> and are followed by <paramref name="trail"/>.</summary>
@@ -345,7 +462,18 @@ public sealed class FightTally : IDisposable
 
                 break;
             case MagicLineKind.DrainDealt:
-                DrainDealt += amount;
+                if (TryHarmDealt(e.Line.Text, out var harmed, out _, out _))
+                {
+                    // M6 14 (m6-life-through): health taken by Harm Other is damage: the fight's win reads damage_dealt, and a kill by Harm Other has this line where a bolt's kill has none.
+                    DamageDealt += harmed;
+                    HarmDealt += harmed;
+                    HarmLinesDealt++;
+                }
+                else
+                {
+                    DrainDealt += amount;
+                }
+
                 break;
             case MagicLineKind.DamageTaken:
                 SpellDamageTaken += amount;

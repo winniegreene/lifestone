@@ -449,7 +449,7 @@ public sealed class Avatar
 /// Until one is bound the set places the player at each of its accepted positions.</para>
 /// <para>Not thread-safe; the frame thread owns it.</para>
 /// </remarks>
-public sealed class AvatarSet : ITargetWorld
+public sealed class AvatarSet : ITargetWorld, ILiveBodies
 {
     private const string LogCategory = "avatars";
 
@@ -684,6 +684,23 @@ public sealed class AvatarSet : ITargetWorld
 
     /// <summary>The avatar of <paramref name="guid"/>.</summary>
     public bool TryGet(uint guid, [NotNullWhen(true)] out Avatar? avatar) => _avatars.TryGetValue(guid, out avatar);
+
+    /// <summary>
+    /// M6 item 14 (<c>m6-live-position</c>): the body of <paramref name="guid"/> as the screen draws it, for the session's <see cref="LivePositions"/>: its position, whether it stands in a cell of its own, whether it is
+    /// Hidden, and whether it is known not to have taken the server's last position (<see cref="AvatarBody.ServerPositionPending"/>). A lookup; allocates nothing.
+    /// </summary>
+    public bool TryGetBody(uint guid, out LiveBody body)
+    {
+        if (!_avatars.TryGetValue(guid, out var avatar))
+        {
+            body = default;
+            return false;
+        }
+
+        var b = avatar.Body;
+        body = new LiveBody(b.Position, b.InWorld, b.IsHidden, b.ServerPositionPending);
+        return true;
+    }
 
     /// <summary>
     /// The object a target id names: the player body when it can be targeted (so reports reach its own target manager),

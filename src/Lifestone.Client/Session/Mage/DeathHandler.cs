@@ -1,11 +1,14 @@
 using System.Globalization;
 using Lifestone.Client.Diagnostics;
+using Lifestone.Client.Session.Autopilot;
 using Lifestone.Client.Session.Casting;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
 using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Session.Scenarios.Journey;
+using Lifestone.Client.Session.Travel;
+using Lifestone.Client.Session.Vitals;
 using Lifestone.Client.World;
 using Lifestone.Data.Magic;
 using Lifestone.Data.World;
@@ -52,7 +55,7 @@ public readonly record struct DeathFacts(uint CorpseGuid, CellFrame? CorpsePosit
 /// <para><b>No place.</b> The handler never sends the mod's <c>place</c>: the recall is cast (<see cref="RecallHome"/>), and the corpse leg goes through the travel seam's <see cref="TravelPurpose.Corpse"/> runner; a seam that is today's place
 /// (<see cref="PlaceTravel"/>) has no runner, so the leg is not made (<c>corpse_recovered=no</c>, <c>TODO(m5-death-corpse-runner)</c>) and the fight resumes.</para>
 /// </remarks>
-public sealed class DeathHandler : IDisposable
+public sealed partial class DeathHandler : IDisposable
 {
     /// <summary>The log category (the death loop's).</summary>
     public const string LogCategory = "death";
@@ -71,6 +74,23 @@ public sealed class DeathHandler : IDisposable
 
     /// <summary>ACE's WeenieError 0x04A3 <c>YouMustLinkToPortalToRecall</c>: the mage holds no portal tie (@95ef426d <c>WorldObject_Magic.cs</c> 1107-1119, the Primary Portal Recall case: <c>LinkedPortalOneDID</c> null; the arrival: the 2 s delay and the teleport, 1166-1175).</summary>
     public const uint UntiedRefusal = 0x04A3;
+
+    /// <summary>
+    /// M6 6 C2 (the lead's live round 1: the corpse route's rung change failed once at the Town Network walk, "moved 24.9 m in one step", and the corpse was never gone back for): the retries of a failed route travel (the rung change, the
+    /// leg's cut rung change, the corpse walk, the way back to the rung) in one death's handling, each logged <c>handler: route retry &lt;n&gt; of &lt;max&gt; after &lt;failure&gt;</c>, made only while the player is present, alive and not
+    /// dead again on the leg (a new death restarts the handler instead); a failure past them is the named stop it was (Lifestone's own number).
+    /// </summary>
+    public const int RouteRetries = 1;
+
+    /// <summary>
+    /// M6 6 FXD1 (6-D3): the slowest pace a route=leg corpse leg is allowed, in metres a second of straight line (Lifestone's own): the wayfinder's assumed run, <see cref="WayfindScenario.AssumedSpeedMetresPerSecond"/> (4.8 m/s, a low
+    /// fighter's Quickness 10 and Run 15), over its <see cref="WayfindScenario.RouteFactor"/> (1.5, the route against the straight line), about 3.2 m/s. A leg death's trip starts its clock at the corpse's travel place (the island run's
+    /// drop, up to the run's own length from the corpse), so <see cref="DeathOptions.AbortSeconds"/> counts from there plus that line at this pace; no new world fact, only the wayfinder's two numbers.
+    /// </summary>
+    public const double LegCorpseMinMetresPerSecond = WayfindScenario.AssumedSpeedMetresPerSecond / WayfindScenario.RouteFactor;
+
+    /// <summary>M6 6 C2: the <c>trip_abort=</c> of a leg death whose corpse no travel place holds (<see cref="RungRoute.PlaceHolding"/>; with <c>corpse_recovered=no</c>).</summary>
+    public const string CorpseOffRouteAbort = "corpse-off-route";
 
     /// <summary>The pre-trip heal's limit, in seconds (four casts and the regeneration of <see cref="DeathScenario.PreTripRegenSeconds"/>).</summary>
     public const double HealSeconds = 120;
@@ -105,12 +125,28 @@ public sealed class DeathHandler : IDisposable
     /// <summary>M5 7 F19: the hold between two trip fights after one ended without a kill (Lifestone's own: the creature comes on in the meantime).</summary>
     public const double TripFightRetrySeconds = 3;
 
+    /// <summary>
+    /// M6 7 AG (the gate's autopilot-mage lane, m6-7-g: 40 kills and 650 s of the trip's 725 s in trip fights, 76 s of walking, health never under 77%, cut 9.7 m from the corpse): the seconds of one trip's fights that clear the path (every creature within
+    /// the aggro reach of it, M5 D92: the corpse trip never runs past tuskers). Past them the trip fights only what attacks it (M5 D88) and walks on to the corpse, so a ground that fills the path as fast as the mage clears it cannot hold the trip for ever.
+    /// Lifestone's own: a third of the death state's 900 s watchdog (<c>AutopilotWatchdogs.BaseSeconds</c>), which leaves room for the 100 s before the trip, the 90 s the trip's own clock allows and the fights back. The fights back have no cap (D88).
+    /// </summary>
+    public const double TripFightBudgetSeconds = 300;
+
+    /// <summary>M6 7 AG: the seconds after an attack (a hit, an evade or a spell on the mage) during which it counts as attacked once <see cref="TripFightBudgetSeconds"/> is spent (the same quiet as <see cref="RebuffDriver.FightQuietSeconds"/> and the autopilot's <c>HostileWatch</c>).</summary>
+    public const double TripAttackQuietSeconds = RebuffDriver.FightQuietSeconds;
+
     private readonly HuntingGround _ground;
     private readonly DeathTally _tally;
     private readonly IJourneyTravel _travel;
     private readonly FightLegFactory _factory;
     private readonly IFightWalk? _walk;
     private readonly GearKit _kit;
+
+    /// <summary>The worn set of before the death the take-back wears again (the autopilot's snapshot while the mage lived): <see cref="DeathOptions.Worn"/>, else <see cref="WornMemory.Shared"/> (M6 6 C1: set in the constructor).</summary>
+    private WornMemory _worn;
+
+    /// <summary>The worn set of before the death (M6 0 F3: the tests' own; M6 6 C1: <see cref="DeathOptions.Worn"/> when the caller gives one, else <see cref="WornMemory.Shared"/>; this init overrides both).</summary>
+    public WornMemory WornSet { get => _worn; init => _worn = value ?? throw new ArgumentNullException(nameof(value)); }
     private readonly IReadOnlyDictionary<uint, SpellInfo> _spells;
     private readonly BuffOptions _buff;
     private readonly FightOptions _fight;
@@ -127,10 +163,18 @@ public sealed class DeathHandler : IDisposable
     private RecallHome? _recall;
     private CorpseLooter? _looter;
     private WornRestorer? _restorer; // M5 7 S2d: the worn set back on after the take-back
+    private WornRestorer? _rewearer; // M6 7 AE: the remembered pieces the pack holds, worn right after the respawn
+    private List<uint> _rewearWanted = [];
+    private string _afterRewear = "rebuff";
+    private Dictionary<uint, uint>? _wornBefore; // M6 0 F3: the worn set as the take-back found it (the restorer snapshots the memory when it ends), the kit-less check's "before"
+
     private ActionHandle? _pending;
     private ActionHandle? _healCast;
     private CastAttempt? _healAttempt;
     private bool _healOpen;
+
+    /// <summary>M6 6 R1G: true once the heal spell is dropped for the trip (ACE's 0x0400 on a cast, or the pack short of its components before one): never cast again, no retry; the rest and regeneration, and the hold's and the abort's own rules, go on.</summary>
+    private bool _healDropped;
     private ActionHandle? _abandonedOpen;
     private int _wearIndex;
     private bool _slotFreed;
@@ -174,10 +218,32 @@ public sealed class DeathHandler : IDisposable
     private double _tripFightStart;
     private double _tripFightRetryAt = double.NaN;
     private int _tripFightFails;
+    private double _tripFightSpent; // M6 7 AG: the seconds of this trip's fights that ended (the fight in progress is added by TripFightSpentSeconds)
+    private bool _tripBudgetLogged;
+    private long _attackMark = -1;
+    private double _lastAttackAt = double.NegativeInfinity;
+    private bool _respawnRead; // M6 7 AG: the station was entered again after a cut, away from the respawn: nothing is waited for or classified again
     private uint _hostile;
+    private DeathDropDecision? _drop; // M6 6 C2: the drop rule's answer, read once a death (before a leg route's trip, or at the corpse leg)
+    private bool _corpseRunAsked; // M6 7 AY: the rung's owner was asked for this death
+    private bool _coinFetch; // M6 7 AY: the coin rule said fetch
+    private LadderCorpseCoin? _stall; // M6 8 I: set when the corpse is worth fetching (fetch:met, a need): the trip's limit is no progress, not time
+    private (string Step, CellFrame At, double Since)? _stallMark; // M6 8 I: where the body stood when the stall clock last restarted
+    private string? _legPlace; // M6 6 C2: the travel place a leg death's corpse trip stops in
+    private int _routeRetries; // M6 6 C2 (live round 1): the route travel's retries this death (at most RouteRetries)
+    private int _rungBackRetries; // M6 6 FXD1 (6-D13): the way back to the rung's own retries this death (at most RouteRetries)
+    private double _legAllowance; // M6 6 FXD1 (6-D3): the seconds a route=leg trip's clock adds for the corpse leg's straight line (0 on every other route)
+    private double _legMetres = double.NaN; // M6 6 FXD1 (6-D3): that straight line, in metres (NaN when not measured)
+    private double _rungBackEnded = double.NaN; // M6 6 FXD1: the clock the way back to the rung's leg ended at, while its check after waits for a placed player
 
     /// <summary>M5 7 F19 (D92): the trip fights (a creature near the path or the corpse fought before the trip went on), report-only.</summary>
     public int TripFights { get; private set; }
+
+    /// <summary>M6 7 AG: the kills of the trip's fights in this handling (report-only; each trip fight is one kill a leg).</summary>
+    public int TripFightKills { get; private set; }
+
+    /// <summary>M6 7 AG: true once this trip's fights spent <see cref="TripFightBudgetSeconds"/> with a creature still near the path: from there the trip fights only what attacks it.</summary>
+    public bool TripFightBudgetSpent => _tripBudgetLogged;
 
     /// <summary>M5 7 F19 (D92): the dance's casts and drinks for the handler's mana (the recall, the heals, the top-up), report-only.</summary>
     public string DanceFields => _dance is { } d ? string.Create(CultureInfo.InvariantCulture, $"dance_transfers={d.Transfers} dance_revitalizes={d.Revitalizes} dance_potions={d.Potions}") : "dance_transfers=0 dance_revitalizes=0 dance_potions=0";
@@ -201,6 +267,7 @@ public sealed class DeathHandler : IDisposable
     {
         (_ground, _tally, _travel, _factory) = (ground ?? throw new ArgumentNullException(nameof(ground)), tally ?? throw new ArgumentNullException(nameof(tally)), travel ?? throw new ArgumentNullException(nameof(travel)), fightFactory ?? throw new ArgumentNullException(nameof(fightFactory)));
         (_walk, _kit, _spells, _buff, _fight, _options, _log, _arrivalSeconds) = (walk, kit ?? throw new ArgumentNullException(nameof(kit)), spells ?? throw new ArgumentNullException(nameof(spells)), buff ?? throw new ArgumentNullException(nameof(buff)), fight ?? throw new ArgumentNullException(nameof(fight)), options ?? throw new ArgumentNullException(nameof(options)), log ?? throw new ArgumentNullException(nameof(log)), arrivalSeconds);
+        _worn = options.Worn ?? WornMemory.Shared; // M6 6 C1: the caller's memory (the contract); null is today's process-wide one
     }
 
     /// <summary>The step the handler is in: <c>idle</c>, <c>respawn</c>, <c>rearm</c> (only when a caster is to be wielded or bought), <c>rebuff</c>, <c>heal</c>, <c>route</c>, <c>recall</c>, <c>runner</c>, <c>corpse-walk</c>, <c>trip-heal</c>, <c>corpse-seek</c>, <c>corpse-open</c>, <c>corpse-loot</c>, <c>corpse-close</c>, <c>wear</c>, <c>relines</c>, <c>fight</c>, <c>second-death</c>, <c>done</c>.</summary>
@@ -212,13 +279,14 @@ public sealed class DeathHandler : IDisposable
     /// <summary><c>deaths=</c>: the deaths the handler handled (the first and every restart).</summary>
     public int Deaths { get; private set; }
 
-    /// <summary><c>corpse_recovered=</c>: <c>yes</c>, <c>partial</c>, <c>no</c>, <c>rotted</c>, <c>not-found</c>, or <c>n/a</c> before the trip.</summary>
+    /// <summary><c>corpse_recovered=</c>: <c>yes</c>, <c>partial</c>, <c>no</c>, <c>rotted</c>, <c>not-found</c>, <c>none-needed</c> (M6 6 C1: nothing but pyreals left the inventory, <see cref="DeathDropRule"/>; no walk), or <c>n/a</c> before the trip.</summary>
     public string Corpse { get; private set; } = DeathLegVerdict.NotApplicable;
 
     /// <summary><c>rearm=</c> (M5 3 F5, D53; report-only): <see cref="DeathRearm.None"/> (a caster was wielded), <see cref="DeathRearm.Pack"/>, <see cref="DeathRearm.Bought"/>, <see cref="DeathRearm.Failed"/>, or <c>n/a</c> before the respawn's end.</summary>
     public string Rearm { get; private set; } = DeathLegVerdict.NotApplicable;
 
-    /// <summary><c>route=</c>: <c>recall</c>, <c>runner</c> or <c>n/a</c> (no trip planned yet).</summary>
+    /// <summary><c>route=</c>: <c>recall</c>, <c>runner</c>, <c>walk</c>, <c>rung-change</c> (M6 6 C1: also after a 0x04A3 refusal when the travel rule, asked again, routes the ground), <c>leg</c> (M6 6 C2: the corpse lies on a leg, off the ground)
+    /// or <c>n/a</c> (no trip planned yet).</summary>
     public string Route { get; private set; } = DeathLegVerdict.NotApplicable;
 
     /// <summary>Why the trip stopped short (<c>trip_abort=</c>), or <see cref="DeathLegVerdict.TripAbortNone"/>.</summary>
@@ -250,6 +318,12 @@ public sealed class DeathHandler : IDisposable
 
     /// <summary><c>rebuffed_pretrip=</c> (D56, report-only): the rebuff's own verdict before the corpse trip, the value <c>rebuffed=</c> had before the item lines were re-cast.</summary>
     public string RebuffedPretrip { get; private set; } = DeathLegVerdict.RebuffedSkipped;
+
+    /// <summary>
+    /// <c>rewear=</c> (M6 7 AE, report-only, D27): the remembered worn pieces the pack held at the respawn and the step wore again before the rebuff, <c>&lt;worn&gt;of&lt;held&gt;</c>; <c>none</c> when the pack held none (a real death: the dead mage's pieces
+    /// stay worn or lie on the corpse, so the step is a no-op); <c>n/a</c> before the step.
+    /// </summary>
+    public string Rewear { get; private set; } = DeathLegVerdict.NotApplicable;
 
     /// <summary><c>relines=</c>: the item lines re-cast after the items came back.</summary>
     public int Relines { get; private set; }
@@ -287,11 +361,17 @@ public sealed class DeathHandler : IDisposable
     /// <summary>A hold before the fight starts (the death loop's mana wait): true while the fight must wait.</summary>
     public Func<IGameSessionView, bool>? HoldBeforeFight { get; set; }
 
+    /// <summary>
+    /// M6 item 14: asked each frame before the rebuff begins; true holds the rebuff (the host's own step is running: the stop at the buff bot, ten metres from the lifestone she respawned at). The host answers false
+    /// for good once its step is over or not due.
+    /// </summary>
+    public Func<IGameSessionView, double, bool>? BeforeRebuff { get; set; }
+
     /// <summary>The verdict fields, additive at the end of the death's line (report-only): <c>deaths= corpse_recovered= route= items_back= vitae_grants= rebuffed= rebuffed_pretrip= relines= rearm=</c> (the handler's <c>deaths=</c> and <c>rebuffed=</c> are the only ones on the death line: the respawn measures are <c>respawn_deaths=</c> and <c>stage_rebuffed=</c>, 3-R2).</summary>
-    public string Fields => string.Create(CultureInfo.InvariantCulture, $"deaths={Deaths} corpse_recovered={Corpse} route={Route} items_back={ItemsBack} vitae_grants={(VitaeGrants < 0 ? DeathLegVerdict.NotApplicable : VitaeGrants.ToString(CultureInfo.InvariantCulture))} rebuffed={Rebuffed} rebuffed_pretrip={RebuffedPretrip} relines={Relines} rearm={Rearm}");
+    public string Fields => string.Create(CultureInfo.InvariantCulture, $"deaths={Deaths} corpse_recovered={Corpse} route={Route} items_back={ItemsBack} vitae_grants={(VitaeGrants < 0 ? DeathLegVerdict.NotApplicable : VitaeGrants.ToString(CultureInfo.InvariantCulture))} rebuffed={Rebuffed} rebuffed_pretrip={RebuffedPretrip} relines={Relines} rearm={Rearm} rewear={Rewear} replace={Replace}");
 
     /// <summary>The fields before any handler ran: every one <c>n/a</c> (a constant 0 for <c>vitae_grants=</c> would pass the judge on a run that never counted, 3-R1).</summary>
-    public const string UnmeasuredFields = "deaths=n/a corpse_recovered=n/a route=n/a items_back=n/a vitae_grants=n/a rebuffed=n/a rebuffed_pretrip=n/a relines=n/a rearm=n/a";
+    public const string UnmeasuredFields = "deaths=n/a corpse_recovered=n/a route=n/a items_back=n/a vitae_grants=n/a rebuffed=n/a rebuffed_pretrip=n/a relines=n/a rearm=n/a rewear=n/a replace=n/a";
 
     /// <summary>Starts the handler after a death.</summary>
     /// <param name="session">The session.</param>
@@ -299,11 +379,12 @@ public sealed class DeathHandler : IDisposable
     /// <param name="facts">The death's corpse.</param>
     /// <param name="boundLifestone">The lifestone the respawn is classified against, or null (any lifestone object).</param>
     /// <param name="respawned">True when the caller already waited for the arrival and the vitals (the death loop's <c>respawn-vitals</c>): the respawn is classified at once.</param>
-    public void Begin(IGameSessionView session, double now, in DeathFacts facts, CellFrame? boundLifestone = null, bool respawned = false)
+    /// <param name="respawnRead">M6 7 AG: true when the station was entered again after a cut with the body away from the respawn: the respawn was read at its first entry and the object table no longer holds its lifestone, so it is not classified again.</param>
+    public void Begin(IGameSessionView session, double now, in DeathFacts facts, CellFrame? boundLifestone = null, bool respawned = false, bool respawnRead = false)
     {
         ArgumentNullException.ThrowIfNull(session);
-        (_facts, _bound, _lastNow) = (facts, boundLifestone, now);
-        Deaths = 1;
+        (_facts, _bound, _lastNow, _respawnRead) = (facts, boundLifestone, now, respawnRead);
+        Deaths = respawnRead ? Math.Max(1, _tally.Deaths) : 1; // M6 7 AG: a cut's second entry keeps the handling's deaths (the server's count since the station began): one death stays one, and a third still stops the run
         _verbs = session.Tools.Verbs;
         (_verbMark, _verbEnd) = (_verbs.Counts, null); // vitae_grants= (3-R1): the xp verbs sent from here to the handler's end
         Mark();
@@ -321,6 +402,7 @@ public sealed class DeathHandler : IDisposable
         ArgumentNullException.ThrowIfNull(session);
         _lastNow = now;
         PollAbandonedOpen(session);
+        NoteAttacks(now);
         if (Failure is not null)
         {
             return ScenarioStatus.Failed;
@@ -340,12 +422,17 @@ public sealed class DeathHandler : IDisposable
         {
             "respawn" => RespawnStep(session, now),
             "rearm" => RearmStep(session, now),
+            "rewear" => RewearStep(session, now),
+            "replace" => ReplaceStep(session, now),
             "rebuff" => BuffStep(session, now, relines: false),
             "heal" => HealStep(session, now),
             "topup" => TopUpStep(session, now),
             "trip-fight" => TripFightStep(session, now),
             "route" => RouteStep(session, now),
             "recall" => RecallStep(session, now),
+            "rung-change" => RungChangeStep(session, now),
+            "leg" => LegStep(session, now),
+            "rung-back" => RungBackStep(session, now),
             "runner" => Fail(string.Create(CultureInfo.InvariantCulture, $"handler: route=runner: the travel seam has no runner from the lifestone to {_ground.Name}'s portal{(_ground.Portal is { } p ? $" (its front point in cell 0x{p.FrontCell:X8}) and its Use" : " (the ground has no portal section)")}: TODO(m6-first-tie-walk)")),
             "trip-heal" => TripHealStep(session, now),
             "corpse-walk" => CorpseWalkStep(session, now),
@@ -371,6 +458,9 @@ public sealed class DeathHandler : IDisposable
 
         _disposed = true;
         DropInFlight("disposed");
+        EndThreatShadow(); // M6 16 E2b: the handling's line of its shadow's asks, report-only
+        _legWatch?.Dispose(); // M6 14 run past: the corpse leg's hearing
+        _legWatch = null;
     }
 
     // ------------------------------------------------------------------------------------------------ deaths
@@ -404,9 +494,15 @@ public sealed class DeathHandler : IDisposable
         (Corpse, Route, TripAbort, _tripStart, _tripEnd, _arrived, _arrivedAt, _wearIndex, CorpseEntries) = (DeathLegVerdict.NotApplicable, DeathLegVerdict.NotApplicable, DeathLegVerdict.TripAbortNone, double.NaN, double.NaN, false, double.NaN, 0, 0);
         (_groundAt, _drainUntil, _tripHealing, _tripHeals, _holdCasts) = (double.NaN, double.NaN, false, 0, 0);
         (_tripFighting, _tripFightFails, _tripFightRetryAt, _hostile, _topupHeals, _topupHealOver) = (false, 0, double.NaN, 0, 0, false);
+        (_tripFightSpent, _tripBudgetLogged, _respawnRead) = (0, false, false); // M6 7 AG: a new death's trip has its own budget, and its respawn is read as any
         _looter = null;
         _restorer = null;
+        (_rewearer, Rewear, _afterRewear) = (null, DeathLegVerdict.NotApplicable, "rebuff");
+        ResetReplace();
+        _wornBefore = null;
         (Rearm, _shop) = (DeathLegVerdict.NotApplicable, null);
+        (_drop, _legPlace, _routeRetries, _rungBackRetries, _legAllowance, _legMetres, _rungBackEnded) = (null, null, 0, 0, 0, double.NaN, double.NaN);
+        (_corpseRunAsked, _coinFetch, _stall, _stallMark) = (false, false, null, null);
         _logged.Clear(); // each step is logged once per death
         Enter("second-death", now);
         return ScenarioStatus.Running;
@@ -472,6 +568,12 @@ public sealed class DeathHandler : IDisposable
             return ScenarioStatus.Running;
         }
 
+        if (_respawnRead)
+        {
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"handler: respawn=read at the station's first entry (arrival cell 0x{_tally.ArrivalCell:X8}): entered again after a cut, it is not run again; the corpse 0x{_facts.CorpseGuid:X8}{(_facts.CorpsePosition is { } lies ? $" in cell 0x{lies.CellId:X8}" : " (no position remembered)")}"));
+            return BeginRearm(session, now);
+        }
+
         var respawn = DeathLegVerdict.ClassifyRespawn(_tally, session.State.Objects, _bound);
         if (respawn != DeathRespawn.Lifestone)
         {
@@ -497,7 +599,7 @@ public sealed class DeathHandler : IDisposable
         {
             Rearm = DeathRearm.None;
             _log.Info(LogCategory, wielded.Caster is { } held ? $"handler: rearm=none: the {held.Name} is still wielded" : $"handler: rearm=none: a wielded weapon-slot item 0x{wielded.Unknown:X8} has no object yet, so its kind is unknown; no rearm is decided (the combat-mode guard names it if it matters)");
-            return Enter("rebuff", now);
+            return EnterRewear(session, now, "rebuff");
         }
 
         Enter("rearm", now);
@@ -509,6 +611,16 @@ public sealed class DeathHandler : IDisposable
         }
 
         var wands = _ground.Supplies.Kit.Where(k => k.Slot == KitSlot.Wielded).ToList();
+        if (wands.Count == 0 && _kit.Items.Count == 0)
+        {
+            // M6 0 F3 (closes TODO(m6-death-outdoor-kit)): a character whose profile has no kit has no wand to buy and none to wield from the pack: the wand it wielded (if any) lies on the corpse. No walk, no buy, no cast without a caster:
+            // the corpse trip goes first (the lifestone to the corpse on foot) and the wear step wields the best caster held again; the rebuff follows the items back (the item lines).
+            Rearm = DeathRearm.Corpse;
+            Rebuffed = RebuffedPretrip = DeathLegVerdict.RebuffedSkipped;
+            _log.Info(LogCategory, "handler: rearm=corpse: no caster is wielded or held and the profile has no kit to buy one from: the corpse trip goes first, the wear step wields the best caster again, and the rebuff follows (nothing is granted, D51)");
+            return EnterRewear(session, now, "route");
+        }
+
         if (wands.Count == 0)
         {
             return RearmFailed($"no caster is wielded or held, and the ground {_ground.Name}'s kit has no wielded line to buy (its profile's supplies.kit): nothing is granted (D51)");
@@ -540,9 +652,10 @@ public sealed class DeathHandler : IDisposable
     private ScenarioStatus WieldRearm(IGameSessionView session, double now, uint guid, string how, string name)
     {
         (_rearmHow, _rearmLine) = (how, name);
-        _pending = session.Actions.Wield(guid, EquipMask.Held, ActionSource.Automation);
+        var wield = new Quartermaster.WieldResult();
+        _pending = Quartermaster.Wardrobe.Send(session, new Quartermaster.WieldRequest(guid) { Name = name, Location = (uint)EquipMask.Held }, wield); // M6 16 E5e1: the one wield routine's send (its check before, the slot, the wield); the check after is this step's own
         _stepStart = now;
-        return ScenarioStatus.Running;
+        return _pending is null ? RearmFailed("the wield of the " + name + " was not sent: " + wield.Why) : ScenarioStatus.Running;
     }
 
     private ScenarioStatus RearmStep(IGameSessionView session, double now)
@@ -590,8 +703,8 @@ public sealed class DeathHandler : IDisposable
                 {
                     _pending = null;
                     Rearm = _rearmHow;
-                    _log.Info(LogCategory, $"handler: rearm={Rearm}: the {_rearmLine} is wielded; the rebuff follows");
-                    return Enter("rebuff", now);
+                    _log.Info(LogCategory, $"handler: rearm={Rearm}: the {_rearmLine} is wielded; the worn pieces of the pack go on, then the rebuff follows");
+                    return EnterRewear(session, now, "rebuff");
                 }
             }
 
@@ -607,11 +720,83 @@ public sealed class DeathHandler : IDisposable
         return Fail("rearm: rearm=failed: " + why);
     }
 
+    /// <summary>The seconds the rewear may take (a piece a second is plenty; Lifestone's own).</summary>
+    public const double RewearSeconds = 60;
+
+    /// <summary>
+    /// M6 7 AE: between the rearm and the rebuff (the item spells need a worn piece to land on): the remembered worn pieces the pack holds and the body does not wear are put on, each named; check before (the state of every remembered piece), act
+    /// (the restorer's memory phase only), check after. A real death leaves nothing of the set in the pack, so it is a logged no-op (<c>rewear=none</c>). What the corpse holds is the take-back's.
+    /// </summary>
+    private ScenarioStatus EnterRewear(IGameSessionView session, double now, string next)
+    {
+        _afterRewear = next;
+        _rewearWanted = [];
+        foreach (var (guid, location) in _worn.Set)
+        {
+            var place = session.State.Self.Inventory.Find(guid);
+            var name = session.State.Objects.TryGet(guid, out var o) ? o.Name : "?";
+            var where = !place.Held ? "not held (on the corpse or gone: the take-back's)" : place.Kind == InventoryPlaceKind.Equipped ? "worn" : "in the pack";
+            _log.Info(LogCategory, $"rewear: before: '{name}' 0x{guid:X8} (location 0x{location:X8}): {where}");
+            if (place.Held && place.Kind != InventoryPlaceKind.Equipped)
+            {
+                _rewearWanted.Add(guid);
+            }
+        }
+
+        if (_rewearWanted.Count == 0)
+        {
+            Rewear = "none";
+            _log.Info(LogCategory, $"rewear=none: no remembered worn piece lies in the pack ({_worn.Set.Count} remembered); nothing to put on before the {next}");
+            return EnterReplace(session, now, next);
+        }
+
+        _log.Info(LogCategory, $"rewear: {_rewearWanted.Count} remembered piece(s) lie in the pack: they go on before the {next} so the item spells find a worn piece");
+        _rewearer = new WornRestorer(_ground, session.State.Self.Qualities.Level, _spells, _log, LogCategory, "the death's respawn", _worn, memoryOnly: true);
+        return Enter("rewear", now);
+    }
+
+    private ScenarioStatus RewearStep(IGameSessionView session, double now)
+    {
+        var restorer = _rewearer;
+        if (restorer is not null && restorer.Step(session) && now - _stepStart <= RewearSeconds)
+        {
+            return ScenarioStatus.Running;
+        }
+
+        var timedOut = restorer is not null && !restorer.IsDone;
+        _rewearer = null;
+        var worn = 0;
+        foreach (var guid in _rewearWanted)
+        {
+            var on = session.State.Self.Inventory.TryGetEquipped(guid, out _);
+            worn += on ? 1 : 0;
+            var name = session.State.Objects.TryGet(guid, out var o) ? o.Name : "?";
+            var line = $"rewear: after: '{name}' 0x{guid:X8}: {(on ? "worn" : "not worn")}";
+            if (on)
+            {
+                _log.Info(LogCategory, line);
+            }
+            else
+            {
+                _log.Warn(LogCategory, line + " (report-only; the take-back tries again)");
+            }
+        }
+
+        Rewear = string.Create(CultureInfo.InvariantCulture, $"{worn}of{_rewearWanted.Count}");
+        _log.Info(LogCategory, $"rewear={Rewear}{(timedOut ? $" (the step ran past {RewearSeconds:0} s and was left; report-only)" : string.Empty)}; the replace step follows, then the {_afterRewear}");
+        return EnterReplace(session, now, _afterRewear);
+    }
+
     private static bool IsBuffing(string stage) => stage is "start" or "gear" or "buffs" or "buffs-mode" or "buffs-cycle";
 
     /// <summary>The rebuff (what the mage still holds) and, after the items came back, the item lines: the composed inner fight's buff stage alone, dropped at its own stage <c>place</c>.</summary>
     private ScenarioStatus BuffStep(IGameSessionView session, double now, bool relines)
     {
+        if (_inner is null && !relines && _options.Rebuff && BeforeRebuff?.Invoke(session, now) == true)
+        {
+            return ScenarioStatus.Running;
+        }
+
         if (_inner is null)
         {
             if (!_options.Rebuff || (relines && _rebuffAllUp && Rewielded == 0))
@@ -626,7 +811,7 @@ public sealed class DeathHandler : IDisposable
                     _log.Info(LogCategory, "handler: no item line to re-cast (the rebuff had every line up and nothing came back to be worn); relines=0");
                 }
 
-                return relines ? BeginFight(now) : Enter("heal", now);
+                return relines ? BeginFight(session, now) : Enter("heal", now);
             }
 
             _inner = _factory(_kit, _spells, _buff, _fight, null, _log, _arrivalSeconds, false, FightStages.Buffs); // no walk: the inner fight disposes the walk it is given, and the ground's walk is the fight's
@@ -650,7 +835,7 @@ public sealed class DeathHandler : IDisposable
             Relines = Casts(note);
             Rebuffed = up ? DeathLegVerdict.RebuffedYes : DeathLegVerdict.RebuffedNo; // D56: every line up once the item lines are re-cast
             _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"handler: the item lines re-cast after the items came back: relines={Relines} (buffs={note}; the rebuff had missed: {(_misses.Count == 0 ? "none named" : string.Join(", ", _misses))}){(up ? string.Empty : "; a line is still down (report-only)")}"));
-            return BeginFight(now);
+            return BeginFight(session, now);
         }
 
         (_rebuffAllUp, _misses) = (up, misses);
@@ -699,7 +884,12 @@ public sealed class DeathHandler : IDisposable
         }
     }
 
-    private static readonly uint[] HealLevels = [DeathScenario.HealSelfVii];
+    /// <summary>
+    /// M6 6 FXD1 (6-D1): the heal's ends that never drop it for the trip: the server ran it (<see cref="CastEnd.Landed"/>, <see cref="CastEnd.Unproven"/>) or the end is luck or time that passes (<see cref="CastEnd.Fizzled"/>,
+    /// <see cref="CastEnd.Busy"/>, <see cref="CastEnd.ManaShort"/>: the next cast may land). Every other end (a component, an unknown spell's <see cref="CastEnd.ServerError"/>, <see cref="CastEnd.NoEffect"/>, <see cref="CastEnd.Refused"/>, a
+    /// timeout, ...) is permanent for this trip: the heal is dropped once, named with the end, and never cast again (live round 1's refusal loop).
+    /// </summary>
+    internal static bool HealEndKeeps(CastEnd end) => end is CastEnd.Landed or CastEnd.Unproven or CastEnd.Fizzled or CastEnd.Busy or CastEnd.ManaShort;
 
     private enum HealOutcome
     {
@@ -742,6 +932,12 @@ public sealed class DeathHandler : IDisposable
             }
 
             var report = _healAttempt.Report;
+            if (!HealEndKeeps(end))
+            {
+                // M6 6 FXD1 (6-D1): every end but Landed, Unproven, Fizzled, Busy and ManaShort is permanent for the trip (0x0400, an unknown spell's 0x03FC, no effect, refused, a timeout): dropped once, named, never recast
+                DropHeal(what, end == CastEnd.NoComponents ? "no components (ACE 0x0400)" : string.Create(CultureInfo.InvariantCulture, $"the cast ended {end.Name()}{(report.Code == 0 ? string.Empty : $" (code 0x{report.Code:X})")}, a permanent end for this trip"));
+            }
+
             _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"handler: {what} cast ended {end.Name()}{(landed ? $" (heal {casts} of {DeathScenario.PreTripMaxHeals})" : " (not counted as a heal)")} fizzles={report.Fizzles} busy={report.Busy}; health {Share(session, 1):0}%"));
         }
 
@@ -756,7 +952,7 @@ public sealed class DeathHandler : IDisposable
             return HealOutcome.GaveUp;
         }
 
-        if (casts >= DeathScenario.PreTripMaxHeals || !_spells.TryGetValue(DeathScenario.HealSelfVii, out var heal))
+        if (casts >= DeathScenario.PreTripMaxHeals || _healDropped || HealLevel(session, what) is not { } heal)
         {
             if (_healNoWait)
             {
@@ -805,8 +1001,70 @@ public sealed class DeathHandler : IDisposable
         _logged.Remove(what + "-mana");
         _healAttempt ??= new CastAttempt(session.Actions, session.State, _log, _spells);
         _healOpen = true;
-        _healAttempt.Start(new CastRequest { Levels = HealLevels, Rules = CastRules.Once, Purpose = "handler " + what, Source = ActionSource.Automation }, now);
+        _healAttempt.Start(new CastRequest { Levels = [heal.Id], Rules = CastRules.Once, Purpose = "handler " + what, Source = ActionSource.Automation }, now);
         return HealOutcome.Running;
+    }
+
+    /// <summary>
+    /// M6 6 FXD1 (6-D1, the check before the cast): the Heal Self level the handler casts, or null when the heal is dropped for the trip (logged once by <see cref="DropHeal"/>). A read spellbook gives the highest level of the keeper's
+    /// Heal Self line (<see cref="VitalsMeans.HealSelf"/>, I to VII, the ids the vitals keeper's heal reads) that the book knows, the SpellTable holds and the pack can pay for (M6 6 R1G: the foci formula,
+    /// <see cref="LevelFloor.HeldForAccount"/>, the same read the bolt pick uses; not read: not judged, the refusal drops it); a book that knows none, or none the pack pays for, drops the heal, named. An unread book (the server's
+    /// list not in yet) is not judged, logged once: the den mage's Heal Self VII as before, and a permanent refusal drops it after one cast (<see cref="HealEndKeeps"/>). The climber is never granted a spell (D10, D34): below Heal
+    /// Self VII its book holds a lower level, and the level picked is the one cast.
+    /// </summary>
+    private SpellInfo? HealLevel(IGameSessionView session, string what)
+    {
+        var book = session.State.Self.Spellbook;
+        if (!book.IsKnown)
+        {
+            if (_logged.Add("heal-book-unread"))
+            {
+                _log.Info(LogCategory, $"handler: {what}: the spellbook is not read yet: the heal's level is not judged (Heal Self VII as the den mage's; a permanent refusal drops it after one cast)");
+            }
+
+            return _spells.TryGetValue(DeathScenario.HealSelfVii, out var vii) ? vii : null; // not in the SpellTable: regeneration only, as before
+        }
+
+        var held = LevelFloor.HeldForAccount(session.State, DatReaderWriter.Enums.MagicSchool.LifeMagic, null);
+        var ids = VitalsMeans.HealSelf;
+        string? shortOf = null;
+        for (var i = ids.Count - 1; i >= 0; i--)
+        {
+            if (!book.Knows(ids[i]) || !_spells.TryGetValue(ids[i], out var info))
+            {
+                continue;
+            }
+
+            if (held is not null && LevelFloor.ShortOf(held, info, out var need))
+            {
+                shortOf ??= info.Name + " needs " + need;
+                continue;
+            }
+
+            if (_logged.Add("heal-level"))
+            {
+                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"handler: {what}: the heal's level is {info.Name} ({info.Id}), the highest Heal Self level the spellbook ({book.Count} spells) knows{(held is null ? string.Empty : " and the pack pays for")}"));
+            }
+
+            return info;
+        }
+
+        DropHeal(what, shortOf is null
+            ? string.Create(CultureInfo.InvariantCulture, $"not in the spellbook: the read spellbook ({book.Count} spells) knows no Heal Self level the SpellTable holds")
+            : "the pack is short: " + shortOf);
+        return null;
+    }
+
+    /// <summary>M6 6 R1G, FXD1: drops the heal spell for the trip, logged once with why; the next heal source is the regeneration (and the hold's, the abort's own rules), never a retry.</summary>
+    private void DropHeal(string what, string why)
+    {
+        if (_healDropped)
+        {
+            return;
+        }
+
+        _healDropped = true;
+        _log.Warn(LogCategory, $"handler: {what}: Heal Self dropped for the trip: {why}; the trip goes on at the health it has (regeneration, the hold and the abort rules)");
     }
 
     private static double Share(IGameSessionView session, uint maxId) =>
@@ -821,10 +1079,36 @@ public sealed class DeathHandler : IDisposable
             _tripStart = now; // the first look; the recall's mana wait below keeps this step and does not restart the trip's clock
         }
 
+        if (CorpseRunShut(session, now) is { } shut)
+        {
+            return shut; // M6 7 AY: a shut gate means no fetch, before any way is taken
+        }
+
         var portal = _ground.Portal;
-        var tied = _options.Facts?.PortalTieOf(_ground.Key) ?? PortalTie.Unknown; // the tie of THIS ground (M5 3 p1, 2-R12)
+        var tied = _options.Facts?.TieOf(_ground) ?? PortalTie.Unknown; // the tie of THIS ground (M5 3 p1, 2-R12); M6 4 F1 (4-R2): untied when the one slot holds another
         string why;
-        if (portal is null)
+        if (portal is null && WayHomeRule.HomeOnFoot(_ground))
+        {
+            // M6 0 F3: an outdoor ground hunted from its home on foot (the climber's rung): the lifestone is in the town beside it and the corpse lies in the ground's cells, so the way is the corpse leg's own walk (an object goal through the travel seam);
+            // there is no portal to recall to and no portal to walk to.
+            (Route, why) = (DeathRoute.Walk, "the ground is outdoors with no portal and is hunted from " + _ground.Home.Town + " on foot: the corpse walk goes from the lifestone");
+        }
+        else if (LegDeath(session, now) is { } leg)
+        {
+            return leg;
+        }
+        else if (_travel is JourneyTravel && session.State.Self.Position is { } here && _ground.InLandblocks(here.CellId))
+        {
+            // M6 7 U (r1f-climb, TODO(m6-first-tie-walk) with a route in the travel file): a station entered again after a cut starts here with the body already on the ground, whatever the tally's respawn says. The travel rule then answers
+            // "route here, the ground's own station", not the rung change, so the portal section's arm below would name a stop for a ground whose route exists. C1's re-decide reads a 0x04A3 refusal and does not run here. The way is done: the corpse leg.
+            (Route, why) = (DeathRoute.Here, string.Create(CultureInfo.InvariantCulture, $"the body already stands in {_ground.Name} (cell 0x{here.CellId:X8}): the station was entered again and there is no way left to travel"));
+        }
+        else if (_travel is JourneyTravel journey && journey.Decide(session, _ground, RungDirection.Out) is { Way: Autopilot.TravelWay.RungChange } routed)
+        {
+            // M6 4 F1 (4-R1): the travel rule the autopilot's Travel state uses (AutopilotTravelRule.Out), decided before the act: a routed ground (untieable, or its tie not known tied) is reached by the rung change, never a recall tried.
+            (Route, why) = (DeathRoute.RungChange, $"the travel rule says the rung change (route {routed.Route ?? "n/a"}): {routed.Reason}");
+        }
+        else if (portal is null)
         {
             (Route, why) = (DeathRoute.Runner, "the ground has no portal section");
         }
@@ -842,9 +1126,27 @@ public sealed class DeathHandler : IDisposable
             _log.Info(LogCategory, $"handler: the corpse trip's route=recall|runner plan: route={Route} ({why}); {_ground.Name}{(portal is { } p ? $", portal 0x{p.Guid:X8}, recall spell {p.RecallSpell}" : string.Empty)}");
         }
 
+        if (Route is DeathRoute.Walk or DeathRoute.Here)
+        {
+            return BeginCorpseLeg(session, now);
+        }
+
+        if (NothingOwedHere(session))
+        {
+            return BeginCorpseLeg(session, now); // M6 7 U: corpse_recovered=none-needed with no trip: the corpse leg's own arm ends it
+        }
+
         if (Route == DeathRoute.Runner)
         {
             return Enter("runner", now);
+        }
+
+        if (Route == DeathRoute.RungChange)
+        {
+            // M6 4 F1 (4-R1): the corpse trip's way to the ground by the travel seam's Ground purpose, whose leg is the rung change (JourneyTravel asks the same rule); check after: present in the ground before the corpse leg.
+            _log.Info(LogCategory, $"walking: purpose=ground (the corpse trip: the rung change to {_ground.Name}, then the corpse leg)");
+            _leg = _travel.GoTo(session, new TravelRequest(_ground.ArrivalDestination(), TravelPurpose.Ground), now);
+            return Enter("rung-change", now);
         }
 
         if (WaitsForRecallMana(session, now, portal!.RecallSpell))
@@ -859,6 +1161,22 @@ public sealed class DeathHandler : IDisposable
         }
 
         return Enter("recall", now);
+    }
+
+    /// <summary>
+    /// M6 7 U (D67, r1f-climb: two rung changes of about 220 s, 611 and 725 m, to learn <c>none-needed</c> on arrival): the drop rule is read here, before any trip. With nothing owed and no fight of the handler's own (<see cref="DeathOptions.Fight"/>
+    /// off: the autopilot's known state owns the next move) no trip is made: the handler ends where the body stands and the known state takes the way out by its own rule, so the walk is the climb going on and never the cost of the answer. With the
+    /// handler's own fight the way to the ground is the fight's, and it goes as before. <c>route=</c> stays the plan.
+    /// </summary>
+    private bool NothingOwedHere(IGameSessionView session)
+    {
+        if (_options.Fight || !_options.RecoverCorpse || !NoneOwed(session))
+        {
+            return false;
+        }
+
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"handler: nothing is owed (the drop rule, read before any trip, D67) and this station has no fight of its own: no trip from cell 0x{session.State.Self.Position?.CellId ?? 0:X8}; route={Route} stays a plan and the caller's known state takes the way out"));
+        return true;
     }
 
     /// <summary>
@@ -913,6 +1231,33 @@ public sealed class DeathHandler : IDisposable
         return true;
     }
 
+    /// <summary>M6 4 F1 (4-R1): the corpse trip's rung change to the ground (the travel seam's Ground leg): arrived and present in the ground's landblocks, the corpse leg; else the handler fails by the leg's name.</summary>
+    private ScenarioStatus RungChangeStep(IGameSessionView session, double now)
+    {
+        var leg = _leg!;
+        var status = leg.Step(session, now);
+        if (status == TravelStatus.Running)
+        {
+            return ScenarioStatus.Running;
+        }
+
+        var failure = leg.Failure;
+        leg.Dispose();
+        _leg = null;
+        if (status == TravelStatus.Failed)
+        {
+            return RetryRoute(session, now, "route=rung-change: " + (failure ?? "travel:rung-change:failed"), "route");
+        }
+
+        if (session.State.Self.Position is not { } at || !_ground.InLandblocks(at.CellId))
+        {
+            return RetryRoute(session, now, $"route=rung-change: the rung change ended but the player is not in {_ground.Name}'s landblocks (cell 0x{session.State.Self.Position?.CellId ?? 0:X8})", "route");
+        }
+
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"handler: the rung change brought the mage into {_ground.Name} (cell 0x{at.CellId:X8}); the corpse leg"));
+        return BeginCorpseLeg(session, now);
+    }
+
     private ScenarioStatus RecallStep(IGameSessionView session, double now)
     {
         var recall = _recall!;
@@ -921,7 +1266,7 @@ public sealed class DeathHandler : IDisposable
             case RecallStatus.Done:
                 if (_options.Facts is { } done)
                 {
-                    done.SetPortalTie(_ground.Key, PortalTie.Tied);
+                    done.SetPrimaryPortalTie(_ground.Key); // M6 4 F1 (4-R2): the recall landed in the ground, so the one slot holds it
                     done.Recalls++;
                 }
 
@@ -940,8 +1285,19 @@ public sealed class DeathHandler : IDisposable
                         untied.SetPortalTie(_ground.Key, PortalTie.Untied);
                     }
 
+                    // M6 6 C1 (map-death section 2, gap a): the refusal taught the tie (Untied), so the travel rule is asked again, as the travel seam does (AutopilotTravelRule.Out: "ACE's 0x04A3 turns the travel to the rung change"):
+                    // a ground the rule now routes is reached by the rung change with no failure; only a ground with no such way stops at the runner's named TODO.
+                    if (_travel is JourneyTravel journey && journey.Decide(session, _ground, RungDirection.Out) is { Way: Autopilot.TravelWay.RungChange } routed)
+                    {
+                        Route = DeathRoute.RungChange;
+                        _log.Warn(LogCategory, $"handler: the recall was refused untied (WeenieError 0x04A3 YouMustLinkToPortalToRecall): the tie is now known untied and the travel rule, asked again, says the rung change (route {routed.Route ?? "n/a"}): {routed.Reason}; route=rung-change");
+                        _log.Info(LogCategory, $"walking: purpose=ground (the corpse trip: the rung change to {_ground.Name} after the untied recall, then the corpse leg)");
+                        _leg = _travel.GoTo(session, new TravelRequest(_ground.ArrivalDestination(), TravelPurpose.Ground), now);
+                        return Enter("rung-change", now);
+                    }
+
                     Route = DeathRoute.Runner;
-                    _log.Warn(LogCategory, "handler: the recall was refused untied (WeenieError 0x04A3 YouMustLinkToPortalToRecall): route=runner");
+                    _log.Warn(LogCategory, $"handler: the recall was refused untied (WeenieError 0x04A3 YouMustLinkToPortalToRecall): route=runner ({(_travel is JourneyTravel ? "the travel rule, asked again with the tie untied, gives no rung change" : "this host's travel seam has no travel rule to ask again")})");
                     return Enter("runner", now);
                 }
 
@@ -951,14 +1307,158 @@ public sealed class DeathHandler : IDisposable
         }
     }
 
+    // ------------------------------------------------------------------------------------------------ M6 6 C2: a corpse lost on a leg
+
+    /// <summary>
+    /// M6 6 C2 (map-death section 2, the leg death): the corpse's landblock is not the ground's (and the ground is not hunted from home on foot: that is <c>route=walk</c>), so the death was on a leg (the island run, a mainland walk). The drop rule
+    /// is read first: nothing to recover is no trip to the corpse (the route to the ground is decided as for any death, <c>corpse_recovered=none-needed</c>). Else <c>route=leg</c>: the travel place that holds the corpse
+    /// (<see cref="RungRoute.PlaceHolding"/>), the rung change out cut there (<see cref="JourneyTravel.ToPlace"/>), then the corpse leg on foot (<see cref="TravelPurpose.Corpse"/>); after the items, the wear and the item lines, the normal rung
+    /// change back to the ground and the fight. No place holds it: <c>corpse_recovered=no trip_abort=corpse-off-route</c>, named with the landblock. Null when the death is not a leg death, nothing is to recover, or this host's travel has no
+    /// travel file (today's route then).
+    /// </summary>
+    private ScenarioStatus? LegDeath(IGameSessionView session, double now)
+    {
+        if (_facts.CorpsePosition is not { } corpse || _ground.InLandblocks(corpse.CellId))
+        {
+            return null;
+        }
+
+        var landblock = RungRoute.Hex(corpse.CellId >> 16);
+        if (_travel is not JourneyTravel { Context: { } context } journey)
+        {
+            if (_logged.Add("leg-no-context"))
+            {
+                _log.Warn(LogCategory, $"handler: the corpse 0x{_facts.CorpseGuid:X8} lies in landblock {landblock}, off {_ground.Name}'s landblocks (a death on a leg), but this host's travel seam has no travel file to plan a way to it: today's route is decided (route=leg needs the journey's travel)");
+            }
+
+            return null;
+        }
+
+        if (NoneOwed(session))
+        {
+            if (_logged.Add("leg-none-needed"))
+            {
+                _log.Info(LogCategory, $"handler: the corpse 0x{_facts.CorpseGuid:X8} lies in landblock {landblock}, off {_ground.Name}'s landblocks (a death on a leg), and nothing is to recover: no trip to it; the route to the ground is decided as for any death");
+            }
+
+            return null;
+        }
+
+        Route = DeathRoute.Leg;
+        var level = session.State.Self.Qualities.Level;
+        var held = RungRoute.PlaceHolding(context.Routes, _ground, level, corpse.CellId, corpse.Frame.Origin);
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"handler: the corpse trip's route=recall|runner plan: route={DeathRoute.Leg} (the corpse 0x{_facts.CorpseGuid:X8} lies in cell 0x{corpse.CellId:X8}, off {_ground.Name}'s landblocks: a death on a leg; level {level}); place={held.Key ?? "none"}: {held.Why}"));
+        if (held.Key is not { } place)
+        {
+            return NoCorpse(now, DeathCorpse.No, CorpseOffRouteAbort, $"the corpse 0x{_facts.CorpseGuid:X8} lies in landblock {landblock} (cell 0x{corpse.CellId:X8}), which no travel place holds and no on-foot leg of {_ground.Key}'s route reaches: trip_abort={CorpseOffRouteAbort} ({held.Why})");
+        }
+
+        _legPlace = place;
+        _log.Info(LogCategory, $"walking: purpose=ground (the corpse trip of a death on a leg: the rung change out to {_ground.Name} cut at {place}, stop_at={place}, then the corpse leg on foot)");
+        _leg = journey.ToPlace(session, _ground, place, now);
+        return Enter("leg", now);
+    }
+
+    /// <summary>M6 6 C2: the rung change cut at the corpse's place: arrived (the station checked the place), the corpse leg; else the handler fails by the leg's name.</summary>
+    private ScenarioStatus LegStep(IGameSessionView session, double now)
+    {
+        var leg = _leg!;
+        var status = leg.Step(session, now);
+        if (status == TravelStatus.Running)
+        {
+            return ScenarioStatus.Running;
+        }
+
+        var failure = leg.Failure;
+        leg.Dispose();
+        _leg = null;
+        if (status == TravelStatus.Failed)
+        {
+            return RetryRoute(session, now, "route=leg: " + (failure ?? "travel:rung-change:failed"), "route");
+        }
+
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"handler: the rung change brought the mage to {_legPlace} (cell 0x{session.State.Self.Position?.CellId ?? 0:X8}), the place of the corpse 0x{_facts.CorpseGuid:X8} in cell 0x{_facts.CorpsePosition?.CellId ?? 0:X8}; the corpse leg on foot"));
+        return BeginCorpseLeg(session, now);
+    }
+
+    /// <summary>
+    /// M6 6 C2: after a leg death's corpse (taken back, or given up by name), the way back to the rung: check before (already in the ground: the fight at once), the normal rung change out (the travel seam's Ground leg, as
+    /// <c>route=rung-change</c>), check after (present in the ground's landblocks), then the fight; a failure is the handler's by the leg's name. M6 6 FXD1: any route whose fight would begin outside the ground comes here (6-D6), and this way
+    /// has its own retry (6-D13).
+    /// </summary>
+    private ScenarioStatus RungBackStep(IGameSessionView session, double now)
+    {
+        if (_leg is null && double.IsNaN(_rungBackEnded))
+        {
+            if (session.State.Self.Position is { } here && _ground.InLandblocks(here.CellId))
+            {
+                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"handler: back to the rung: the mage already stands in {_ground.Name} (cell 0x{here.CellId:X8}); the fight"));
+                return Enter("fight", now);
+            }
+
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"walking: purpose=ground (back to the rung before the fight (route={Route}): the rung change out to {_ground.Name} from cell 0x{session.State.Self.Position?.CellId ?? 0:X8}, then the fight)"));
+            _leg = _travel.GoTo(session, new TravelRequest(_ground.ArrivalDestination(), TravelPurpose.Ground), now);
+            return ScenarioStatus.Running;
+        }
+
+        if (_leg is not null)
+        {
+            var status = _leg.Step(session, now);
+            if (status == TravelStatus.Running)
+            {
+                return ScenarioStatus.Running;
+            }
+
+            var failure = _leg.Failure;
+            _leg.Dispose();
+            _leg = null;
+            if (status == TravelStatus.Failed)
+            {
+                return RetryRoute(session, now, $"route={Route}: back to the rung: " + (failure ?? "travel:rung-change:failed"), "rung-back");
+            }
+
+            _rungBackEnded = now;
+        }
+
+        // M6 6 FXD1: the check after reads a placed player: a rung change that ends while the last teleport is still in flight (portal space) is waited for, at most the handler's arrival limit, logged once; then judged
+        if (session.State.Self.Travel != SelfTravel.Present && now - _rungBackEnded < _arrivalSeconds)
+        {
+            if (_logged.Add("rung-back-arrival"))
+            {
+                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"handler: back to the rung: the rung change ended with the player in travel {session.State.Self.Travel}: the check after waits for the arrival (at most {_arrivalSeconds:0} s)"));
+            }
+
+            return ScenarioStatus.Running;
+        }
+
+        _rungBackEnded = double.NaN;
+        _logged.Remove("rung-back-arrival");
+        if (session.State.Self.Position is not { } at || !_ground.InLandblocks(at.CellId))
+        {
+            return RetryRoute(session, now, $"route={Route}: back to the rung: the rung change ended but the player is not in {_ground.Name}'s landblocks (cell 0x{session.State.Self.Position?.CellId ?? 0:X8})", "rung-back");
+        }
+
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"handler: back to the rung: the rung change brought the mage into {_ground.Name} (cell 0x{at.CellId:X8}); the fight"));
+        return Enter("fight", now);
+    }
+
     // ------------------------------------------------------------------------------------------------ the corpse
 
     private ScenarioStatus BeginCorpseLeg(IGameSessionView session, double now)
     {
         _groundAt = now; // the arrival in the ground: --death-recover-abort-seconds counts from here
+        LegAllowance(session);
         if (!_options.RecoverCorpse)
         {
             return NoCorpse(now, DeathLegVerdict.NotApplicable, "skipped", "--death-recover-corpse is off: the corpse is not gone back for");
+        }
+
+        // M6 6 C1 (map-death section 2, gap c): is there anything to recover? Checked before any corpse walk, on one line with its inputs; an unread diff walks as before and says why (M6 6 C2: read once a death, a leg route reads it first).
+        if (NoneOwed(session))
+        {
+            (Corpse, TripAbort, _tripEnd) = (DeathCorpse.NoneNeeded, DeathLegVerdict.TripAbortNoneNeeded, now);
+            _log.Info(LogCategory, $"handler: corpse_recovered={DeathCorpse.NoneNeeded} trip_abort={DeathLegVerdict.TripAbortNoneNeeded}: nothing but pyreals left the inventory at the death, so the corpse 0x{_facts.CorpseGuid:X8} is not walked to (route={Route} planned, not walked); the fight resumes");
+            return Enter("wear", now);
         }
 
         if (_facts.CorpseGuid == 0 || _facts.CorpsePosition is not { } at)
@@ -977,9 +1477,238 @@ public sealed class DeathHandler : IDisposable
             return NoCorpse(now, DeathCorpse.No, "no-runner", $"this host's travel seam is today's place and the handler never places: the corpse 0x{_facts.CorpseGuid:X8} in cell 0x{at.CellId:X8} is not walked to (TODO(m5-death-corpse-runner))");
         }
 
+        return StartCorpseWalk(at, age, session, now);
+    }
+
+    private ScenarioStatus StartCorpseWalk(CellFrame at, double age, IGameSessionView session, double now)
+    {
         _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"walking: purpose=corpse (the runner over {_ground.Name}'s room graph to the corpse 0x{_facts.CorpseGuid:X8} in cell 0x{at.CellId:X8}, {age:0} s old; ACE's rot floor {DeathScenario.PlayerCorpseMinRotSeconds:0} s)"));
         _leg = _travel.GoTo(session, new TravelRequest(DeathScenario.CorpseDestination(at), TravelPurpose.Corpse, _facts.CorpseGuid, DeathScenario.CorpseTravelRangeMetres), now);
         return Enter("corpse-walk", now);
+    }
+
+    /// <summary>
+    /// M6 6 C2 (live round 1): one named recovery for a failed route travel: when a retry is left (<see cref="RouteRetries"/>) and <see cref="CanRetryRoute"/> holds, the route is decided again from where the body stands and started once more
+    /// (<paramref name="step"/>: <c>route</c> re-decides the way to the ground or the corpse's place, <c>rung-back</c> the way back to the rung); else the named stop it was.
+    /// </summary>
+    private ScenarioStatus RetryRoute(IGameSessionView session, double now, string failure, string step)
+    {
+        if (!CanRetryRoute(session, failure, step == "rung-back"))
+        {
+            return Fail(failure);
+        }
+
+        _logged.Remove("route-plan"); // the decision is logged again
+        _logged.Remove("step:" + step);
+        return Enter(step, now);
+    }
+
+    /// <summary>
+    /// M6 6 C2: true (and counted, logged <c>handler: route retry n of max after &lt;failure&gt;</c>) when a route retry is left, the player is present and alive, and the failure is not a death on the leg; else false, logged why. M6 6 FXD1
+    /// (6-D13): the way back to the rung (<paramref name="rungBack"/>) counts its own <see cref="RouteRetries"/>, so a retry spent on the way out never fails a station whose items are already back; its lines say <c>(the way back to the rung)</c>.
+    /// </summary>
+    private bool CanRetryRoute(IGameSessionView session, string failure, bool rungBack = false)
+    {
+        var self = session.State.Self;
+        var alive = self.Qualities.TryGetVitalLevels(MageTemplate.MaxHealth, out var health, out _) && health > 0;
+        var died = failure.Contains("died:", StringComparison.Ordinal) || failure.Contains("dead:", StringComparison.Ordinal) || NewDeath();
+        var spent = rungBack ? _rungBackRetries : _routeRetries;
+        var whose = rungBack ? " (the way back to the rung's own)" : string.Empty;
+        var why = spent >= RouteRetries ? string.Create(CultureInfo.InvariantCulture, $"the {RouteRetries} retry{whose} is spent")
+            : died ? "the failure is a death on the leg (the handler restarts for it)"
+            : self.Travel != SelfTravel.Present ? $"the player is not present (travel {self.Travel})"
+            : !alive ? "the player's health is 0 or unknown"
+            : null;
+        if (why is not null)
+        {
+            _log.Warn(LogCategory, $"handler: no route retry ({why}) after {failure}");
+            return false;
+        }
+
+        spent = rungBack ? ++_rungBackRetries : ++_routeRetries;
+        _leg?.Dispose();
+        _leg = null;
+        _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"handler: route retry {spent} of {RouteRetries}{whose} after {failure}; the route is decided again from cell 0x{self.Position?.CellId ?? 0:X8}"));
+        return true;
+    }
+
+    /// <summary>M6 7 AY: nothing is owed and no coin is fetched: the drop rule's none-needed, unless the coin rule said fetch.</summary>
+    private bool NoneOwed(IGameSessionView session) => DropCheck(session).NoneNeeded && !_coinFetch;
+
+    /// <summary>
+    /// M6 7 AY (the owner's decision of 2026-11-06; closes <c>m6-corpse-run-gate</c>), read once a death, before any way is taken: the ladder's character asks <see cref="RungOwner.CorpseRun"/> on the buffs that stand after the rebuff. A corpse that owes an item and lies behind a shut gate is not fetched
+    /// (<c>corpse_recovered=no trip_abort=gate-shut</c>, an answer: the climb goes on from where she stands); a corpse that owes nothing is fetched only on <see cref="CorpseCoinRule"/>'s yes. Both logged by name, met or not. Null: the trip goes on as before.
+    /// </summary>
+    private ScenarioStatus? CorpseRunShut(IGameSessionView session, double now)
+    {
+        if (_corpseRunAsked || !_options.RecoverCorpse || _facts.CorpsePosition is not { } at)
+        {
+            return null;
+        }
+
+        _corpseRunAsked = true;
+        var state = session.State;
+        var ladder = _options.CorpseLadder ?? (CharacterPolicy.For(state.Self.Name).WarLadder ? LadderLoader.WarMage : null);
+        if (ladder is null || !state.Self.Qualities.TryGetInt(PlayerQualities.LevelProperty, out var level))
+        {
+            return null;
+        }
+
+        var buffs = _options.CorpseBuffsForTest ?? LiveBuffs(session, now);
+        var ground = RungOwner.GroundOf(ladder, at.CellId) ?? (_ground.InLandblocks(at.CellId) ? _ground : null);
+        var gate = RungOwner.CorpseRun(ladder, new RungAsk(level, state.Self.Position?.CellId, state.Self.Qualities, AutopilotScenario.GateKnows(session), buffs) { Trial = _options.Journey?.Facts.Trial }, ground?.Key); // M6 item 14: a corpse on the trial's ground is the trial's gate's
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"handler: corpse run: asked the rung's owner: level={level} corpse_cell=0x{at.CellId:X8} ground={ground?.Key ?? "none"} rung={gate.Rung ?? "none"} -> {(gate.Open ? "open" : "shut")} ({gate.Reason})"));
+        if (DropCheck(session).NoneNeeded)
+        {
+            var ask = new CorpseCoinAsk(ladder.CorpseCoin, CorpseCoinRule.CoinLost(ReadDrops(session).LostLine), at.CellId, ground, gate);
+            var answer = CorpseCoinRule.Decide(in ask);
+            _coinFetch = answer.Fetch;
+            _log.Info(LogCategory, "handler: " + CorpseCoinRule.Line(in ask, answer));
+            if (answer.Fetch && CorpseApproachShut(session, at.CellId, ground, level, now) is { } shutForCoin)
+            {
+                _coinFetch = false;
+                return shutForCoin;
+            }
+
+            LogLimit(ladder.CorpseCoin, answer.Fetch);
+            return null;
+        }
+
+        // M6 7 BB: an item is owed; the walk is for what she needs, and only when the corpse's cell is safe (the coin gate's data) and the gate is open. M6 7 finish: the coin counts, when the server leaves it on the corpse
+        var owed = ReadDrops(session);
+        var lost = owed.LostLine;
+        var trip = new CorpseTripAsk(ladder.CorpseCoin, owed.WornMissing, owed.CasterKept, lost is not null && lost.Contains("Healing Kit", StringComparison.OrdinalIgnoreCase), false, null, !owed.LinesRead, at.CellId, ground, gate, CorpseCoinRule.CoinLost(lost));
+        var tripAnswer = CorpseCoinRule.DecideTrip(in trip);
+        _log.Info(LogCategory, "handler: " + CorpseCoinRule.TripLine(in trip, tripAnswer));
+        if ((tripAnswer.Fetch || tripAnswer.Reason == "cell-unsafe") && CorpseApproachShut(session, at.CellId, ground, level, now) is { } shutForItems)
+        {
+            return shutForItems; // M6 14 retreat attackers (rule 7): a corpse she needs, in an approach she cannot survive, is left by that name, the rot's time with it
+        }
+
+        if (tripAnswer.Fetch)
+        {
+            LogLimit(ladder.CorpseCoin, true);
+            return null;
+        }
+
+        if (tripAnswer.Reason is "nothing-needed" or "cell-unsafe")
+        {
+            _log.Warn(LogCategory, "handler: TODO(corpse-item-value): the drop line names items but not their Value, and no quest item is known (TODO(corpse-quest-item)); only worn gear, the caster, a kit and an unread diff count as needed");
+            return NoCorpse(now, DeathCorpse.No, tripAnswer.Reason == "cell-unsafe" ? DeathLegVerdict.TripAbortCellUnsafe : DeathLegVerdict.TripAbortNoneNeeded, tripAnswer.Reason == "cell-unsafe"
+                ? $"the corpse holds something she needs but lies on cell 0x{at.CellId:X8}, which the ground's corpse_fetch data does not call safe: the handler leaves the corpse and goes on"
+                : "the corpse holds nothing she needs (no worn gear, caster or kit; no item value is read): the handler leaves the corpse and goes on");
+        }
+
+        return NoCorpse(now, DeathCorpse.No, DeathLegVerdict.TripAbortGateShut, $"the corpse lies on {ground?.Key}, behind a shut gate ({gate.Reason}): a shut gate means no fetch");
+    }
+
+    /// <summary>
+    /// M6 14 retreat attackers (rule 7; live 2026-11-14: her corpse lay on the Holding's approach, on no rung's ground, so no gate guarded the walk back): a corpse the trip would fetch is first judged by the approach it lies in (an approach
+    /// whose landblocks hold its cell) or the approach of the ground it lies in, on her state after the rebuff (<see cref="ApproachCheck.Live"/>). One that she cannot survive is not walked to (<see cref="CorpseApproachRule"/>):
+    /// <c>corpse_recovered=no trip_abort=approach</c>, the rot's time named. Null: the trip goes on.
+    /// </summary>
+    private ScenarioStatus? CorpseApproachShut(IGameSessionView session, uint cell, HuntingGround? ground, int level, double now)
+    {
+        var place = ground?.Approach is not null ? ground : ApproachCheck.ApproachOf(GroundCatalog.All, cell);
+        // M6 14 approach cost (rule 3): the corpse trip reads the way out's verdict: the approach check, the crossing's cost on her state after the rebuff, and a crossing given up this run
+        var facts = _options.Facts ?? _options.Journey?.Facts;
+        var costWhy = string.Empty;
+        _approachLine.Times = CreatureAttackTimes.For(_options.Journey?.Dats); // M6 14 attack timing: the camps' hits at their own timing from the dats
+        var verdict = place is null ? null : ApproachCrossing.Judge(session.State, place, _approachLine, now, _options.CorpseLadder ?? LadderLoader.WarMage, _spells, _options.Journey?.Routes ?? TravelRoutes.Default, facts?.ApproachAbandonedOf(place.Key), out costWhy, CreaturePaces.For(_options.Journey?.Dats)); // M6 14 run past (D137): the corpse trip reads the crossing priced as a run past
+        if (verdict is { Cost: null, Abandoned: null } && costWhy.Length > 0)
+        {
+            _log.Info(LogCategory, $"handler: corpse approach: the crossing's cost is not judged: {costWhy}");
+        }
+
+        var answer = CorpseApproachRule.Decide(verdict, level, now - _facts.DiedAt);
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"handler: corpse approach: corpse_cell=0x{cell:X8} approach={place?.Key ?? "none"} -> {(answer.Walk ? "walk" : "no walk")} ({answer.Reason}): {answer.Why}"));
+        return answer.Walk ? null : NoCorpse(now, DeathCorpse.No, DeathLegVerdict.TripAbortApproach, answer.Why);
+    }
+
+    private readonly LiveFightLine _approachLine = new(); // M6 14 retreat attackers: her armour and resistance for the corpse trip's approach check
+
+    /// <summary>
+    /// M6 8 I (round 1, 19:10 UTC, level 11: 44,664 pyreals on a corpse, fetch:met, given up at the 90 s limit of a walk whose fights had spent 320 s). A corpse worth fetching on a safe, gate-open ground gets the ladder's no-progress limit
+    /// (<see cref="LadderCorpseCoin.TripStallSeconds"/> without <see cref="LadderCorpseCoin.TripStallMetres"/> of movement; a fight and a heal hold restart it) in place of <c>--death-recover-abort-seconds</c>, which keeps its meaning for every other trip. One line, with the numbers.
+    /// </summary>
+    private void LogLimit(LadderCorpseCoin rule, bool fetch)
+    {
+        _stall = fetch && rule.TripStallSeconds > 0 ? rule : null;
+        _stallMark = null;
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"handler: trip limit: fetch={(fetch ? "yes" : "no")} -> {(_stall is null ? $"time: {_options.AbortSeconds:0.##} s from the arrival (--death-recover-abort-seconds)" : $"no progress: {rule.TripStallSeconds:0.##} s without {rule.TripStallMetres:0.##} m of movement (the fights and the heal holds do not count); --death-recover-abort-seconds {_options.AbortSeconds:0.##} s does not apply")}"));
+    }
+
+    private RungBuffRead LiveBuffs(IGameSessionView session, double now)
+    {
+        var cycle = new BuffCycle(session, _spells, _buff, _log, ArmourBuffLedger.For(session.State));
+        return new RungBuffRead(name => cycle.ActiveLevel(name, now), cycle.ReachLevel);
+    }
+
+    /// <summary>M6 6 C1, C2: the drop rule's answer for this death, read and logged once (<c>handler: corpse check: ...</c>).</summary>
+    private DeathDropDecision DropCheck(IGameSessionView session)
+    {
+        if (_drop is { } known)
+        {
+            return known;
+        }
+
+        var drops = ReadDrops(session);
+        var decision = DeathDropRule.Decide(in drops);
+        _drop = decision;
+        _log.Info(
+            LogCategory,
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"handler: corpse check: level={drops.Level?.ToString(CultureInfo.InvariantCulture) ?? "unknown"} retained_line={(drops.RetainedLine ? "yes" : "no")} lost_line={(drops.LostLine is { } lost ? "'" + lost + "'" : drops.LinesRead ? "none" : "unread")} worn_before={drops.WornBefore} worn_missing={drops.WornMissing} caster_kept={(drops.CasterKept ? "yes" : "no")} rearm={Rearm} -> {(decision.NoneNeeded ? "none-needed" : "walk")}: {decision.Why}"));
+        return decision;
+    }
+
+    /// <summary>
+    /// M6 6 C1: how long before the corpse's own create ACE's drop line may land and still be this death's, in seconds (Lifestone's own: ACE sends the line and the corpse in the same tick, @95ef426d <c>Creature_Death.cs</c>:540-580,
+    /// but in two queues, the player's own and the landblock's, so either may come first; two seconds covers that order and no earlier death, which is at least a respawn's length before).
+    /// </summary>
+    public const double DropLineSlackSeconds = 2;
+
+    /// <summary>M6 6 C1: what the handler can read at the respawn about what left the inventory (see <see cref="DeathDropRule"/>).</summary>
+    private DeathDropInput ReadDrops(IGameSessionView session)
+    {
+        var state = session.State;
+        int? level = state.Self.Qualities.Ints.TryGetValue(PlayerQualities.LevelProperty, out var l) ? l : null;
+        var (retained, lost, linesRead) = (false, (string?)null, !double.IsNaN(_facts.DiedAt));
+        if (linesRead)
+        {
+            var since = _facts.DiedAt - DropLineSlackSeconds;
+            var chat = state.Chat;
+            for (var i = 0; i < chat.Count; i++)
+            {
+                var line = chat[i];
+                if (line.Time < since || line.Kind != ChatKind.System)
+                {
+                    continue;
+                }
+
+                if (string.Equals(line.Text, DeathDropRule.RetainedLine, StringComparison.Ordinal))
+                {
+                    retained = true;
+                }
+                else if (line.Text.StartsWith(DeathDropRule.LostPrefix, StringComparison.Ordinal))
+                {
+                    lost = line.Text;
+                }
+            }
+        }
+
+        var (before, missing) = (0, 0);
+        foreach (var guid in _worn.Set.Keys)
+        {
+            before++;
+            if (!state.Self.Inventory.Contains(guid))
+            {
+                missing++;
+            }
+        }
+
+        return new DeathDropInput(level, retained, lost, linesRead, before, missing, Rearm == DeathRearm.None);
     }
 
     private ScenarioStatus NoCorpse(double now, string outcome, string abort, string why)
@@ -994,12 +1723,12 @@ public sealed class DeathHandler : IDisposable
     /// <summary>The trip's limits, checked each frame of the walk, the seek, the open and the loot: null when the trip goes on; the time limit aborts at once, the health line holds and heals.</summary>
     private ScenarioStatus? TripGuard(IGameSessionView session, double now)
     {
-        if (TripOver(now) is { } over)
+        if (TripOver(session, now) is { } over)
         {
             return AbortTrip(session, now, over.Reason, over.Why);
         }
 
-        if (HostileNearPath(session, out var hostile, out var reach))
+        if (TripHostile(session, now, out var hostile, out var reach))
         {
             return BeginTripFight(session, now, hostile, reach);
         }
@@ -1008,12 +1737,80 @@ public sealed class DeathHandler : IDisposable
         return !double.IsNaN(health) && health < _options.AbortHealthPercent ? BeginTripHeal(now, health) : null;
     }
 
-    private (string Reason, string Why)? TripOver(double now) =>
-        !double.IsNaN(_groundAt) && now - _groundAt > _options.AbortSeconds
-            ? (string.Create(CultureInfo.InvariantCulture, $"trip-over-{_options.AbortSeconds:0.##}s"), string.Create(CultureInfo.InvariantCulture, $"the trip took over {_options.AbortSeconds:0.##} s from the arrival in {_ground.Name} (--death-recover-abort-seconds)"))
+    /// <summary>
+    /// M6 8 I: the trip's limit. A corpse worth fetching (<see cref="_stall"/>): no progress, <c>trip-stalled-&lt;N&gt;s</c>: the body has not moved the ladder's metres since the clock last restarted, which a new step, a fight and a heal hold also do (so a busy trip is not cut and a stuck one is).
+    /// Any other trip: <see cref="DeathOptions.AbortSeconds"/> from the arrival, as before.
+    /// </summary>
+    private (string Reason, string Why)? TripOver(IGameSessionView session, double now)
+    {
+        if (_stall is not { } rule || double.IsNaN(_groundAt))
+        {
+            return TripOverByTime(now);
+        }
+
+        var at = session.State.Self.Position;
+        if (_stallMark is not { } mark || mark.Step != CurrentStep || (at is { } p && p.ToGlobal().DistanceTo(mark.At.ToGlobal()) >= rule.TripStallMetres))
+        {
+            if (at is { } here)
+            {
+                _stallMark = (CurrentStep, here, now);
+            }
+
+            return null;
+        }
+
+        var still = now - mark.Since;
+        return still > rule.TripStallSeconds
+            ? (string.Create(CultureInfo.InvariantCulture, $"trip-stalled-{rule.TripStallSeconds:0.##}s"), string.Create(CultureInfo.InvariantCulture, $"the body moved under {rule.TripStallMetres:0.##} m in {still:0.#} s in {CurrentStep} (trip_stall_seconds {rule.TripStallSeconds:0.##}, trip_stall_metres {rule.TripStallMetres:0.##}): no progress; the fights and heal holds are not counted"))
+            : null;
+    }
+
+    private (string Reason, string Why)? TripOverByTime(double now) =>
+        !double.IsNaN(_groundAt) && now - _groundAt > _options.AbortSeconds + _legAllowance
+            ? (string.Create(CultureInfo.InvariantCulture, $"trip-over-{_options.AbortSeconds:0.##}s"), Route == DeathRoute.Leg && _legPlace is { } place
+                ? string.Create(CultureInfo.InvariantCulture, $"the trip took over {_options.AbortSeconds + _legAllowance:0.#} s from the arrival in {place}, the corpse's travel place (--death-recover-abort-seconds {_options.AbortSeconds:0.##} s plus {_legAllowance:0.#} s for the corpse leg's {_legMetres:0} m of straight line at {LegCorpseMinMetresPerSecond:0.0} m/s)")
+                : string.Create(CultureInfo.InvariantCulture, $"the trip took over {_options.AbortSeconds:0.##} s from the arrival in {_ground.Name} (--death-recover-abort-seconds)"))
             : null;
 
+    /// <summary>
+    /// M6 6 FXD1 (6-D3, the review's live scenario: the Burrow's island run, the corpse up to 609 m from the island's drop, about 85 s of walk before any detour): on <c>route=leg</c> the trip's clock starts at the corpse's travel place, not
+    /// in the ground, so the limit adds the corpse leg's straight-line metres from where the mage stands at its start over <see cref="LegCorpseMinMetresPerSecond"/>; logged once with its inputs. Every other route adds nothing (the
+    /// corpse lies in the ground the clock starts in). An unmeasurable line (no position, or no corpse position) adds nothing, said so.
+    /// </summary>
+    private void LegAllowance(IGameSessionView session)
+    {
+        (_legAllowance, _legMetres) = (0, double.NaN);
+        if (Route != DeathRoute.Leg)
+        {
+            return;
+        }
+
+        if (session.State.Self.Position is not { } here || _facts.CorpsePosition is not { } corpse)
+        {
+            _log.Warn(LogCategory, $"handler: route=leg: the corpse leg's straight line cannot be measured (the mage's position {(session.State.Self.Position is null ? "unknown" : "known")}, the corpse's {(_facts.CorpsePosition is null ? "unknown" : "known")}): the trip's clock is --death-recover-abort-seconds alone, from the arrival in {_legPlace}");
+            return;
+        }
+
+        var metres = here.ToGlobal().DistanceTo(corpse.ToGlobal());
+        if (double.IsNaN(metres) || double.IsInfinity(metres))
+        {
+            _log.Warn(LogCategory, $"handler: route=leg: the corpse leg's straight line is not a number: the trip's clock is --death-recover-abort-seconds alone, from the arrival in {_legPlace}");
+            return;
+        }
+
+        (_legMetres, _legAllowance) = (metres, metres / LegCorpseMinMetresPerSecond);
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"handler: route=leg: the trip's clock starts in {_legPlace} (cell 0x{here.CellId:X8}), {metres:0} m of straight line from the corpse in cell 0x{corpse.CellId:X8}: the limit is --death-recover-abort-seconds {_options.AbortSeconds:0.##} s plus {_legAllowance:0.#} s ({metres:0} m at {LegCorpseMinMetresPerSecond:0.0} m/s, the wayfinder's assumed run over its route factor) = {_options.AbortSeconds + _legAllowance:0.#} s"));
+    }
+
     private string HealthAbort => string.Create(CultureInfo.InvariantCulture, $"health-under-{_options.AbortHealthPercent:0.##}");
+
+    /// <summary>M6 8 K: the survival layer held the trip for <paramref name="seconds"/>: its step clock shifts by the hold and the no-progress clock restarts, as for the trip's own heal hold.</summary>
+    /// <param name="seconds">The seconds held.</param>
+    public void NoteHeld(double seconds)
+    {
+        _stepStart += seconds;
+        _stallMark = null;
+    }
 
     /// <summary>The health fell under the line: hold where the mage stands (the runner paused), then heal; the step it was in is resumed with its clock shifted by the hold.</summary>
     private ScenarioStatus BeginTripHeal(double now, double health)
@@ -1028,7 +1825,7 @@ public sealed class DeathHandler : IDisposable
 
     private ScenarioStatus TripHealStep(IGameSessionView session, double now)
     {
-        if (TripOver(now) is { } over)
+        if (TripOver(session, now) is { } over)
         {
             return AbortTrip(session, now, over.Reason, over.Why);
         }
@@ -1041,6 +1838,7 @@ public sealed class DeathHandler : IDisposable
         {
             case HealOutcome.Healthy:
                 _tripHealing = false;
+                _stallMark = null; // M6 8 I: a hold restarts the no-progress clock
                 CurrentStep = _resumeStep;
                 _stepStart = _resumeStart + (now - _healStart);
                 _leg?.Resume(now);
@@ -1183,8 +1981,10 @@ public sealed class DeathHandler : IDisposable
     /// <summary>
     /// M5 7 F19 (D92, rule 4): true when a living target creature of the ground (the profile's targets: any ground, D46) stands within <see cref="DeathOptions.TripAggroMetres"/> of the path ahead: the straight line from the mage toward
     /// the corpse, <see cref="TripLookAheadMetres"/> long (at the corpse, within the reach of the mage). The nearest such creature is <paramref name="hostile"/>.
+    /// M6 16 E2b (the one world picture): each creature is measured where the session's <see cref="IGameSessionView.Live"/> says it stands (the body the client draws when it draws one and the body can be trusted, else the
+    /// server's last report), as the outer loop's watch and the corpse leg's read (<see cref="LegRunPast"/>) take it; a session that draws no bodies answers from the report, as before.
     /// </summary>
-    private bool HostileNearPath(IGameSessionView session, out uint hostile, out double reach)
+    private bool HostileNearPathOwn(IGameSessionView session, out uint hostile, out double reach)
     {
         (hostile, reach) = (0, double.MaxValue);
         if (_options.TripAggroMetres <= 0 || session.State.Self.Position is not { } at)
@@ -1194,10 +1994,11 @@ public sealed class DeathHandler : IDisposable
 
         var self = at.ToGlobal();
         GlobalPosition? corpse = _facts.CorpsePosition is { } c ? c.ToGlobal() : null;
-        var wcids = _ground.TargetWcids();
+        var wcids = FightTargets.Wcids(_ground); // M6 F2: an outdoor ground's targets are its creatures in the band (a5's FightTargets), not the profile's empty target list
+        var live = session.Live;
         foreach (var o in session.State.Objects.All)
         {
-            if (o.Position is not { } p || o.Health is <= 0f || o.Motion is { Forward: WorldObjectTable.DeadMotionLowWord } || !Listed(wcids, o.Weenie.WeenieClassId))
+            if (o.Position is null || o.Health is <= 0f || o.Motion is { Forward: WorldObjectTable.DeadMotionLowWord } || !Listed(wcids, o.Weenie.WeenieClassId) || live.At(o) is not { } p)
             {
                 continue;
             }
@@ -1225,6 +2026,120 @@ public sealed class DeathHandler : IDisposable
         return false;
     }
 
+    /// <summary>
+    /// M6 7 AG: what the trip stops for: within <see cref="TripFightBudgetSeconds"/> of its fights, any creature near the path (M5 D92); past them, only when something attacked the mage within <see cref="TripAttackQuietSeconds"/> (M5 D88): the fight back, and then the walk goes on.
+    /// A creature that stands near the path and has not attacked no longer holds the trip.
+    /// </summary>
+    private bool TripHostile(IGameSessionView session, double now, out uint hostile, out double reach)
+    {
+        if (Route == DeathRoute.Leg)
+        {
+            return LegRunPast(session, out hostile, out reach); // M6 14 run past (D137): a corpse on a travel leg is fetched by the leg's rule
+        }
+
+        if (!HostileNearPath(session, out hostile, out reach))
+        {
+            return false;
+        }
+
+        var spent = TripFightSpentSeconds(now);
+        if (spent < TripFightBudgetSeconds)
+        {
+            return true;
+        }
+
+        if (!_tripBudgetLogged)
+        {
+            _tripBudgetLogged = true;
+            _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"handler: trip-fight: the trip's fights spent {spent:0.0} s of their {TripFightBudgetSeconds:0} s ({TripFightKills} kills, {TripFights} fights) and a creature is still near the path: from here the trip fights only what attacks it (M5 D88) and walks on to the corpse"));
+        }
+
+        if (now - _lastAttackAt < TripAttackQuietSeconds)
+        {
+            return true;
+        }
+
+        (hostile, reach) = (0, double.MaxValue);
+        return false;
+    }
+
+    private double TripFightSpentSeconds(double now) => _tripFightSpent + (_tripFighting ? now - _tripFightStart : 0);
+
+    private AttackWatch? _legWatch;
+    private readonly RunPastReader _legRunPast = new();
+    private readonly List<PresentAttacker> _legPresent = [];
+
+    /// <summary>
+    /// M6 14 run past (D137; the owner's amendment of M5 D88 on travel legs): the corpse leg of a death on a travel leg (<c>route=leg</c>: the corpse lies on an approach, off the ground) runs past as the leg's walks do
+    /// (<see cref="RunPast"/>, <see cref="RunPastReader"/>): a creature near the path that has not attacked holds nothing (no D92 clearing on a travel leg); an attacker holds the trip for its fight only when the rule must fight it
+    /// (it keeps pace and keeps hitting; a ranged one whose hits would bring her to the trip's health line before she is out of its range; at the corpse, any still on her). Only the creatures the trip's fight can take are judged (the
+    /// ground's targets, <see cref="HostileNearPath"/>'s). The nearest such is <paramref name="hostile"/>; each verdict is logged once a change.
+    /// </summary>
+    private bool LegRunPast(IGameSessionView session, out uint hostile, out double reach)
+    {
+        (hostile, reach) = (0, double.MaxValue);
+        if (session.State.Self.Position is not { } at)
+        {
+            return false;
+        }
+
+        if (_legWatch is null)
+        {
+            _legWatch = new AttackWatch(session, line => _log.Info(LogCategory, "handler: corpse leg: " + line));
+            _legWatch.Start();
+        }
+
+        LegPresent(session); // M6 16 Q2: the threat board answers the corpse leg's own question (DeathHandler.ThreatShadow.cs)
+        if (_legPresent.Count == 0)
+        {
+            return false;
+        }
+
+        var q = session.State.Self.Qualities;
+        var speed = CreaturePace.Her(q, out var speedWhy);
+        var g = at.ToGlobal();
+        var her = new System.Numerics.Vector2((float)g.X, (float)g.Y);
+        System.Numerics.Vector2? goal = _facts.CorpsePosition is { } corpse ? new System.Numerics.Vector2((float)corpse.ToGlobal().X, (float)corpse.ToGlobal().Y) : null;
+        var above = q.TryGetVitalLevels(MageTemplate.MaxHealth, out var health, out var max) ? health - (_options.AbortHealthPercent / 100.0 * max) : 0;
+        var side = new RunPastHer(speed ?? 0, speed is null ? speedWhy + ": every creature keeps pace" : speedWhy, false, CurrentStep != "corpse-walk", above, string.Create(CultureInfo.InvariantCulture, $"the trip's health line {_options.AbortHealthPercent:0}%"));
+        var paces = CreaturePaces.For(_options.Journey?.Dats);
+        var wcids = FightTargets.Wcids(_ground);
+        foreach (var p in _legPresent)
+        {
+            if (!Listed(wcids, p.Wcid))
+            {
+                continue; // the trip's fight takes the ground's targets only; another is left to the leg's safety (the trip's health line)
+            }
+
+            var a = _legRunPast.Read(session, _legWatch, p, her, goal, side.Speed, paces, CreatureAttackTimes.For(_options.Journey?.Dats));
+            var v = RunPast.Judge(in side, in a);
+            if (_legRunPast.Note(p.Guid, in v) is { } line)
+            {
+                _log.Info(LogCategory, "handler: corpse leg: " + line);
+            }
+
+            if (v.Call == RunPastCall.Fight && a.Metres < reach)
+            {
+                (hostile, reach) = (p.Guid, a.Metres);
+            }
+        }
+
+        return hostile != 0;
+    }
+
+    /// <summary>M6 7 AG: each frame, whether something attacked the mage: the tally's hits, evades and spells on the mage moved (0x01B2, 0x01B4, the Magic lines; <see cref="FightTally"/>).</summary>
+    private void NoteAttacks(double now)
+    {
+        var fight = _tally.Fight;
+        var attacks = fight.HitsTaken + (long)fight.Evades + fight.SpellDamageTaken + fight.DrainTaken;
+        if (_attackMark >= 0 && attacks != _attackMark)
+        {
+            _lastAttackAt = now;
+        }
+
+        _attackMark = attacks;
+    }
+
     /// <summary>A creature is near the path or the corpse: the trip holds (the runner paused) and fights it first; the step it was in resumes when none is near, with the trip's clocks shifted by the fight.</summary>
     private ScenarioStatus BeginTripFight(IGameSessionView session, double now, uint hostile, double reach)
     {
@@ -1245,7 +2160,7 @@ public sealed class DeathHandler : IDisposable
     {
         if (_inner is null)
         {
-            var near = HostileNearPath(session, out var hostile, out _);
+            var near = TripHostile(session, now, out var hostile, out _);
             if (!near)
             {
                 return EndTripFight(session, now);
@@ -1274,11 +2189,12 @@ public sealed class DeathHandler : IDisposable
         {
             _tripFightFails = 0;
             _tripFightRetryAt = double.NaN;
+            TripFightKills++;
             _log.Info(LogCategory, "handler: trip-fight: a kill; the path is looked at again");
             return ScenarioStatus.Running;
         }
 
-        if (!HostileNearPath(session, out _, out _))
+        if (!TripHostile(session, now, out _, out _))
         {
             return EndTripFight(session, now);
         }
@@ -1355,7 +2271,16 @@ public sealed class DeathHandler : IDisposable
 
         public uint LegGoalCell => inner.LegGoalCell;
 
+        public bool JumpInFlight => inner.JumpInFlight; // M6 14 airborne
+
         public bool BeginLegTo(IGameSessionView session, double now, in CellFrame goal, out string description) => inner.BeginLegTo(session, now, in goal, out description); // M5 7 P7b (D139 j)
+
+        // M6 6 C1 (map-death section 6): the corpse trip's fight keeps the ground walk's whole seam, not only BeginLegTo: the approach trace, the defence spots and the avoided spot are the inner walk's (a default here would read "not traced" and "no spots").
+        public bool AvoidSpot(in CellFrame at, double until, out string description) => inner.AvoidSpot(in at, until, out description);
+
+        public LineTrace CellsOnLine(in CellFrame from, in CellFrame to, List<uint> cells) => inner.CellsOnLine(in from, in to, cells);
+
+        public IReadOnlyList<CellFrame> FloorSpots => inner.FloorSpots;
 
         public void Dispose() => inner.Abandon();
     }
@@ -1364,6 +2289,8 @@ public sealed class DeathHandler : IDisposable
     {
         _tripFighting = false;
         var held = now - _tripFightStart;
+        _tripFightSpent += held;
+        _stallMark = null; // M6 8 I: a fight restarts the no-progress clock
         CurrentStep = _resumeStep;
         _stepStart = _resumeStart + held;
         if (!double.IsNaN(_groundAt))
@@ -1372,7 +2299,7 @@ public sealed class DeathHandler : IDisposable
         }
 
         _leg?.Resume(now);
-        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"handler: trip-fight: no creature within {_options.TripAggroMetres:0.#} m of the path after {held:0.0} s; the trip goes on in {CurrentStep} (health {Share(session, 1):0}%)"));
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"handler: trip-fight: {(_tripBudgetLogged ? $"no attacker for {TripAttackQuietSeconds:0} s" : $"no creature within {_options.TripAggroMetres:0.#} m of the path")} after {held:0.0} s; the trip goes on in {CurrentStep} (health {Share(session, 1):0}%, trip_fight_s={_tripFightSpent:0.0} of {TripFightBudgetSeconds:0}, kills={TripFightKills})"));
         return ScenarioStatus.Running;
     }
 
@@ -1395,9 +2322,15 @@ public sealed class DeathHandler : IDisposable
         var failure = leg.Failure;
         leg.Dispose();
         _leg = null;
-        return status == TravelStatus.Failed
-            ? NoCorpse(now, DeathCorpse.No, "travel-failed", "the corpse leg failed: " + failure)
-            : Enter("corpse-seek", now);
+        if (status != TravelStatus.Failed)
+        {
+            return Enter("corpse-seek", now);
+        }
+
+        // M6 6 C2: the corpse walk is the route's last leg: one retry from where the body stands, else the named outcome it was
+        return CanRetryRoute(session, "the corpse leg failed: " + failure) && _facts.CorpsePosition is { } at
+            ? StartCorpseWalk(at, now - _facts.DiedAt, session, now)
+            : NoCorpse(now, DeathCorpse.No, "travel-failed", "the corpse leg failed: " + failure);
     }
 
     private ScenarioStatus CorpseSeekStep(IGameSessionView session, double now)
@@ -1452,7 +2385,7 @@ public sealed class DeathHandler : IDisposable
 
         CorpseEntries = view.Entries.Count;
         _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"handler: opened the corpse 0x{_facts.CorpseGuid:X8}: {CorpseEntries} item(s); taking everything (take-all)"));
-        _looter = new CorpseLooter(_log, LogCategory, _facts.CorpseGuid, new LayoutTakeAll(new PackRules(_ground), SaleMemory.Shared.KeptAside.Contains, PackMemory.Shared.Rotation.Contains)); // M5 7 D121: each item back into the pack of its job
+        _looter = new CorpseLooter(_log, LogCategory, _facts.CorpseGuid, MakeTakeAll(session)); // M5 7 D121: each item back into the pack of its job
         return Enter("corpse-loot", now);
     }
 
@@ -1487,8 +2420,14 @@ public sealed class DeathHandler : IDisposable
 
         _pending = null;
         var looter = _looter!;
-        Corpse = looter.Looted <= 0 ? DeathCorpse.No
-            : looter.Looted >= CorpseEntries && looter is { Refused: 0, TimedOut: 0, Skipped: 0 } ? DeathCorpse.Yes
+        foreach (var guid in looter.LeftGuids)
+        {
+            _leftOnCorpse.Add(guid); // M6 7 AH: left on purpose, not lost: the wear step's check after does not count them
+        }
+
+        var accounted = looter.Looted + looter.Left; // M6 7 AH: an entry left because the replacement fills its slot is accounted for
+        Corpse = accounted <= 0 ? DeathCorpse.No
+            : accounted >= CorpseEntries && looter is { Refused: 0, TimedOut: 0, Skipped: 0 } ? DeathCorpse.Yes
             : DeathCorpse.Partial;
         _tripEnd = now;
         _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"handler: corpse_recovered={Corpse} items_back={ItemsBack} of {CorpseEntries} ({looter.Summary}){(TripAbort == DeathLegVerdict.TripAbortNone ? string.Empty : "; trip_abort=" + TripAbort)}"));
@@ -1555,20 +2494,21 @@ public sealed class DeathHandler : IDisposable
                 _wearIndex--;
                 _slotFreed = true;
                 _freeingSlot = true;
-                _pending = session.Actions.Unwield(other.Guid, ActionSource.Automation);
+                _pending = Quartermaster.Wardrobe.SendTakeOff(session, new Quartermaster.WieldBlocker(other.Guid, other.Name)); // M6 16 E5e1: the wear service's take-off
                 _stepStart = now;
                 return ScenarioStatus.Running;
             }
 
             _log.Info(LogCategory, (item.Kind == GearKind.Wand ? "handler: wield " : "handler: wear the ") + item.Name + " again from the pack");
-            _pending = session.Actions.Wield(carried, (EquipMask)WieldSlotChoice.Choose(inventory, (uint)item.ValidLocations), ActionSource.Automation);
+            _pending = Quartermaster.Wardrobe.Send(session, new Quartermaster.WieldRequest(carried) { Name = item.Name, Valid = (uint)item.ValidLocations }, new Quartermaster.WieldResult()); // M6 16 E5e1: the one wield routine's send (the piece was read held and not worn just above; the slot by its one rule); the check after is this step's own
             _stepStart = now;
             return ScenarioStatus.Running;
         }
 
         // M5 7 S2d (closes TODO(m5-self-equip-death-rewear)): the take-back put every piece into a pack and the loop above wore the kit's lines only; the worn set of before the death (the shirt, the breeches, the cantrip pieces),
         // the clothing whose coverage is free and the best caster held go back on now.
-        _restorer ??= new WornRestorer(_ground, session.State.Self.Qualities.Level, _spells, _log, LogCategory, "the death's take-back");
+        _wornBefore ??= new Dictionary<uint, uint>(_worn.Set);
+        _restorer ??= new WornRestorer(_ground, session.State.Self.Qualities.Level, _spells, _log, LogCategory, "the death's take-back", _worn);
         if (_restorer.Step(session))
         {
             return ScenarioStatus.Running;
@@ -1577,6 +2517,30 @@ public sealed class DeathHandler : IDisposable
         WornRestored = _restorer.Restored;
         int worn = 0, wanted = 0;
         var wand = true;
+        if (lines.Count == 0)
+        {
+            // M6 0 F3: no kit plan to count against: the check after is the state against what the character wore before the death (the memory the restorer wore it back from) and a caster wielded again.
+            wand = CombatModeGuard.Read(session.State).Caster is not null;
+            foreach (var guid in _wornBefore!.Keys)
+            {
+                if (_leftOnCorpse.Contains(guid))
+                {
+                    _log.Info(LogCategory, $"handler: the piece 0x{guid:X8} worn before the death was left on the corpse (replaced at the vendor): not counted");
+                    continue;
+                }
+
+                wanted++;
+                if (session.State.Self.Inventory.TryGetEquipped(guid, out _))
+                {
+                    worn++;
+                }
+                else
+                {
+                    _log.Warn(LogCategory, $"handler: the piece 0x{guid:X8} worn before the death is not worn again (lost with the corpse, or refused)");
+                }
+            }
+        }
+
         foreach (var item in lines)
         {
             if (item.Kind is not (GearKind.Wand or GearKind.Armour))
@@ -1641,11 +2605,11 @@ public sealed class DeathHandler : IDisposable
 
     // ------------------------------------------------------------------------------------------------ the fight
 
-    private ScenarioStatus BeginFight(double now)
+    private ScenarioStatus BeginFight(IGameSessionView session, double now)
     {
         if (!_options.Fight)
         {
-            _log.Info(LogCategory, "handler: --death-fight is off: the handler ends in the ground");
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"handler: --death-fight is off: the handler ends where the body stands (cell 0x{session.State.Self.Position?.CellId ?? 0:X8}, {(session.State.Self.Position is { } end && _ground.InLandblocks(end.CellId) ? "on the ground" : "off the ground")})"));
             return Done(now);
         }
 
@@ -1653,6 +2617,22 @@ public sealed class DeathHandler : IDisposable
         {
             _log.Warn(LogCategory, "handler: no walk for the composed fight in this host: the handler ends in the ground without fighting (TODO(m4-death-walkless-wait))");
             return Done(now);
+        }
+
+        // M6 6 FXD1 (6-D6, generalising C2's leg arm): check before the fight: the fight's walk is prepared on the assumption that the mage stands in the ground, so a mage outside its landblocks (a leg death's corpse place; route=walk
+        // with nothing to recover, still at the Holtburg lifestone) goes back to the rung first by the normal rung change, which checks before and after. The rung change is the journey's travel (JourneyTravel's Ground leg, the
+        // only Ground leg the handler has ever asked for: the route's rung change and the leg death both need it); another host's seam may answer a Ground leg with the mod's place, which the handler never sends, so there the
+        // fight begins where the mage stands, as before, said loudly (TODO(m6-death-fight-outside-ground)).
+        if (Route == DeathRoute.Leg || session.State.Self.Position is not { } here || !_ground.InLandblocks(here.CellId))
+        {
+            var cell = session.State.Self.Position?.CellId ?? 0;
+            if (Route == DeathRoute.Leg || _travel is JourneyTravel)
+            {
+                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"handler: before the fight: the mage stands in cell 0x{cell:X8}, outside {_ground.Name}'s landblocks (route={Route}): back to the rung first"));
+                return Enter("rung-back", now);
+            }
+
+            _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"handler: before the fight: the mage stands in cell 0x{cell:X8}, outside {_ground.Name}'s landblocks (route={Route}), and this host's travel seam has no rung change (the handler never places): the fight begins here, as before (TODO(m6-death-fight-outside-ground))"));
         }
 
         return Enter("fight", now);
@@ -1751,6 +2731,41 @@ public static class DeathCorpse
 
     /// <summary>The corpse was not in the object table at its cell, or none was remembered.</summary>
     public const string NotFound = "not-found";
+
+    /// <summary>M6 6 C1: nothing but pyreals left the inventory at the death (<see cref="DeathDropRule"/>): no trip is made and the fight resumes; the judges read it as recovered.</summary>
+    public const string NoneNeeded = "none-needed";
+}
+
+/// <summary>
+/// M6 7 U (r1f-climb): whether a death station that did not end ok still answered for the corpse, so the autopilot neither runs it again nor stops the night. <c>none-needed</c> is an answer however the station ended (nothing is owed). A verdict
+/// that fails after the handler finished (<c>why=verdict</c>: the handler's order ran to its end) keeps the handler's named end: a recovered corpse, a rotted one, one not found, or <c>corpse_recovered=no</c> with a named <c>trip_abort=</c>. A plain
+/// <c>corpse_recovered=no</c> from a failed handler (no named abort) is no answer: the trip is still owed.
+/// </summary>
+public static class DeathAnswer
+{
+    /// <summary>The failure text of a station that ran to its end and whose verdict failed (the autopilot's <c>why</c>).</summary>
+    public const string VerdictOnly = "verdict";
+
+    /// <summary>The answer, <c>corpse_recovered=&lt;c&gt; trip_abort=&lt;a&gt;</c>, or null when the corpse is still owed.</summary>
+    /// <param name="why">The station's failure (<see cref="VerdictOnly"/>, a handler's failure, or null for a cut).</param>
+    /// <param name="corpse">The station's <c>corpse_recovered=</c>, or null.</param>
+    /// <param name="abort">The station's <c>trip_abort=</c>, or null.</param>
+    public static string? Of(string? why, string? corpse, string? abort)
+    {
+        var line = $"corpse_recovered={corpse ?? DeathLegVerdict.NotApplicable} trip_abort={abort ?? DeathLegVerdict.NotApplicable}";
+        if (corpse == DeathCorpse.NoneNeeded)
+        {
+            return line;
+        }
+
+        if (why != VerdictOnly)
+        {
+            return null;
+        }
+
+        var named = abort is not null and not DeathLegVerdict.TripAbortNone and not DeathLegVerdict.NotApplicable;
+        return corpse is DeathCorpse.Yes or DeathCorpse.Partial or DeathCorpse.Rotted or DeathCorpse.NotFound || named ? line : null;
+    }
 }
 
 /// <summary>The handler's <c>rearm=</c> values (M5 3 F5, D53).</summary>
@@ -1765,6 +2780,9 @@ public static class DeathRearm
     /// <summary>The ground's kit wand was bought at its vendor and wielded.</summary>
     public const string Bought = "bought";
 
+    /// <summary>M6 0 F3: no caster is wielded or held and the profile has no kit: the corpse trip goes first and the wear step wields the best caster again.</summary>
+    public const string Corpse = "corpse";
+
     /// <summary>No caster could be wielded or bought: the handler failed by name.</summary>
     public const string Failed = "failed";
 }
@@ -1775,8 +2793,20 @@ public static class DeathRoute
     /// <summary>Primary Portal Recall: the mage holds the ground's tie.</summary>
     public const string Recall = "recall";
 
+    /// <summary>M6 0 F3: no portal at all: an outdoor ground hunted from home on foot; the corpse walk starts at the lifestone.</summary>
+    public const string Walk = "walk";
+
     /// <summary>The runner from the lifestone to the ground's portal and through it.</summary>
     public const string Runner = "runner";
+
+    /// <summary>M6 4 F1 (4-R1): the rung change (<see cref="RungChangeStation"/>) through the travel seam's Ground purpose, where the travel rule says so (a routed ground: untieable, or its tie not known tied).</summary>
+    public const string RungChange = "rung-change";
+
+    /// <summary>M6 7 U: the body already stands in the ground (a station entered again after a cut): no travel, the corpse leg from where it stands.</summary>
+    public const string Here = "here";
+
+    /// <summary>M6 6 C2: the corpse lies on a leg, off the ground (the island run, a mainland walk): the rung change out cut at the travel place that holds it, the corpse leg on foot, then the rung change back to the ground.</summary>
+    public const string Leg = "leg";
 }
 
 /// <summary>M5 7 F19 (D92): the corpse trip's path ahead, a straight stand-in for the runner's route (<c>TODO(f19-trip-path-geometry)</c>). Engine-free.</summary>

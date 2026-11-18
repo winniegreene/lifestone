@@ -498,6 +498,7 @@ public sealed class GameEffectsPageTests(DatSetFixture fixture, ITestOutputHelpe
     }
 
     [RequiresLocalDatsFact]
+    [Trait("Tier", "Timing")] // m4-timing-tier-candidates: an 8 ms wall-clock bound and a zero-byte allocation count
     public void A_controller_is_built_in_under_8_ms_and_an_idle_step_allocates_nothing()
     {
         var good = Spells(true, 24);

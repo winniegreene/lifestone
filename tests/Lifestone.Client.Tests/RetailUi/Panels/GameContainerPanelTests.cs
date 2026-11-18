@@ -204,6 +204,7 @@ public sealed class GameContainerPanelTests(DatSetFixture fixture) : IClassFixtu
     }
 
     [RequiresLocalDatsFact]
+    [Trait("Tier", "Timing")] // m4-timing-tier-candidates: the container panel's zero-byte allocation row
     public void M4_2_2_fix2_R14_DrawState_allocates_nothing_over_a_drawn_window()
     {
         using var g = Enter();
@@ -410,6 +411,7 @@ public sealed class GameContainerPanelTests(DatSetFixture fixture) : IClassFixtu
     }
 
     [RequiresLocalDatsFact]
+    [Trait("Tier", "Timing")] // m4-timing-tier-candidates: the container panel's zero-byte allocation row
     public void M4_3_1_p_DrawState_allocates_nothing_over_a_window_with_a_sub_container_row()
     {
         using var g = Enter();
@@ -681,6 +683,7 @@ public sealed class GameContainerPanelTests(DatSetFixture fixture) : IClassFixtu
     }
 
     [RequiresLocalDatsFact]
+    [Trait("Tier", "Timing")] // m4-timing-tier-candidates: an 8 ms wall-clock bound
     public void Its_attach_is_one_small_unit_under_eight_milliseconds_and_it_registers_no_page_handler()
     {
         using var g = Enter();

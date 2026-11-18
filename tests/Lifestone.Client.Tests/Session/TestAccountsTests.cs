@@ -12,8 +12,9 @@ public sealed class TestAccountsTests
     [Fact]
     public void The_list_is_the_four_accounts_with_one_fighter_each_for_melee_and_archer_and_the_throwaway_on_tools()
     {
-        Assert.Equal(["test", "test-melee", "test-archer", "test-tools"], TestAccounts.Keys);
-        Assert.Equal(["Lifestone Smoke", "Lifestone Loopback", "BSD Mage", "Holtburg Hunter"], TestAccounts.Characters["test"]);
+        Assert.Equal(["test", "test-melee", "test-archer", "test-tools", "qwinnie"], TestAccounts.Keys);
+        Assert.Equal(["Qwinnie"], TestAccounts.Characters["qwinnie"]);
+        Assert.Equal(["Lifestone Smoke", "Lifestone Loopback", "BSD Mage", "Holtburg Hunter", "Winnie"], TestAccounts.Characters["test"]); // M6 D7: Winnie, the ladder's climber
         Assert.Equal(["Holtburg Brawler"], TestAccounts.Characters["test-melee"]);
         Assert.Equal(["Holtburg Archer"], TestAccounts.Characters["test-archer"]);
         Assert.Equal(["Lifestone Throwaway", "Lifestone Tools"], TestAccounts.Characters["test-tools"]);

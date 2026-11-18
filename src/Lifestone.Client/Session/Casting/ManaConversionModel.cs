@@ -17,7 +17,7 @@ namespace Lifestone.Client.Session.Casting;
 /// product is a sum of constants, 1 / luck and 1 / luck^2 over at most four luck intervals per k, integrated with logarithms. The only approximation is the model's: the draws are continuous uniforms, where
 /// ACE's are doubles (and the scripted caster's are floats, 2^-24 apart); a tie at a half cent of mana is a measure-zero event the model ignores. The floating-point error of the sum is under 1e-12; the tests hold it
 /// to the table of m5-plan.md section 8 item 0, to a deterministic quasi-random integration of the cost itself (an independent method) at 2e-3, and to a seeded sample of <see cref="RollCost"/>. It allocates nothing:
-/// a call is O(base mana) arithmetic on the stack, so the keeper may ask per decision.</para>
+/// a call is O(base mana) arithmetic on the stack, so the keeper may ask per decision. <see cref="ExpectedCost"/> sums it over every mana held, O(base mana squared), and keeps each mean it has worked out.</para>
 /// </summary>
 public static class ManaConversionModel
 {
@@ -161,7 +161,32 @@ public static class ManaConversionModel
         return Math.Min(1.0, Math.Max(0.0, total));
     }
 
-    /// <summary>The mean of the rolled cost: the sum over m of P(cost &gt; m), from <see cref="LandingChance"/>. The base for an untrained caster.</summary>
+    /// <summary>The means <see cref="ExpectedCost"/> keeps at most (a power of two); a mean that finds its places taken takes one of them, and the mean it replaces is worked out again when asked.</summary>
+    public const int ExpectedCostsKept = 1024;
+
+    private const int ExpectedCostKeyBits = 21;
+    private const int ExpectedCostPlaces = 4; // the places a key may lie in, side by side
+
+    /// <summary>
+    /// M6 16 Eperf: the means already worked out, by base mana, power and skill. The mean is a pure function of those three, and one call is O(base mana squared): 319 microseconds at a base of 100 in the game's Debug build
+    /// (EngineFrameCostTests), asked some fifteen times by each decision of the fight, which made every decision's frame 4.6 to 5.2 ms long. Kept, a mean asked again is one lookup. Two arrays made with the model (its type
+    /// initializer below runs at the model's first use of any kind, so no later call makes them); a key of 0 is an empty place (a kept base mana is at least 2). Any thread may ask: a key and its mean are read and
+    /// written together under one lock, and nothing is allocated, kept or not.
+    /// </summary>
+    private static readonly ulong[] ExpectedCostKeys = new ulong[ExpectedCostsKept];
+    private static readonly double[] ExpectedCostMeans = new double[ExpectedCostsKept];
+    private static readonly Lock ExpectedCostGate = new();
+    private static int _expectedCostTurn;
+
+    /// <summary>Precise initialization: the kept means' arrays are made when the model is first used at all (any member), not at the first mean asked, so a caller that has warmed up never sees them made.</summary>
+    static ManaConversionModel()
+    {
+    }
+
+    /// <summary>
+    /// The mean of the rolled cost: the sum over m of P(cost &gt; m), from <see cref="LandingChance"/>. The base for an untrained caster. The sum is worked out once for each base mana, power and skill and kept
+    /// (<see cref="ExpectedCostsKept"/> at most), so the number returned is the same one, bit for bit, whenever it is asked; it allocates nothing, kept or worked out.
+    /// </summary>
     /// <param name="baseMana">The base mana.</param>
     /// <param name="power">The spell's power.</param>
     /// <param name="manaConversion">The caster's Mana Conversion skill (0: untrained).</param>
@@ -178,10 +203,47 @@ public static class ManaConversionModel
             return 1.0;
         }
 
+        var keyed = (baseMana | power | manaConversion) >> ExpectedCostKeyBits == 0; // three numbers of at most 21 bits make one key; a larger one (no spell of the SpellTable) is worked out each time
+        var key = ((ulong)baseMana << (2 * ExpectedCostKeyBits)) | ((ulong)power << ExpectedCostKeyBits) | manaConversion;
+        var first = (int)((key * 0x9E3779B97F4A7C15UL) >> 40) & (ExpectedCostsKept - 1);
+        if (keyed)
+        {
+            lock (ExpectedCostGate)
+            {
+                for (var i = 0; i < ExpectedCostPlaces; i++)
+                {
+                    var place = (first + i) & (ExpectedCostsKept - 1);
+                    if (ExpectedCostKeys[place] == key)
+                    {
+                        return ExpectedCostMeans[place];
+                    }
+                }
+            }
+        }
+
         var mean = 0.0;
         for (uint held = 0; held < baseMana; held++)
         {
             mean += 1.0 - LandingChance(baseMana, power, manaConversion, held);
+        }
+
+        if (keyed)
+        {
+            lock (ExpectedCostGate)
+            {
+                var place = (first + (_expectedCostTurn++ & (ExpectedCostPlaces - 1))) & (ExpectedCostsKept - 1); // every place taken: one of them in turn (a session asks for a few hundred: her spells' costs at the skills her buffs give)
+                for (var i = 0; i < ExpectedCostPlaces; i++)
+                {
+                    var candidate = (first + i) & (ExpectedCostsKept - 1);
+                    if (ExpectedCostKeys[candidate] == 0 || ExpectedCostKeys[candidate] == key)
+                    {
+                        place = candidate;
+                        break;
+                    }
+                }
+
+                (ExpectedCostKeys[place], ExpectedCostMeans[place]) = (key, mean);
+            }
         }
 
         return mean;

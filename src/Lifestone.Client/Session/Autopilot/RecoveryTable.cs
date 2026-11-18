@@ -3,6 +3,8 @@ using Lifestone.Client.Session.Actions.Trackers;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Vitals;
+using Lifestone.Data.Animation;
+using Lifestone.Data.World;
 
 namespace Lifestone.Client.Session.Autopilot;
 
@@ -29,6 +31,12 @@ public enum RecoveryFix
 
     /// <summary>No fix: the retry plans again from the state (the item it needed is not held).</summary>
     PlanAgain,
+
+    /// <summary>
+    /// M6 7 I1: the same station failed from the same cell with the same failure twice running. A bounded settle (<see cref="RecoveryTable.SettleSeconds"/>: long enough for a creature to move or a door to close), then one named act that changes the state
+    /// (a short step backward, <see cref="RecoveryTable.StepBackSeconds"/>, checked on the position), then the last retry.
+    /// </summary>
+    SettleStep,
 }
 
 /// <summary>
@@ -47,6 +55,28 @@ public static class RecoveryTable
     /// <summary>The bound of any fix (Lifestone's own: a wield or a drop takes a second or two; the mana dance up to a few casts).</summary>
     public const double FixSeconds = 120;
 
+    /// <summary>M6 7 I1: the settle before a repeated station failure's retry (Lifestone's own: a creature on the plan moves on and a door swings shut within a few seconds).</summary>
+    public const double SettleSeconds = 5;
+
+    /// <summary>M6 7 I1: how long the act of <see cref="RecoveryFix.SettleStep"/> holds Walk Backward (Lifestone's own: a short step, well under a room's width). TODO(m6-7-i-door-back): the walk back to the door the character came through, or to the station's stop, needs the journey to keep that point; until it does, the act is a step.</summary>
+    public const double StepBackSeconds = 0.6;
+
+    /// <summary>M6 7 I1: the wait after the step's release before the position is read (the avatar glides to a stop).</summary>
+    public const double StepSettleSeconds = 0.5;
+
+    /// <summary>M6 7 I1: the least the step must move the character for the check after to count it as moved (Lifestone's own; a step into a wall moves none, and is logged as such).</summary>
+    public const double StepMovedMetres = 0.2;
+
+    /// <summary>M6 7 I1: identical failures in a row (same station, same cell, same failure) the autopilot lives through: the first goes to the usual recovery, the second is retried after <see cref="RecoveryFix.SettleStep"/>, the third stops the run by name.</summary>
+    public const int RepeatStopCount = 3;
+
+    /// <summary>The signature of a station failure: the stop name and the failure text with their digit runs collapsed, and the cell (a leg's number or a distance changes between identical failures).</summary>
+    /// <param name="stop">The stop name.</param>
+    /// <param name="cell">The cell text (<c>cell 0x...</c>).</param>
+    /// <param name="why">The failure text.</param>
+    public static string Signature(string stop, string cell, string? why) =>
+        System.Text.RegularExpressions.Regex.Replace(stop + "|" + (why ?? string.Empty), "[0-9]+", "#") + "|" + cell;
+
     /// <summary>The fix for <paramref name="reason"/>: the table.</summary>
     /// <param name="reason">The failure's typed reason.</param>
     public static RecoveryFix FixFor(ActionReason reason) => reason switch
@@ -56,6 +86,7 @@ public static class RecoveryTable
         ActionReason.NotEnoughMana => RecoveryFix.ManaDance,
         ActionReason.TargetGone => RecoveryFix.RePick,
         ActionReason.Busy => RecoveryFix.Wait,
+        ActionReason.InTheAir => RecoveryFix.Wait, // M6 14 airborne: the body was in the air (0x04EB): the landing, then the same action
         ActionReason.NotHeld => RecoveryFix.PlanAgain,
         _ => RecoveryFix.Generic,
     };
@@ -70,6 +101,7 @@ public static class RecoveryTable
         RecoveryFix.RePick => "re-pick",
         RecoveryFix.Wait => "wait",
         RecoveryFix.PlanAgain => "plan-again",
+        RecoveryFix.SettleStep => "settle-step",
         _ => "generic",
     };
 
@@ -130,6 +162,9 @@ public sealed class RecoveryFixRun
     private string _what = string.Empty;
     private double _start = double.NaN;
     private bool _begun;
+    private int _stage;
+    private double _stageStart;
+    private CellFrame? _mark;
 
     /// <summary>A fix to run.</summary>
     /// <param name="fix">The fix.</param>
@@ -165,10 +200,54 @@ public sealed class RecoveryFixRun
             RecoveryFix.ShedPack => ShedPack(session),
             RecoveryFix.ManaDance => ManaDance(now),
             RecoveryFix.Wait => now - _start >= RecoveryTable.BusyWaitSeconds ? Done(string.Create(CultureInfo.InvariantCulture, $"waited {RecoveryTable.BusyWaitSeconds:0} s for the server's busy chain")) : RecoveryFixStatus.Running,
+            RecoveryFix.SettleStep => SettleStep(session, now),
             RecoveryFix.RePick => Done("nothing to fix: the object is gone; the retry picks again"),
             RecoveryFix.PlanAgain => Done("nothing to fix: the item is not held; the retry plans again from the state"),
             _ => Fail("TODO(state): the generic recovery has no fix run"),
         };
+    }
+
+    private RecoveryFixStatus SettleStep(IGameSessionView session, double now)
+    {
+        var elapsed = now - _start;
+        switch (_stage)
+        {
+            case 0:
+                if (elapsed < RecoveryTable.SettleSeconds)
+                {
+                    return RecoveryFixStatus.Running;
+                }
+
+                if (session.State.Self.Position is not { } before)
+                {
+                    return Done(string.Create(CultureInfo.InvariantCulture, $"settled {RecoveryTable.SettleSeconds:0} s; no position, so no step"));
+                }
+
+                _mark = before; // check before: where the character stands
+                _stageStart = now;
+                _ = session.Actions.Move.Command(MotionCommands.WalkBackwards, true, ActionSource.Automation);
+                _stage = 1;
+                return RecoveryFixStatus.Running;
+            case 1:
+                if (now - _stageStart < RecoveryTable.StepBackSeconds)
+                {
+                    return RecoveryFixStatus.Running;
+                }
+
+                _ = session.Actions.Move.Command(MotionCommands.WalkBackwards, false, ActionSource.Automation);
+                _stageStart = now;
+                _stage = 2;
+                return RecoveryFixStatus.Running;
+            default:
+                if (now - _stageStart < RecoveryTable.StepSettleSeconds)
+                {
+                    return RecoveryFixStatus.Running;
+                }
+
+                var moved = session.State.Self.Position is { } after && _mark is { } was ? ControlDrill.Metres(was, after) : double.NaN;
+                var verdict = double.IsNaN(moved) ? "no position after" : moved >= RecoveryTable.StepMovedMetres ? "moved" : "did not move (a wall or a body in the way)";
+                return Done(string.Create(CultureInfo.InvariantCulture, $"settled {RecoveryTable.SettleSeconds:0} s, then stepped back {RecoveryTable.StepBackSeconds:0.0#} s: {verdict} ({moved:0.00} m)"));
+        }
     }
 
     private RecoveryFixStatus WieldCaster(IGameSessionView session)
@@ -182,14 +261,15 @@ public sealed class RecoveryFixRun
             }
 
             // The recall's rearm (M5 7 D139 l): the self-equip's pick of the casters in the packs, else the usable one with the best war factor, else any.
-            if (HeldCaster.Rearm(state, new SelfEquipJudge([], 0, _ => null), out var why) is not { } caster)
+            if (HeldCaster.Rearm(state, Quartermaster.Wardrobe.For(state).RearmJudge(), out var why) is not { } caster)
             {
                 return Fail("no caster to wield: " + why);
             }
 
             _what = "wield " + why;
-            _pending = session.Actions.Wield(caster.Guid, (EquipMask)SelfEquipJudge.Held, ActionSource.Automation);
-            return RecoveryFixStatus.Running;
+            var wield = new Quartermaster.WieldResult();
+            _pending = Quartermaster.Wardrobe.Send(session, new Quartermaster.WieldRequest(caster.Guid) { Name = caster.Name, Location = SelfEquipJudge.Held }, wield); // M6 16 E5e1: the one wield routine's send (its check before, the slot, the wield); the check after is this fix's own, below
+            return _pending is null ? Fail(_what + ": " + wield.Why) : RecoveryFixStatus.Running;
         }
 
         if (_pending.Outcome is not { } outcome)
@@ -207,7 +287,7 @@ public sealed class RecoveryFixRun
         var state = session.State;
         if (_pending is null)
         {
-            if (BuyTracker.FreeSlots(state) is > 0 and var free)
+            if (Quartermaster.PackView.AllPacksLessFociFree(state) is > 0 and var free)
             {
                 return Done(string.Create(CultureInfo.InvariantCulture, $"the packs have {free} free slot(s) already: nothing to shed"));
             }
@@ -239,7 +319,7 @@ public sealed class RecoveryFixRun
             return RecoveryFixStatus.Running;
         }
 
-        var after = BuyTracker.FreeSlots(state);
+        var after = Quartermaster.PackView.AllPacksLessFociFree(state);
         return after is > 0
             ? Done(_what + ": " + Describe(outcome) + string.Create(CultureInfo.InvariantCulture, $"; {after} free slot(s) now"))
             : Fail(_what + ": " + Describe(outcome) + "; still no free pack slot");

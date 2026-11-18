@@ -283,6 +283,7 @@ public sealed partial class PlayMode : Node, IPlayWorld
 
         if (autoEnter)
         {
+            LiveRaiseCheck.InstallIfAsked(main, host, ui); // M6 7 S: --live-raise-check, the owner's click-to-raise proof on Lifestone Throwaway
             RebuffDriverHost.Install(main, services, host, ui); // M4 4.1 lane c: the auto-buff driver (--buff-auto, the Pause key); a login-check leg runs its own
             if (services.Dats is not null)
             {
@@ -642,6 +643,11 @@ public sealed partial class PlayMode : Node, IPlayWorld
         _bridge?.Dispose();
         _flow?.Dispose();
         _adapter?.Dispose();
+        if (_avatars is not null && _host?.Session is { } bodiless && ReferenceEquals(bodiless.Live.Bodies, _avatars))
+        {
+            bodiless.UseBodies(null); // M6 14 (m6-live-position): this mode's avatar set is no longer stepped; the server's report answers again
+        }
+
         _chatLog?.Dispose();
         _creatureCapture?.Dispose();
         _captureFrames?.LogNotSeen();
@@ -660,6 +666,7 @@ public sealed partial class PlayMode : Node, IPlayWorld
     /// <inheritdoc/>
     public override void _Process(double delta)
     {
+        using var framePhase = Lifestone.Game.Diagnostics.FramePhases.Play(); // M6 16 Eperf2: this call's share of a long frame
         // The work first (building the player is the heavy item), then the session's object events, in order, inside a budget: a frame that did heavy work leaves the
         // events to the next one, so no frame carries both (DoD 15). The player's own CreateObject is the first event of an arrival; the player's build waits for it.
         var frameStart = Stopwatch.GetTimestamp();
@@ -890,6 +897,7 @@ public sealed partial class PlayMode : Node, IPlayWorld
         PlayerRig.WireDynamicLights(_avatars, _interiors); // --viewer-light and the cell glow's source, the one wiring every avatar set shares (M3 4.1 fix A, R1)
         var session = _host.Session!;
         _adapter = new SessionAvatarAdapter(session.Events, session.State, _avatars, PlayerController.Clock, GodotLogSink.Instance);
+        session.UseBodies(_avatars); // M6 14 (m6-live-position): the fight reads a creature where this set draws it, not where the server last reported it
         if (_layer is not null)
         {
             _layer.Active = false;
@@ -1036,6 +1044,11 @@ public sealed partial class PlayMode : Node, IPlayWorld
         rig.Controller.Picking = _picking;
         rig.Controller.Selection = Selection;
         rig.Controller.Actions = _host.Session!.Actions;
+        if (_services.Dats is { } shotDats)
+        {
+            _host.Session.Actions.UseShots(new Lifestone.Client.Session.Casting.PhysicsShotCheck(() => _rig?.Physics, shotDats)); // M6 8 L: both fights check the shot on the player's own physics world before a bolt is paid for
+        }
+
         rig.Controller.TargetMode = _ui?.Manager.TargetMode; // M5 7 S6: the toolbar's Examine with nothing selected asks for the object the next click names
         BindMoveIntents(rig, _host.Session.Actions.Move);
         if (_layer is not null)

@@ -96,6 +96,12 @@ public static class BuffStatMods
         new(4981, Stamina, Mana, 0.5f, -1.0f, 0), // Incantation of Stamina to Mana Self
     ];
 
+    /// <summary>
+    /// M6 7 AD: the base mana of <see cref="StaminaToMana"/>'s levels I to VII, in their order (the SpellTable's BaseMana, pinned by <c>The_stamina_to_mana_base_mana_is_the_spell_tables</c>): what a press costs a caster with no Mana Conversion, and so which
+    /// level nets the most at a low stamina (<see cref="Vitals.ManaOrder.NetYield"/>).
+    /// </summary>
+    public static IReadOnlyList<uint> StaminaToManaBaseMana { get; } = [10, 20, 30, 40, 50, 60, 70];
+
     /// <summary>The Revitalize Self spells (1177-1182, 2083, 4321), in level order.</summary>
     public static IReadOnlyList<BoostRow> Revitalize { get; } =
     [
@@ -108,6 +114,27 @@ public static class BuffStatMods
         new(2083, 100, 100), // Robustification
         new(4321, 125, 125), // Incantation of Revitalize Self
     ];
+
+    /// <summary>
+    /// M6 14 (the stamina dance in the potions' place): the base mana of <see cref="Revitalize"/>'s levels I to VI, in their order (the SpellTable's BaseMana, pinned by <c>The_stamina_to_mana_base_mana_is_the_spell_tables</c>). A Life Magic self spell
+    /// carries no worn-piece surcharge, so this is its <c>GearCasts.ManaCeiling</c>, from which Mana Conversion rolls the cost (<see cref="Casting.ManaConversionModel.ExpectedCost"/>): what the spell plan weighs a round of the dance on
+    /// (<see cref="ScrivenerLearnPlan.RevitalizeTarget"/>) with no SpellTable at hand.
+    /// </summary>
+    public static IReadOnlyList<uint> RevitalizeBaseMana { get; } = [15, 30, 40, 50, 60, 70];
+
+    /// <summary>The boost row of spell <paramref name="id"/>, or null.</summary>
+    public static BoostRow? BoostOf(uint id)
+    {
+        foreach (var row in Revitalize)
+        {
+            if (row.Id == id)
+            {
+                return row;
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>The transfer row of spell <paramref name="id"/>, or null.</summary>
     public static TransferRow? TransferOf(uint id)
@@ -124,16 +151,18 @@ public static class BuffStatMods
     }
 
     /// <summary>
-    /// What one self cast of the transfer <paramref name="row"/> drains and gives (ACE <c>HandleCastSpell_Transfer</c>, see the type's remarks).
+    /// What one cast of the transfer <paramref name="row"/> drains and gives (ACE <c>HandleCastSpell_Transfer</c>, see the type's remarks). M6 14 drain resistance: <paramref name="drainMod"/> is the source's drain resistance, which ACE
+    /// applies to the take before the TransferCap (<c>WorldObject_Magic.cs</c> 719-726 @95ef426d: <c>round(current x Proportion x drainMod)</c>; the target's <c>GetResistanceMod</c> for a drain from another, 1 for a self transfer).
     /// </summary>
     /// <param name="row">The spell's row.</param>
     /// <param name="sourceCurrent">The current value of the source vital.</param>
     /// <param name="destinationMissing">The destination vital's maximum minus its current value.</param>
     /// <param name="drained">The amount the source loses.</param>
     /// <param name="given">The amount the destination gains.</param>
-    public static void Transfer(in TransferRow row, uint sourceCurrent, uint destinationMissing, out uint drained, out uint given)
+    /// <param name="drainMod">The source's drain resistance (<see cref="Vitals.DrainResist"/>; 1, the default: none; 0: it gives nothing).</param>
+    public static void Transfer(in TransferRow row, uint sourceCurrent, uint destinationMissing, out uint drained, out uint given, float drainMod = 1.0f)
     {
-        var src = (uint)Math.Round(sourceCurrent * row.Proportion);
+        var src = (uint)Math.Round(sourceCurrent * row.Proportion * drainMod);
         if (row.TransferCap != 0 && src > row.TransferCap)
         {
             src = (uint)row.TransferCap;

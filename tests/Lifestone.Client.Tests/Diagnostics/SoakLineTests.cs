@@ -27,7 +27,8 @@ public sealed partial class SoakLineTests
         WorthALook = 2, // M5 7 F30 (the owner)
         FreeComponents = 20, FreeKit = 18, FreeReview = 24, SelfEquips = 1, StoneRefills = 2, StoneCaptures = 1, // M5 7 D121, D125
         TurnReversals = 300, TurnFlips = 60, ProgressBacks = 4, Swings = 9, // M5 7 D134: the steering totals
-        TexCacheCount = 2100, TexCacheMb = 412.5, TexIdleMb = 96.25, MeshCacheCount = 3300, MeshCacheMb = 88.0, CacheTrims = 7, OrphansDropped = 640, // M5 7 P7d: last
+        TexCacheCount = 2100, TexCacheMb = 412.5, TexIdleMb = 96.25, MeshCacheCount = 3300, MeshCacheMb = 88.0, CacheTrims = 7, OrphansDropped = 640, // M5 7 P7d
+        Frames = 3540, FrameMeanMs = 16.949, // M6 16 Eperf: last
     };
 
     private static string Line(SoakSnapshot snapshot)
@@ -43,8 +44,8 @@ public sealed partial class SoakLineTests
         var pairs = Pair().Matches(Line(Full())).Select(m => m.Groups["name"].Value).ToArray();
 
         Assert.Equal(SoakLineFormat.FieldNames, pairs);
-        Assert.Equal(78, pairs.Length); // P7d: tex_cache_n tex_cache_mb tex_idle_mb mesh_cache_n mesh_cache_mb cache_trims orphans_dropped last; D134: turn_reversals turn_flips progress_backs swings last; D121, D125: free_components free_kit free_review self_equips stone_refills stone_captures last; D123 loot_busy_waits loot_left_busy loot_left_unreached after loot_left_decayed; F30 worth_a_look last; F28 target_died_mid_cast after stance_changes; the 43 of DoD 13 stay in place; M5 7 F16 added hp_pct sp_pct mp_pct hit_max after log_bytes, F25 stance_changes after hit_max; F29 loot_kept loot_left free_slots burden_pct trips after that; the loot retry corpses_opened loot_left_aggro loot_left_decayed after trips
-        Assert.Equal(["log_bytes", "hp_pct", "sp_pct", "mp_pct", "hit_max", "stance_changes", "target_died_mid_cast", "loot_kept", "loot_left", "free_slots", "burden_pct", "trips", "corpses_opened", "loot_left_aggro", "loot_left_decayed", "loot_busy_waits", "loot_left_busy", "loot_left_unreached", "worth_a_look", "free_components", "free_kit", "free_review", "self_equips", "stone_refills", "stone_captures", "turn_reversals", "turn_flips", "progress_backs", "swings", "tex_cache_n", "tex_cache_mb", "tex_idle_mb", "mesh_cache_n", "mesh_cache_mb", "cache_trims", "orphans_dropped"], pairs[42..]);
+        Assert.Equal(80, pairs.Length); // M6 16 Eperf: frames frame_mean_ms last; P7d: tex_cache_n tex_cache_mb tex_idle_mb mesh_cache_n mesh_cache_mb cache_trims orphans_dropped last; D134: turn_reversals turn_flips progress_backs swings last; D121, D125: free_components free_kit free_review self_equips stone_refills stone_captures last; D123 loot_busy_waits loot_left_busy loot_left_unreached after loot_left_decayed; F30 worth_a_look last; F28 target_died_mid_cast after stance_changes; the 43 of DoD 13 stay in place; M5 7 F16 added hp_pct sp_pct mp_pct hit_max after log_bytes, F25 stance_changes after hit_max; F29 loot_kept loot_left free_slots burden_pct trips after that; the loot retry corpses_opened loot_left_aggro loot_left_decayed after trips
+        Assert.Equal(["log_bytes", "hp_pct", "sp_pct", "mp_pct", "hit_max", "stance_changes", "target_died_mid_cast", "loot_kept", "loot_left", "free_slots", "burden_pct", "trips", "corpses_opened", "loot_left_aggro", "loot_left_decayed", "loot_busy_waits", "loot_left_busy", "loot_left_unreached", "worth_a_look", "free_components", "free_kit", "free_review", "self_equips", "stone_refills", "stone_captures", "turn_reversals", "turn_flips", "progress_backs", "swings", "tex_cache_n", "tex_cache_mb", "tex_idle_mb", "mesh_cache_n", "mesh_cache_mb", "cache_trims", "orphans_dropped", "frames", "frame_mean_ms"], pairs[42..]);
         // DoD 13's fields, by name (m5-first-dungeon.md section 2): memory, collections, objects, frames, link, phase, tallies, errors, log size.
         foreach (var name in new[] { "ws_mb", "private_mb", "managed_mb", "committed_mb", "frag_mb", "loh_mb", "gen0", "gen1", "gen2", "gc_pause_ms", "static_mb", "video_mb", "tex_mb", "nodes", "orphans", "resources", "objects", "avatars", "in_cell", "light_rows", "cull_pending", "culled", "frame_max_ms", "frame_p99_ms", "over_50", "over_75", "tick_ms", "pump_msgs", "sent", "recv", "resends", "naks", "dup", "gaps", "loss_pct", "silence_max_s", "phase", "reconnects", "kills", "deaths", "cycles", "godot_errors", "log_bytes" })
         {
@@ -60,7 +61,8 @@ public sealed partial class SoakLineTests
         Assert.StartsWith("ws_mb=1462.25 private_mb=2112.5 managed_mb=188.125 ", line, StringComparison.Ordinal);
         Assert.Contains(" gen0=5447 gen1=46 gen2=19 gc_pause_ms=1892.349 ", line, StringComparison.Ordinal);
         Assert.Contains(" frame_max_ms=41.5 frame_p99_ms=9.25 over_50=0 over_75=0 ", line, StringComparison.Ordinal);
-        Assert.Contains(" loss_pct=0.5 silence_max_s=0.31 phase=InWorld reconnects=0 kills=11 deaths=1 cycles=2 godot_errors=0 log_bytes=224545 hp_pct=87.5 sp_pct=90.0 mp_pct=40.5 hit_max=21 stance_changes=3 target_died_mid_cast=2 loot_kept=42 loot_left=16 free_slots=38 burden_pct=61.5 trips=3 corpses_opened=55 loot_left_aggro=7 loot_left_decayed=2 loot_busy_waits=9 loot_left_busy=1 loot_left_unreached=4 worth_a_look=2 free_components=20 free_kit=18 free_review=24 self_equips=1 stone_refills=2 stone_captures=1 turn_reversals=300 turn_flips=60 progress_backs=4 swings=9 tex_cache_n=2100 tex_cache_mb=412.5 tex_idle_mb=96.25 mesh_cache_n=3300 mesh_cache_mb=88.0 cache_trims=7 orphans_dropped=640", line, StringComparison.Ordinal); // M5 7 F29 (D96): the tail; P7d last
+        Assert.Contains(" loss_pct=0.5 silence_max_s=0.31 phase=InWorld reconnects=0 kills=11 deaths=1 cycles=2 godot_errors=0 log_bytes=224545 hp_pct=87.5 sp_pct=90.0 mp_pct=40.5 hit_max=21 stance_changes=3 target_died_mid_cast=2 loot_kept=42 loot_left=16 free_slots=38 burden_pct=61.5 trips=3 corpses_opened=55 loot_left_aggro=7 loot_left_decayed=2 loot_busy_waits=9 loot_left_busy=1 loot_left_unreached=4 worth_a_look=2 free_components=20 free_kit=18 free_review=24 self_equips=1 stone_refills=2 stone_captures=1 turn_reversals=300 turn_flips=60 progress_backs=4 swings=9 tex_cache_n=2100 tex_cache_mb=412.5 tex_idle_mb=96.25 mesh_cache_n=3300 mesh_cache_mb=88.0 cache_trims=7 orphans_dropped=640 frames=3540 frame_mean_ms=16.949", line, StringComparison.Ordinal); // M5 7 F29 (D96): the tail; P7d; M6 16 Eperf last
+        Assert.EndsWith(" orphans_dropped=640 frames=3540 frame_mean_ms=16.949", line, StringComparison.Ordinal); // M6 16 Eperf: the two new fields end the line, so a reader by prefix or by position of the 78 before is not moved
         Assert.Contains(" in_cell=64 light_rows=12 cull_pending=4 culled=310 frame_max_ms=", line, StringComparison.Ordinal); // 0-R11: the cull's counts sit with the object fields
         Assert.DoesNotContain("n/a", line, StringComparison.Ordinal);
         Assert.DoesNotContain("  ", line, StringComparison.Ordinal); // single spaces between pairs
@@ -76,7 +78,7 @@ public sealed partial class SoakLineTests
         var line = Line(new SoakSnapshot { WsMb = 10.0, Phase = null });
 
         var values = Pair().Matches(line).ToDictionary(m => m.Groups["name"].Value, m => m.Groups["value"].Value);
-        Assert.Equal(78, values.Count);
+        Assert.Equal(80, values.Count);
         Assert.Equal("10.0", values["ws_mb"]);
         foreach (var (name, value) in values.Where(p => p.Key != "ws_mb"))
         {
@@ -101,6 +103,7 @@ public sealed partial class SoakLineTests
     }
 
     [Fact]
+    [Trait("Tier", "Timing")] // m6-6-a: an allocation count that flaked once under the parallel suite (4,024 B, M5 item 1's note); passes alone
     public void The_tallies_read_n_a_without_an_autopilot_and_the_autopilots_numbers_with_one()
     {
         var snapshot = Full();
@@ -165,6 +168,7 @@ public sealed partial class SoakLineTests
 
         Assert.Equal(100, window.Frames);
         Assert.Equal(100.0, window.Max);
+        Assert.Equal(50.5, window.Mean); // M6 16 Eperf: the mean of 1 to 100, exact for the whole interval
         Assert.Equal(99.0, window.P99()); // nearest rank: the 99th of 100
         Assert.Equal(50, window.Over50); // 51 to 100
         Assert.Equal(25, window.Over75); // 76 to 100
@@ -173,6 +177,7 @@ public sealed partial class SoakLineTests
 
         Assert.Equal(0, window.Frames);
         Assert.Equal(0.0, window.Max);
+        Assert.Equal(0.0, window.Mean); // no frame: 0, never a division by none
         Assert.Equal(0.0, window.P99());
         Assert.Equal(0, window.Over50);
         Assert.Equal(0, window.Over75);
@@ -192,6 +197,7 @@ public sealed partial class SoakLineTests
         Assert.Equal(1, window.Over75);
         Assert.Equal(4.0, window.P99()); // the percentile reads the last 10
         Assert.Equal(11, window.Frames);
+        Assert.Equal(540.0 / 11, window.Mean); // M6 16 Eperf: the mean covers every frame of the interval, the early spike too
     }
 
     [Fact]
@@ -201,11 +207,16 @@ public sealed partial class SoakLineTests
     }
 
     [Fact]
+    [Trait("Tier", "Timing")] // m5-soakline-alloc-flake: a zero-byte allocation count (784 bytes once under the gate's parallel load); the 24-byte cause below is fixed, the rest is load
     public void Sampling_a_frame_allocates_nothing()
     {
         var window = new SoakFrameWindow();
-        window.Add(16.6); // the JIT's first call
-        _ = window.P99();
+        for (var i = 0; i < 64; i++)
+        {
+            window.Add(16.6 + i); // the JIT's first calls
+        }
+
+        _ = window.P99(); // M6 0 t, the cause of m5-soakline-alloc-flake's 24 bytes: the first Array.Sort over a window with more than one sample builds its comparer once per process (a one-sample window returns before it), so alone, or first in a run, the read below allocated 24 bytes
 
         var before = GC.GetAllocatedBytesForCurrentThread();
         for (var i = 0; i < 200_000; i++)

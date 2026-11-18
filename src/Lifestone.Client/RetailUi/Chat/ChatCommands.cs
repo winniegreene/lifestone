@@ -44,11 +44,27 @@ public sealed class ChatCommandResult
 /// </summary>
 public interface IAutopilotChatControls
 {
-    /// <summary><c>/stop</c>: the autopilot stops where he stands and the movement keys are the person's again. Returns the chat line.</summary>
+    /// <summary><c>/stop</c>: the autopilot stops where it stands and the movement keys are the person's again. Returns the chat line.</summary>
     string Stop();
 
     /// <summary><c>/auto</c>: the autopilot checks every state a fight needs and resumes. Returns the chat line.</summary>
     string Auto();
+
+    /// <summary>
+    /// M6 6 MD1, <c>/auto &lt;task&gt;</c>: chooses the task the autopilot runs and then does what <see cref="Auto"/> does. The task type is in the session contract (<see cref="AutopilotTask"/>). A refusal (the dial is running, no such quest file) is the returned line and nothing starts.
+    /// The default answers that this host cannot choose a task, so a host that has not built it fails in plain words, never silently.
+    /// </summary>
+    /// <param name="task">The parsed task.</param>
+    /// <returns>The chat line.</returns>
+    string Run(AutopilotTask task) => "Lifestone: this host cannot choose a task (TODO(m6-chat-task-host)); nothing was started.";
+
+    /// <summary>
+    /// The autopilot's orders (the command registry, 2026-11-17): <c>/trip</c>, <c>/rebuff</c>, <c>/quest &lt;key&gt;</c>, <c>/ladder</c>, <c>/help</c>, <c>/status</c> and the rest. Returns the lines for the chat window (the host's runner may send
+    /// them through its own line instead and return none), or null when <paramref name="name"/> is no order, so the line goes its usual way. The default knows no order.
+    /// </summary>
+    /// <param name="name">The command's name, lower case, without the slash.</param>
+    /// <param name="line">The whole line as typed, trimmed.</param>
+    IReadOnlyList<string>? Command(string name, string line) => null;
 }
 
 /// <summary>
@@ -69,7 +85,7 @@ public interface IAutopilotChatControls
 /// </para>
 /// <para>
 /// <b>Lifestone's own (M5 7 D145):</b> <c>/stop</c> and <c>/auto</c>, the autopilot's controls (<see cref="Autopilot"/>), handled here and never sent: neither name is in retail's table (built, channel or other, below) nor one of
-/// ACE's commands (ACE has <c>stop-now</c>, a different name; its command table is matched by the whole name). Each answers with a local system line; no arguments are read.
+/// ACE's commands (ACE has <c>stop-now</c>, a different name; its command table is matched by the whole name). Each answers with a local system line; <c>/stop</c> reads no arguments, <c>/auto</c> takes an optional task (M6 6 MD1).
 /// </para>
 /// <para>
 /// <b>Answered by name, not built:</b> the channels (<c>TODO(g4-chat-channels)</c>, M6) and the other client commands in retail's table
@@ -104,7 +120,7 @@ public sealed class ChatCommands
     private static readonly HashSet<string> UnbuiltNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "?", "help", "commands", "all", "ab", "alh", "ah", "motd", "speaker", "channels", "age", "status", "birth", "clear", "text", "consent", "death", "cor", "corpse",
-        "day", "die", "emotes", "endurance", "fillcomps", "filter", "unfilter", "framerate", "friends", "friends_add", "friends_remove", "hou", "house", "hslist", "index",
+        "day", "die", "emotes", "endurance", "fillcomps", "filter", "unfilter", "framerate", "friends", "friends_add", "friends_remove", "hslist", "index",
         "title", "join", "leave", "loadautoui", "loadfile", "loadui", "saveautoui", "saveui", "lockui", "loc", "log", "hor", "message_types", "messagetypes", "msg_types",
         "msgtypes", "permit", "pka", "pkarena", "pkl", "pklite", "pla", "pklarena", "render", "version",
     };
@@ -212,10 +228,18 @@ public sealed class ChatCommands
                 return args.Length > 0
                     ? Lines(ChatTextTypes.SpewBox, "Please see @help marketplace for more information on how to use this command.")
                     : Recall(_actions.RecallMarketplace(ActionSource.Ui), "the marketplace recall did not happen", "Lifestone: you are in the marketplace.");
+            case "house" or "hou":
+                return House(args);
             case StopCommand:
                 return AutopilotLine(static c => c.Stop());
             case AutoCommand:
-                return AutopilotLine(static c => c.Auto());
+                return args.Length == 0 ? AutopilotLine(static c => c.Auto()) : AutoTask(args);
+        }
+
+        // The autopilot's orders (the command registry): after the client's own commands, before the channels and retail's unbuilt names (help, status and clear answer the autopilot while one is wired).
+        if (Autopilot?.Command(name.ToLowerInvariant(), trimmed) is { } orderLines)
+        {
+            return new ChatCommandResult { Lines = [.. orderLines.Select(l => new ChatCommandLine(ChatTextTypes.System, l))], ClientHandled = true };
         }
 
         if (ChannelNames.Contains(name))
@@ -237,6 +261,48 @@ public sealed class ChatCommands
         return Talk("@" + trimmed[1..]);
     }
 
+    /// <summary>The usage line <c>/auto</c> answers for an argument it does not know (M6 6 MD1).</summary>
+    public const string AutoUsage = "Lifestone: /auto [level-up | level-up quest <key> | quest <key> | errand]: level-up climbs the ladder, level-up quest <key> starts the climb with that quest's errand, quest <key> runs one quest, errand runs the errand; nothing was started.";
+
+    // M6 6 MD1: /auto <task>. level-up is the Job task; "quest <key>" and "quest:<key>" are the quest task; errand is the errand. Anything else answers the usage line and sends nothing.
+    private ChatCommandResult AutoTask(string[] args)
+    {
+        var word = args[0].ToLowerInvariant();
+        string text;
+        switch (word)
+        {
+            case "level-up" or "levelup" or "job" when args.Length == 1:
+                text = "job";
+                break;
+            case "level-up" or "levelup" or "job" when args.Length == 3 && args[1].Equals("quest", StringComparison.OrdinalIgnoreCase):
+                // M6 14 the start quest (the owner's ruling, 2026-11-16: start the quest on request (a way to trigger the autopilot to start the quest at once)): the level up job, its first errand the quest named (--autopilot-start-quest's twin)
+                if (!Session.Quests.QuestCatalog.All.Any(q => q.Key == args[2]))
+                {
+                    return Lines(ChatTextTypes.System, $"Lifestone: '{args[2]}' is no quest of the catalog; nothing was started.", clientHandled: true);
+                }
+
+                return AutopilotLine(c => c.Run(new AutopilotTask(AutopilotTaskKind.Job, args[2])));
+            case "errand" when args.Length == 1:
+                text = "errand";
+                break;
+            case "quest" when args.Length == 2:
+                text = "quest:" + args[1];
+                break;
+            case var w when w.StartsWith("quest:", StringComparison.Ordinal) && args.Length == 1:
+                text = "quest:" + args[0]["quest:".Length..];
+                break;
+            default:
+                return Lines(ChatTextTypes.System, AutoUsage, clientHandled: true);
+        }
+
+        if (!AutopilotTask.TryParse(text, out var task, out var error))
+        {
+            return Lines(ChatTextTypes.System, "Lifestone: " + error + "; nothing was started.", clientHandled: true);
+        }
+
+        return AutopilotLine(c => c.Run(task));
+    }
+
     private static string Join(string[] args) => string.Join(' ', args).Trim();
 
     // M5 7 D145: /stop and /auto are the client's; nothing goes to the server (no handle), and the answer is a local system line.
@@ -244,7 +310,7 @@ public sealed class ChatCommands
         ? new ChatCommandResult { Lines = [new ChatCommandLine(ChatTextTypes.System, run(controls))], ClientHandled = true }
         : Lines(ChatTextTypes.System, NoAutopilotLine);
 
-    private static ChatCommandResult Lines(int type, string text) => new() { Lines = [new ChatCommandLine(type, text)] };
+    private static ChatCommandResult Lines(int type, string text, bool clientHandled = false) => new() { Lines = [new ChatCommandLine(type, text)], ClientHandled = clientHandled };
 
     private static ChatCommandResult Channel(string what) => new()
     {
@@ -264,6 +330,25 @@ public sealed class ChatCommands
         Handle = _actions.Tell(name, text, ActionSource.Ui),
         FailurePrefix = "your tell to " + name + " was not sent",
     };
+
+    /// <summary>
+    /// <c>/house</c> (M6 villa): <c>/house recall</c> sends TeleToHouse (<see cref="IActionApi.RecallHouse"/>); the other subcommands of retail's table (guest, storage, open,
+    /// boot, available, ...) are not built (<c>TODO(villa-house-subcommands)</c>) and say so.
+    /// </summary>
+    private ChatCommandResult House(string[] args)
+    {
+        if (args.Length == 1 && string.Equals(args[0], "recall", StringComparison.OrdinalIgnoreCase))
+        {
+            return Recall(_actions.RecallHouse(ActionSource.Ui), "the house recall did not happen", "Lifestone: you are at your house.");
+        }
+
+        return new ChatCommandResult
+        {
+            Lines = [new ChatCommandLine(ChatTextTypes.System, "Lifestone: only /house recall is built (TODO(villa-house-subcommands)).")],
+            TodoKey = "chat:cmd:house",
+            TodoMessage = "TODO(villa-house-subcommands): /house " + string.Join(' ', args) + " is not built; nothing was sent",
+        };
+    }
 
     private static ChatCommandResult Recall(ActionHandle handle, string failure, string done) => new() { Handle = handle, FailurePrefix = failure, SuccessLine = done };
 

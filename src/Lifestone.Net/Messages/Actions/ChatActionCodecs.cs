@@ -48,6 +48,27 @@ internal static class ChatActionCodecs
     }
 
     /// <summary>
+    /// Writes F7B1 {<paramref name="sequence"/>, 0x0032, message, target} (M6 14): a tell to an object by its id, which is how a creature that is not a player is told
+    /// (a tell by name reaches online players only). Not a port: written from ACE's reader, <c>GameActionTalkDirect</c> (<c>ReadString16L</c>, then <c>ReadUInt32</c>;
+    /// <c>GameActionTalkDirect.cs:18-19</c>, @95ef426d). Retail's sender is the <c>Event_TalkDirect</c> docs/retail-ui.md names; its body and address were not read.
+    /// The message is not the last field, so it goes through the ASCII guard as Tell's does.
+    /// </summary>
+    /// <exception cref="ArgumentException">The target is 0, the message is not ASCII, or it is too long; nothing is written.</exception>
+    public static void WriteTalkDirect(PacketWriter writer, uint sequence, uint target, ReadOnlySpan<char> text)
+    {
+        if (target == 0)
+        {
+            throw new ArgumentException("a TalkDirect needs a target object.", nameof(target));
+        }
+
+        AsciiGuard.Require(text, "TalkDirect text");
+        _ = PacketWriter.String16LSize(text, "TalkDirect text");
+        GameActionEnvelope.WriteHeader(writer, sequence, GameActionTypes.TalkDirect);
+        writer.WriteAsciiString16L(text, "TalkDirect text");
+        writer.WriteUInt32(target);
+    }
+
+    /// <summary>
     /// Writes F7B1 {<paramref name="sequence"/>, 0x01DF, text}: the emote text is one String16L, read by ACE's <c>GameActionEmote</c>
     /// (<c>ReadString16L</c>, <c>GameActionEmote.cs:10</c>, @95ef426d); retail's sender is <c>CM_Communication::Event_Emote</c> (11.6096
     /// 0x006A4F40). Like Talk it is the last field, so it stays CP1252.

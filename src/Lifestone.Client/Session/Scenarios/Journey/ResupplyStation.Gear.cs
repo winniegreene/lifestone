@@ -2,6 +2,7 @@ using System.Globalization;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Mage;
+using Lifestone.Client.Session.Quartermaster;
 
 namespace Lifestone.Client.Session.Scenarios.Journey;
 
@@ -44,10 +45,16 @@ public sealed partial class ResupplyRun
 
     private PackRules? _packRules;
 
+    /// <summary>
+    /// The owner, 2026-11-16: the review pack holds only the pieces the owner wants to see, the useful great-cantrip ones (<see cref="CantripRoom.IsUsefulGreatPiece(GameState, uint, IReadOnlyDictionary{uint, Lifestone.Data.Magic.SpellInfo}, CantripPlan, Action{string}, string)"/>);
+    /// every other kept item stays in the main pack. M6 14 useful cantrips: a piece in the review pack whose great cantrips are not useful is sorted back to the main pack, where the sale offers it as sell loot; each piece's verdict is logged once.
+    /// </summary>
+    private bool ReviewPiece(uint guid) => CantripRoom.IsUsefulGreatPiece(S.State, guid, Context.Spells, log: Log);
+
     private PackLayout Layout(HuntingGround ground)
     {
         _packRules ??= new PackRules(ground);
-        var layout = PackLayout.Of(S.State, _packRules, _memory.KeptAside.Contains, PackMemory.Shared.Rotation.Contains);
+        var layout = PackLayout.Of(S.State, _packRules, ReviewPiece, PackMemory.Shared.Rotation.Contains);
         layout.Publish();
         return layout;
     }
@@ -60,7 +67,7 @@ public sealed partial class ResupplyRun
         var layout = Layout(ground);
         Log(Text($"packs: layout ({why}): {layout.Why}; {layout.SlotsLine()}"));
         var stays = new List<string>();
-        var moves = layout.Sort(PackLayout.Items(S.State), _packRules!, _memory.KeptAside.Contains, PackMemory.Shared.Rotation.Contains, stays);
+        var moves = layout.Sort(PackLayout.Items(S.State), _packRules!, ReviewPiece, PackMemory.Shared.Rotation.Contains, stays);
         foreach (var line in stays)
         {
             Log(line);
@@ -98,6 +105,8 @@ public sealed partial class ResupplyRun
         Stage = "gear";
         foreach (var h in AppraiseGear()) { yield return h; }
 
+        foreach (var h in KeepGemBuffs()) { yield return h; } // M6 14 (the owner, 2026-11-15): keep Blackmoor's Favor active
+
         var skills = new QualitiesSkills(S.State.Self.Qualities);
         var judge = Judge(ground);
         foreach (var h in ShedStones(ground, "the visit's start")) { yield return h; }
@@ -110,24 +119,34 @@ public sealed partial class ResupplyRun
 
         foreach (var h in SelfEquip(ground, judge, skills)) { yield return h; }
 
-        foreach (var h in KeepItemMana(ground)) { yield return h; }
+        foreach (var h in RefillWornMana(ground)) { yield return h; } // M6 item 14: the worn items' mana by the time to the next visit (ItemManaRefillStep.cs), in KeepItemMana's place
 
         foreach (var h in ShedStones(ground, "after the mana")) { yield return h; }
 
         Log("gear: done: " + GearFields());
     }
 
-    /// <summary>The self-equip's judge for the ground's plan: its war element and the keep-aside block's useful cantrips.</summary>
+    private SelfEquipJudge? _judge;
+    private GearScoreNotes? _gearNotes;
+
+    /// <summary>
+    /// The self-equip's judge for the ground's plan: its war element and the keep-aside block's useful cantrips, made once a run. M6 2 b (<c>m5-self-equip-element</c>, slice a's <see cref="SelfEquipJudge.ElementOf(string?, string?, out string)"/>):
+    /// the element is the ladder rung's first (the rung of the character's level, when it names this ground), else the spell plan's family, with the source logged; the run's one <see cref="GearScoreNotes"/> writes each score TODO once to
+    /// the log.
+    /// </summary>
     private SelfEquipJudge Judge(HuntingGround ground)
     {
-        var family = ground.PlanFor(S.State.Self.Qualities.Level)?.Family;
-        var element = SelfEquipJudge.ElementOf(family);
-        if (element == 0)
+        if (_judge is not null)
         {
-            Log($"gear: TODO(m5-self-equip-element): the plan's war family '{family ?? "none"}' has no element in the table: no caster counts as better by its bonus");
+            return _judge;
         }
 
-        return new SelfEquipJudge(ground.Loot?.KeepAside?.SpellNames() ?? [], element, id => Context.Spells.TryGetValue(id, out var s) ? s.Name : null);
+        _gearNotes ??= new GearScoreNotes(Log);
+        var judge = Wardrobe.For(S.State).JudgeOn(ground, Context.Spells, out var read, _gearNotes); // M6 16 E5e2: the session's one wear judge (the element by the one rule, the ladder's caster terms, the lit pieces, the session's memory of a wield that did not land)
+        Log(Text($"gear: element 0x{read.Element:X}: {read.ElementSource}{(read.Element == 0 ? ": no caster counts as better by its bonus" : string.Empty)}"));
+        Log(Text($"gear: caster score: {read.Caster}; the bolt: {read.BoltSource}"));
+        Wardrobe.For(S.State).NoteBlindElement(Context.Log, "station", ground, read); // M6 16 E5e3: no element while the fight has a line is an error, once a session
+        return _judge = judge;
     }
 
     /// <summary>The held items the gear phase reads: the worn pieces, the side packs' items, the stones and the main pack's casters, wearables and magic items, that no appraisal of is held.</summary>
@@ -185,16 +204,16 @@ public sealed partial class ResupplyRun
         }
 
         Log("gear: shoes: wear " + why);
-        var handle = S.Actions.Wield(pick.Guid, (EquipMask)SelfEquipJudge.FootWear, ActionSource.Automation);
-        yield return handle;
-        Shoes = handle.Outcome is { Kind: ActionOutcomeKind.Confirmed } ? "worn" : "refused";
+        var handle = new WieldResult();
+        foreach (var h in Wardrobe.PutOn(S, new WieldRequest(pick.Guid) { Name = pick.Name, Location = SelfEquipJudge.FootWear }, handle)) { yield return h; } // M6 16 E5e1: the one wield routine
+        Shoes = handle.Confirmed ? "worn" : "refused";
         if (Shoes == "worn")
         {
             SelfEquips++;
             PackTally.AddEquip();
         }
 
-        Log(Text($"gear: shoes: '{pick.Name}' 0x{pick.Guid:X8}: {Describe(handle)}"));
+        Log(Text($"gear: shoes: '{pick.Name}' 0x{pick.Guid:X8}: {handle.Outcome(Describe)}"));
     }
 
     private List<GearCandidate> HeldCandidates()
@@ -214,6 +233,8 @@ public sealed partial class ResupplyRun
     /// <summary>M5 7 D125: the self-equip over every held wearable (see <see cref="SelfEquipJudge"/>); the caster is the one pick's (<see cref="SwapBestCaster"/>, run before the sort).</summary>
     private IEnumerable<ActionHandle?> SelfEquip(HuntingGround ground, SelfEquipJudge judge, IGearSkills skills)
     {
+        ReleaseWearReview(); // M6 14 (m6-armour): the pieces kept at the last visit are reviewed again now, before the sale
+        judge = WithWearTerms(ground, judge, "the gear phase");
         foreach (var candidate in HeldCandidates())
         {
             if (!S.State.Self.Inventory.Contains(candidate.Guid) || S.State.Self.Inventory.Find(candidate.Guid).Kind == InventoryPlaceKind.Equipped)
@@ -221,28 +242,58 @@ public sealed partial class ResupplyRun
                 continue;
             }
 
-            var choice = judge.Judge(candidate, SelfEquipJudge.Worn(S.State), skills);
+            if (KeepUnread(candidate))
+            {
+                continue;
+            }
+
+            var worn = SelfEquipJudge.Worn(S.State);
+            var choice = judge.Judge(candidate, worn, skills);
             if (choice.Kind == SelfEquipKind.None || (choice.Kind is SelfEquipKind.Swap or SelfEquipKind.Wear && (candidate.ItemType & SelfEquipJudge.CasterType) != 0))
             {
+                if (judge.Wear is not null && choice.Kind == SelfEquipKind.None && GearScore.SlotOf(candidate.ItemType, candidate.Coverage, candidate.ValidLocations) is GearSlot.Armour or GearSlot.Jewellery)
+                {
+                    Log(choice.ToString() + " (to the pack rules)"); // M6 14 (m6-armour): every armour and jewellery verdict is logged with its numbers
+                }
+
                 continue; // M5 7 S2c: a caster is wielded only by the one pick below, never item by item
             }
 
             Log(choice.ToString());
+            if (choice.Kind is SelfEquipKind.Wear or SelfEquipKind.Replace && InCombatMode())
+            {
+                foreach (var h in EnterPeaceForSwap(choice)) { yield return h; }
+            }
+
+            if (choice.Kind is SelfEquipKind.Wear or SelfEquipKind.Replace && !WearInPeace(choice))
+            {
+                KeepForReview(candidate, "the swap waits for peace mode");
+                continue;
+            }
+
             if (choice.Kind == SelfEquipKind.Wear)
             {
-                var on = S.Actions.Wield(choice.Guid, (EquipMask)choice.Location, ActionSource.Automation);
-                yield return on;
-                Log(Text($"gear: wear '{choice.Name}' 0x{choice.Guid:X8}: {Describe(on)}"));
-                if (on.Outcome is { Kind: ActionOutcomeKind.Confirmed })
-                {
-                    SelfEquips++;
-                    PackTally.AddEquip();
-                }
+                // M6 2 f (2-R15): with the state check after the wield (the piece in the equipped slot), a named line when it is not
+                foreach (var h in WearChecked(choice)) { yield return h; }
+            }
+            else if (choice.Kind == SelfEquipKind.Replace)
+            {
+                // M6 2 f (2-R2): a looted piece the judge would put on in place of a worn one is worn here, before the sale could offer it (check, act, check in ReplaceChecked)
+                foreach (var h in ReplaceChecked(choice, worn)) { yield return h; }
+            }
+            else if (choice.Kind == SelfEquipKind.Review && judge.Wear is not null && S.State.Self.Inventory.Find(candidate.Guid).Kind != InventoryPlaceKind.MainPack)
+            {
+                KeepForReview(candidate, "the wear pick's review"); // M6 14 (m6-armour): already in a side pack: kept there, reviewed again at the next visit
             }
             else if (choice.Kind == SelfEquipKind.Review && S.State.Self.Inventory.Find(candidate.Guid).Kind == InventoryPlaceKind.MainPack)
             {
                 PackMemory.Shared.Interesting.Add(candidate.Guid);
                 _memory.KeptAside.Add(candidate.Guid); // never offered to a vendor
+                if (judge.Wear is not null)
+                {
+                    KeepForReview(candidate, "the wear pick's review"); // M6 14 (m6-armour): reviewed again at the next visit, then worn or released to the sale
+                }
+
                 var review = Layout(ground).PackOf(PackJob.Review);
                 if (review is { Free: > 0 } pack)
                 {
@@ -261,6 +312,9 @@ public sealed partial class ResupplyRun
     /// swaps the held one out by itself (a wield into the occupied held slot is refused, Player_Inventory.cs 1800-1810), so the move comes first. (l): a refused move of the held caster is re-checked against the hands the server
     /// left (ACE's fallback puts it in the main pack, not back in the hands): with the hands empty the pick is wielded at once, and whatever fails, the hands end with a caster (<see cref="RearmHands"/>).</para>
     /// </summary>
+    /// <summary>M6 14 (<c>m6-caster-spend</c>): the named failure of a caster swap whose wield did not land (the check after: the server's answer and the caster in the hands).</summary>
+    public const string CasterWieldFailed = "caster-wield-failed";
+
     private IEnumerable<ActionHandle?> SwapBestCaster(HuntingGround ground, SelfEquipJudge judge, IGearSkills skills)
     {
         var casters = HeldCandidates().Where(c => (c.ItemType & SelfEquipJudge.CasterType) != 0 && S.State.Self.Inventory.Find(c.Guid).Kind != InventoryPlaceKind.Equipped).ToList();
@@ -273,6 +327,18 @@ public sealed partial class ResupplyRun
         }
 
         Log(choice.ToString());
+        if (choice.Replaces != 0 && InCombatMode())
+        {
+            // M6 14 (m6-caster): check before: a swap only at a safe point, in peace mode as retail's player swaps (this reads the mode the server last said, never assumes it). M6 14 (live 2026-11-14: the Fire Sceptre's swap
+            // waited a whole visit twice because she stood in the magic mode): the station sets peace itself at home and checks the server's answer; the fight re-enters its mode when it starts
+            foreach (var h in EnterPeaceForSwap(choice)) { yield return h; }
+            if (InCombatMode())
+            {
+                Log(Text($"gear: no swap: the combat mode is {S.State.Self.Qualities.CombatMode}, not peace, after asking peace: '{choice.Name}' 0x{choice.Guid:X8} waits for the next visit"));
+                yield break;
+            }
+        }
+
         if (choice.Replaces != 0)
         {
             var into = HeldCaster.SwapPack(Layout(ground), out var where);
@@ -300,25 +366,48 @@ public sealed partial class ResupplyRun
             }
         }
 
-        var on = S.Actions.Wield(choice.Guid, (EquipMask)SelfEquipJudge.Held, ActionSource.Automation);
-        yield return on;
+        var on = new WieldResult();
+        foreach (var h in Wardrobe.PutOn(S, new WieldRequest(choice.Guid) { Name = choice.Name, Location = SelfEquipJudge.Held }, on)) { yield return h; } // M6 16 E5e1: the one wield routine
         var held = S.State.Self.Inventory.EquippedAt(SelfEquipJudge.Held);
-        Log(Text($"gear: wield '{choice.Name}' 0x{choice.Guid:X8}: {Describe(on)}; held now 0x{held ?? 0:X8}"));
-        if (on.Outcome is { Kind: ActionOutcomeKind.Confirmed } && held == choice.Guid)
+        Log(Text($"gear: wield '{choice.Name}' 0x{choice.Guid:X8}: {on.Outcome(Describe)}; held now 0x{held ?? 0:X8}"));
+        if (on.Confirmed && held == choice.Guid)
         {
             SelfEquips++;
             PackTally.AddEquip();
+            CasterSpellsDropped.Shared.Clear(choice.Guid, choice.Name);
+            CasterAurasAfterSwap(choice);
             yield break;
         }
 
+        _equipRefused.Add(Text($"wield '{choice.Name}' ({on.Outcome(Describe)})"));
+
+        // M6 14 (m6-caster-spend): the check after failed: the server did not confirm the wield, or the hands do not hold the pick. A named failure, and the caster is held back for the run (the pick, the rearm and the spend pass it over),
+        // so a refusal (ACE's 0x0468 under a wield requirement) is never sent again at every visit.
+        var failed = Text($"{CasterWieldFailed}: the wield of '{choice.Name}' 0x{choice.Guid:X8} did not land: the server's answer {on.Outcome(Describe)}, the hands hold 0x{held ?? 0:X8}");
+        Log("gear: FAILED " + failed + "; it is held back for the run");
+        judge.HeldBack.Hold(choice.Guid, failed);
         if (choice.Replaces != 0 && !HeldCaster.Held(S.State))
         {
-            var back = S.Actions.Wield(choice.Replaces, (EquipMask)SelfEquipJudge.Held, ActionSource.Automation);
-            yield return back;
-            Log(Text($"gear: the old caster 0x{choice.Replaces:X8} wielded again: {Describe(back)}"));
+            var back = new WieldResult();
+            foreach (var h in Wardrobe.PutOn(S, new WieldRequest(choice.Replaces) { Name = "the old caster", Location = SelfEquipJudge.Held }, back)) { yield return h; } // M6 16 E5e1: the one wield routine
+            Log(Text($"gear: the old caster 0x{choice.Replaces:X8} wielded again: {back.Outcome(Describe)}"));
         }
 
         foreach (var h in RearmHands(judge, "the failed swap")) { yield return h; }
+    }
+
+    /// <summary>
+    /// M6 14 (<c>m6-caster</c>): the check after a confirmed swap: her caster auras (<see cref="CasterAuraCheck"/>) read from her enchantments now. An aura up carries to the new caster (it is hers); one down or under the re-buff margin is
+    /// owed and asks the pass before the next fight (<see cref="CasterAuraMemory"/>), which casts it on her at the level her live skill lands at the buff bar. Logged either way, with both casters named.
+    /// </summary>
+    private void CasterAurasAfterSwap(SelfEquipChoice choice)
+    {
+        var lines = CasterAuraCheck.AfterSwap(S.State, S.Clock.Now, BuffOptions.DefaultRebuffMarginSeconds);
+        Log(Text($"gear: caster auras after the swap to '{choice.Name}' 0x{choice.Guid:X8} from 0x{choice.Replaces:X8}: {CasterAuraCheck.Describe(lines)}"));
+        if (lines.Any(l => l.Verdict == CasterAuraVerdict.Owed))
+        {
+            CasterAuraMemory.Shared.Owe(Text($"'{choice.Name}' 0x{choice.Guid:X8} wielded at the visit: {string.Join(", ", lines.Where(l => l.Verdict == CasterAuraVerdict.Owed).Select(l => l.Line))} owed"));
+        }
     }
 
     /// <summary>
@@ -334,14 +423,48 @@ public sealed partial class ResupplyRun
 
         if (HeldCaster.Rearm(S.State, judge, out var why) is not { } pick)
         {
-            Log($"gear: the hands hold no caster after {after} and none can be wielded: {why} (TODO(m5-no-caster): the magic combat mode fails with \"no caster held\")");
+            // M6 2 b (m5-no-caster): the loud stop. Before the buys the floor may still buy one (GearFloor), so the stop is decided at the trip's end (NoCasterStop): with a caster held by then it clears, else the trip fails by name.
+            _noCaster = Text($"the hands hold no caster after {after} and none can be wielded: {why} (the magic combat mode fails with \"no caster held\", Player_Combat.cs 872-880 @95ef426d)");
+            Log($"gear: STOP {GearFloor.NoCaster}: {_noCaster}");
             yield break;
         }
 
         Log($"gear: the hands hold no caster after {after}: wield {why}");
-        var on = S.Actions.Wield(pick.Guid, (EquipMask)SelfEquipJudge.Held, ActionSource.Automation);
-        yield return on;
-        Log(Text($"gear: rearm '{pick.Name}' 0x{pick.Guid:X8}: {Describe(on)}; a caster held now: {(HeldCaster.Held(S.State) ? "yes" : "no")}"));
+        var on = new WieldResult();
+        foreach (var h in Wardrobe.PutOn(S, new WieldRequest(pick.Guid) { Name = pick.Name, Location = SelfEquipJudge.Held }, on)) { yield return h; } // M6 16 E5e1: the one wield routine
+        var heldNow = HeldCaster.Held(S.State);
+        Log(Text($"gear: rearm '{pick.Name}' 0x{pick.Guid:X8}: {on.Outcome(Describe)}; a caster held now: {(heldNow ? "yes" : "no")}"));
+        if (heldNow)
+        {
+            CasterSpellsDropped.Shared.Clear(pick.Guid, pick.Name);
+            _noCaster = null;
+        }
+        else
+        {
+            _equipRefused.Add(Text($"rearm '{pick.Name}' ({on.Outcome(Describe)})"));
+            _noCaster = Text($"the hands hold no caster after {after}: the wield of '{pick.Name}' 0x{pick.Guid:X8} was refused ({on.Outcome(Describe)})");
+            Log($"gear: STOP {GearFloor.NoCaster}: {_noCaster}");
+        }
+    }
+
+    private string? _noCaster;
+
+    /// <summary>M6 2 b (<c>m5-no-caster</c>): at the trip's end, the hands still empty after <see cref="RearmHands"/> found nothing to wield: the trip fails by name (<see cref="GearFloor.NoCaster"/>).</summary>
+    private void NoCasterStop(string where)
+    {
+        if (_noCaster is not { } why)
+        {
+            return;
+        }
+
+        if (HeldCaster.Held(S.State))
+        {
+            Log(Text($"gear: {GearFloor.NoCaster} cleared at the end of {where}: a caster is held now"));
+            _noCaster = null;
+            return;
+        }
+
+        Fail(Text($"{GearFloor.NoCaster}: at the end of {where}: {why}"));
     }
 
     /// <summary>The empty mana stones this trip put out for sale (<see cref="ShedStones"/>).</summary>
@@ -426,7 +549,7 @@ public sealed partial class ResupplyRun
                 continue; // a stone this visit shed already is not named twice
             }
 
-            if (Layout(ground).FreeSlots(PackJob.Main) <= 0)
+            if (Layout(ground).FreeIn(PackJob.Main) <= 0)
             {
                 Log(Text($"gear stones: '{stone.Name}' 0x{stone.Guid:X8} empty beyond the keep: the main pack is full, it waits in its pack 0x{from:X8}"));
                 continue;
@@ -466,13 +589,50 @@ public sealed partial class ResupplyRun
             }
 
             var weighed = new List<string>();
-            var step = ItemManaKeeper.Next(worn, stones, junk, S.State.Self.Guid, weighed);
+            var step = ItemManaKeeper.Next(worn, stones, junk, S.State.Self.Guid, weighed, CasterInput(ground));
             foreach (var line in weighed)
             {
                 Log(line); // M5 7 S2b: every junk item weighed, the mana's worth against the payout
             }
 
-            Log(step.ToString());
+            var stepLine = step.ToString();
+            Log(stepLine);
+            if (step.Caster is { } decision && !stepLine.StartsWith("caster mana:", StringComparison.Ordinal))
+            {
+                Log(decision.ToString()); // M6 2 c: the caster's own line (a swap or a rewield is the step's line already)
+            }
+
+            // M6 2 b: the caster's decision, acted on with check, act, check (M5 D141)
+            if (step.Caster is { Act: CasterManaAct.SwapToSpare } swap)
+            {
+                var swapped = false;
+                foreach (var h in WieldCaster(ground, swap.Spare, "the caster's mana: the held caster is out, the charged spare", ok => swapped = ok)) { yield return h; }
+                if (!swapped)
+                {
+                    yield break;
+                }
+
+                continue;
+            }
+
+            if (step.Caster is { Act: CasterManaAct.Rewield } again)
+            {
+                var rewielded = false;
+                foreach (var h in RewieldCaster(ground, again.Caster, again.Name, ok => rewielded = ok)) { yield return h; }
+                if (!rewielded)
+                {
+                    yield break;
+                }
+
+                continue;
+            }
+
+            if (step.Caster is { Act: CasterManaAct.WantStone } want)
+            {
+                _casterWant = want; // the floor's charge line (GearFloor), bought on this trip's walk
+                Log("gear mana: the caster's want joins the floor: " + want.Reason);
+            }
+
             if (step.Act == ItemManaAct.None)
             {
                 yield break;
@@ -514,4 +674,607 @@ public sealed partial class ResupplyRun
 
     /// <summary>ACE's PropertyBool Retained (91): a retained item refuses a stone's drain (ManaStone.cs:91-92).</summary>
     private const uint RetainedBool = 91;
+
+    private readonly List<string> _equipRefused = [];
+    private CasterManaDecision? _casterWant;
+
+    /// <summary>M6 2 b: the trip's gear floor (<see cref="GearFloor"/>), or null before it was planned (a kit trip plans none).</summary>
+    public GearFloorPlan? FloorPlan { get; private set; }
+
+    /// <summary>M6 2 b: the floor lines bought and proved (the item arrived, the purse paid).</summary>
+    public int FloorBought { get; private set; }
+
+    /// <summary>M6 2 b: the floor lines not bought, by name with the reason.</summary>
+    public List<string> FloorRefused { get; } = [];
+
+    /// <summary>M6 2 b: the equip pass's pieces put on in a free slot (a caster wielded counts).</summary>
+    public int EquipWorn { get; private set; }
+
+    /// <summary>M6 2 b: the equip pass's replacements (a worn piece off, a better one on in its place).</summary>
+    public int EquipReplaced { get; private set; }
+
+    /// <summary>M6 2 b: the equip pass's summary line, or null when it did not run.</summary>
+    public string? EquipLine { get; private set; }
+
+    /// <summary>
+    /// M6 2 c, wired by b: the held caster's mana (its appraisal), whether its spells dropped (<see cref="CasterSpellsDropped"/>, from the "out of Mana" line), the spare casters in the packs with their mana, and every ware of the ground's
+    /// profile vendors (the rule picks the charges).
+    /// </summary>
+    private CasterManaInput CasterInput(HuntingGround ground)
+    {
+        WornMana? held = null;
+        var spares = new List<WornMana>();
+        foreach (var e in S.State.Self.Inventory.Equipped)
+        {
+            if ((e.Location & SelfEquipJudge.Held) != 0 && S.State.Objects.TryGet(e.Guid, out var o) && (o.ItemType & SelfEquipJudge.CasterType) != 0)
+            {
+                held = S.TryGetAppraisal(e.Guid, out var a) && !a.IsNotFound ? new WornMana(e.Guid, o.Name, a.ItemMana ?? 0, a.ItemMaxMana ?? 0, a.Float(5) ?? 0.0) : new WornMana(e.Guid, o.Name, 0, 0, 0);
+            }
+        }
+
+        foreach (var item in PackLayout.Items(S.State))
+        {
+            if ((item.ItemType & SelfEquipJudge.CasterType) != 0 && S.TryGetAppraisal(item.Guid, out var a) && !a.IsNotFound && a.ItemMaxMana is > 0)
+            {
+                spares.Add(new WornMana(item.Guid, item.Name, a.ItemMana ?? 0, a.ItemMaxMana.Value, a.Float(5) ?? 0.0));
+            }
+        }
+
+        var offers = ground.Vendors.SelectMany(v => v.Sells.Select(w => new ManaOffer(v.Wcid, v.Name, w.Wcid, w.Price))).ToList();
+        var dropped = held is { } h && CasterSpellsDropped.Shared.IsDropped(h.Guid, h.Name);
+        return new CasterManaInput(held, dropped, spares, offers);
+    }
+
+    /// <summary>
+    /// M6 2 b: wields the caster <paramref name="guid"/> in the hands (check: held in a pack, not wielded; act: the held caster to a pack with room, then the wield; check: the hands hold it). A refusal is named; the recovery wields the old
+    /// caster again when the hands are left empty, then <see cref="RearmHands"/>.
+    /// </summary>
+    private IEnumerable<ActionHandle?> WieldCaster(HuntingGround ground, uint guid, string why, Action<bool> done)
+    {
+        var name = S.State.Objects.TryGet(guid, out var o) ? o.Name : "caster";
+        var place = S.State.Self.Inventory.Find(guid).Kind;
+        if (guid == 0 || !S.State.Self.Inventory.Contains(guid) || place == InventoryPlaceKind.Equipped)
+        {
+            Log(Text($"gear: wield '{name}' 0x{guid:X8} ({why}): check before failed: it is {(guid == 0 || !S.State.Self.Inventory.Contains(guid) ? "not held" : "wielded already")}: nothing sent"));
+            done(false);
+            yield break;
+        }
+
+        var old = S.State.Self.Inventory.EquippedAt(SelfEquipJudge.Held) ?? 0;
+        if (old != 0)
+        {
+            var into = HeldCaster.SwapPack(Layout(ground), out var where);
+            if (into == 0)
+            {
+                _equipRefused.Add(Text($"wield '{name}' (no pack for the held caster: {where})"));
+                Log(Text($"gear: wield '{name}' 0x{guid:X8} ({why}): the held caster 0x{old:X8} has no pack to go to: {where}; nothing sent"));
+                done(false);
+                yield break;
+            }
+
+            PackMemory.Shared.Rotation.Add(old);
+            var off = S.Actions.MoveToPack(old, into, 0, ActionSource.Automation);
+            yield return off;
+            Log(Text($"gear: the held caster 0x{old:X8} to {where}: {Describe(off)}"));
+        }
+
+        var on = new WieldResult();
+        foreach (var h in Wardrobe.PutOn(S, new WieldRequest(guid) { Name = name, Location = SelfEquipJudge.Held }, on)) { yield return h; } // M6 16 E5e1: the one wield routine
+        var heldNow = S.State.Self.Inventory.EquippedAt(SelfEquipJudge.Held);
+        var ok = heldNow == guid;
+        Log(Text($"gear: wield '{name}' 0x{guid:X8} ({why}): {on.Outcome(Describe)}; check after: held now 0x{heldNow ?? 0:X8}{(ok ? string.Empty : " (refused)")}"));
+        if (ok)
+        {
+            SelfEquips++;
+            PackTally.AddEquip();
+            CasterSpellsDropped.Shared.Clear(guid, name);
+            done(true);
+            yield break;
+        }
+
+        _equipRefused.Add(Text($"wield '{name}' ({on.Outcome(Describe)})"));
+        if (old != 0 && !HeldCaster.Held(S.State))
+        {
+            var back = new WieldResult();
+            foreach (var h in Wardrobe.PutOn(S, new WieldRequest(old) { Name = "the old caster", Location = SelfEquipJudge.Held }, back)) { yield return h; } // M6 16 E5e1: the one wield routine
+            Log(Text($"gear: recovery: the old caster 0x{old:X8} wielded again: {back.Outcome(Describe)}"));
+        }
+
+        foreach (var h in RearmHands(Judge(ground), "the refused wield of " + name)) { yield return h; }
+        done(false);
+    }
+
+    /// <summary>
+    /// M6 2 b (the mage half of <c>m4-gear-mana-reactivate</c>): the held caster's spells dropped when it ran dry and only a wield brings them back (Player_Inventory.cs:313-315 @95ef426d): check: it is the held one; act: to a pack, then
+    /// wielded again; check: held again. A refusal is named; the recovery is <see cref="RearmHands"/>.
+    /// </summary>
+    private IEnumerable<ActionHandle?> RewieldCaster(HuntingGround ground, uint guid, string name, Action<bool> done)
+    {
+        if (S.State.Self.Inventory.EquippedAt(SelfEquipJudge.Held) != guid)
+        {
+            Log(Text($"gear: rewield '{name}' 0x{guid:X8}: check before failed: it is not the held caster; nothing sent"));
+            done(false);
+            yield break;
+        }
+
+        var into = HeldCaster.SwapPack(Layout(ground), out var where);
+        if (into == 0)
+        {
+            _equipRefused.Add(Text($"rewield '{name}' (no pack: {where})"));
+            Log(Text($"gear: rewield '{name}' 0x{guid:X8}: no pack to take it off into: {where}; nothing sent"));
+            done(false);
+            yield break;
+        }
+
+        var off = S.Actions.MoveToPack(guid, into, 0, ActionSource.Automation);
+        yield return off;
+        var offOk = S.State.Self.Inventory.Find(guid).Kind != InventoryPlaceKind.Equipped;
+        Log(Text($"gear: rewield '{name}' 0x{guid:X8}: off to {where}: {Describe(off)}; check: {(offOk ? "off" : "still wielded")}"));
+        if (!offOk)
+        {
+            _equipRefused.Add(Text($"rewield '{name}' (take-off {Describe(off)})"));
+            done(false);
+            yield break;
+        }
+
+        var on = new WieldResult();
+        foreach (var h in Wardrobe.PutOn(S, new WieldRequest(guid) { Name = name, Location = SelfEquipJudge.Held }, on)) { yield return h; } // M6 16 E5e1: the one wield routine
+        var ok = S.State.Self.Inventory.EquippedAt(SelfEquipJudge.Held) == guid;
+        Log(Text($"gear: rewield '{name}' 0x{guid:X8}: {on.Outcome(Describe)}; check after: {(ok ? "held, its spells back with its mana" : "not held (refused)")}"));
+        if (ok)
+        {
+            SelfEquips++;
+            CasterSpellsDropped.Shared.Clear(guid, name);
+            done(true);
+            yield break;
+        }
+
+        _equipRefused.Add(Text($"rewield '{name}' ({on.Outcome(Describe)})"));
+        foreach (var h in RearmHands(Judge(ground), "the refused rewield of " + name)) { yield return h; }
+        done(false);
+    }
+
+    /// <summary>
+    /// The pyreals the trip plans with: the coin (unread counted as 0) and the face of every trade note held, the side packs' too (M6 16 E5a1: the quartermaster's <see cref="PurseView.EverythingHeldUnreadAsZero"/>, the same sum as
+    /// before). M6 16 E5a2: a buy changes any note she holds when the coin is short, a side pack's too (<see cref="VendorCounter"/>), so this is what a counter that takes a note pays with: <see cref="PurseView.CounterCanPayUnreadAsZero"/>.
+    /// </summary>
+    internal long FloorPurse() => PurseView.EverythingHeldUnreadAsZero(S.State);
+
+    /// <summary>
+    /// M6 2 b: the gear floor (<see cref="GearFloor"/>) of this trip: its lines join the buy list BESIDE the kit (never <c>supplies.kit</c>), first, so the caster is paid before the stock; the charge line is the caster's mana want
+    /// (<see cref="KeepItemMana"/>). False with the trip failed by name when no caster is held and none can be bought (<see cref="GearFloor.NoCaster"/>); a missing spare that cannot be bought is the same stop's line, logged, and the trip
+    /// goes on (the autopilot's audit is the stop for it, slice e).
+    /// </summary>
+    private bool PlanFloor(HuntingGround ground)
+    {
+        var floorLevel = GearFloor.FloorLevel(LadderLoader.WarMage);
+        var unread = new List<string>();
+        var plan = GearFloor.Plan(ground, GearFloor.StateOf(S.State, FloorPurse()), floorLevel, _casterWant, SelfEquipJudge.Worn(S.State));
+        FloorPlan = plan;
+        Log(plan.Why);
+        if (GearFloor.CastersHeld(S.State, unread) > 0 && unread.Count > 0)
+        {
+            Log(Text($"gear floor: {unread.Count} caster(s) counted while unread (not appraised yet): {string.Join(", ", unread)} (2-R3: a caster counts only when wieldable)")); // named, never silent
+        }
+
+        foreach (var note in plan.Notes)
+        {
+            Log(note);
+        }
+
+        var buys = new List<ResupplyBuy>();
+        foreach (var line in plan.Lines)
+        {
+            Log(line.ToString());
+            var buy = ResupplyBuy.ForFloor(line);
+            _floorBuys.Add(buy);
+            buys.Add(buy);
+        }
+
+        if (buys.Count > 0)
+        {
+            _buyList = [.. buys, .. _buyList];
+        }
+
+        if (plan.Stop is { } stop)
+        {
+            if (plan.CastersAfter == 0)
+            {
+                Fail("gear floor: " + stop);
+                return false;
+            }
+
+            Log("gear floor: STOP " + stop + " (one caster is held: the trip goes on; the audit's stop is the autopilot's)");
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// M6 2 b: one floor line's buy with check, act, check (M5 D141): check (the vendor is open: the visit met and opened him; the price beside the profile's and the purse: <see cref="BuyLine"/>), act (the buy), check (the item arrived:
+    /// the held count rose by the line's count; the purse paid). A refused buy is a named line (<see cref="FloorRefused"/>), never a silent skip.
+    /// </summary>
+    private IEnumerable<ActionHandle?> FloorBuy(HuntingGround ground, GroundVendor vendor, uint guid, ResupplyBuy buy)
+    {
+        var scratch = new List<uint>();
+        var name = buy.Line.Name;
+        var heldBefore = GearInventory.CountOf(S.State, scratch, buy.Line.Wcid);
+        var spentBefore = Spent;
+        var refusalsBefore = _refusals.Count;
+        Log(Text($"gear floor: buy {buy.Count} x {name} at {vendor.Name}: check before: open 0x{guid:X8} {(S.State.Vendor?.Vendor == guid ? "yes" : "no")}, the profile's price {(ground.PriceOf(buy.Line.Wcid) ?? vendor.Sells.FirstOrDefault(w => w.Wcid == buy.Line.Wcid)?.Price)?.ToString(CultureInfo.InvariantCulture) ?? "none"}, coin {Coins()}, held {heldBefore}"));
+        foreach (var h in BuyLine(ground, vendor, guid, buy)) { yield return h; }
+
+        var heldAfter = GearInventory.CountOf(S.State, scratch, buy.Line.Wcid);
+        var paid = Spent - spentBefore;
+        if (heldAfter >= heldBefore + buy.Count && paid > 0)
+        {
+            FloorBought++;
+            Log(Text($"gear floor: bought {buy.Count} x {name} at {vendor.Name}: check after: held {heldBefore} -> {heldAfter}, paid {paid}"));
+            yield break;
+        }
+
+        var reason = _refusals.Count > refusalsBefore ? "refused: " + _refusals[^1] : paid == 0 ? "nothing paid (the purse, the stock or the pack: the lines above)" : "the item did not arrive";
+        FloorRefused.Add(Text($"{name} ({reason})"));
+        Log(Text($"gear floor: refused: {name} at {vendor.Name}: {reason}; check after: held {heldBefore} -> {heldAfter}, paid {paid}"));
+    }
+
+    /// <summary>
+    /// M6 2 b: the equip pass after the buys. The new and unread pieces appraised; the best caster wielded (<see cref="SwapBestCaster"/>: the other kept as the spare); then the self-equip's judge over every held piece, acted on: a
+    /// <see cref="SelfEquipKind.Wear"/> in its free slot, a <see cref="SelfEquipKind.Replace"/> (the worn piece off to the main pack, the better one on at its location), each with check, act, check per wield and ACE's coverage rule (the
+    /// judge's <see cref="SelfEquipJudge.FreeLocation"/>, Creature_Equipment.cs:50-58, 93-105 @95ef426d: the Pathwarden robe's 0x17F00 holds the head and the feet, so the sollerets stay in the pack). One summary line:
+    /// <c>equip pass: worn=&lt;n&gt; replaced=&lt;n&gt; casters=&lt;held&gt; refused=&lt;n&gt; (&lt;names&gt;)</c>. A Replace is not an upgrade for the loot's keep-aside (the lead's decision: the den's loot lines unchanged).
+    /// </summary>
+    internal IEnumerable<ActionHandle?> EquipPass(HuntingGround ground)
+    {
+        Stage = "equip";
+        var refusedFrom = 0; // M6 2 f (2-R2): the whole run's refusals, the gear phase's Replace and Wear among them (the counters worn= and replaced= are the run's too)
+        foreach (var h in AppraiseGear()) { yield return h; }
+
+        foreach (var h in LeatherSwapPass()) { yield return h; } // M6 item 14: once every piece of the leather set is held, the robe off and the set on, as one act
+
+        var skills = new QualitiesSkills(S.State.Self.Qualities);
+        var judge = Judge(ground);
+        var equipsBefore = SelfEquips;
+        foreach (var h in SwapBestCaster(ground, judge, skills)) { yield return h; }
+
+        EquipWorn += SelfEquips - equipsBefore;
+        judge = WithWearTerms(ground, judge, "the equip pass"); // M6 14 (m6-armour): her load read again after the sale
+        foreach (var candidate in HeldCandidates())
+        {
+            if (!S.State.Self.Inventory.Contains(candidate.Guid) || S.State.Self.Inventory.Find(candidate.Guid).Kind == InventoryPlaceKind.Equipped || (candidate.ItemType & SelfEquipJudge.CasterType) != 0)
+            {
+                continue; // a caster is the one pick's (above)
+            }
+
+            if (KeepUnread(candidate))
+            {
+                continue;
+            }
+
+            var worn = SelfEquipJudge.Worn(S.State);
+            var choice = judge.Judge(candidate, worn, skills);
+            if (choice.Kind is SelfEquipKind.Wear or SelfEquipKind.Replace && InCombatMode())
+            {
+                foreach (var h in EnterPeaceForSwap(choice)) { yield return h; }
+            }
+
+            if (choice.Kind is SelfEquipKind.Wear or SelfEquipKind.Replace && !WearInPeace(choice))
+            {
+                KeepForReview(candidate, "the swap waits for peace mode");
+            }
+            else if (choice.Kind == SelfEquipKind.Wear)
+            {
+                Log("equip pass: " + choice);
+                foreach (var h in WearChecked(choice)) { yield return h; }
+            }
+            else if (choice.Kind == SelfEquipKind.Replace)
+            {
+                Log("equip pass: " + choice);
+                foreach (var h in ReplaceChecked(choice, worn)) { yield return h; }
+            }
+            else if (choice.Kind == SelfEquipKind.Review && judge.Wear is not null)
+            {
+                Log("equip pass: " + choice);
+                KeepForReview(candidate, "the wear pick's review");
+            }
+        }
+
+        // The floor's robe: a plain robe scores no armour gain (the Faran Robe with Hood is armour level 0), so the judge never wears it; the floor bought it because the chest is bare, so it goes on in its free slot.
+        if (FloorPlan?.Lines.FirstOrDefault(l => l.Kind == GearFloorKind.Robe) is { } robeLine && GearFloor.ChestPiece(SelfEquipJudge.Worn(S.State)) is null
+            && HeldCandidates().FirstOrDefault(c => S.State.Objects.TryGet(c.Guid, out var o) && o.Weenie.WeenieClassId == robeLine.Wcid && S.State.Self.Inventory.Find(c.Guid).Kind != InventoryPlaceKind.Equipped) is { } robe)
+        {
+            if (SelfEquipJudge.FreeLocation(robe, SelfEquipJudge.Worn(S.State), out var blocker) is { } location)
+            {
+                foreach (var h in WearChecked(new SelfEquipChoice(SelfEquipKind.Wear, robe.Guid, robe.Name, location, 0, "the floor's robe: no chest-covering piece is worn"))) { yield return h; }
+            }
+            else
+            {
+                _equipRefused.Add(Text($"wear '{robe.Name}' ({blocker})"));
+                Log(Text($"equip pass: the floor's robe '{robe.Name}' 0x{robe.Guid:X8} cannot go on: {blocker}"));
+            }
+        }
+
+        // M6 7 AH: the floor's gauntlets, as the robe: the judge may score a pair no better than bare hands, but the floor bought them because no worn piece covers the hands, so they go on in their free slot (check before, the wear's own check after).
+        if (FloorPlan?.Lines.FirstOrDefault(l => l.Kind == GearFloorKind.Gauntlets) is { } glovesLine && !GearFloor.HandsCoveredBy(SelfEquipJudge.Worn(S.State))
+            && HeldCandidates().FirstOrDefault(c => S.State.Objects.TryGet(c.Guid, out var o) && o.Weenie.WeenieClassId == glovesLine.Wcid && S.State.Self.Inventory.Find(c.Guid).Kind != InventoryPlaceKind.Equipped) is { } gloves)
+        {
+            if (SelfEquipJudge.FreeLocation(gloves, SelfEquipJudge.Worn(S.State), out var blocker) is { } location)
+            {
+                foreach (var h in WearChecked(new SelfEquipChoice(SelfEquipKind.Wear, gloves.Guid, gloves.Name, location, 0, "the floor's gauntlets: no worn piece covers the hands"))) { yield return h; }
+            }
+            else
+            {
+                _equipRefused.Add(Text($"wear '{gloves.Name}' ({blocker})"));
+                Log(Text($"equip pass: the floor's gauntlets '{gloves.Name}' 0x{gloves.Guid:X8} cannot go on: {blocker}"));
+            }
+        }
+
+        if (FloorPlan?.Lines.Any(l => l.Kind == GearFloorKind.Gauntlets) == true)
+        {
+            Log(GearFloor.HandsCoveredBy(SelfEquipJudge.Worn(S.State)) ? "equip pass: check after: the hands are covered" : "equip pass: check after: the hands are still bare although the floor bought gauntlets (named: gauntlets-not-worn)");
+        }
+
+        if (!HeldCaster.Held(S.State) && _noCaster is null)
+        {
+            foreach (var h in RearmHands(judge, "the equip pass")) { yield return h; }
+        }
+
+        var refused = _equipRefused.Skip(refusedFrom).ToList();
+        EquipLine = Text($"equip pass: worn={EquipWorn} replaced={EquipReplaced} casters={GearFloor.CastersHeld(S.State)} refused={refused.Count} ({(refused.Count == 0 ? "none" : string.Join(", ", refused))})");
+        Log(EquipLine);
+    }
+
+    /// <summary>A Wear with check (held, not worn), act (the wield at its location), check (worn now); a refusal is named and the piece stays in its pack.</summary>
+    private IEnumerable<ActionHandle?> WearChecked(SelfEquipChoice choice)
+    {
+        if (!S.State.Self.Inventory.Contains(choice.Guid) || S.State.Self.Inventory.Find(choice.Guid).Kind == InventoryPlaceKind.Equipped)
+        {
+            Log(Text($"equip pass: wear '{choice.Name}' 0x{choice.Guid:X8}: check before failed: not held in a pack; nothing sent"));
+            yield break;
+        }
+
+        var numbersBefore = SelfNumbers();
+        var on = new WieldResult();
+        foreach (var h in Wardrobe.PutOn(S, new WieldRequest(choice.Guid) { Name = choice.Name, Location = choice.Location }, on)) { yield return h; } // M6 16 E5e1: the one wield routine
+        var ok = S.State.Self.Inventory.Find(choice.Guid).Kind == InventoryPlaceKind.Equipped;
+        Log(Text($"equip pass: wear '{choice.Name}' 0x{choice.Guid:X8} at 0x{choice.Location:X}: {on.Outcome(Describe)}; check after: {(ok ? "worn" : "not worn (refused)")}; her numbers before: {numbersBefore}; after: {SelfNumbers()}"));
+        if (ok)
+        {
+            EquipWorn++;
+            SelfEquips++;
+            PackTally.AddEquip();
+            yield break;
+        }
+
+        _equipRefused.Add(Text($"wear '{choice.Name}' ({on.Outcome(Describe)})"));
+    }
+
+    /// <summary>
+    /// A Replace with check (the worn piece still worn, a free main-pack slot to take it off into), act (the worn piece to the main pack), check (off), act (the better piece on at its location), check (worn); a refused wield is named and the
+    /// recovery puts the old piece back on at its location (checked and logged).
+    /// </summary>
+    private IEnumerable<ActionHandle?> ReplaceChecked(SelfEquipChoice choice, IReadOnlyList<WornPiece> worn)
+    {
+        // M6 14 (m6-armour): the wear pick may displace several pieces (a robe over a coat and leggings); each comes off checked, and a refused wield puts every one back
+        var guids = choice.Displaced.Count > 0 ? choice.Displaced : [choice.Replaces];
+        var olds = new List<WornPiece>();
+        foreach (var guid in guids)
+        {
+            var old = worn.FirstOrDefault(w => w.Guid == guid);
+            if (old is null || S.State.Self.Inventory.Find(guid).Kind != InventoryPlaceKind.Equipped)
+            {
+                Log(Text($"equip pass: replace with '{choice.Name}': check before failed: the worn piece 0x{guid:X8} is not worn; nothing sent"));
+                yield break;
+            }
+
+            olds.Add(old);
+        }
+
+        var names = string.Join(", ", olds.Select(o => $"'{o.Name}'"));
+        if (PackView.MainPackFree(S.State) < olds.Count)
+        {
+            _equipRefused.Add(Text($"replace {names} (no free main-pack slot)"));
+            Log(Text($"equip pass: replace {names} with '{choice.Name}': the main pack has {PackView.MainPackFree(S.State)} free slot(s) for {olds.Count} piece(s) to take off; nothing sent"));
+            yield break;
+        }
+
+        var numbersBefore = SelfNumbers();
+        // M6 16 E5e1: the one wield routine: the worn pieces come off first, each checked (a move to the main pack), then the piece goes on; one that stays on ends it, and what came off goes back
+        var on = new WieldResult();
+        var host = new WieldHost(VendorCounterHost.ClockUntil(S))
+        {
+            TookOff = (old, off, offOk) =>
+            {
+                Log(Text($"equip pass: replace: '{old.Name}' 0x{old.Guid:X8} off to the main pack (the pack rules decide it at the sale): {Describe(off)}; check: {(offOk ? "off" : "still worn")}"));
+                if (!offOk)
+                {
+                    _equipRefused.Add(Text($"take off '{old.Name}' ({Describe(off)})"));
+                }
+            },
+        };
+        foreach (var h in Wardrobe.PutOn(S, new WieldRequest(choice.Guid) { Name = choice.Name, Location = choice.Location, TakeOff = [.. olds.Select(o => new WieldBlocker(o.Guid, o.Name) { Into = S.State.Self.Guid })] }, on, host)) { yield return h; }
+
+        var offDone = olds.Take(on.TakenOff.Count).ToList();
+        if (on.Refusal == Wardrobe.Blocked)
+        {
+            foreach (var h in PutBack(offDone)) { yield return h; }
+            yield break;
+        }
+        var ok = S.State.Self.Inventory.Find(choice.Guid).Kind == InventoryPlaceKind.Equipped;
+        Log(Text($"equip pass: replace: '{choice.Name}' 0x{choice.Guid:X8} on at 0x{choice.Location:X}: {on.Outcome(Describe)}; check after: {(ok ? "worn" : "not worn (refused)")}; her numbers before: {numbersBefore}; after: {SelfNumbers()}"));
+        if (ok)
+        {
+            EquipReplaced++;
+            SelfEquips++;
+            PackTally.AddEquip();
+            yield break;
+        }
+
+        _equipRefused.Add(Text($"replace with '{choice.Name}' ({on.Outcome(Describe)})"));
+        foreach (var h in PutBack(offDone)) { yield return h; }
+    }
+
+    /// <summary>The recovery of a failed replace: every piece taken off goes back on at its location, each checked and logged.</summary>
+    private IEnumerable<ActionHandle?> PutBack(IReadOnlyList<WornPiece> pieces)
+    {
+        foreach (var old in pieces)
+        {
+            var back = new WieldResult();
+            foreach (var h in Wardrobe.PutOn(S, new WieldRequest(old.Guid) { Name = old.Name, Location = old.Location }, back)) { yield return h; } // M6 16 E5e1: the one wield routine
+            var backOk = S.State.Self.Inventory.Find(old.Guid).Kind == InventoryPlaceKind.Equipped;
+            Log(Text($"equip pass: recovery: '{old.Name}' 0x{old.Guid:X8} back on at 0x{old.Location:X}: {back.Outcome(Describe)}; check: {(backOk ? "worn again" : "NOT worn: the parts it covered are bare")}"));
+        }
+    }
+
+    /// <summary>
+    /// M6 14 (<c>m6-armour</c>): <paramref name="judge"/> with the wear pick's terms of her now (<see cref="WearTerms"/>): the ladder's weights, the caster terms, the ground's Magic Defense, the rung's hitter and gate lines, her capacity and
+    /// kept load, the ground's jumps; logged with <paramref name="where"/>.
+    /// </summary>
+    private SelfEquipJudge WithWearTerms(HuntingGround ground, SelfEquipJudge judge, string where)
+    {
+        var withWear = Wardrobe.For(S.State).WithWearTerms(ground, judge, () => ReadBook(ground), keptBurden: true, out var terms); // M6 16 Q10c: the terms are the wardrobe's; this trip's read-only sale context is the one they ask
+        Log(Text($"gear: wear pick ({where}): {terms}"));
+        Context.Facts.WearJudge = withWear; // M6 14 (m6-lore-spend): the experience spend's Arcane Lore rule judges her held pieces with this pick between visits
+        return withWear;
+    }
+
+    /// <summary>M6 16 Q10c: the wardrobe's (<see cref="Wardrobe.StaysInPackWhenOff"/>) over this trip's read-only sale context; the tests ask it here.</summary>
+    internal Func<WornPiece, bool> StaysInPackWhenOff(HuntingGround ground) => Wardrobe.For(S.State).StaysInPackWhenOff(() => ReadBook(ground));
+
+    /// <summary>M6 16 Q10c: the wardrobe's (<see cref="Wardrobe.KeptBurden"/>) over this trip's read-only sale context; the tests ask it here.</summary>
+    internal int? KeptBurden(HuntingGround ground, int burden) => Wardrobe.For(S.State).KeptBurden(ground, burden, () => ReadBook(ground));
+
+    /// <summary>
+    /// M6 14 (the owner, 2026-11-15: keep Blackmoor's Favor active): check, act, check for each eternal gem she holds (<see cref="SelfBuffGems"/>): its spell's time left on her (her registry); under
+    /// <see cref="SelfBuffGems.RefreshUnderSeconds"/> or absent, she uses the gem (a player's double click in the pack) and the line after reads the spell again; each named.
+    /// </summary>
+    private IEnumerable<ActionHandle?> KeepGemBuffs()
+    {
+        foreach (var gem in SelfBuffGems.All)
+        {
+            var guid = HeldOf(gem.Wcid).FirstOrDefault();
+            if (guid == 0)
+            {
+                continue;
+            }
+
+            var left = GemLeft(gem.SpellId);
+            if (left is { } l && l >= SelfBuffGems.RefreshUnderSeconds)
+            {
+                Log(string.Create(CultureInfo.InvariantCulture, $"gem: {gem.Name} 0x{guid:X8}: its spell has {l / 3600:0.#} h left (refreshed under {SelfBuffGems.RefreshUnderSeconds / 3600:0} h): not used"));
+                continue;
+            }
+
+            var before = left is { } t ? string.Create(CultureInfo.InvariantCulture, $"has {t / 60:0} min left") : "is not on her";
+            Log(string.Create(CultureInfo.InvariantCulture, $"gem: {gem.Name} 0x{guid:X8}: check before: its spell {before}: using the gem"));
+            var use = S.Actions.Use(guid, ActionSource.Automation);
+            foreach (var h in Until(() => use.IsCompleted && GemLeft(gem.SpellId) is > SelfBuffGems.RefreshUnderSeconds, 5)) { yield return h; }
+
+            var after = GemLeft(gem.SpellId);
+            var afterText = after is { } a ? string.Create(CultureInfo.InvariantCulture, $"has {a / 60:0} min left") : "is not on her";
+            Log(after is > SelfBuffGems.RefreshUnderSeconds
+                ? string.Create(CultureInfo.InvariantCulture, $"gem: {gem.Name}: check after: its spell is on her, {after.Value / 3600:0.#} h left ({Describe(use)})")
+                : string.Create(CultureInfo.InvariantCulture, $"gem: {gem.Name}: FAILED: check after: its spell {afterText} after the use ({Describe(use)}): the next visit tries again"));
+        }
+    }
+
+    /// <summary>The seconds left of <paramref name="spellId"/> on her (the longest of its entries), or null when it is not on her.</summary>
+    private double? GemLeft(uint spellId)
+    {
+        double? left = null;
+        var active = S.State.Self.Qualities.ActiveEnchantments;
+        if (active.IsDefaultOrEmpty)
+        {
+            return null;
+        }
+
+        var now = S.Clock.Now;
+        foreach (var e in active)
+        {
+            var r = e.RemainingSeconds(now);
+            if (e.Enchantment.SpellId == spellId && r > 0 && (left is null || r > left))
+            {
+                left = r;
+            }
+        }
+
+        return left;
+    }
+
+    /// <summary>True while the server last said a combat mode (melee, missile or magic), not peace.</summary>
+    private bool InCombatMode() => S.State.Self.Qualities.CombatMode is CombatModes.Melee or CombatModes.Missile or CombatModes.Magic;
+
+    /// <summary>
+    /// M6 14 (live 2026-11-14: the Fire Sceptre's swap waited two visits in a row in the magic mode): the act between a swap's checks: the station, at home and in a safe moment, asks peace for the swap itself and logs the
+    /// server's answer; the caller reads the mode again (check after) and waits for the next visit only when peace did not land.
+    /// </summary>
+    private IEnumerable<ActionHandle?> EnterPeaceForSwap(SelfEquipChoice choice)
+    {
+        Log(Text($"gear: the combat mode is {S.State.Self.Qualities.CombatMode}: setting peace for the swap of '{choice.Name}' 0x{choice.Guid:X8}"));
+        var peace = S.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Automation);
+        yield return peace;
+        Log(Text($"gear: peace for the swap: {Describe(peace)}; the mode is {S.State.Self.Qualities.CombatMode} now"));
+    }
+
+    /// <summary>M6 14 (<c>m6-armour</c>): check before a wearable swap: peace mode (the mode the server last said), as retail's player swaps at a safe point; false, logged, in a combat mode.</summary>
+    private bool WearInPeace(SelfEquipChoice choice)
+    {
+        if (S.State.Self.Qualities.CombatMode is CombatModes.Melee or CombatModes.Missile or CombatModes.Magic)
+        {
+            Log(Text($"gear: no swap: the combat mode is {S.State.Self.Qualities.CombatMode}, not peace: '{choice.Name}' 0x{choice.Guid:X8} waits for the next visit"));
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>M6 14 (<c>m6-armour</c>): her numbers a worn piece's cantrips move, read from the state: War, Life, Creature and Item, Mana Conversion, Arcane Lore, the maximum mana and health, the burden.</summary>
+    private string SelfNumbers()
+    {
+        var skills = new QualitiesSkills(S.State.Self.Qualities);
+        string N(int? v) => v?.ToString(CultureInfo.InvariantCulture) ?? "unread";
+        return Text($"War Magic {N(skills.Current(MageTemplate.WarMagic))}, Life {N(skills.Current(MageTemplate.LifeMagic))}, Creature {N(skills.Current(MageTemplate.CreatureEnchantment))}, Item {N(skills.Current(MageTemplate.ItemEnchantment))}, Mana Conversion {N(skills.Current(MageTemplate.ManaConversion))}, Arcane Lore {N(skills.Current(MageTemplate.ArcaneLore))}, max mana {N(skills.VitalMax(5))}, max health {N(skills.VitalMax(1))}, burden {N(S.State.Self.Inventory.Burden)}");
+    }
+
+    /// <summary>
+    /// M6 14 (<c>m6-armour</c>, not sold blind): a held armour, clothing or jewellery piece with no appraisal (past the visit's cap of <see cref="GearAppraisalCap"/>) is kept for the next visit's review, never offered unread; true when kept.
+    /// </summary>
+    private bool KeepUnread(GearCandidate candidate)
+    {
+        if (candidate.Appraisal is { IsNotFound: false } || GearScore.SlotOf(candidate.ItemType, candidate.Coverage, candidate.ValidLocations) is not (GearSlot.Armour or GearSlot.Jewellery))
+        {
+            return false;
+        }
+
+        KeepForReview(candidate, "not appraised this visit: not sold blind");
+        return true;
+    }
+
+    /// <summary>M6 14 (<c>m6-armour</c>): keeps <paramref name="candidate"/> from the sale until the next visit's gear phase reviews it (<see cref="PackMemory.WearReview"/>), logged with <paramref name="why"/>.</summary>
+    private void KeepForReview(GearCandidate candidate, string why)
+    {
+        if (PackMemory.Shared.WearReview.Add(candidate.Guid))
+        {
+            _memory.KeptAside.Add(candidate.Guid);
+            Log(Text($"gear: wear pick: '{candidate.Name}' 0x{candidate.Guid:X8} kept for the review at the next visit ({why}): pack rule gear-review"));
+        }
+    }
+
+    /// <summary>M6 14 (<c>m6-armour</c>): at the gear phase's start the pieces kept at the last visit are released to this visit's review (worn, kept again, or sold by the pack rules).</summary>
+    private void ReleaseWearReview()
+    {
+        if (PackMemory.Shared.WearReview.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var guid in PackMemory.Shared.WearReview)
+        {
+            _memory.KeptAside.Remove(guid);
+            PackMemory.Shared.Interesting.Remove(guid);
+        }
+
+        Log(Text($"gear: wear pick: {PackMemory.Shared.WearReview.Count} piece(s) kept at the last visit are reviewed again now"));
+        PackMemory.Shared.WearReview.Clear();
+    }
 }

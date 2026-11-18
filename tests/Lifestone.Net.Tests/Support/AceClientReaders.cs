@@ -281,6 +281,19 @@ internal static class AceClientReaders
         }
     }
 
+    /// <summary>0x0032 TalkDirect (<c>GameActionTalkDirect.cs:18-19</c>, @95ef426d): the message by UTF-8 characters, then the target's id.</summary>
+    public static (uint Sequence, string Text, uint Target, int Unread) ReadTalkDirect(byte[] message)
+    {
+        var (sequence, actionType, reader) = ReadGameAction(message);
+        using (reader)
+        {
+            ExpectAction(actionType, 0x0032);
+            var text = ReadString16L(reader);
+            var target = reader.ReadUInt32();
+            return (sequence, text, target, Unread(reader));
+        }
+    }
+
     /// <summary>ACE's <c>BinaryReader.Align</c>: skips to a multiple of 4 from the message's start.</summary>
     private static void AlignFromStart(BinaryReader reader) =>
         reader.BaseStream.Position += (4 - (reader.BaseStream.Position & 3)) & 3;

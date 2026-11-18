@@ -51,6 +51,12 @@ public sealed class ArmourBuffLedger
 
     private static readonly ConditionalWeakTable<GameState, ArmourBuffLedger> PerSession = new();
 
+    /// <summary>M6 7 AN: the lines a climber's pass left missing at its mana limit: not counted due until <see cref="PassLeftUntil"/>, so the upkeep does not stop the fight for them at once.</summary>
+    public HashSet<string> PassLeft { get; } = [];
+
+    /// <summary>M6 7 AN: the session clock at which <see cref="PassLeft"/> counts as due again.</summary>
+    public double PassLeftUntil { get; set; } = double.NegativeInfinity;
+
     private readonly Dictionary<uint, Dictionary<string, ArmourEntry>> _pieces = [];
     private readonly List<uint> _scratch = [];
 
@@ -166,11 +172,54 @@ public sealed class ArmourBuffLedger
     /// <param name="piece">The piece's guid.</param>
     public void Forget(uint piece) => _pieces.Remove(piece);
 
+    /// <summary>
+    /// M6 14 (live 2026-11-16 00:35-01:28 UTC): the worn pieces a self-cast armour line passed over while it named the others, learned not enchantable by ACE's rule (IsEnchantable, ResistMagic 9999: every cloak) from
+    /// ACE's own cast lines (<see cref="BuffCycle"/>), shared by every buff cycle of the session (the fight's refresh learned a Chevron Cloak while the ladder's gate read, another cycle, still counted it). A piece taken
+    /// off is forgotten (<see cref="Prune"/>).
+    /// </summary>
+    public HashSet<uint> NotEnchanted { get; } = [];
+
+    /// <summary>The self-cast armour casts that passed over each worn piece while they named others (see <see cref="NotEnchanted"/>).</summary>
+    public Dictionary<uint, int> SilentCasts { get; } = [];
+
+    private void ForgetLearnedTakenOff(ReadOnlySpan<uint> worn)
+    {
+        _scratch.Clear();
+        foreach (var piece in NotEnchanted)
+        {
+            if (!worn.Contains(piece))
+            {
+                _scratch.Add(piece);
+            }
+        }
+
+        foreach (var piece in SilentCasts.Keys)
+        {
+            if (!worn.Contains(piece))
+            {
+                _scratch.Add(piece);
+            }
+        }
+
+        foreach (var piece in _scratch)
+        {
+            NotEnchanted.Remove(piece);
+            SilentCasts.Remove(piece);
+        }
+
+        _scratch.Clear();
+    }
+
     /// <summary>Forgets every piece that is not in <paramref name="worn"/> (what the player still wears), so a piece taken off loses its lines.</summary>
     /// <param name="worn">The guids of everything equipped.</param>
     /// <returns>The number of pieces forgotten.</returns>
     public int Prune(ReadOnlySpan<uint> worn)
     {
+        if (NotEnchanted.Count > 0 || SilentCasts.Count > 0)
+        {
+            ForgetLearnedTakenOff(worn);
+        }
+
         if (_pieces.Count == 0)
         {
             return 0;

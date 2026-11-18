@@ -16,7 +16,7 @@ namespace Lifestone.Client.Tests.Session;
 internal readonly record struct Piece(uint Guid, string Name, uint ItemType, sbyte? CombatUse, EquipMask Slot, bool Present = true);
 
 /// <summary>
-/// One wielded setup and what is true of it (M4 3.1 g): whether melee, magic and missile fit it by the owner's rule (<see cref="CombatModeGuard"/>), and the mode the toolbar's
+/// One wielded setup and what is true of it (M4 3.1 g): whether melee, magic and missile fit it by the combat-mode rule (<see cref="CombatModeGuard"/>), and the mode the toolbar's
 /// <c>GetDefaultCombatMode</c> picks from peace.
 /// </summary>
 internal sealed record WieldedCase(string Name, Piece[] Pieces, bool Melee, bool Magic, bool Missile, CombatMode Pick)

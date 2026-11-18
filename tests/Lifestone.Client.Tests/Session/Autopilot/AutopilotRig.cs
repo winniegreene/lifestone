@@ -4,6 +4,7 @@ using Lifestone.Client.Session.Autopilot;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Mage;
+using Lifestone.Client.Session.Quests;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Session.Scenarios.Journey;
 using Lifestone.Client.Tests.Session.Journey;
@@ -24,7 +25,7 @@ internal static class AutopilotRig
     public const string Den = "black-spawn-den-aluvian";
     public const string Temple = "tusker-temple-fort-tethana";
     public const double KillSeconds = 2;
-    public static readonly string[] CycleNames = ["n", "state", "why", .. AutopilotTally.FieldNames, "s"];
+    public static readonly string[] CycleNames = ["n", "state", "why", .. AutopilotTally.FieldNames, "casters", "s"]; // M6 2 e: casters= is a state read between the tally and s=, not a tally field
     public static readonly string[] DoneNames = ["ok", "cycles", "stop", .. AutopilotTally.FieldNames, "s"];
 
     /// <summary>A scripted station run: <see cref="Body"/> is stepped until it returns a status.</summary>
@@ -43,7 +44,10 @@ internal static class AutopilotRig
 
         public long Unmatched => 0;
 
-        public bool Ok => _status == ScenarioStatus.Succeeded;
+        public bool Ok => _status == ScenarioStatus.Succeeded && !VerdictFails;
+
+        /// <summary>M6 7 U: the run ends Succeeded and its verdict is false (the autopilot's <c>why=verdict</c>).</summary>
+        public bool VerdictFails { get; init; }
 
         public ScenarioStatus Step(IGameSessionView session, double now)
         {
@@ -145,6 +149,11 @@ internal static class AutopilotRig
         /// <summary>M5 7 F14: the scripted recall home is refused with 0x049E until a scripted bind station has tied (a mage bound to no lifestone); false: the recall always lands.</summary>
         public bool RefuseRecallUntilBound { get; set; }
 
+        /// <summary>M6 7 AV: the first scripted recall home is refused for a missing component (0x0400), as the real station is: it sets the journey's fact (<see cref="JourneyFacts.LifestoneRecallUnavailable"/>) and fails.</summary>
+        public bool RefuseRecallComponents { get; set; }
+
+        private bool RecallRefusedOnce { get; set; }
+
         /// <summary>M5 7 F14: the scripted bind station succeeds but ties nothing and leaves the mage where it stands (the recall is refused again after it).</summary>
         public bool BindTiesNothing { get; set; }
 
@@ -153,6 +162,18 @@ internal static class AutopilotRig
 
         /// <summary>True once a scripted bind station tied the lifestone.</summary>
         public bool Bound { get; private set; }
+
+        /// <summary>M6 item 14: how many scripted bind stations bound (each is a walk to the lifestone a start paid for).</summary>
+        public int BindStations { get; private set; }
+
+        /// <summary>M6 item 14: the scripted bind station records the lifestone it used in the journey's facts, as the real one does at the server's "attuned your spirit" (false: it says bound=yes and records no point).</summary>
+        public bool BindRecordsPoint { get; set; } = true;
+
+        /// <summary>M6 item 14: the lifestone the scripted bind station says it used (null: the ground's home lifestone).</summary>
+        public (uint Cell, Vector3 At)? BindAt { get; set; }
+
+        /// <summary>M6 item 14: the scripted bind station's <c>tied=</c> field (<c>yes</c>, <c>skipped</c>, <c>no</c>).</summary>
+        public string BindTied { get; set; } = "yes";
 
         /// <summary>M5 7 F23: wraps each scripted fight made (a test gives it a buff refresh of its own), or null.</summary>
         public Func<ScriptedFight, IStationRun>? WrapFight { get; set; }
@@ -217,10 +238,11 @@ internal static class AutopilotRig
                 StationKinds.DenTravel => new Station(spec.Name, StationNeeds.None, c => RefusePortalRecall
                     ? new ScriptedRun(spec.Name, _ => { c.Facts.SetPortalTie(g.Key, PortalTie.Untied); return ScenarioStatus.Failed; }, () => "den=none portal_tied=no") { Failure = "den-travel: Primary Portal Recall refused: YouMustLinkToPortalToRecall 0x04A3; travel:ground:untied" }
                     : new ScriptedRun(spec.Name, _ => Stand(arrival.CellId, arrival.Local), () => "route=recall")),
+                StationKinds.RecallHome when RefuseRecallComponents && !RecallRefusedOnce => new Station(spec.Name, StationNeeds.None, c => new ScriptedRun(spec.Name, _ => { RecallRefusedOnce = true; c.Facts.LifestoneRecallUnavailable = true; return ScenarioStatus.Failed; }, () => "recalls=0 recall_why=recall:cast") { Failure = "recall-home: recall:cast: ServerError (code 0x400) YouDontHaveAllTheComponents 0x0400: the server refused the cast" }),
                 StationKinds.RecallHome => new Station(spec.Name, StationNeeds.None, _ => RefuseRecallUntilBound && !Bound
                     ? new ScriptedRun(spec.Name, _ => ScenarioStatus.Failed, () => "recalls=0") { Failure = "recall-home: recall: cast: ACE refused: YouMustLinkToLifestoneToRecall 0x049E (the character is bound to no lifestone)" }
                     : new ScriptedRun(spec.Name, _ => Stand(g.Home.LifestoneCell, g.Home.LifestonePoint), () => "recalls=1")),
-                StationKinds.Bind => new Station(spec.Name, StationNeeds.None, _ => new ScriptedRun(
+                StationKinds.Bind => new Station(spec.Name, StationNeeds.None, c => new ScriptedRun(
                     spec.Name,
                     _ =>
                     {
@@ -230,9 +252,17 @@ internal static class AutopilotRig
                         }
 
                         Bound = true;
+                        BindStations++;
+                        if (BindRecordsPoint)
+                        {
+                            // M6 item 14: as the real station does at "attuned your spirit": the lifestone the Use was confirmed at (JourneyFacts.BoundAt), which the autopilot keeps as the bind's proof
+                            c.Facts.Bound = true;
+                            c.Facts.BoundAt = new Lifestone.Data.World.CellFrame(BindAt?.Cell ?? g.Home.LifestoneCell, new Lifestone.Data.Animation.AcFrame(BindAt?.At ?? g.Home.LifestonePoint, Quaternion.Identity));
+                        }
+
                         return Stand(g.Home.LifestoneCell, g.Home.LifestonePoint);
                     },
-                    () => "bound=yes tied=yes")),
+                    () => "bound=yes tied=" + BindTied)),
                 StationKinds.DenFight => new Station(spec.Name, FightNeeds ?? StationNeeds.None, _ => WrapFight is { } wrap ? wrap(Made_Fight(new ScriptedFight(onKill))) : Made_Fight(new ScriptedFight(onKill))),
                 StationKinds.Death => new Station(spec.Name, deathNeeds ?? new StationNeeds(StationWhere.Den), _ => new ScriptedRun(
                     spec.Name,
@@ -263,7 +293,7 @@ internal static class AutopilotRig
             return fight;
         }
 
-        private ScenarioStatus? Died()
+        internal ScenarioStatus? Died()
         {
             trip.Vendor.H.R.Bus.Publish(new PlayerDied("You have been slain by a scripted blow!", 0, DeathNoticeSource.VictimNotification)); // the station's own death: not an unscripted one
             return null;
@@ -289,10 +319,10 @@ internal static class AutopilotRig
         /// <summary>The pack a login delivers after a <see cref="LeaveWorld"/> (null: the world's own <c>held</c>): a test that cuts a trip after its purchases says the pack is full again.</summary>
         public Func<StockLine, int>? HeldAfterRelogin { get; set; }
 
-        public ApWorld(string key, ITestOutputHelper output, Func<StockLine, int>? held = null, bool atHome = true, Action<ApWorld, int>? onKill = null, StationNeeds? deathNeeds = null)
+        public ApWorld(string key, ITestOutputHelper output, Func<StockLine, int>? held = null, bool atHome = true, Action<ApWorld, int>? onKill = null, StationNeeds? deathNeeds = null, int sidePacks = 0)
         {
             _held = held;
-            Trip = new LogisticsStationTests.Trip(key, held: held, inGround: !atHome).WithOutput(output);
+            Trip = new LogisticsStationTests.Trip(key, held: held, inGround: !atHome, sidePacks: sidePacks).WithOutput(output);
             Factory = new Factory(Trip, onKill is null ? null : k => onKill(this, k), deathNeeds);
             Output = output;
         }
@@ -314,12 +344,38 @@ internal static class AutopilotRig
         /// <summary>M5 7 audit: sets the journey's facts of each context made (a bind or a portal tie already proven this session), or null.</summary>
         public Action<JourneyContext>? Prime { get; set; }
 
-        public AutopilotScenario Autopilot(AutopilotOptions options, IAutopilotCheckpointStore? store = null, IAutopilotSession? host = null, AutopilotSeed? seed = null)
+        /// <summary>M6 6 MB: the character's quest timers every context made shares (as the host's file-backed ones do across a hand-back), or null: each context keeps its own in memory.</summary>
+        public QuestTimers? Quests { get; set; }
+
+        /// <summary>A journey context of this world (<see cref="LogisticsStationTests.Trip.Context"/>, with <see cref="Quests"/> when set), primed.</summary>
+        public JourneyContext Context()
         {
-            var context = Trip.Context();
-            Prime?.Invoke(context);
-            return new(options, Factory, context, store, host, seed);
+            var c = Trip.Context();
+            if (Quests is { } quests)
+            {
+                c = new JourneyContext { Character = c.Character, Account = c.Account, Log = c.Log, Travel = c.Travel, Spells = c.Spells, Dungeon = c.Dungeon, Quests = quests };
+            }
+
+            if (KeeperMaker is not null || Spells is not null)
+            {
+                var spells = Spells ?? c.Spells;
+                c = new JourneyContext { Character = c.Character, Account = c.Account, Log = c.Log, Travel = c.Travel, Spells = spells, Dungeon = c.Dungeon, Quests = c.Quests, Keeper = KeeperMaker?.Invoke(c) };
+            }
+
+            Prime?.Invoke(c);
+            return c;
         }
+
+        public AutopilotScenario Autopilot(AutopilotOptions options, IAutopilotCheckpointStore? store = null, IAutopilotSession? host = null, AutopilotSeed? seed = null) => new(options, Factory, Context(), store, host, seed) { MinStintSeconds = MinStintSeconds };
+
+        /// <summary>M6 14 T: the minimum fight stint of the autopilots this world makes (<see cref="TripStint"/>). 0 here: the scripted world's fights last seconds, and each test is about the trigger it names; the stint's own tests set it (<c>AutopilotTripStintTests</c>).</summary>
+        public double MinStintSeconds { get; set; }
+
+        /// <summary>M6 7 BD: the context's spell table (the scripted world has an empty one by default).</summary>
+        public IReadOnlyDictionary<uint, Lifestone.Data.Magic.SpellInfo>? Spells { get; set; }
+
+        /// <summary>M6 7 BD: makes the context's vitals keeper (the scripted world has none by default: the phases go straight to the peace).</summary>
+        public Func<JourneyContext, Lifestone.Client.Session.Vitals.VitalsKeeper>? KeeperMaker { get; set; }
 
         /// <summary>M5 7 audit: the pack holds the ground's kit lines (each to its count) and the mage's four foci, as the build leaves them.</summary>
         public void OwnKit()

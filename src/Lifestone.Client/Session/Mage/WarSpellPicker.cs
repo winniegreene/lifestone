@@ -47,6 +47,21 @@ public static class WarSpellData
     private const double ArcSpeed = 40;
     private const double RingSpeed = 2;
 
+    /// <summary>
+    /// M6 14 the element line: the bolt line of each war element (the keys of <c>SpellPlan.BoltLineNames</c>), its spell ids I to VI, VII, VIII: the Flame Bolt's are the list's first rows (the profile's line, <c>ArenaProfile</c>), the
+    /// others the ids of M6 1 f's read (<see cref="OtherBolts"/>). Declared before <see cref="Rows"/>, whose initializer reads it. The fight casts, at each target, the line of these that hits it hardest (<see cref="BoltElement.Best"/>).
+    /// </summary>
+    public static IReadOnlyDictionary<string, IReadOnlyList<uint>> BoltLineIds { get; } = new Dictionary<string, IReadOnlyList<uint>>(StringComparer.Ordinal)
+    {
+        ["fire"] = [27, 81, 82, 83, 84, 85, 2128, 4439], // Flame Bolt; VII Ilservian's Flame
+        ["cold"] = [28, 70, 71, 72, 73, 74, 2136, 4447], // Frost Bolt; VII Icy Torment
+        ["electric"] = [75, 76, 77, 78, 79, 80, 2140, 4451], // Lightning Bolt; VII Alset's Coil
+        ["acid"] = [58, 59, 60, 61, 62, 63, 2122, 4433], // Acid Stream; VII Disintegration
+        ["bludgeon"] = [64, 65, 66, 67, 68, 69, 2144, 4455], // Shock Wave; VII Crushing Shame
+        ["slash"] = [92, 93, 94, 95, 96, 97, 2146, 4457], // Whirling Blade; VII Evisceration
+        ["pierce"] = [86, 87, 88, 89, 90, 91, 2132, 4443], // Force Bolt; VII The Spike
+    };
+
     /// <summary>The rows: bolt, streak, arc, volley, blast and the ring.</summary>
     public static IReadOnlyList<WarSpellRow> Rows { get; } =
     [
@@ -61,7 +76,31 @@ public static class WarSpellData
         new(3662, WarKind.Blast, 1, 11, 10, 3, BoltSpeed), new(115, WarKind.Blast, 3, 15, 16, 3, BoltSpeed), new(116, WarKind.Blast, 4, 20, 20, 3, BoltSpeed), new(117, WarKind.Blast, 5, 26, 26, 3, BoltSpeed),
         new(118, WarKind.Blast, 6, 34, 35, 3, BoltSpeed), new(2127, WarKind.Blast, 7, 42, 42, 5, BoltSpeed), new(4438, WarKind.Blast, 8, 47, 47, 5, BoltSpeed),
         new(1785, WarKind.Ring, 6, 42, 42, 9, RingSpeed),
+        .. OtherBolts(),
     ];
+
+    /// <summary>
+    /// M6 1 f (<c>m5-war-pick-data</c> closed for every element): the bolt line of each other element, I to VIII, so the war picks build whatever element a ground's rung names. The pinned world SQL v0.9.296 read offline:
+    /// <c>SELECT id, name, base_Intensity, variance, num_Projectiles, wcid FROM spell</c> for the seven bolt lines gives every element the Flame Bolt's numbers level by level (16+15, 26+26, 42+42, 52+53, 68+68, 84+84, 115+74, 142+62;
+    /// one projectile), and <c>weenie_properties_float</c> type 26 (MaximumVelocity, read by <c>GetProjectileSpeed</c>, WorldObject_Magic.cs:1898-1921) is 15 for each projectile weenie (1499 fire, 1503 frost, 1633 acid,
+    /// 1634 Shock Wave (bludgeoning), 1635 lightning, 1636 Whirling Blade, 1667 Force Bolt). Ids in the order I to VI, VII, VIII.
+    /// </summary>
+    private static IEnumerable<WarSpellRow> OtherBolts()
+    {
+        (int Base, int Variance)[] damage = [(16, 15), (26, 26), (42, 42), (52, 53), (68, 68), (84, 84), (115, 74), (142, 62)];
+        foreach (var (element, line) in BoltLineIds)
+        {
+            if (element == "fire")
+            {
+                continue; // the Flame Bolt rows are the list's first
+            }
+
+            for (var i = 0; i < line.Count; i++)
+            {
+                yield return new WarSpellRow(line[i], WarKind.Bolt, i + 1, damage[i].Base, damage[i].Variance, 1, BoltSpeed);
+            }
+        }
+    }
 
     private static readonly Dictionary<uint, WarSpellRow> ById = Rows.ToDictionary(r => r.Id);
 
@@ -652,7 +691,10 @@ public sealed class WarPicks(WarSpellPicker picker, ILogSink log, string categor
         var index = picker.Choose(_options, targets, in mage, out var seconds, out var boltSeconds, out var missing);
         if (missing != WarSpellPicker.Unusable.None)
         {
-            NoteOnce($"TODO(m5-war-pick-data): the bolt's seconds could not be worked out ({missing}); the bolt stays");
+            // M6 1 f (m5-war-pick-data closed): every reason but the health is a fact of the moment, not an unknown; the unknown health is f10-picker-data's (the fight asks it of the server by an appraisal).
+            NoteOnce(missing == WarSpellPicker.Unusable.HealthUnknown
+                ? "TODO(f10-picker-data): the war pick has no target maximum health (no ground row, no appraisal answer); the bolt stays"
+                : $"war pick: the bolt's seconds could not be worked out ({missing}); the bolt stays");
             Count(0);
             return null;
         }

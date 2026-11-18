@@ -44,6 +44,7 @@ public static partial class OptionCatalog
         // adds its options together with their parser.
         Session(),
         Headless(),
+        WorldWalk(), // the world walk's options (OptionCatalog.WorldWalk.cs)
         PortalSpace(),
         Audio(),
         RetailUi(),
@@ -119,7 +120,7 @@ public static partial class OptionCatalog
     public static OptionGroup Core() => new("Core", "every scene",
     [
         new("--help", null, "Print every option and quit (also the headless host's, which lists its own options only).", OptionRole.Help, AlsoIn: OptionScenes.Headless),
-        new("--dat-dir", "DIR", "Retail dat folder (else LIFESTONE_DAT_DIR, else the client folder of the Lifestone checkout, next to Lifestone.slnx; also the headless host's).", AlsoIn: OptionScenes.Headless),
+        new("--dat-dir", "DIR", "Retail dat folder (else LIFESTONE_DAT_DIR, else the client folder of the Lifestone checkout, next to Lifestone.slnx; also the headless host's and the world walk's).", AlsoIn: OptionScenes.Headless | OptionScenes.WorldWalk),
         new("--log-level", "debug|info|warning|error", "Minimum log level (default info; also the headless host's).", AlsoIn: OptionScenes.Headless),
         new("--screenshot", "PATH", "Save a PNG once the scene is ready (main scene: the place complete - streaming, objects, the interiors' cells - then --frames frames and at least 2 s, so living statics' flames and smoke show, as in the golden viewpoints), then quit. Relative paths are taken from the repository root; never inside src/ or tests/. Also the spell viewer's and the terrain preview's.", OptionRole.EndsRun),
         new("--frames", "N", "Frames rendered before --screenshot (default 30; the main scene also waits at least 2 s; also the spell viewer's and the terrain preview's)."),

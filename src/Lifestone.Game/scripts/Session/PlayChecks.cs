@@ -102,7 +102,7 @@ public sealed partial class PlayChecks : Node
     /// run in the run's second session): <c>HealItems</c> announces a Handy Healing Kit and five Potions of Healing in the pack (<c>Visit</c> keeps its own pack: the other rows count it), the player STARTS with partial
     /// health from the synthetic description (<c>Recorded = null</c>: a recorded character's description may be full-health, or list Healing untrained; <c>VitalUpdates</c> empty: no later update makes it 41), and the
     /// rest of <c>Visit</c> stays. <c>TODO(m4-standin-start-vitals)</c>: the starting health is a placeholder of the rows, not a character's; the visit logs it once when it starts (<see cref="StandInVisit.StartVitalsPlaceholder"/>).
-    /// <para><b>Seam note for the owners of <see cref="Visit"/> and of rows in the run's second session</b> (M4 3.1 fix, review R24): every row that runs after the reconnect (the reconnect rows, the silent-server row, the heal rows) runs on THIS visit, a synthetic
+    /// <para><b>Seam note for whoever owns <see cref="Visit"/> and of rows in the run's second session</b> (M4 3.1 fix, review R24): every row that runs after the reconnect (the reconnect rows, the silent-server row, the heal rows) runs on THIS visit, a synthetic
     /// description with 5 health and the kit and potions, not on the machine's recorded character, and the visible window shows a 5-health player. A row that needs the recorded character or a full vital belongs in the first session.</para>
     /// </summary>
     public static StandInVisit ReplayVisit { get; } = Visit with
@@ -628,7 +628,7 @@ public sealed partial class PlayChecks : Node
     private static string SoundedText(SoundHookRouter? router, int? count) => router is { CountsSounded: true } && count is { } n ? n.ToString(System.Globalization.CultureInfo.InvariantCulture) : "n/a";
 
     /// <summary>
-    /// Review frames of the shell for the owner (<see cref="ShellFramesPlan"/>): with <c>--play-frames[=DIR]</c> the checks save the window to DIR (default
+    /// Review frames of the shell for the person judging (<see cref="ShellFramesPlan"/>): with <c>--play-frames[=DIR]</c> the checks save the window to DIR (default
     /// <see cref="PlayOptions.DefaultFramesDirectory"/> plus the window's <c>WxH</c>) when each state is reached, and check the picture is the size asked for and not blank.
     /// The read-back is slow, so a run that saves frames is not a timing run (the frame-time judgement is reported, not judged). Gitignored places only.
     /// </summary>
@@ -1394,6 +1394,8 @@ public sealed partial class PlayChecks : Node
         Check("the-player-arrives-a-third-time", third, $"stage={_mode.Flow.Stage}");
         var present3 = await WaitFor(() => _mode.Flow.Stage == Lifestone.Client.Play.PlayStage.InWorld, 60.0);
         Check("the-third-arrival-is-in-the-world", present3, $"stage={_mode.Flow.Stage}");
+        await AutopilotReconnectChecksAsync(session, ui); // M6 6 MH: the autopilot's own reconnect (not the button) back to the game screen with the dial running (PlayChecks.Reconnect.cs; m5-autopilot-ui-reconnect)
+        await AutopilotSteerChecksAsync(session, ui); // the steer desk on real files and its real thread (PlayChecks.Steer.cs)
 
         // --- a log off through retail's key (Shift+Escape, End Character Session): Actions.LogOff only; the bridge drives portal space ---
         var key = _mode.EndKey;

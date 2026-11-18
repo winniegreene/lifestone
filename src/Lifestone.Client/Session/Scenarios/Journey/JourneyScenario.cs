@@ -1,12 +1,17 @@
+using Lifestone.Client.Session.Autopilot;
+using Lifestone.Client.Session.Quests;
 using System.Globalization;
 using Lifestone.Client.Diagnostics;
+using Lifestone.Client.Movement.Routes;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
+using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Vitals;
 using Lifestone.Net.Session;
 using Lifestone.Data.Dat;
 using Lifestone.Data.Magic;
+using Lifestone.Data.World;
 
 namespace Lifestone.Client.Session.Scenarios.Journey;
 
@@ -54,6 +59,10 @@ public sealed class JourneyScenario : IScenario, IDisposable
     public const double StationLimitMarginSeconds = 300;
 
     private readonly JourneyPlan _plan;
+    private readonly List<StationSpec> _stations; // the plan's stations, plus a death station inserted after a station that died (M6 6 D)
+    private DeathTally? _deathTally; // M6 6 D: runs from the first station, offered to the death station through JourneyFacts.ObservedDeath
+    private int _deathsAtStationStart;
+    private int _deathStationIndex = -1; // the index of the death station this journey inserted; a failure of it is recovered once, never answered by a second death station
     private readonly IStationFactory _factory;
     private readonly JourneyContext _context;
     private readonly bool _endSession;
@@ -86,6 +95,9 @@ public sealed class JourneyScenario : IScenario, IDisposable
     private double? _whereMax;
     private long _unmatched;
     private string? _peaceWhy;
+    private string? _stop;
+    private bool _cheatFreeMarked;
+    private int _level;
 
     private enum Phase
     {
@@ -120,6 +132,7 @@ public sealed class JourneyScenario : IScenario, IDisposable
     public JourneyScenario(JourneyPlan plan, IStationFactory factory, JourneyContext context, bool endSession = true, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, JourneyPlace? place = null, Func<uint, float, float, float?>? groundHeight = null)
     {
         _plan = plan ?? throw new ArgumentNullException(nameof(plan));
+        _stations = [.. plan.Stations];
         _factory = factory ?? throw new ArgumentNullException(nameof(factory));
         _context = context ?? throw new ArgumentNullException(nameof(context));
         _endSession = endSession;
@@ -129,6 +142,18 @@ public sealed class JourneyScenario : IScenario, IDisposable
         _log = context.Log;
         _verdict = new JourneyVerdict(plan.Stations.Count);
         context.Facts.TeleportBudget = plan.TeleportBudget;
+    }
+
+    /// <summary>
+    /// M6 4 R2: points the room graph's pit stub (<c>TODO(m6-abode-pits)</c>, <see cref="CellRoutePlanner.PitLog"/>) at the host's session log and forgets the pit edges already logged, so the run's log file carries it instead of the standard error stream.
+    /// Each host's journey start calls it once (the headless journey and autopilot scenarios, the Godot journey legs).
+    /// </summary>
+    /// <param name="log">The host's session log.</param>
+    public static void BindPitLog(ILogSink log)
+    {
+        ArgumentNullException.ThrowIfNull(log);
+        CellRoutePlanner.PitLog = log;
+        CellRoutePlanner.ResetPitLog();
     }
 
     /// <summary>
@@ -144,11 +169,25 @@ public sealed class JourneyScenario : IScenario, IDisposable
     /// <param name="place">The place verb, or null for <see cref="JourneyTravel.ToolPlace"/>.</param>
     /// <param name="windowFrames">The host's window frame times (<see cref="JourneyWindowSamplers"/>), or null for none (the station lines print <c>n/a</c>).</param>
     /// <param name="dungeon">The dungeon ground of the journey's den stations (<c>--fight-ground</c>: <see cref="FightOptions.GroundProfile"/>), or null for the option's default ground.</param>
-    public static JourneyContext NewContext(JourneyPlan plan, ILogSink log, IReadOnlyDictionary<uint, SpellInfo> spells, VitalsKeeper? keeper = null, DatSet? dats = null, IJourneyRunnerHost? runners = null, IJourneyObserver? observer = null, JourneyPlace? place = null, IJourneyWindowFrames? windowFrames = null, HuntingGround? dungeon = null)
+    /// <param name="questStore">M6 5 Q2: the host's store over <see cref="QuestTimers.FileName"/>, or null for none (the stations then log <c>TODO(m6-quest-timers-no-store)</c> once). Read once here; a file that cannot be read or parsed stops the run by name (<see cref="InvalidDataException"/>) and is never overwritten.</param>
+    public static JourneyContext NewContext(JourneyPlan plan, ILogSink log, IReadOnlyDictionary<uint, SpellInfo> spells, VitalsKeeper? keeper = null, DatSet? dats = null, IJourneyRunnerHost? runners = null, IJourneyObserver? observer = null, JourneyPlace? place = null, IJourneyWindowFrames? windowFrames = null, HuntingGround? dungeon = null, IAutopilotCheckpointStore? questStore = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
         var facts = new JourneyFacts { TeleportBudget = plan.TeleportBudget };
         dungeon ??= GroundCatalog.Get(FightOptions.DefaultGround);
+        QuestTimers? quests = null;
+        if (questStore is not null)
+        {
+            try
+            {
+                quests = QuestTimers.Load(questStore, plan.Character);
+            }
+            catch (Exception e) when (e is InvalidDataException or IOException)
+            {
+                throw new InvalidDataException($"TODO(m6-quest-timers-unreadable): the quest timers file {questStore.Describe} cannot be read, so the run stops and the file is left as it is (move it aside to start over): {e.Message}", e);
+            }
+        }
+
         return new JourneyContext
         {
             Character = plan.Character,
@@ -163,6 +202,8 @@ public sealed class JourneyScenario : IScenario, IDisposable
             Facts = facts,
             WindowFrames = windowFrames,
             Dungeon = dungeon,
+            Quests = quests,
+            QuestStore = questStore,
         };
     }
 
@@ -201,6 +242,7 @@ public sealed class JourneyScenario : IScenario, IDisposable
     {
         ArgumentNullException.ThrowIfNull(session);
         _clock = session.Clock.Now;
+        _level = session.State.Self.Qualities.Level; // the climber line's level= (M6 0 a3b): the character's own property, read every frame
         switch (_phase)
         {
             case Phase.Start:
@@ -239,6 +281,7 @@ public sealed class JourneyScenario : IScenario, IDisposable
     {
         DisposeLeg();
         DisposeRun();
+        _deathTally?.Dispose();
     }
 
     // ------------------------------------------------------------------------------------------------ login and the known state
@@ -281,6 +324,13 @@ public sealed class JourneyScenario : IScenario, IDisposable
                     return Elapsed > _arrivalSeconds ? Abort($"known-state: the player was not present within {_arrivalSeconds:0} s (travel {self.Travel})") : ScenarioStatus.Running;
                 }
 
+                _context.BindQuestTimers(self.Guid); // before a station reads them; a second call for the same guid does nothing
+
+                if (_plan.CheatFree)
+                {
+                    return CheatFreeKnownState(session);
+                }
+
                 if (JourneyGrounds.At(StationWhere.Holtburg, self.Position) && !JourneyGrounds.Indoors(self.Position))
                 {
                     return Go(Phase.KnownPeace);
@@ -317,6 +367,13 @@ public sealed class JourneyScenario : IScenario, IDisposable
                 switch (Peace(session))
                 {
                     case true:
+                        if (_plan.CheatFree)
+                        {
+                            var now = session.Tools.Verbs.Counts.Since(_context.Facts.VerbMark);
+                            _log.Info(JourneyVerdict.LogCategory, string.Create(CultureInfo.InvariantCulture, $"journey known-state peace=yes cheat_free={CheatFreeWord(now)} recovery_place={now.RecoveryPlace}")); // 0-R1: computed from the counter, never a literal
+                            return BeginStation(session, 0); // the verbs were marked at the journey's start (CheatFreeKnownState)
+                        }
+
                         _log.Info(JourneyVerdict.LogCategory, $"journey known-state peace=yes holtburg=yes recovery_place={_verdict.RecoveryPlace}");
                         MarkVerbs(session, "the start of the stations"); // a plan with no build-verify station counts from here
                         return BeginStation(session, 0);
@@ -327,6 +384,70 @@ public sealed class JourneyScenario : IScenario, IDisposable
                 }
         }
     }
+
+    /// <summary>
+    /// The cheat-free climber's known state (M6 item 0 a3b, <see cref="JourneyPlan.CheatFree"/>): the mod verbs are marked here, at the journey's start, so every verb of the run counts; the player must stand where the first station starts
+    /// (<see cref="IKnownStart"/>, the Academy's start cell for the climber), else at the plan's ground; anywhere else the journey stops by name, <c>stop=known-state-unplayable:&lt;where&gt;</c>, and never places.
+    /// </summary>
+    private ScenarioStatus CheatFreeKnownState(IGameSessionView session)
+    {
+        if (!_cheatFreeMarked)
+        {
+            _cheatFreeMarked = true;
+            MarkVerbs(session, "the journey's start (the cheat-free climber: every verb of the run counts)");
+        }
+
+        var at = session.State.Self.Position;
+        string? unplayable;
+        string judge;
+        if (FirstStationStart() is { } start)
+        {
+            unplayable = start.Unplayable(at);
+            judge = "the first station's start (" + _stations[0].Name + ")";
+        }
+        else
+        {
+            judge = "the plan's ground (" + _plan.Ground + ")";
+            try
+            {
+                unplayable = _plan.Ground == StationWhere.Here || JourneyGrounds.At(_plan.Ground, at, _context.Dungeon) ? null : _plan.Ground.ToString().ToLowerInvariant() + ":" + CellWord(at);
+            }
+            catch (ArgumentNullException)
+            {
+                unplayable = _plan.Ground.ToString().ToLowerInvariant() + ":no-ground-profile";
+            }
+        }
+
+        if (unplayable is not null)
+        {
+            _stop = "known-state-unplayable:" + unplayable;
+            return Abort($"stop={_stop}: the player ({Cell(session)}) is not at {judge}, and the cheat-free climber takes no place (no recovery place, no tool)");
+        }
+
+        var counted = session.Tools.Verbs.Counts.Since(_context.Facts.VerbMark);
+        _log.Info(JourneyVerdict.LogCategory, string.Create(CultureInfo.InvariantCulture, $"journey known-state cheat_free={CheatFreeWord(counted)} at {judge}: {Cell(session)} recovery_place={counted.RecoveryPlace}")); // 0-R1: computed from the counter, never a literal
+        return Go(Phase.KnownPeace);
+    }
+
+    /// <summary>The first station's start rule, when it has one (<see cref="IKnownStart"/>), else null.</summary>
+    private IKnownStart? FirstStationStart()
+    {
+        if (_stations.Count == 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            return StationAt(0) as IKnownStart;
+        }
+        catch (Exception e) when (e is NotSupportedException or InvalidOperationException or ArgumentException)
+        {
+            return null; // BeginStation reports the factory's refusal when the station is reached
+        }
+    }
+
+    private static string CellWord(CellFrame? at) => at is { } p ? "cell-0x" + p.CellId.ToString("X8", CultureInfo.InvariantCulture) : "no-position";
 
     /// <summary>Asks for peace when the player is not in it: true in peace, false on a refusal or after <see cref="PeaceSeconds"/>, null while waiting.</summary>
     private bool? Peace(IGameSessionView session)
@@ -367,7 +488,7 @@ public sealed class JourneyScenario : IScenario, IDisposable
     {
         if (!_made.TryGetValue(index, out var station))
         {
-            station = _factory.Create(_plan.Stations[index]);
+            station = _factory.Create(_stations[index]);
             _made[index] = station;
         }
 
@@ -377,7 +498,7 @@ public sealed class JourneyScenario : IScenario, IDisposable
     /// <summary>The needs of plan index <paramref name="index"/>: the plan's override, else the station's own (none when the factory has no station for it).</summary>
     private StationNeeds NeedsOf(int index)
     {
-        if (_plan.Stations[index].NeedsOverride is { } over)
+        if (_stations[index].NeedsOverride is { } over)
         {
             return over;
         }
@@ -394,14 +515,21 @@ public sealed class JourneyScenario : IScenario, IDisposable
 
     private ScenarioStatus BeginStation(IGameSessionView session, int index)
     {
-        if (index >= _plan.Stations.Count)
+        if (index >= _stations.Count)
         {
             return Finish(session);
         }
 
         _index = index;
-        _spec = _plan.Stations[index];
+        _spec = _stations[index];
         _station = null;
+        if (_deathTally is null)
+        {
+            _deathTally = new DeathTally();
+            _deathTally.Start(session); // M6 6 D: running from the first station, so a death on a leg is known with its corpse (the autopilot's pattern, AutopilotScenario's start)
+        }
+
+        _deathsAtStationStart = _deathTally.Deaths;
         try
         {
             _station = StationAt(index);
@@ -598,7 +726,36 @@ public sealed class JourneyScenario : IScenario, IDisposable
         }
 
         var next = _index + 1;
-        return BeginRecover(next < _plan.Stations.Count ? NeedsOf(next).Where : StationWhere.Holtburg, next);
+        if (_index != _deathStationIndex && !string.Equals(_spec.Kind, StationKinds.Death, StringComparison.Ordinal) && _deathTally is { } tally && (why?.StartsWith("died:", StringComparison.Ordinal) == true || tally.Deaths > _deathsAtStationStart))
+        {
+            // M6 6 D (map-death 4): a station that died is followed by the death station, which goes back for the corpse; only then the recovery toward the station after it.
+            _context.Facts.ObservedDeath = tally;
+            _stations.Insert(next, DeathSpec);
+            ShiftMade(next);
+            _deathStationIndex = next;
+            _verdict.NoteInserted();
+            _log.Warn(JourneyVerdict.LogCategory, string.Create(CultureInfo.InvariantCulture, $"journey station={name} died: the death station follows (corpse 0x{tally.LastCorpseGuid:X8})"));
+        }
+
+        return BeginRecover(next < _stations.Count ? NeedsOf(next).Where : StationWhere.Holtburg, next);
+    }
+
+    /// <summary>The death station a journey inserts after a station that died: no place to be in (the character stands at its lifestone after the respawn), no fight of its own, unattended. The shape of <c>AutopilotScenario.UnscriptedDeathSpec</c>; the argument names are <see cref="JourneyStations"/>'s.</summary>
+    private static StationSpec DeathSpec { get; } = new("death", StationKinds.Death, StationNeeds.None, 280, new Dictionary<string, string>(StringComparer.Ordinal) { [JourneyStations.DeathNoFightArgument] = "yes", [JourneyStations.UnattendedArgument] = "yes" });
+
+    /// <summary>Stations made for indexes at or after <paramref name="from"/> move up one: a spec was inserted at <paramref name="from"/>.</summary>
+    private void ShiftMade(int from)
+    {
+        var moved = _made.Where(kv => kv.Key >= from).OrderByDescending(kv => kv.Key).ToList();
+        foreach (var kv in moved)
+        {
+            _made.Remove(kv.Key);
+        }
+
+        foreach (var kv in moved)
+        {
+            _made[kv.Key + 1] = kv.Value;
+        }
     }
 
     private ScenarioStatus Skip(IGameSessionView session, string miss, string fields)
@@ -712,6 +869,13 @@ public sealed class JourneyScenario : IScenario, IDisposable
 
     private ScenarioStatus RecoverFallback(IGameSessionView session, string why)
     {
+        if (_plan.CheatFree)
+        {
+            // M6 0 a3b: the cheat-free climber takes no recovery place: the journey stops by name where it stands.
+            _stop = "known-state-unplayable:recover:" + CellWord(session.State.Self.Position);
+            return Abort($"stop={_stop}: the way home failed ({why}), and the cheat-free climber takes no place");
+        }
+
         if ((string.Equals(_plan.Name, JourneyPlans.Mage.Name, StringComparison.Ordinal) || string.Equals(_plan.Name, JourneyPlans.HeroMage.Name, StringComparison.Ordinal)) && JourneyGrounds.At(StationWhere.Den, session.State.Self.Position, _context.Dungeon))
         {
             // The mage in the den with its hop spent: the suicide tool; the respawn is Holtburg's lifestone (its bind), the vitae stage pays for it.
@@ -720,6 +884,12 @@ public sealed class JourneyScenario : IScenario, IDisposable
             _recoverBySuicide = true;
             _pending = session.Actions.Suicide(ActionSource.Host);
             return Go(Phase.RecoverPlacing);
+        }
+
+        if (CharacterPolicy.For(_plan.Character).CheatFree)
+        {
+            // M6 0 F3: the climber is cheat-free (granted=0 place=0 recovery_place=0): a failed way home is a loud stop by name, never a recovery place.
+            return Abort($"recover: the way home failed ({why}) and the climber has no recovery place (recovery_place=0): recover:climber-no-place");
         }
 
         _verdict.RecoveryPlaces++;
@@ -793,11 +963,29 @@ public sealed class JourneyScenario : IScenario, IDisposable
 
         var travel = _context.Travel as JourneyTravel;
         Emit(_verdict.DoneLine(_plan.Name, facts, travel?.RouteMetres ?? 0, travel?.RunSeconds ?? 0, travel?.Rungs ?? 0, travel?.Blocked ?? 0, travel?.Sightless ?? 0));
+        if (_plan.CheatFree)
+        {
+            Emit(ClimberLine(_level, facts.Verbs, _stop));
+        }
         if (!_verdict.Ok(facts))
         {
             Failure ??= string.Create(CultureInfo.InvariantCulture, $"journey {_plan.Name} ok=false: failed={_verdict.FirstFailed ?? "none"} teleports={facts.Teleports}/{facts.TeleportBudget} stations={_verdict.Stations.Count(r => r.Ok)}/{_verdict.Planned}");
         }
     }
+
+    /// <summary>
+    /// The cheat-free climber's line (M6 item 0 a3b, DoD 2): <c>journey climber cheat_free=yes level=&lt;n&gt; granted=&lt;n&gt; place=&lt;n&gt; recovery_place=&lt;n&gt; stop=&lt;name|none&gt;</c>. The counts are the mod-verb counter's since the journey's start
+    /// (<see cref="ModVerbCounts"/>: <c>granted</c> the item, xp, corpses-rot and spell-learn requests, <c>place</c> the budgeted places, <c>recovery_place</c> the recovery places); the climber is judged <c>granted=0 place=0 recovery_place=0</c>. The level is the character's own property.
+    /// </summary>
+    /// <param name="level">The character's level (property 25).</param>
+    /// <param name="verbs">The verbs since the journey's start.</param>
+    /// <param name="stop">The stop's name, or null.</param>
+    public static string ClimberLine(int level, ModVerbCounts verbs, string? stop) =>
+        string.Create(CultureInfo.InvariantCulture, $"journey climber cheat_free={CheatFreeWord(verbs)} level={level} granted={verbs.Granted} place={verbs.Place} recovery_place={verbs.RecoveryPlace} stop={stop ?? "none"}");
+
+    /// <summary>The <c>cheat_free=</c> word computed from the counts beside it (M6 item 0 F5, 0-R1): <c>yes</c> only when no grant, no place and no recovery place was counted.</summary>
+    /// <param name="verbs">The verbs counted since the journey's start.</param>
+    public static string CheatFreeWord(ModVerbCounts verbs) => verbs.Granted == 0 && verbs.Place == 0 && verbs.RecoveryPlace == 0 ? "yes" : "no";
 
     private ScenarioStatus Abort(string why)
     {

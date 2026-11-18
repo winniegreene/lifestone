@@ -1,0 +1,146 @@
+{
+  "key": "tusker-guard-kill-task",
+  "name": "The Tusker Guard Kill Task (Shoichi in Lin: 500 Tusker Guards, the Tusker Barracks)",
+  "giver": {
+    "wcid": 33968,
+    "name": "Shoichi"
+  },
+  "start": {
+    "cell": "0xDA3B0116",
+    "point": null,
+    "name": "Lin (Shoichi's town, reached by the Town Network)"
+  },
+  "steps": [
+    {
+      "kind": "go",
+      "what": "to Shoichi in Lin (another town: the Town Network's Lin portal)",
+      "place": {
+        "cell": "0xDA3B0116",
+        "point": [
+          110.636,
+          77.923,
+          6.805
+        ],
+        "name": "Shoichi, indoors in Lin"
+      },
+      "target": {
+        "wcid": 33968,
+        "name": "Shoichi"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/5/facts.md): Shoichi 33968 landblock_instance guid 0x7DA3B03A, cell 0xDA3B0116 (indoors), origin (110.636, 77.923, 6.805) (facts.md section 4); Lin is a travel place (travel-routes.json, M6 5 q6b, Town Network portal 42844 'Lin Portal', destination 0xDC3C0011, D55)",
+      "todo": null
+    },
+    {
+      "kind": "talk",
+      "what": "ask Shoichi for the task: the first talk arms the counter at 0",
+      "place": null,
+      "target": {
+        "wcid": 33968,
+        "name": "Shoichi"
+      },
+      "item": null,
+      "expect": {
+        "reply": "Return to me after you have killed 500 Tusker Guards",
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/5/facts.md): weenie_properties_emote object 33968, Use set 53989 (InqQuest TuskerG); with no TuskerG stamp and 0 solves the failure chain ends at QuestFailure set 53995 (TuskerGkillcount@KillTaskInProgress): Tells 'Greetings, have you come to train?' / 'There is much you can learn from fighting any opponent. I have specialized in the fighting of Tusker Guards and have learned many, if not all of their weaknesses.' / 'If you wish to do the same you must first go out and experience combat with these creatures. Return to me after you have killed 500 Tusker Guards and I will reward you.', then SetQuestCompletions TuskerGkillcount amount 0 (action 3)",
+      "todo": null,
+      "armed_reply": "out of 500 Tusker Guards",
+      "wait_reply": "Part of our training is knowing when to stop and reflect"
+    },
+    {
+      "kind": "kill",
+      "what": "500 Tusker Guards at the Tusker Barracks",
+      "place": null,
+      "target": {
+        "wcid": 1629,
+        "name": "Tusker Guard"
+      },
+      "item": null,
+      "expect": {
+        "reply": "Your task is complete!",
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/5/facts.md): KillQuest (weenie_properties_string type 45) 'TuskerGkillcount' on the wcids 1629, 22593, 22592 and 21525 (all named Tusker Guard): the target is the one wcid 1629 and the other three count too (22593 is the Barracks's tusk carrier, 5 placed; 22592 stands 1 at 0x5B45 and 2 at 0x5C4B; 21525 is not placed); quest row TuskerGkillcount (id 5055) min_Delta 0, max_Solves 500; ACE HandleKillTask QuestManager.cs:583-626 @95ef426d; the Barracks 0x5A48 holds 49 of 1629 and 5 of 22593 = 54 credits a full spawn",
+      "todo": null,
+      "count": 500,
+      "ground": "tusker-barracks"
+    },
+    {
+      "kind": "go",
+      "what": "back to Shoichi in Lin",
+      "place": {
+        "cell": "0xDA3B0116",
+        "point": [
+          110.636,
+          77.923,
+          6.805
+        ],
+        "name": "Shoichi, indoors in Lin"
+      },
+      "target": {
+        "wcid": 33968,
+        "name": "Shoichi"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/5/facts.md): as step 0",
+      "todo": null
+    },
+    {
+      "kind": "talk",
+      "what": "turn the task in: 20,000,000 experience",
+      "place": null,
+      "target": {
+        "wcid": 33968,
+        "name": "Shoichi"
+      },
+      "item": null,
+      "expect": {
+        "reply": "Excellent, now go contemplate what you have learned",
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/5/facts.md): weenie_properties_emote object 33968, QuestSuccess set 53992 (TuskerGkillcount@KillTaskCompleted: has the quest and cannot solve it again = 500 reached): Tell (0) 'Excellent, now go contemplate what you have learned from fighting the Tusker Guards. You may be able to apply these pratices in various different types of combat with a great variety of creatures.', AwardNoShareXP (1) amount_64 20,000,000, AddCharacterTitle 435 TuskerBlight (2), DirectBroadcast (3), StampQuest TuskerG (4), EraseQuest TuskerGkillcount (5); the reward is no item, so the turn-in's checks are the reply and the reward line",
+      "todo": null
+    }
+  ],
+  "done": {
+    "stamp": null,
+    "reply": "Excellent, now go contemplate what you have learned",
+    "item": null
+  },
+  "timer_seconds": 72000,
+  "level": {
+    "min": 1,
+    "max": null
+  },
+  "experience": {
+    "amount": 20000000,
+    "kind": "fixed",
+    "max": null,
+    "percent": null,
+    "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/5/facts.md): weenie_properties_emote_action of emote 53992 order 1, type 62 AwardNoShareXP, amount_64 20,000,000; ACE EmoteManager.cs:142-147 @95ef426d (EarnXP with ShareType.None), the line 'You've earned N experience.' Player_Xp.cs:114"
+  },
+  "sources": [
+    "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/5/facts.md): Shoichi 33968 (Use set 53989 and the sets 53990-53995), quest rows TuskerGkillcount (5055: min_Delta 0, max_Solves 500) and TuskerG (5054: min_Delta 72000 s = 20 h, max_Solves -1)",
+    "timer_seconds 72000: TuskerG min_Delta (quest id 5054); the turn-in's StampQuest TuskerG (emote 53992 action 4) sets it, and while it runs Shoichi says 'You have killed many Tusker Guards...' (set 53990)",
+    "level {min 1, max null}: no emote of Shoichi tests a level (the action types are 5, 10, 12, 18, 21, 22, 30, 31, 34, 62 and 70 only); the Tusker Guards are Level 80 and the ground's entry MinLevel is 40 (the Barracks portal 22661), which is the profile's, not the quest's",
+    "The ground is tusker-barracks (D54), not the den (black-spawn-den-aluvian: 192 placed 1629 in the landblocks 0x0103-0x0105, SELECT count by landblock_instance) and not the Temple 40+ (0x5C4A, 49 placed: no profile of its own): the Barracks is the ladder's own rung for the level 40 band (entry MinLevel 40, profile level_band 80), its profile lists 1629 and 22593, and the same fight yields the Tusker Guard Tusk for Brighteyes (tusk-guard.json); the den is the home from level 100 (spec section 5.6), and the same task there is another file with another ground",
+    "The task is 500 kills over many fights: the kill step is open-ended and the counter (the quest row's solves) survives a run that ends early",
+    "M6 14 guard task (the owner, 2026-11-13): the level up job runs this file when --autopilot-ladder-quests names it (tusks,tusker-guard-kill-task; climb.ps1 -Quests), as LadderKillTask: the talk of steps 0-1 is an errand from home while the counter is unread and the timer allows (his reply reads the counter: the start arms it at 0, his DirectBroadcast 'You've killed N out of 500 Tusker Guards.' is his count, a done reply means it was complete and the talk was the turn-in, his wait reply means the timer runs); the kill step is the ladder's own hunt on tusker-barracks in place of her rung's ground while the server's counter is armed (every 'You have killed N Tusker Guards!' line is read); steps 3-4 are the turn-in from where the complete line found her; the station's done check records the 72,000 s timer",
+    "M6 14 guard task (closes TODO(m6-lin-shoichi-walk)): the walk from the Lin arrival to Shoichi (368 m) and from him back to Lin's Portal to Town Network (86 m) are planned whole on the dats and confirmed by the walker's physics (TownNetworkWalkDatTests). The cause was his house's street door 0xDA3B0109: its sill (z 8.00) opens 1.2 m over the entry 0xDA3B0118's floor (z 6.80), which the room graph refused as a pit edge; the three static steps of the entry carry the floor down, and the route planner now reads a doorway's steps (CellRoutePlanner, the steps down past a doorway)"
+  ]
+}

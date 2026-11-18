@@ -87,7 +87,7 @@ public sealed partial class BuffLegRunner : Node
     private readonly Lifestone.Client.Session.Hosting.LegFaultGuard _guard = new("BuffLegRunner", LogCategory, GodotLogSink.Instance);
     private PlayMode _mode = null!;
     private RetailUiLayer? _ui;
-    private Task<(SpellTableData Table, GearKit Kit, double BuildMilliseconds)>? _loading;
+    private Task<(SpellTableData Table, GearKit Kit, double BuildMilliseconds, BuffOptions Buff)>? _loading;
     private BuffScenario? _scenario;
     private BuffOptions _buffOptions = new();
     private string? _optionError;
@@ -171,8 +171,9 @@ public sealed partial class BuffLegRunner : Node
             {
                 var table = SpellTableData.Load(dats);
                 var built = System.Diagnostics.Stopwatch.GetTimestamp();
-                var kit = GearKit.Build(table.Spells, LoginName(key), ground: ground);
-                return (table, kit, System.Diagnostics.Stopwatch.GetElapsedTime(built).TotalMilliseconds);
+                var login = LoginName(key);
+                var kit = GearKit.Build(table.Spells, login, ground: ground);
+                return (table, kit, System.Diagnostics.Stopwatch.GetElapsedTime(built).TotalMilliseconds, buffOptions with { AccountName = login }); // M6 1 w: the account's formula for the cycle's levels and the gear's first cast (the carrier is the buff options, never printed)
             },
             CancellationToken.None,
             TaskCreationOptions.LongRunning,
@@ -541,11 +542,11 @@ public sealed partial class BuffLegRunner : Node
 
     private void BeginScenario(IGameSessionView session)
     {
-        var (table, kit, buildMilliseconds) = _loading!.Result;
+        var (table, kit, buildMilliseconds, buff) = _loading!.Result;
         Log.Info(LogCategory, "buff: the gear kit was built on the loading worker, off the game thread", ("build_ms", buildMilliseconds));
         // The ledger of the armour lines is the session's, kept in the user data across a log-off (M4 4.1 lane c; closes TODO(m4-buff-armour-relog-time)): read by the cycle's seed after this login, saved when the scenario ends.
         var store = new ArmourLedgerFileStore(new UserDataFiles(ProjectSettings.GlobalizePath("user://armour")), GodotLogSink.Instance);
-        _scenario = new BuffScenario(kit, table.Spells, _buffOptions, GodotLogSink.Instance, LoginScenario.DefaultArrivalSeconds, endSession: false, bars: new MageSpellBars(GodotLogSink.Instance), ledger: ArmourBuffLedger.For(session.State), store: store);
+        _scenario = new BuffScenario(kit, table.Spells, buff, GodotLogSink.Instance, LoginScenario.DefaultArrivalSeconds, endSession: false, bars: new MageSpellBars(GodotLogSink.Instance), ledger: ArmourBuffLedger.For(session.State), store: store);
         _avatars = _mode.Avatars;
         if (_avatars is { } avatars)
         {

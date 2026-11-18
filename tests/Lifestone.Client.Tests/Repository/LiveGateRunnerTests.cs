@@ -575,6 +575,14 @@ public sealed class LiveGateRunnerTests
         Assert.DoesNotContain("FullyQualifiedName~.FighterArcherBuildLoopbackTests.", fighter, StringComparison.Ordinal);
         Assert.DoesNotContain("FullyQualifiedName~.BuffLoopLiveTests.", fighter, StringComparison.Ordinal);
 
+        // M6 0 F5 (0-R2): the climber's Academy run belongs to the m6-climber area, not to actions: a Session/Actions change leaves it out, a Session/Quests change selects it.
+        var actions = string.Join("\n", Plan("-Loopback", "core", "-ChangedPaths", "src/Lifestone.Client/Session/Actions/ActionApi.cs"));
+        Assert.Contains("loopback: area actions touched by src/Lifestone.Client/Session/Actions/ActionApi.cs", actions, StringComparison.Ordinal);
+        Assert.DoesNotContain("AcademyChestLiveTests", actions, StringComparison.Ordinal);
+        var quests = string.Join("\n", Plan("-Loopback", "core", "-ChangedPaths", "src/Lifestone.Client/Session/Quests/Quest.cs"));
+        Assert.Contains("loopback: area m6-climber touched by src/Lifestone.Client/Session/Quests/Quest.cs", quests, StringComparison.Ordinal);
+        Assert.Contains("AcademyChestLiveTests", quests, StringComparison.Ordinal);
+
         // A changed loopback test file selects the classes it declares.
         var file = string.Join("\n", Plan("-Loopback", "core", "-ChangedPaths", "tests/Lifestone.Loopback.Tests/Session/ContainerLiveTests.cs"));
         Assert.Contains("class ContainerLiveTests changed", file, StringComparison.Ordinal);
@@ -602,7 +610,7 @@ public sealed class LiveGateRunnerTests
 
         var bad = RunRunner(["-Plan", "-Loopback", "bogus"], expectSuccess: false);
         Assert.Contains("unknown -Loopback value 'bogus'", bad, StringComparison.Ordinal);
-        Assert.Contains("actions, fighter, mage, movement, net, servermod", bad, StringComparison.Ordinal);
+        Assert.Contains("actions, fighter, m6-climber, m6-quests,", bad, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -653,7 +661,7 @@ public sealed class LiveGateRunnerTests
     public void Every_class_GateAreas_names_is_a_loopback_class_and_every_area_can_be_planned()
     {
         // The runner throws on a name that is not a loopback class (read from the test sources), so planning every area proves the file in step with the tests.
-        foreach (var area in new[] { "net", "movement", "actions", "fighter", "mage", "servermod" })
+        foreach (var area in new[] { "net", "movement", "actions", "fighter", "mage", "servermod", "m6-climber" })
         {
             var plan = RunRunner(["-Plan", "-Loopback", area], expectSuccess: true);
             Assert.Contains("loopback=areas classes=", plan, StringComparison.Ordinal);

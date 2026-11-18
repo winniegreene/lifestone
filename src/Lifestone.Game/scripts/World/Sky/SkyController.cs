@@ -132,6 +132,7 @@ public partial class SkyController : Node
 
     public override void _Process(double delta)
     {
+        using var framePhase = Lifestone.Game.Diagnostics.FramePhases.World(); // M6 16 Eperf2: this call's share of a long frame
         if (Time is not null)
         {
             Update(delta);

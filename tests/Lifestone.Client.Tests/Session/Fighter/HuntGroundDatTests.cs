@@ -8,7 +8,7 @@ using Xunit.Abstractions;
 namespace Lifestone.Client.Tests.Session.Fighter;
 
 /// <summary>
-/// The hunt grounds' cells against the retail dats: the ten belt cells (M4 1.2 s4a; closes <c>TODO(m4-belt-cell-terrain)</c>) and the forest's 0x9FB* strip (M4 3.1 s0; closes <c>TODO(m4-forest-cells)</c>): water by the terrain type of the cell's four corner vertices (types 16 to 20, ACE's table,
+/// The hunt grounds' cells against the retail dats: the ten belt cells (M4 1.2 s4a; closes <c>TODO(m4-belt-cell-terrain)</c>) and the forest's 0x9FB* strip (M4 3.1 s0; closes <c>m4-forest-cells (closed)</c>): water by the terrain type of the cell's four corner vertices (types 16 to 20, ACE's table,
 /// <c>LandblockStruct.cs:62</c>, the same the physics world reads) and slope by the surface normal under a 5 x 5 grid of points in the cell against <see cref="PhysicsGlobals.FloorZ"/>, the physics floor
 /// (a normal steeper than that cannot be stood on). <see cref="HuntGround.LowB"/> carries the finding per cell; this test pins it. Finding (2026-10-20, the retail dats): all ten cells are dry and flat (lowest normal z 0.993 or more). The forest's finding (2026-10-21, the retail dats): all 33 cells of the 0x9FB* strip are dry and flat (lowest normal z 0.973 or more, centre heights 70 to 108 m). <c>TODO(m4-belt-cell-terrain)</c> is closed for water and slope; what the dats say of buildings and scenery on a cell is not read (<c>TODO(m4-belt-cell-objects)</c>: the server drops the player to the floor and the hunt walks nowhere, so it only matters for a spawn point inside a wall).
 /// </summary>

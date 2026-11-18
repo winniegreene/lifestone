@@ -1,0 +1,251 @@
+{
+  "key": "repaired-shadow-stone",
+  "name": "The Repaired Shadow Stone (a Damaged Shadow Stone from the Repository, repaired by Ciandra in Xarabydun)",
+  "giver": {
+    "wcid": 19713,
+    "name": "Ciandra, Arcanum Alchemist"
+  },
+  "start": {
+    "cell": "0xA9B40019",
+    "point": [
+      84.0,
+      7.7,
+      94.0
+    ],
+    "name": "Holtburg's lifestone point"
+  },
+  "steps": [
+    {
+      "kind": "go",
+      "what": "to the Repository portal on the Singularity Caul island",
+      "place": {
+        "cell": "0x0A0F0027",
+        "point": [
+          111.271,
+          150.449,
+          247.565
+        ],
+        "name": "in front of the Repository portal"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.1): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z, angles_W, angles_Z FROM landblock_instance WHERE guid = 0x70A0F003: weenie 32584, cell 0x0A0F0027; the point is its front side",
+      "todo": "TODO(m6-repository-cliff-climb): the island is reached by no travel-file route (Recall to the Singularity Caul, spell 2943, or the Caul's Surface portals, min level 150), and the portal stands on a cliff whose climb the database cannot show (the public Repository page starts it at 92.1S 94.3W): not established, never guessed"
+    },
+    {
+      "kind": "use",
+      "what": "enter the Repository",
+      "place": {
+        "cell": "0x0047039C",
+        "point": [
+          60,
+          -228.903,
+          0.004999
+        ],
+        "name": "the arrival of the Repository"
+      },
+      "target": {
+        "wcid": 32584,
+        "name": "Repository"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.1): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM weenie_properties_position WHERE object_Id = 32584 AND position_Type = 2: destination; MinLevel 125 (weenie_properties_int type 86), the file's level; PortalBitmask 49, no quest restriction",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Damaged Shadow Stone",
+      "place": {
+        "cell": "0x00470326",
+        "point": [
+          22.3422,
+          -100.182,
+          -4.9683
+        ],
+        "name": "where the Damaged Shadow Stone lies"
+      },
+      "target": {
+        "wcid": 32589,
+        "name": "Damaged Shadow Stone"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.1): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x70047005: weenie 32589, cell 0x00470326 (the second of its two spots); no door on the way is locked by default",
+      "todo": "TODO(m6-offline-fetch-walks): this file is checked offline only (D118), a walk no test has made; M7 walks it"
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Damaged Shadow Stone from the floor",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 32589,
+        "name": "Damaged Shadow Stone"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.1): the item's own Quest string damagedshadowstone (quest row min_Delta 72000, max_Solves -1) gates the pick-up for 20 h (ACE Player_Inventory.cs:1249-1262 @95ef426d)",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Repository's Surface portal",
+      "place": {
+        "cell": "0x0047039C",
+        "point": [
+          60.273,
+          -235.974,
+          -0.063
+        ],
+        "name": "in front of Surface"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.1): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z, angles_W, angles_Z FROM landblock_instance WHERE guid = 0x70047001: weenie 70756, cell 0x0047039C, the arrival's room; the point is its front side",
+      "todo": "TODO(m6-offline-fetch-walks): this file is checked offline only (D118), a walk no test has made; M7 walks it"
+    },
+    {
+      "kind": "use",
+      "what": "out of the Repository by Surface",
+      "place": {
+        "cell": "0x0A0F0027",
+        "point": [
+          111.167,
+          162.938,
+          245.377
+        ],
+        "name": "the arrival of Surface"
+      },
+      "target": {
+        "wcid": 70756,
+        "name": "Surface"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.1): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM weenie_properties_position WHERE object_Id = 70756 AND position_Type = 2: destination",
+      "todo": null
+    },
+    {
+      "kind": "recall",
+      "what": "home by Lifestone Recall",
+      "place": {
+        "cell": "0xA9B40019",
+        "point": [
+          84.0,
+          7.7,
+          94.0
+        ],
+        "name": "Holtburg's lifestone point"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the spell id is Fighter/RecallHome.cs LifestoneRecallSpell: the portal row's NoRecall bit stops a tie to it, not a recall out of its island",
+      "todo": null,
+      "spell": 1635
+    },
+    {
+      "kind": "go",
+      "what": "to Ciandra in Xarabydun",
+      "place": {
+        "cell": "0x934B0122",
+        "point": [
+          43.6571,
+          34.6215,
+          17.205
+        ],
+        "name": "Ciandra's place"
+      },
+      "target": {
+        "wcid": 19713,
+        "name": "Ciandra, Arcanum Alchemist"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.1): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x7934B00B: weenie 19713, cell 0x934B0122; no locked door between the arrival and her",
+      "todo": "TODO(m6-xarabydun-route): the travel file has no place for Xarabydun (hub portal 42832, arrival 0x934B0021, 70.6 m to her); this go stops go:town-network by name until one is added"
+    },
+    {
+      "kind": "give",
+      "what": "give Ciandra the Damaged Shadow Stone",
+      "place": null,
+      "target": {
+        "wcid": 19713,
+        "name": "Ciandra, Arcanum Alchemist"
+      },
+      "item": {
+        "wcid": 32589,
+        "name": "Damaged Shadow Stone"
+      },
+      "expect": {
+        "reply": "Ahh, a damaged Atlan Stone. I've seen a lot of these lately. I wonder what's damaging them without destroying them... Very odd...",
+        "stamp": null,
+        "item": {
+          "wcid": 32588,
+          "name": "Repaired Shadow Stone"
+        }
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.1): weenie_properties_emote id 47938 (object 19713, category 6 Give, weenie_Class_Id 32589): Tells, Give 32588 x1, AwardXP (type 2) amount_64 161,000,000; no quest test; AllowGive true (weenie_properties_bool type 8)",
+      "todo": null
+    }
+  ],
+  "done": {
+    "stamp": null,
+    "reply": null,
+    "item": {
+      "wcid": 32588,
+      "name": "Repaired Shadow Stone"
+    }
+  },
+  "timer_seconds": 72000,
+  "level": {
+    "min": 125,
+    "max": null
+  },
+  "experience": {
+    "amount": 161000000,
+    "kind": "fixed",
+    "max": null,
+    "percent": null,
+    "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.1): emote 47938's AwardXP (type 2) amount_64; a fixed amount, not level-proportional"
+  },
+  "sources": [
+    "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.1): offline only (D118): level 125 by the Repository portal; it does not count toward the six and has no ladder",
+    "timer_seconds 72000: the stone's pick-up quest damagedshadowstone (quest row id 2432); the hand-in has no timer",
+    "level: min 125 is the portal 32584's MinLevel (weenie_properties_int type 86); the dungeon holds levels 80 to 185"
+  ]
+}

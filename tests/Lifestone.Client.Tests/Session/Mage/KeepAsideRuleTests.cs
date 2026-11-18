@@ -8,6 +8,7 @@ using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Tests.Session;
 using Lifestone.Client.Tests.Session.Fighter;
 using Lifestone.Data.Magic;
+using Lifestone.Data.Tests;
 using Lifestone.Net.Messages;
 
 namespace Lifestone.Client.Tests.Session.Mage;
@@ -21,12 +22,12 @@ public sealed class KeepAsideRuleTests
     private const uint Caster = 0x8000;
     private const uint Jewelry = 0x8;
     private const uint Melee = 0x1;
-    private const uint MajorFocus = 3001;
-    private const uint MinorFocus = 3002;
-    private const uint MajorHeavyAptitude = 3003;
-    private const uint MajorArmor = 3004;
-    private const uint EpicWillpower = 3005;
-    private const uint MajorWillpower = 3006;
+    private const uint MajorFocus = 2574; // M6 14 useful cantrips: the real spell ids (ACE's spell table), so the judge reads what each raises
+    private const uint MinorFocus = 2581;
+    private const uint MajorHeavyAptitude = 2531;
+    private const uint MajorArmor = 2571;
+    private const uint EpicWillpower = 4227;
+    private const uint MajorWillpower = 2577;
 
     private static readonly Dictionary<uint, SpellInfo> Spells = new()
     {
@@ -76,7 +77,7 @@ public sealed class KeepAsideRuleTests
     }
 
     private static MageLootItem Item(MageLootRules rules, uint guid, string name, uint type, long value, long burden, Appraisal? appraisal) =>
-        new MageLootItem(guid, name, type, value, burden) with { KeepAside = rules.Thresholds.KeepAside!.Match(type, appraisal, rules.SpellName) };
+        rules.Thresholds.KeepAside!.Match(type, appraisal, rules.SpellName, UsefulCantripTests.Qwinnie) is { } why ? new MageLootItem(guid, name, type, value, burden) with { KeepAside = why, Look = true } : new MageLootItem(guid, name, type, value, burden); // the rule's match (M6 14: Look, the soak line's worth a look)
 
     [Fact]
     public void The_dens_rule_is_the_profiles_block()
@@ -127,7 +128,7 @@ public sealed class KeepAsideRuleTests
 
         Assert.Equal("Major Focus", major.KeepAside);
         Assert.Null(minor.KeepAside); // only the profile's tiers count
-        Assert.Null(wrongFamily.KeepAside); // a major cantrip the mage has no use for
+        Assert.Null(wrongFamily.KeepAside); // M6 14 useful cantrips: Heavy Weapons she neither holds nor plans, and Major Armor raises body armour: not useful
         Assert.Equal("Epic Willpower", epic.KeepAside); // the den's block names Epic and Legendary too
         Assert.Null(noAppraisal.KeepAside); // the spells come from an appraisal only
         Assert.Equal([2u, 5u], plan.Kept);
@@ -179,11 +180,42 @@ public sealed class KeepAsideRuleTests
     }
 
     [Fact]
+    public void The_loot_plan_takes_a_keep_aside_piece_before_heavier_lower_value_loot_at_the_load_line_M6_14()
+    {
+        // The climber on the Barracks (no keep_aside block: her default runs) at 60 burden under the load line (100% of 17,850): a Major Focus ring (burden 15, Value 500) beside a mana stone the kit wants (burden 50, Value 40) and a
+        // silver ewer (burden 60, Value 400). Before M6 14 the kit's stones went first and took the room; the ring was left over the line.
+        var rules = new MageLootRules(new FightOptions { Loot = true, Ground = "tusker-barracks", KeepAsideDefault = KeepAsideRule.DefaultFor(MageTemplate.ClimberName) }.EffectiveLootThresholds, Spells);
+        var stone = new MageLootItem(3, "Mana Stone", PackRules.ManaStoneType, 40, 50);
+        var ewer = new MageLootItem(4, "Silver Ewer", 0x80, 400, 60);
+        var ring = rules.ItemFor(Find(2, "Ring", Jewelry, 15, 0x000C0000), Appraised(2, null, MajorFocus), held: false);
+        const int Capacity = 17_850, Burden = Capacity - 60;
+
+        var plan = rules.Plan("Corpse of Tusker Guard", "Winnie", [stone, ewer, ring], Burden, Capacity, freeSlots: 20, stonesWanted: 1);
+
+        Assert.Equal(("Major Focus", true), (ring.KeepAside, ring.Look));
+        Assert.Equal([2u], plan.Kept); // the ring first; the stone and the ewer would carry her over the line after it
+        Assert.Equal(MageLootVerdict.KeepAside, plan.VerdictOf(2));
+        Assert.Equal(MageLootVerdict.Load, plan.VerdictOf(3));
+        Assert.Equal(MageLootVerdict.Load, plan.VerdictOf(4));
+        Assert.Equal(1, plan.WorthALookCount);
+
+        // Any other character on the Barracks keeps nothing aside: the ring is plain loot, the stone the kit wants goes first, and the ring is left over the line.
+        var plain = new MageLootRules(new FightOptions { Loot = true, Ground = "tusker-barracks", KeepAsideDefault = KeepAsideRule.DefaultFor("BSD Mage") }.EffectiveLootThresholds, Spells);
+        var plainRing = plain.ItemFor(Find(2, "Ring", Jewelry, 15, 0x000C0000), Appraised(2, null, MajorFocus), held: false);
+        var before = plain.Plan("Corpse of Tusker Guard", "BSD Mage", [stone, ewer, plainRing], Burden, Capacity, freeSlots: 20, stonesWanted: 1);
+        Assert.Null(plainRing.KeepAside);
+        Assert.Equal([3u], before.Kept);
+        Assert.Equal(MageLootVerdict.Load, before.VerdictOf(2));
+    }
+
+    [Fact]
     public void The_tally_counts_for_the_soak_line()
     {
         var before = KeepAsideTally.WorthALook;
+        var guid = 0x8F000000u + (uint)Environment.TickCount % 0x10000u;
 
-        KeepAsideTally.Add();
+        Assert.True(KeepAsideTally.Add(guid));
+        Assert.False(KeepAsideTally.Add(guid)); // M6 14 (m6-lore-cantrips): a piece counts once over the process
 
         Assert.True(KeepAsideTally.WorthALook >= before + 1);
     }
@@ -237,33 +269,54 @@ public sealed class KeepAsideRuleTests
         });
     }
 
+    [Fact]
+    public void A_scroll_the_keep_scroll_hook_names_is_kept_aside_and_never_sold_and_without_the_hook_it_is_plain_loot_M6_item_1()
+    {
+        const uint Writable = 0x00002000; // ItemType.Writable: a scroll
+        var scroll = Find(7, "Scroll of Flame Bolt II", Writable, 5, 0);
+        var hooked = new MageLootRules(Den() with { KeepScroll = o => o.Name.StartsWith("Scroll of Flame Bolt", StringComparison.Ordinal) ? "the plan's next level: read it" : null }, Spells);
+        var plain = DenRules();
+
+        var kept = hooked.ItemFor(scroll, appraisal: null, held: false);
+        var other = hooked.ItemFor(Find(8, "Scroll of Frost Bolt II", Writable, 5, 0), appraisal: null, held: false);
+
+        Assert.Equal("the plan's next level: read it", kept.KeepAside);
+        Assert.Equal(MageLootVerdict.KeepAside, hooked.Plan("Corpse of Drudge Skulker", "Winnie", [kept], burden: 0, capacity: 1500, freeSlots: 20).VerdictOf(7));
+        Assert.Null(other.KeepAside);
+        Assert.Null(plain.ItemFor(scroll, appraisal: null, held: false).KeepAside);
+    }
+
     private static Appraisal FireSceptre(uint guid, double bonus, int warReq) =>
         SelfEquipTests.Appraised(guid, new() { [45] = 0x10, [158] = 1, [159] = 34, [160] = warReq, [109] = 200 }, new() { [AppraisalIds.ElementalDamageMod] = bonus });
 
     [Fact]
-    public void A_heavy_find_worth_a_look_that_is_no_wearable_upgrade_is_left_on_the_corpse_with_its_line_M5_7_D149()
+    public void A_heavy_find_worth_a_look_that_is_no_wearable_upgrade_is_left_on_the_corpse_with_its_line_but_a_great_cantrip_piece_is_kept_M5_7_D149_M6_14()
     {
         var rules = DenRules();
         var shield = Judged(rules, Find(2, "Covenant Shield", 0x2, 600, 0x00200000), SelfEquipTests.Appraised(2, null, null, MajorWillpower)); // a shield: no slot a mage uses
         var bracelet = Judged(rules, Find(3, "Heavy Bracelet", Jewelry, 160, 0x00030000), SelfEquipTests.Appraised(3, null, null, MajorFocus)); // its cantrip is worn already
         var sceptre = Judged(rules, Find(4, "Fire Sceptre", Caster, 200, SelfEquipJudge.Held), FireSceptre(4, 1.05, warReq: 400)); // better, but the wield requirement is unmet
-        var unjudged = rules.ItemFor(Find(5, "Covenant Greaves", 0x2, 425, 0x6000, 0x300), SelfEquipTests.Appraised(5, null, null, MajorWillpower), held: false); // no judge given: left, named
+        var unjudged = rules.ItemFor(Find(5, "Covenant Greaves", 0x2, 425, 0x6000, 0x300), SelfEquipTests.Appraised(5, null, null, MajorWillpower), held: false); // no judge given: named
 
         var plan = rules.Plan("Corpse of Tusker Guard", "Amy", [shield, bracelet, sceptre, unjudged], burden: 0, capacity: 5000, freeSlots: 20);
 
         Assert.Equal(150, rules.Thresholds.MaxItemBurden); // the den profile's max_item_burden
-        Assert.Empty(plan.Kept);
-        Assert.All([2u, 3u, 4u, 5u], g => Assert.Equal(MageLootVerdict.HeavyNotUpgrade, plan.VerdictOf(g)));
+        // M6 14 keep every great cantrip (the owner, 2026-11-15, amends D149): a heavy piece with a Major cantrip of the rule is kept whatever the self-equip says; the heavy rule still leaves the wand kept for its War Magic bonus
+        Assert.Equal([3u, 5u, 2u], plan.Kept); // the great pieces, by value per burden
+        Assert.All([2u, 3u, 5u], g => Assert.Equal(MageLootVerdict.KeepAside, plan.VerdictOf(g)));
+        Assert.Equal(MageLootVerdict.HeavyNotUpgrade, plan.VerdictOf(4));
         var lines = plan.WorthALookLines().ToArray();
         Assert.Equal(4, lines.Length);
-        Assert.Equal("loot: worth a look but heavy and not an upgrade: left 'Covenant Shield' 0x00000002 burden 600 (Major Willpower; review: no free slot for Major Willpower: its locations 0x00200000 are no jewellery slot and it has no coverage)", lines[0]);
-        Assert.Equal("loot: worth a look but heavy and not an upgrade: left 'Heavy Bracelet' 0x00000003 burden 160 (Major Focus; review: its cantrips (Major Focus) are cast by a worn piece already)", lines[1]);
+        Assert.Equal("loot: worth a look: 'Covenant Shield' 0x00000002 (Major Willpower); heavy (burden 600 over 150) and not an upgrade, but kept for its great cantrip (the owner, 2026-11-15): review: no free slot for Major Willpower: its locations 0x00200000 are no jewellery slot and it has no coverage", lines[0]);
+        Assert.Equal("loot: worth a look: 'Heavy Bracelet' 0x00000003 (Major Focus); heavy (burden 160 over 150) and not an upgrade, but kept for its great cantrip (the owner, 2026-11-15): review: its cantrips (Major Focus) are cast by a worn piece already", lines[1]);
         Assert.StartsWith("loot: worth a look but heavy and not an upgrade: left 'Fire Sceptre' 0x00000004 burden 200 (War Magic bonus +5%; review: better but wield: skill 34 current 300 < 400", lines[2], StringComparison.Ordinal);
-        Assert.Equal("loot: worth a look but heavy and not an upgrade: left 'Covenant Greaves' 0x00000005 burden 425 (Major Willpower; not judged: the loot step gave no self-equip judge)", lines[3]);
-        Assert.Equal(0, plan.WorthALookCount); // none goes to the review pack, so the sale's keep-aside list gains nothing
-        Assert.Contains("heavy_not_upgrade=4", plan.Summary(), StringComparison.Ordinal);
-        Assert.Contains(plan.DecisionLines(), l => l.StartsWith("loot: left Covenant Shield", StringComparison.Ordinal) && l.EndsWith(", worth a look but heavy and not an upgrade)", StringComparison.Ordinal));
-        Assert.Equal(LootDecision.Burden, plan.Decide(Find(2, "Covenant Shield", 0x2, 600, 0x00200000), new LootContext(Burden: 0, Capacity: 5000, Inventory: null)));
+        Assert.Equal("loot: worth a look: 'Covenant Greaves' 0x00000005 (Major Willpower); heavy (burden 425 over 150) and not an upgrade, but kept for its great cantrip (the owner, 2026-11-15): not judged: the loot step gave no self-equip judge", lines[3]);
+        Assert.Equal(3, plan.WorthALookCount);
+        Assert.Contains("heavy_not_upgrade=1", plan.Summary(), StringComparison.Ordinal);
+        Assert.Contains(plan.DecisionLines(), l => l.StartsWith("loot: left Fire Sceptre", StringComparison.Ordinal) && l.EndsWith(", worth a look but heavy and not an upgrade)", StringComparison.Ordinal));
+        Assert.Contains(plan.DecisionLines(), l => l.StartsWith("loot: kept Covenant Shield", StringComparison.Ordinal) && l.EndsWith(", worth a look, a great cantrip)", StringComparison.Ordinal));
+        Assert.Equal(LootDecision.Burden, plan.Decide(Find(4, "Fire Sceptre", Caster, 200, SelfEquipJudge.Held), new LootContext(Burden: 0, Capacity: 5000, Inventory: null)));
+        Assert.Equal(LootDecision.Take, plan.Decide(Find(2, "Covenant Shield", 0x2, 600, 0x00200000), new LootContext(Burden: 0, Capacity: 5000, Inventory: null)));
     }
 
     [Fact]
@@ -281,7 +334,7 @@ public sealed class KeepAsideRuleTests
         Assert.Equal(MageLootVerdict.KeepAside, plan.VerdictOf(2));
         Assert.Equal(MageLootVerdict.KeepAside, plan.VerdictOf(3));
         var lines = plan.WorthALookLines().ToArray();
-        Assert.StartsWith("loot: worth a look: 'Fire Sceptre' 0x00000002 (War Magic bonus +5%); heavy (burden 200 over 150) but an upgrade: swap in: better: war damage x1.05 against x1", lines[0], StringComparison.Ordinal);
+        Assert.StartsWith("loot: worth a look: 'Fire Sceptre' 0x00000002 (War Magic bonus +5%); heavy (burden 200 over 150) but an upgrade: swap in: better: 'Fire Sceptre' 0x00000002 score 2.5 (war +5%", lines[0], StringComparison.Ordinal); // M6 14 (m6-caster): the caster score
         Assert.StartsWith("loot: worth a look: 'Compass' 0x00000003 (Major Willpower); heavy (burden 180 over 150) but an upgrade: wear: casts Major Willpower that no worn piece casts, at the free location 0x04000000", lines[1], StringComparison.Ordinal);
         Assert.DoesNotContain("heavy_not_upgrade", plan.Summary(), StringComparison.Ordinal);
     }
@@ -304,7 +357,7 @@ public sealed class KeepAsideRuleTests
     }
 
     [Fact]
-    public void A_heavy_piece_the_robes_coverage_forbids_is_no_upgrade_and_is_left_M5_7_D149_D129()
+    public void A_heavy_piece_the_robes_coverage_forbids_is_no_upgrade_but_its_great_cantrip_keeps_it_M5_7_D149_D129_M6_14()
     {
         var rules = DenRules();
         var breastplate = Judged(rules, Find(2, "Celdon Breastplate", 0x2, 900, 0x00000200, 0x400), SelfEquipTests.Appraised(2, null, null, MajorWillpower)); // the long run's: chest, under the robe
@@ -312,9 +365,41 @@ public sealed class KeepAsideRuleTests
 
         var plan = rules.Plan("Corpse of Tusker Guard", "Amy", [breastplate, boots], burden: 0, capacity: 5000, freeSlots: 20);
 
-        Assert.Empty(plan.Kept);
+        Assert.Equal([3u, 2u], plan.Kept); // M6 14 keep every great cantrip (the owner, 2026-11-15): kept for the review pack though the robe forbids them now
         var lines = plan.WorthALookLines().ToArray();
-        Assert.Equal("loot: worth a look but heavy and not an upgrade: left 'Celdon Breastplate' 0x00000002 burden 900 (Major Willpower; review: no free slot for Major Willpower: the worn 'Faran Robe with Hood' 0x80000001 covers 0x400 of its coverage 0x400 (ACE: \"You must remove your Faran Robe with Hood to wield Celdon Breastplate\"))", lines[0]);
-        Assert.Equal("loot: worth a look but heavy and not an upgrade: left 'Heavy Boots' 0x00000003 burden 300 (Major Willpower; review: no free slot for Major Willpower: the worn 'Faran Robe with Hood' 0x80000001 covers 0x10000 of its coverage 0x10000 (ACE: \"You must remove your Faran Robe with Hood to wield Heavy Boots\"))", lines[1]);
+        Assert.Equal("loot: worth a look: 'Celdon Breastplate' 0x00000002 (Major Willpower); heavy (burden 900 over 150) and not an upgrade, but kept for its great cantrip (the owner, 2026-11-15): review: no free slot for Major Willpower: the worn 'Faran Robe with Hood' 0x80000001 covers 0x400 of its coverage 0x400 (ACE: \"You must remove your Faran Robe with Hood to wield Celdon Breastplate\")", lines[0]);
+        Assert.Equal("loot: worth a look: 'Heavy Boots' 0x00000003 (Major Willpower); heavy (burden 300 over 150) and not an upgrade, but kept for its great cantrip (the owner, 2026-11-15): review: no free slot for Major Willpower: the worn 'Faran Robe with Hood' 0x80000001 covers 0x10000 of its coverage 0x10000 (ACE: \"You must remove your Faran Robe with Hood to wield Heavy Boots\")", lines[1]);
+    }
+}
+
+/// <summary>
+/// M6 2 a (<c>m5-keep-aside-spell-name</c>): every profile's keep-aside cantrip names against the SpellTable, so a typo fails here and not silently in a run (the fight's runtime guard stays, FightScenario.cs). The walk over the
+/// profiles is dat-free; the table's check needs the dats and skips without them, as the other SpellTable tests.
+/// </summary>
+public sealed class KeepAsideProfileNamesTests(DatSetFixture fixture) : IClassFixture<DatSetFixture>
+{
+    [Fact]
+    public void The_walk_reads_every_profile_with_a_block_and_names_each_missing_name_with_its_ground()
+    {
+        var grounds = new List<string>();
+
+        var missing = KeepAsideRule.ProfileNamesMissing(GroundCatalog.All, new Dictionary<uint, SpellInfo>(), grounds);
+
+        Assert.Contains("black-spawn-den-aluvian", grounds);
+        Assert.Equal(GroundCatalog.All.Count(g => g.Loot?.KeepAside is not null), grounds.Count);
+        Assert.Contains("black-spawn-den-aluvian: Major Focus", missing); // an empty table lacks every name: each is named with its ground
+        Assert.All(missing, m => Assert.Contains(": ", m, StringComparison.Ordinal));
+    }
+
+    [RequiresDatsFact]
+    public void Every_profiles_keep_aside_name_is_a_spell_of_the_SpellTable()
+    {
+        var table = SpellTableData.Load(fixture.Dats);
+        var grounds = new List<string>();
+
+        var missing = KeepAsideRule.ProfileNamesMissing(GroundCatalog.All, table.Spells, grounds);
+
+        Assert.NotEmpty(grounds);
+        Assert.Empty(missing);
     }
 }

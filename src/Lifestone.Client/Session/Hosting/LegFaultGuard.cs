@@ -4,7 +4,7 @@ using Lifestone.Client.Diagnostics;
 namespace Lifestone.Client.Session.Hosting;
 
 /// <summary>
-/// The fault guard of a host's per-frame loop (M5 item 0 c2; <c>TODO(m5-nav-one-waypoint)</c>'s last gate wrote 8,642 identical traces because nothing
+/// The fault guard of a host's per-frame loop (M5 item 0 c2; <c>m5-nav-one-waypoint (closed)</c>'s last gate wrote 8,642 identical traces because nothing
 /// caught an exception thrown in a frame): the host wraps its frame in <c>try</c>/<c>catch</c> and hands the exception to <see cref="Catch"/>. The first
 /// fault is reported ONCE, as an error in the runner's category ("&lt;runner&gt;: &lt;stage&gt; threw &lt;ExceptionType&gt;: &lt;message&gt;") and then the whole exception
 /// (type, message, stack) once, and the guard trips: <see cref="Reason"/> is the one-line text for the runner's own fail path (log off if logged in, a verdict

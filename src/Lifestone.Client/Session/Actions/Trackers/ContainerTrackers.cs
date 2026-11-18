@@ -24,6 +24,7 @@ internal sealed class OpenContainerTracker(ActionHandle handle, uint container) 
     private bool _locked;
     private string? _text;
     private double _viewAt = double.NaN;
+    private bool _viewSeen;
     private bool _seen;
 
     /// <inheritdoc/>
@@ -33,7 +34,18 @@ internal sealed class OpenContainerTracker(ActionHandle handle, uint container) 
     internal override bool ConsumesUseDone => true;
 
     /// <inheritdoc/>
-    internal override bool HoldsLane => _opened && !_useDoneSeen;
+    /// <remarks>
+    /// M6 14 recall unblock (m6-container-hold): the hold ends when the UseDone came, when the container's view no longer shows it (a CloseContainer: ACE sent the open's UseDone right behind the 0196, before any close
+    /// could reach it, so nothing is waited for), or at <see cref="ActionPolicy.OpenContainerUseDoneSeconds"/> after the view arrived (<see cref="HoldBoundPassed"/>).
+    /// </remarks>
+    internal override bool HoldsLane => _opened && !_useDoneSeen && _api is { } api && api.State.Containers.ViewedGuid == container;
+
+    /// <inheritdoc/>
+    internal override bool HoldBoundPassed(double now) => _opened && !double.IsNaN(_viewAt) && now - _viewAt >= ActionPolicy.OpenContainerUseDoneSeconds;
+
+    /// <inheritdoc/>
+    /// <remarks>The container's view is open, and it was not when the open was sent (<see cref="Send"/> sends nothing for a view already open): the 0196 answered this open, and ACE's UseDone follows it (capture C2).</remarks>
+    internal override bool ClaimsUseDone(ActionApi api) => api.State.Containers.ViewedGuid == container;
 
     /// <inheritdoc/>
     internal override void Accepted(ActionApi api) => _seen = api.State.Objects.TryGet(container, out _);
@@ -62,6 +74,17 @@ internal sealed class OpenContainerTracker(ActionHandle handle, uint container) 
     /// <inheritdoc/>
     internal override void Poll(ActionApi api)
     {
+        if (Resolution is null && (_viewSeen || !double.IsNaN(_viewAt)) && api.State.Containers.ViewedGuid != container)
+        {
+            // M6 14 recall unblock (live 2026-11-14 17:24:49 UTC: the loot closed a corpse whose 0196 had come but not its contents; the open stayed in flight 20 s, every cast waited behind it, and its timeout owed a
+            // UseDone it had already taken): the view came and is closed now, so the open is over; nothing more will answer it.
+            Resolve(new ActionOutcome(
+                ActionOutcomeKind.Cancelled,
+                0,
+                "the container's view (0196) came and was closed before its contents arrived (a CloseContainer): the open ended" + (UseDoneTaken ? " (its UseDone came)" : " (its UseDone was not seen)")));
+            return;
+        }
+
         if (Resolution is not null || api.State.Containers.Viewed is not { } view || view.Guid != container)
         {
             return;
@@ -106,6 +129,7 @@ internal sealed class OpenContainerTracker(ActionHandle handle, uint container) 
         _useDoneSeen = true;
         if (_api is { } api && api.State.Containers.ViewedGuid == container)
         {
+            _viewSeen = true;
             return true; // the 0196 came: this UseDone sits between it and the contents' F745s and is not the end (capture C2)
         }
 

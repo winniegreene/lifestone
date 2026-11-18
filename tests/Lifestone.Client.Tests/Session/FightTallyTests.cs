@@ -61,6 +61,51 @@ public sealed class FightTallyTests
     }
 
     [Fact]
+    public void M6_14_the_health_a_Harm_Other_takes_is_damage_dealt_counted_apart_from_the_bolts_hits()
+    {
+        // ACE's line of a Boost with a negative amount on another (WorldObject_Magic.cs 548): it is written for the killing cast too, where a bolt's kill has no line.
+        var (h, tally) = Started();
+        Magic(h, "With Harm Other IV you drain 24 points of health from Tusker Crimsonback.");
+        Magic(h, "With Harm Other IV you drain 10 points of health from Tusker Crimsonback.");
+        Magic(h, "With Drain Stamina Other I you drain 30 points of stamina from Tusker Crimsonback.");
+
+        Assert.Equal((34, 34, 2), (tally.DamageDealt, tally.HarmDealt, tally.HarmLinesDealt));
+        Assert.Equal(0, tally.DamageLinesDealt); // the bolts' hits alone: the fight's hit wait reads it
+        Assert.Equal(30, tally.DrainDealt);
+        Assert.Equal(0, tally.UnparsedMagicLines);
+        tally.Reset();
+        Assert.Equal((0, 0, 0), (tally.DamageDealt, tally.HarmDealt, tally.HarmLinesDealt));
+    }
+
+    [Theory]
+    [InlineData("With Harm Other IV you drain 24 points of health from Tusker Crimsonback.", 24, "Harm Other IV", "Tusker Crimsonback")]
+    [InlineData("With Heart Rend you drain 79 points of health from Olthoi Soldier.", 79, "Heart Rend", "Olthoi Soldier")]
+    [InlineData("With Harm Other I you drain 0 points of health from Drudge Skulker.", 0, "Harm Other I", "Drudge Skulker")]
+    [InlineData("With Harm Other II you drain 9 points of Health from Mite Scion.", 9, "Harm Other II", "Mite Scion")] // a server that writes the vital with a capital
+    public void M6_14_a_Harm_Others_line_gives_its_amount_its_spell_and_its_target(string line, long amount, string spell, string target)
+    {
+        Assert.True(FightTally.TryHarmDealt(line, out var read, out var readSpell, out var readTarget));
+        Assert.Equal((amount, spell, target), (read, readSpell.ToString(), readTarget.ToString()));
+        Assert.Equal(MagicLineKind.DrainDealt, FightTally.Classify(line, out var classified, out _)); // the line's form, as before
+        Assert.Equal(amount, classified);
+    }
+
+    [Theory]
+    [InlineData("With Drain Stamina Other I you drain 30 points of stamina from Tusker Slave.")]
+    [InlineData("With Drain Mana Other I you drain 30 points of mana from Tusker Slave.")]
+    [InlineData("You cast Harm Self I and drain 5 points of your health.")]
+    [InlineData("With Harm Other IV you drain 24 points of health from Tusker Crimsonback")]
+    [InlineData("With Harm Other IV you drain many points of health from Tusker Crimsonback.")]
+    [InlineData("With Heal Other IV you restore 24 points of health to Tusker Crimsonback.")]
+    [InlineData("You gain 28 points of health due to casting Drain Health Other I on Tusker Crimsonback")]
+    [InlineData("")]
+    public void M6_14_no_other_line_is_read_as_a_Harm_Others(string line)
+    {
+        Assert.False(FightTally.TryHarmDealt(line, out var amount, out var spell, out var target));
+        Assert.Equal((0, 0, 0), (amount, spell.Length, target.Length));
+    }
+
+    [Fact]
     public void The_defender_forms_are_damage_and_drain_taken()
     {
         var (h, tally) = Started();

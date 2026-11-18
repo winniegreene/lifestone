@@ -1,4 +1,5 @@
 using System.Globalization;
+using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
 using Lifestone.Data.CharacterCreation;
@@ -116,6 +117,12 @@ public enum SelfEquipKind
 
     /// <summary>Interesting, not worn (a requirement unmet, no free slot, the wrong element): the review pack.</summary>
     Review,
+
+    /// <summary>
+    /// M6 2 a: an armour or clothing piece whose <see cref="GearScore"/> beats the one worn piece in its coverage by <see cref="SelfEquipJudge.ReplaceMargin"/> (<see cref="SelfEquipChoice.Replaces"/>): that piece comes off, this one goes
+    /// on at <see cref="SelfEquipChoice.Location"/>. Not an <see cref="SelfEquipChoice.IsUpgrade"/> (the loot's keep-aside of heavy finds stays M5 7 D149's); the equip pass acts on it (slice b).
+    /// </summary>
+    Replace,
 }
 
 /// <summary>The self-equip's decision with the numbers that made it (<see cref="Why"/> is the log's).</summary>
@@ -128,10 +135,28 @@ public enum SelfEquipKind
 public sealed record SelfEquipChoice(SelfEquipKind Kind, uint Guid, string Name, uint Location, uint Replaces, string Why)
 {
     /// <summary>The decision's verb as the log prints it: wear, swap in, review, no gain from.</summary>
-    public string Verb => Kind switch { SelfEquipKind.Wear => "wear", SelfEquipKind.Swap => "swap in", SelfEquipKind.Review => "review", _ => "no gain from" };
+    public string Verb => Kind switch { SelfEquipKind.Wear => "wear", SelfEquipKind.Swap => "swap in", SelfEquipKind.Review => "review", SelfEquipKind.Replace => "replace with", _ => "no gain from" };
 
     /// <summary>M5 7 D149: true for a wearable upgrade the mage can put on (a Wear in a free slot or a Swap for the held caster), the one kind of heavy find the loot rule keeps aside.</summary>
     public bool IsUpgrade => Kind is SelfEquipKind.Wear or SelfEquipKind.Swap;
+
+    /// <summary>M6 14 (<c>m6-armour</c>): every worn piece a <see cref="SelfEquipKind.Replace"/> takes off (the wear pick's: a robe can displace several), the first being <see cref="Replaces"/>; empty for a single one.</summary>
+    public IReadOnlyList<uint> Displaced { get; init; } = [];
+
+    /// <summary>
+    /// M6 14 (<c>m6-lore-spend</c>): for a <see cref="SelfEquipKind.Review"/> kept because her Arcane Lore alone leaves its spells off: the piece's ItemDifficulty, the lore that lights them (<see cref="SelfEquipJudge.LoreShort"/>); null otherwise.
+    /// The wear pick's (<see cref="WearPick.LoreNeed"/>) carries its verdict at that lore in <see cref="LoreKind"/>, <see cref="LoreGain"/> and <see cref="LoreMargin"/>; the plain judge's carries the need alone (the loot's heavy rule reads it).
+    /// </summary>
+    public int? LoreNeed { get; init; }
+
+    /// <summary>M6 14 (<c>m6-lore-spend</c>): what the wear pick would do with her lore at <see cref="LoreNeed"/> (Wear or Replace); None when not judged so.</summary>
+    public SelfEquipKind LoreKind { get; init; }
+
+    /// <summary>M6 14 (<c>m6-lore-spend</c>): the wear pick's gain at that lore, in percent of her hour (0 when not judged so).</summary>
+    public double LoreGain { get; init; }
+
+    /// <summary>M6 14 (<c>m6-lore-spend</c>): the margin that gain beat.</summary>
+    public double LoreMargin { get; init; }
 
     /// <summary>The decision as the log prints it: <c>gear: &lt;wear|swap|review|keep&gt; '&lt;name&gt;' 0x&lt;guid&gt;: &lt;why&gt;</c>.</summary>
     public override string ToString() => string.Create(CultureInfo.InvariantCulture, $"gear: {Verb} '{Name}' 0x{Guid:X8}: {Why}");
@@ -144,8 +169,9 @@ public sealed record SelfEquipChoice(SelfEquipKind Kind, uint Guid, string Name,
 /// <para><b>A better caster.</b> ACE multiplies a war spell's damage by the wielded caster's ElementalDamageMod (PropertyFloat 152) only when the caster's DamageType (PropertyInt 45) is the spell's element
 /// (<c>GetCasterElementalDamageModifier</c>, WorldObject_Weapon.cs:382-401 @95ef426d); the spell plan's family gives the element (the pinned world SQL's spell <c>e_Type</c>: Flame Bolt 16 fire, Frost Bolt 8 cold, Lightning Bolt 64
 /// electric, Force Bolt 2 pierce). The caster's ManaConversionMod (PropertyFloat 144) multiplies the Mana Conversion skill in the magic combat mode (<c>GetWeaponManaConversionModifier</c>, WorldObject_Weapon.cs:235-260; the cost,
-/// Creature_Magic.cs:41-50). A candidate is a clear upgrade when its damage factor on the plan's element is higher; on a tie, when its mana conversion is higher; on a tie, when it casts more of the useful cantrips. A caster of another element
-/// with a bonus is kept for the owner (review), not wielded.</para>
+/// Creature_Magic.cs:41-50). M6 14 (<c>m6-caster</c>, the owner's ask of 2026-11-13): a candidate is an upgrade when its caster score (<see cref="GearScore.Caster"/>: the damage on the plan's element, the bolts a mana bar its Mana
+/// Conversion gives by the mana model, its defences, in percent of the hour by the ladder's weights) beats the wielded one's by the ladder's swap margin; on an exact tie, when it casts more of the useful cantrips. Only a wield requirement
+/// keeps a caster out of the pick; an unmet activation requirement leaves its spells off and its own bonuses in.</para>
 /// <para><b>A wearable with a useful cantrip.</b> A wearable, jewellery piece or trinket that casts a cantrip of the useful list (the ground's keep-aside block: the tiers Major, Epic, Legendary of War Magic Aptitude, Focus, Willpower, Mana
 /// Conversion Prowess, Arcane Prowess, the defences and the other aptitudes) that no worn piece casts already is worn when a slot is free: for clothing and armour no worn piece's ClothingPriority overlaps its own (ACE's
 /// <c>WieldedLocationIsAvailable</c> through <c>GetEquippedClothingArmor</c>, Creature_Equipment.cs:50-58, 93-101, refused with "You must remove your X to wield Y", Player_Inventory.cs:1801-1809); for jewellery and trinkets no worn piece holds
@@ -180,8 +206,14 @@ public sealed class SelfEquipJudge
     /// <summary>ACE's PropertyInt ItemSkillLevelLimit.</summary>
     public const uint ItemSkillLevelLimitInt = 115;
 
-    /// <summary>ACE's PropertyDataId ItemSkillLimit (the skill <see cref="ItemSkillLevelLimitInt"/> is read against).</summary>
+    /// <summary>ACE's PropertyDataId ItemSkillLimit (the skill <see cref="ItemSkillLevelLimitInt"/> is read against), as the server holds it. It is no assessment property (PropertyDataId.cs:55 @95ef426d), so no appraisal carries it: <see cref="AppraisalItemSkillInt"/> does.</summary>
     public const uint ItemSkillLimitDid = 37;
+
+    /// <summary>
+    /// M6 16 E5e4: ACE's PropertyInt AppraisalItemSkill (PropertyInt.cs:250-251 @95ef426d): the skill <see cref="ItemSkillLevelLimitInt"/> is read against, as an appraisal carries it (ACE copies the item's ItemSkillLimit into it for the
+    /// appraisal, AppraiseInfo.cs:410-411; retail's examine line reads the same pair, <c>Appraisal_ShowActivationRequirements</c>, 11.6096 0x004B3910).
+    /// </summary>
+    public const uint AppraisalItemSkillInt = 176;
 
     /// <summary>The war spell families' elements (the pinned world SQL v0.9.296's <c>spell.e_Type</c> of the level VI row): ACE's DamageType bits.</summary>
     public static IReadOnlyDictionary<string, uint> FamilyElements { get; } = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase)
@@ -197,47 +229,182 @@ public sealed class SelfEquipJudge
     private const uint JewelleryLocations = 0x00008000 | Wrists | Fingers | 0x04000000;
     private const uint WearableTypes = 0x2 | 0x4 | 0x8;
 
+    /// <summary>
+    /// M6 2 a: the war elements by the ladder's names (<see cref="Grounds.Ladder.Elements"/>): ACE's DamageType bits (ACE.Entity/Enum/DamageType.cs @95ef426d: Slash 0x1, Pierce 0x2, Bludgeon 0x4, Cold 0x8, Fire 0x10, Acid 0x20,
+    /// Electric 0x40).
+    /// </summary>
+    public static IReadOnlyDictionary<string, uint> ElementBits { get; } = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["slash"] = 0x1,
+        ["pierce"] = 0x2,
+        ["bludgeon"] = 0x4,
+        ["cold"] = 0x8,
+        ["fire"] = 0x10,
+        ["acid"] = 0x20,
+        ["electric"] = 0x40,
+    };
+
+    /// <summary>
+    /// M6 2 a: an armour piece replaces the worn one in its coverage only when its <see cref="GearScore"/> is above the worn one's times this: a replacement is two server actions with the parts bare between them, and the score rests
+    /// on averaged protections while the ground's damage types are a TODO (<c>m6-ground-damage-types</c>), so a gain under a tenth is not taken. A worn piece scored 0 (the Faran Robe with Hood, AL 0) is beaten by any armour.
+    /// </summary>
+    public const double ReplaceMargin = 1.10;
+
     private readonly HashSet<string> _useful;
     private readonly Func<uint, string?> _spellName;
+    private readonly IReadOnlyList<uint>? _damageTypes;
+    private readonly GearScoreNotes _notes;
 
     /// <summary>A judge.</summary>
     /// <param name="useful">The useful cantrip names (tier and family: "Major Focus"), the ground's keep-aside block's.</param>
-    /// <param name="element">The plan's war element (ACE DamageType bits, <see cref="FamilyElements"/>), 0 when not known.</param>
+    /// <param name="element">The rung's war element (ACE DamageType bits, <see cref="ElementOf(string?, string?, out string)"/>), 0 when not known.</param>
     /// <param name="spellName">The name of a spell id (the SpellTable's), or null.</param>
-    public SelfEquipJudge(IEnumerable<string> useful, uint element, Func<uint, string?> spellName)
+    /// <param name="damageTypes">M6 2 a: the ground's creatures' damage types (DamageType bits) for the armour score: <see cref="DamageTypesOf"/> of the ground (M6 3 a2), or null for a ground none of whose targets gives them (the profile's <c>damage_types</c>); <c>TODO(m6-ground-damage-types)</c> now means only that case (and a judge built with no ground at all), logged once a run.</param>
+    /// <param name="notes">M6 2 a: the run's TODO latch for the scores, or null for one of the judge's own.</param>
+    /// <param name="caster">M6 14 (<c>m6-caster</c>): the caster score's weights, bolt and auras (<see cref="CasterTerms.Read"/>), or null for <see cref="CasterTerms.Default"/>.</param>
+    public SelfEquipJudge(IEnumerable<string> useful, uint element, Func<uint, string?> spellName, IReadOnlyList<uint>? damageTypes = null, GearScoreNotes? notes = null, CasterTerms? caster = null)
     {
         ArgumentNullException.ThrowIfNull(useful);
         ArgumentNullException.ThrowIfNull(spellName);
         _useful = new HashSet<string>(useful, StringComparer.OrdinalIgnoreCase);
         Element = element;
         _spellName = spellName;
+        _damageTypes = damageTypes;
+        _notes = notes ?? new GearScoreNotes();
+        Caster = caster ?? CasterTerms.Default;
     }
 
-    /// <summary>The plan's war element (DamageType bits), 0 when not known.</summary>
+    /// <summary>M6 14 (<c>m6-caster</c>): the caster score's terms this judge reads.</summary>
+    public CasterTerms Caster { get; }
+
+    /// <summary>M6 14 (<c>m6-caster</c>): this judge with other caster terms (the element, the useful cantrips, the damage types and the notes kept).</summary>
+    /// <param name="caster">The terms.</param>
+    public SelfEquipJudge WithCaster(CasterTerms caster) => new(_useful, Element, _spellName, _damageTypes, _notes, caster) { Wear = Wear, HeldBack = HeldBack, LitBy = LitBy, UsefulGreat = UsefulGreat };
+
+    /// <summary>
+    /// M6 14 (<c>m6-caster-spend</c>): the casters held back for the run (a swap whose wield did not land, <c>ResupplyStation.SwapBestCaster</c>): the pick (<see cref="BestCaster"/>), the rearm (<see cref="HeldCaster.Rearm"/>) and the spend
+    /// (<see cref="ShortCasters"/>) pass them over, named. The session's one memory when the wardrobe builds the judge (<see cref="Quartermaster.Wardrobe.HeldBack"/>, M6 16 E5e2); a judge of no session has its own, empty.
+    /// </summary>
+    public CasterHeldBack HeldBack { get; init; } = new();
+
+    /// <summary>
+    /// M6 14 (<c>m6-armour</c>): the armour and jewellery pick's terms (<see cref="WearScore"/>), or null for the judge of before (a wearable with a useful cantrip worn in a free slot, armour by <see cref="GearScore.Armour"/>'s summed armour):
+    /// with terms, every armour, clothing and jewellery piece is judged by its score in percent of her hour against what it displaces.
+    /// </summary>
+    public WearTerms? Wear { get; init; }
+
+    /// <summary>M6 14 (<c>m6-armour</c>): this judge with the wear pick's terms.</summary>
+    /// <param name="wear">The terms.</param>
+    public SelfEquipJudge WithWear(WearTerms wear) => new(_useful, Element, _spellName, _damageTypes, _notes, Caster) { Wear = wear, HeldBack = HeldBack, LitBy = LitBy, UsefulGreat = UsefulGreat }; // M6 14 capacity: the lit pieces kept (the stored wear pick lost them before)
+
+    /// <summary>
+    /// M6 3 a2 (narrows <c>TODO(m6-ground-damage-types)</c>): the damage types the armour score is read against for <paramref name="ground"/>: the single DamageType bits (slash 0x1 to lightning 0x40, the seven protections) of the union of
+    /// its targets' <see cref="GroundTarget.DamageTypes"/> (a creature's body-part attacks, Monster_Melee.cs:590-615 @95ef426d); null when no target gives any, which keeps the loud TODO and the seven-protection mean.
+    /// </summary>
+    /// <param name="ground">The ground.</param>
+    public static IReadOnlyList<uint>? DamageTypesOf(HuntingGround ground)
+    {
+        ArgumentNullException.ThrowIfNull(ground);
+        var union = 0u;
+        for (var i = 0; i < ground.Targets.Count; i++)
+        {
+            if (ground.Targets[i].Role == GroundRole.Target)
+            {
+                union |= ground.Targets[i].DamageTypes;
+            }
+        }
+
+        var bits = new List<uint>();
+        for (var bit = 0x1u; bit <= 0x40u; bit <<= 1)
+        {
+            if ((union & bit) != 0)
+            {
+                bits.Add(bit);
+            }
+        }
+
+        return bits.Count == 0 ? null : bits;
+    }
+
+    /// <summary>The rung's war element (DamageType bits), 0 when not known.</summary>
     public uint Element { get; }
 
     /// <summary>The element of a war family, or 0 (logged by the caller as <c>TODO(m5-self-equip-element)</c>).</summary>
     public static uint ElementOf(string? family) => family is not null && FamilyElements.TryGetValue(family, out var e) ? e : 0;
 
-    /// <summary>The useful cantrips <paramref name="appraisal"/> casts, by name, in its order.</summary>
-    public List<string> UsefulCantrips(Appraisal? appraisal)
+    /// <summary>
+    /// M6 2 a (<c>m5-self-equip-element</c>): the war element from the rung first (<see cref="Grounds.LadderRung.Element"/>, "fire"), else from the spell plan's family (<see cref="FamilyElements"/>), else 0;
+    /// <paramref name="source"/> names which, or the TODO when neither does.
+    /// </summary>
+    /// <param name="rungElement">The ladder rung's element, or null (a quest rung, or no ladder).</param>
+    /// <param name="family">The spell plan's war family at the level, or null.</param>
+    /// <param name="source">Where the element came from.</param>
+    public static uint ElementOf(string? rungElement, string? family, out string source)
     {
-        var list = new List<string>();
-        if (appraisal is null || appraisal.IsNotFound)
+        if (rungElement is not null && ElementBits.TryGetValue(rungElement, out var bits))
         {
-            return list;
+            source = string.Create(CultureInfo.InvariantCulture, $"the rung's element {rungElement} 0x{bits:X}");
+            return bits;
         }
 
-        foreach (var id in appraisal.Spells)
+        if (ElementOf(family) is var e and not 0)
         {
-            if (_spellName(id) is { } name && _useful.Contains(name) && !list.Contains(name))
+            source = string.Create(CultureInfo.InvariantCulture, $"the spell plan's family {family} 0x{e:X}{(rungElement is null ? string.Empty : $" (the rung's '{rungElement}' is no element)")}");
+            return e;
+        }
+
+        source = $"TODO(m5-self-equip-element): neither the rung ('{rungElement ?? "none"}') nor the plan's family ('{family ?? "none"}') names an element";
+        return 0;
+    }
+
+    /// <summary>M6 2 a: the score context of this judge for <paramref name="skills"/>.</summary>
+    /// <param name="skills">The character's numbers.</param>
+    public GearContext Context(IGearSkills skills) => new(skills, Element, _damageTypes, _useful, _spellName) { Notes = _notes, Caster = Caster, LitBy = LitBy, UsefulGreat = UsefulGreat, Load = Wear?.Load, Wear = Wear };
+
+    /// <summary>
+    /// M6 14 capacity: the caster pick's context: <see cref="Context(IGearSkills)"/> with the strongest Strength cantrip lit on the pieces she wears other than a caster (<see cref="GearContext.WornStrength"/>), so a caster's Strength
+    /// cantrip counts only over it (ACE's top layer).
+    /// </summary>
+    /// <param name="skills">The character's numbers.</param>
+    /// <param name="worn">The pieces worn and wielded now.</param>
+    public GearContext Context(IGearSkills skills, IReadOnlyList<WornPiece> worn)
+    {
+        ArgumentNullException.ThrowIfNull(worn);
+        var strength = 0.0;
+        var tops = new Dictionary<(uint Type, uint Key), double>();
+        foreach (var w in worn)
+        {
+            if ((w.ItemType & CasterType) == 0 && w.Appraisal is { IsNotFound: false } a && (LitBy?.Invoke(w.Guid) == true || WearScore.SpellsOff(a, skills) is null))
             {
-                list.Add(name);
+                strength = Math.Max(strength, GearScore.StrengthCantrip(a));
+                foreach (var id in a.Spells)
+                {
+                    if (CantripRows.Of(id) is { } row && (!tops.TryGetValue((row.Mod.Type, row.Mod.Key), out var held) || held < row.Mod.Value))
+                    {
+                        tops[(row.Mod.Type, row.Mod.Key)] = row.Mod.Value; // M6 14 casterfair: a caster's own cantrip counts only over the worn one of its family
+                    }
+                }
             }
         }
 
-        return list;
+        return Context(skills) with { WornStrength = strength, WornCantrips = tops };
     }
+
+    /// <summary>M6 14: the worn pieces lit on her now (<see cref="GearContext.LitBy"/>; <see cref="WearScore.LitOn"/> over her registry), or null (not read).</summary>
+    public Func<uint, bool>? LitBy { get; init; }
+
+    /// <summary>
+    /// M6 16 E5e2 (the owner's standing rule: cantrips first, and a piece with a useful great cantrip is never taken off for a piece without one): true for a held or worn piece that casts a great cantrip useful to her
+    /// (<see cref="CantripRoom.IsUsefulGreatPiece(GameState, uint, Func{uint, string}, CantripPlan, Action{string}, string)"/>: Major and above, a basic attribute or a skill she holds or her plan trains, her skills read
+    /// live), whatever the keep-aside's names say. Neither the armour rule (the judge without the wear pick's terms) nor the wear pick (<see cref="WearScore.Judge"/>) replaces such a worn piece with a piece that casts none. Null: not read (a judge of no session).
+    /// <para>M6 16 E5e5 (the owner's decision of 2026-11-18): this read is the first of two questions, "is this a keeper", and answers it whether or not she can activate the piece. The guards ask the second,
+    /// "does its great cantrip count for her on her body" (<see cref="GearContext.GreatOn"/>, <see cref="GreatOnBody"/>): a keeper that can never light for her holds no worn slot against a piece that works, and is
+    /// judged on what it does give.</para>
+    /// </summary>
+    public Func<uint, bool>? UsefulGreat { get; init; }
+
+    /// <summary>The useful cantrips <paramref name="appraisal"/> casts, by name, in its order.</summary>
+    public List<string> UsefulCantrips(Appraisal? appraisal) => GearScore.UsefulCantrips(appraisal, _useful, _spellName);
 
     /// <summary>A caster's damage factor on the plan's element: its ElementalDamageMod when its DamageType is the element, else 1.</summary>
     public double WarFactor(Appraisal? appraisal) =>
@@ -252,7 +419,16 @@ public sealed class SelfEquipJudge
     /// <param name="appraisal">The item's appraisal.</param>
     /// <param name="skills">The character's numbers.</param>
     /// <param name="met">Filled with the requirements met, for the log.</param>
-    public static string? Unmet(Appraisal appraisal, IGearSkills skills, List<string>? met = null)
+    public static string? Unmet(Appraisal appraisal, IGearSkills skills, List<string>? met = null) => WieldUnmet(appraisal, skills, met) ?? ActivationUnmet(appraisal, skills, met);
+
+    /// <summary>
+    /// M6 14 (<c>m6-caster</c>): the first wield requirement the character does not meet (ACE refuses the wield, <c>CheckWieldRequirement</c>, Player_Inventory.cs:2126-2229 @95ef426d), or null when every one is met. A caster whose
+    /// activation requirement alone is unmet is wielded with its spells off (<see cref="ActivationUnmet"/>), so the caster pick reads this one.
+    /// </summary>
+    /// <param name="appraisal">The item's appraisal.</param>
+    /// <param name="skills">The character's numbers.</param>
+    /// <param name="met">Filled with the requirements met, for the log.</param>
+    public static string? WieldUnmet(Appraisal appraisal, IGearSkills skills, List<string>? met = null)
     {
         ArgumentNullException.ThrowIfNull(appraisal);
         ArgumentNullException.ThrowIfNull(skills);
@@ -292,10 +468,67 @@ public sealed class SelfEquipJudge
 
                     met?.Add(string.Create(CultureInfo.InvariantCulture, $"wield: skill {skill} class {skills.AdvancementClass(skill)} >= {r.Difficulty}"));
                     break;
+                case 3: // Attrib: ACE reads the current attribute; the raw one read here is its floor (a buff only raises it), so a limit met here is met there
+                case 4: // RawAttrib: the base
+                case 5: // SecondaryAttrib: the vital's maximum
+                case 6: // RawSecondaryAttrib: the vital's base; the maximum read here has the enchantments in, so a buffed maximum may pass here and be refused at the wield (ACE is the authority there)
+                    var stat = r.Type <= 4 ? skills.Attribute(skill) : skills.VitalMax(skill);
+                    var what = WieldStatName(r.Type, skill);
+                    if (stat is null)
+                    {
+                        return string.Create(CultureInfo.InvariantCulture, $"a wield requirement on {what} ({r.Difficulty}) the read model does not hold (TODO(m5-self-equip-wield-type))");
+                    }
+
+                    if (stat < r.Difficulty)
+                    {
+                        return string.Create(CultureInfo.InvariantCulture, $"wield: {what} {stat} < {r.Difficulty} ({WieldRefusal(SkillTooLow)})");
+                    }
+
+                    met?.Add(string.Create(CultureInfo.InvariantCulture, $"wield: {what} {stat} >= {r.Difficulty}"));
+                    break;
                 default:
                     return string.Create(CultureInfo.InvariantCulture, $"a wield requirement of type {r.Type} (skill {r.Skill}, {r.Difficulty}) this code does not read (TODO(m5-self-equip-wield-type))");
             }
         }
+
+        return null;
+    }
+
+    /// <summary>
+    /// M6 14 (<c>m6-lore-spend</c>): the Arcane Lore points <paramref name="appraisal"/>'s ItemDifficulty (PropertyInt 109) asks over her current Arcane Lore, or null when it asks none (no difficulty, met, or her lore unread).
+    /// ACE reads the CURRENT Arcane Lore (<c>CheckUseRequirements</c>, WorldObject_Use.cs:203-210 @95ef426d: <c>GetCreatureSkill(Skill.ArcaneLore).Current</c>, every buff on her in) once, at the wield (<c>TryActivateSpells</c>,
+    /// Player_Inventory.cs:313-335); spells lit stay lit until the piece runs dry or comes off (ManaConsumersTick, Player_Tick.cs:681-699), whatever the lore does after.
+    /// </summary>
+    /// <param name="appraisal">The piece's appraisal.</param>
+    /// <param name="skills">Her numbers.</param>
+    /// <param name="lore">Her current Arcane Lore (0 when unread).</param>
+    /// <param name="difficulty">The piece's ItemDifficulty (0 when none).</param>
+    public static int? LoreShort(Appraisal appraisal, IGearSkills skills, out int lore, out int difficulty)
+    {
+        ArgumentNullException.ThrowIfNull(appraisal);
+        ArgumentNullException.ThrowIfNull(skills);
+        difficulty = appraisal.Int(AppraisalIds.ArcaneLore) ?? 0;
+        lore = skills.Current(MageTemplate.ArcaneLore) ?? 0;
+        return difficulty > 0 && skills.Current(MageTemplate.ArcaneLore) is { } read && read < difficulty ? difficulty - read : null;
+    }
+
+    /// <summary>M6 14 (<c>m6-lore-spend</c>): her numbers with her Arcane Lore at <paramref name="difficulty"/> (from <paramref name="lore"/>), everything else as hers: the pick's "with the lore there".</summary>
+    /// <param name="skills">Her numbers.</param>
+    /// <param name="lore">Her current Arcane Lore.</param>
+    /// <param name="difficulty">The lore to read.</param>
+    public static IGearSkills WithLore(IGearSkills skills, int lore, int difficulty) => new RaisedSkills(skills, [new CasterSkillShort(MageTemplate.ArcaneLore, lore, difficulty)]);
+
+    /// <summary>
+    /// M6 14 (<c>m6-caster</c>): the first activation requirement the character does not meet (<c>CheckUseRequirements</c>, WorldObject_Use.cs:191-324 @95ef426d): the item goes on, its spells stay off
+    /// (<c>TryActivateSpells</c>, Player_Inventory.cs:313-335). Null when every one is met.
+    /// </summary>
+    /// <param name="appraisal">The item's appraisal.</param>
+    /// <param name="skills">The character's numbers.</param>
+    /// <param name="met">Filled with the requirements met, for the log.</param>
+    public static string? ActivationUnmet(Appraisal appraisal, IGearSkills skills, List<string>? met = null)
+    {
+        ArgumentNullException.ThrowIfNull(appraisal);
+        ArgumentNullException.ThrowIfNull(skills);
 
         // The activation requirements, in ACE's order (CheckUseRequirements, WorldObject_Use.cs:191-324); each refusal names the line ACE sends, which the chat shows as retail's (WeenieErrorText).
         if (appraisal.Int(AppraisalIds.ArcaneLore) is { } difficulty and > 0)
@@ -309,7 +542,9 @@ public sealed class SelfEquipJudge
             met?.Add(string.Create(CultureInfo.InvariantCulture, $"activation: Arcane Lore {lore} >= {difficulty}"));
         }
 
-        if (appraisal.Int(ItemSkillLevelLimitInt) is { } limit and > 0 && appraisal.DataId(ItemSkillLimitDid) is { } limitSkill)
+        // M6 16 E5e4 (live 2026-11-18 00:00:39 to 01:00:03, ladder67: ten re-wields answered "Your Missile Defense is too low to use that item's magic." or "Your Melee Defense ..."): the limit's skill reaches the client as
+        // PropertyInt 176 in the appraisal; the server's own PropertyDataId 37 never does, so read alone it left every skill limit of loot armour (LootGenerationFactory_Magic.cs:177-203) unread and met
+        if (appraisal.Int(ItemSkillLevelLimitInt) is { } limit and > 0 && ItemSkillLimitOf(appraisal) is { } limitSkill)
         {
             var value = skills.Current(limitSkill);
             if (value is null || value < limit)
@@ -380,6 +615,17 @@ public sealed class SelfEquipJudge
         return null;
     }
 
+    /// <summary>
+    /// The skill a piece's ItemSkillLevelLimit is read against, where an appraisal carries it (<see cref="AppraisalItemSkillInt"/>; the server's own <see cref="ItemSkillLimitDid"/> for a record that holds it), or null:
+    /// one read for the activation check and for the question whether she can ever meet it (<see cref="GreatOnBody.NeverActivates"/>).
+    /// </summary>
+    /// <param name="appraisal">The piece's appraisal.</param>
+    public static uint? ItemSkillLimitOf(Appraisal appraisal)
+    {
+        ArgumentNullException.ThrowIfNull(appraisal);
+        return appraisal.Int(AppraisalItemSkillInt) is { } wire and > 0 ? (uint)wire : appraisal.DataId(ItemSkillLimitDid);
+    }
+
     /// <summary>ACE's WeenieError SkillTooLow (WeenieError.cs:526), the wield refusal of a skill, attribute or training requirement (Player_Inventory.cs:2133-2194).</summary>
     public const uint SkillTooLow = 0x0468;
 
@@ -437,6 +683,23 @@ public sealed class SelfEquipJudge
         _ => string.Create(CultureInfo.InvariantCulture, $"skill {skill}"),
     };
 
+    /// <summary>M6 2 a: what a wield requirement of type 3 to 6 names (ACE <c>CheckWieldRequirement</c>, Player_Inventory.cs:2147-2178 @95ef426d), as the log prints it.</summary>
+    private static string WieldStatName(int type, uint stat) => type switch
+    {
+        3 => AttributeName(stat) + " (current, read raw)",
+        4 => AttributeName(stat) + " (base)",
+        5 => VitalName(stat) + " (maximum)",
+        _ => VitalName(stat) + " (base, read as the maximum)",
+    };
+
+    private static string VitalName(uint vital) => vital switch
+    {
+        1 => "Maximum Health",
+        3 => "Maximum Stamina",
+        5 => "Maximum Mana",
+        _ => string.Create(CultureInfo.InvariantCulture, $"vital {vital}"),
+    };
+
     private static string AttributeName(uint attribute) => attribute switch
     {
         1 => "Strength",
@@ -467,54 +730,67 @@ public sealed class SelfEquipJudge
     private SelfEquipChoice JudgeCaster(GearCandidate candidate, Appraisal appraisal, IReadOnlyList<WornPiece> worn, IGearSkills skills)
     {
         var held = worn.FirstOrDefault(w => (w.Location & Held) != 0 && (w.ItemType & CasterType) != 0);
-        var (factor, mc, cantrips) = (WarFactor(appraisal), ManaConversion(appraisal), UsefulCantrips(appraisal).Count);
-        var (heldFactor, heldMc, heldCantrips) = held is null ? (1.0, 0.0, 0) : (WarFactor(held.Appraisal), ManaConversion(held.Appraisal), UsefulCantrips(held.Appraisal).Count);
+        var context = Context(skills, worn);
+        var score = GearScore.Caster(candidate.Guid, candidate.Name, appraisal, context);
+        var heldScore = held?.Appraisal is { IsNotFound: false } ha ? GearScore.Caster(held.Guid, held.Name, ha, context) : null;
+        var margin = Caster.Weights.SwapMargin;
         var numbers = string.Create(
             CultureInfo.InvariantCulture,
-            $"war damage x{factor:0.###} against x{heldFactor:0.###} on the plan's element 0x{Element:X} (its element 0x{appraisal.Int(DamageTypeInt) ?? 0:X}, bonus x{appraisal.Float(AppraisalIds.ElementalDamageMod) ?? 1.0:0.###}), mana conversion +{mc * 100:0.#}% against +{heldMc * 100:0.#}%, useful cantrips {cantrips} against {heldCantrips}{(held is null ? ", no caster held" : $", the held '{held.Name}' 0x{held.Guid:X8}")}");
-        var better = Beats(appraisal, held?.Appraisal);
+            $"{GearScore.CasterNumbers(score)} against {(heldScore is not null ? GearScore.CasterNumbers(heldScore) : held is null ? "no caster held" : $"the held '{held.Name}' 0x{held.Guid:X8} (not appraised: 0)")} on the plan's element 0x{Element:X} (its element 0x{appraisal.Int(DamageTypeInt) ?? 0:X}, bonus x{appraisal.Float(AppraisalIds.ElementalDamageMod) ?? 1.0:0.###}), the swap margin {margin:0.##}");
+        var better = GearScore.CasterBeats(score, heldScore, held is null ? 0 : margin);
         if (!better)
         {
-            // Not an upgrade: nothing to do here (a caster worth a look for its bonus is the keep-aside rule's, which keeps it in the review pack already; a loot wand's small mana conversion alone is not hoarded).
+            // Not an upgrade: nothing to do here (a caster worth a look for its bonus is the keep-aside rule's, which keeps it in the review pack already).
             return new SelfEquipChoice(SelfEquipKind.None, candidate.Guid, candidate.Name, 0, 0, "not better: " + numbers);
         }
 
         var met = new List<string>();
-        if (Unmet(appraisal, skills, met) is { } unmet)
+        if (WieldUnmet(appraisal, skills, met) is { } unmet)
         {
             return new SelfEquipChoice(SelfEquipKind.Review, candidate.Guid, candidate.Name, 0, 0, "better but " + unmet + ": " + numbers);
         }
 
-        return new SelfEquipChoice(held is null ? SelfEquipKind.Wear : SelfEquipKind.Swap, candidate.Guid, candidate.Name, Held, held?.Guid ?? 0, "better: " + numbers + "; " + (met.Count == 0 ? "no requirement" : string.Join(", ", met)));
+        var spells = ActivationUnmet(appraisal, skills, met) is { } off ? "; its spells stay off (" + off + "), its own bonuses count" : string.Empty;
+        return new SelfEquipChoice(held is null ? SelfEquipKind.Wear : SelfEquipKind.Swap, candidate.Guid, candidate.Name, Held, held?.Guid ?? 0, "better: " + numbers + "; " + (met.Count == 0 ? "no requirement" : string.Join(", ", met)) + spells);
     }
 
-    /// <summary>True when the caster's element is the plan's (ACE's bonus applies only then, WorldObject_Weapon.cs:382-401).</summary>
-    private bool OnElement(Appraisal? a) => a is { IsNotFound: false } && Element != 0 && a.Int(DamageTypeInt) is { } t && (uint)t == Element;
-
     /// <summary>
-    /// M5 7 S2c: true when caster <paramref name="candidate"/> is a clear upgrade over <paramref name="held"/> (null: no caster held): a higher war factor on the plan's element wins; on a tie only a caster OF the plan's element may win, by a
-    /// higher mana conversion, then more useful cantrips. A caster of another element never wins a tie (the rehearsal of 2026-10-29 14:07:39 swapped an Electric Sceptre in for the plain Wand on its mana conversion alone).
+    /// M6 14 (<c>m6-caster</c>): true when caster <paramref name="candidate"/> beats <paramref name="held"/> (null: no caster held) by the caster score (<see cref="GearScore.CasterBeats"/>, with the swap margin against a held caster),
+    /// wield requirements aside (the callers check them). <paramref name="skills"/> null: the numbers of no character (the mana term then stands in by the skill's percent, named).
     /// </summary>
-    public bool Beats(Appraisal? candidate, Appraisal? held)
+    /// <param name="candidate">The candidate's appraisal.</param>
+    /// <param name="held">The held caster's appraisal, or null.</param>
+    /// <param name="skills">The character's numbers, or null.</param>
+    public bool Beats(Appraisal? candidate, Appraisal? held, IGearSkills? skills = null)
     {
-        var (f, hf) = (WarFactor(candidate), WarFactor(held));
-        if (f > hf + 1e-6)
-        {
-            return true;
-        }
-
-        if (f < hf - 1e-6 || !OnElement(candidate))
+        if (candidate is not { IsNotFound: false } c)
         {
             return false;
         }
 
-        var (mc, hmc) = (ManaConversion(candidate), ManaConversion(held));
-        return mc > hmc + 1e-6 || (Math.Abs(mc - hmc) <= 1e-6 && UsefulCantrips(candidate).Count > UsefulCantrips(held).Count);
+        var context = Context(skills ?? NoSkills.Instance);
+        var heldScore = held is { IsNotFound: false } h ? GearScore.Caster(h.Guid, string.Empty, h, context) : null;
+        return GearScore.CasterBeats(GearScore.Caster(c.Guid, string.Empty, c, context), heldScore, heldScore is null ? 0 : Caster.Weights.SwapMargin);
+    }
+
+    /// <summary>The numbers of no character: a requirement-blind score (<see cref="Beats"/>).</summary>
+    private sealed class NoSkills : IGearSkills
+    {
+        public static readonly NoSkills Instance = new();
+
+        public int Level => 0;
+
+        public int? Current(uint skill) => null;
+
+        public int? Base(uint skill) => null;
+
+        public int AdvancementClass(uint skill) => 0;
     }
 
     /// <summary>
-    /// M5 7 S2c: the one caster to wield: the best of every caster the mage holds (the wielded one included) whose requirements it meets, by <see cref="Beats"/>; a Swap (or a Wear with none held) when that is not the wielded one, else null.
-    /// <paramref name="why"/> names the pick, the field and the numbers.
+    /// M5 7 S2c, M6 14 (<c>m6-caster</c>): the one caster to wield: the best by the caster score (<see cref="GearScore.Caster"/>) of every caster the mage holds whose wield requirements it meets (an unmet activation requirement leaves
+    /// only the caster's spells off, so it stays in the field), against the wielded one by the ladder's swap margin; a Swap (or a Wear with none held) when that is not the wielded one, else null. <paramref name="why"/> names the pick,
+    /// the field with every caster's score, the ones short of a wield requirement and the numbers.
     /// </summary>
     /// <param name="held">The casters held in the packs, with their appraisals.</param>
     /// <param name="worn">The pieces worn and wielded now.</param>
@@ -525,13 +801,25 @@ public sealed class SelfEquipJudge
         ArgumentNullException.ThrowIfNull(held);
         ArgumentNullException.ThrowIfNull(worn);
         ArgumentNullException.ThrowIfNull(skills);
+        var context = Context(skills, worn);
         var wielded = worn.FirstOrDefault(w => (w.Location & Held) != 0 && (w.ItemType & CasterType) != 0);
+        var wieldedScore = wielded?.Appraisal is { IsNotFound: false } wa ? GearScore.Caster(wielded.Guid, wielded.Name, wa, context) : null;
         GearCandidate? best = null;
+        GearScoreResult? bestScore = null;
         int eligible = 0, unread = 0, unmet = 0;
+        var field = new List<string>();
+        var shortOf = new List<string>();
+        var heldBack = new List<string>();
         foreach (var c in held)
         {
             if ((c.ItemType & CasterType) == 0)
             {
+                continue;
+            }
+
+            if (HeldBack.IsHeldBack(c.Guid, out var failed))
+            {
+                heldBack.Add($"'{c.Name}' 0x{c.Guid:X8}: {failed}"); // M6 14 (m6-caster-spend): a wield that did not land is not sent again this run
                 continue;
             }
 
@@ -541,37 +829,131 @@ public sealed class SelfEquipJudge
                 continue;
             }
 
-            if (Unmet(a, skills) is not null)
+            if (WieldUnmet(a, skills) is { } refused)
             {
                 unmet++;
+                var shortfall = ShortfallOf(c, a, skills, wielded, wieldedScore, worn); // M6 14 (m6-caster-spend): scored as if wielded, the gain the spend reads
+                shortOf.Add($"'{c.Name}' 0x{c.Guid:X8} {refused}{(shortfall.Other is null && shortfall.Skills.Count > 0 ? $": {shortfall.Numbers}; short {string.Join(", ", shortfall.Skills)}" : string.Empty)}");
                 continue;
             }
 
             eligible++;
-            if (best is null ? Beats(a, wielded?.Appraisal) : Beats(a, best.Appraisal))
+            var score = GearScore.Caster(c.Guid, c.Name, a, context);
+            field.Add(string.Create(CultureInfo.InvariantCulture, $"'{c.Name}' 0x{c.Guid:X8} {score.CasterScore:0.##}"));
+            if (bestScore is null || GearScore.CasterBeats(score, bestScore) || (Math.Abs(score.CasterScore - bestScore.CasterScore) <= 1e-6 && score.Cantrips == bestScore.Cantrips && c.Guid < best!.Guid))
             {
-                best = c;
+                (best, bestScore) = (c, score);
             }
         }
 
-        var heldName = wielded is null ? "no caster" : $"'{wielded.Name}' 0x{wielded.Guid:X8}";
-        if (best is null)
+        var heldName = wielded is null ? "no caster" : string.Create(CultureInfo.InvariantCulture, $"'{wielded.Name}' 0x{wielded.Guid:X8} ({(wieldedScore is null ? "not appraised: 0" : wieldedScore.CasterScore.ToString("0.##", CultureInfo.InvariantCulture))})");
+        var tail = string.Create(CultureInfo.InvariantCulture, $"field: {(field.Count == 0 ? "none" : string.Join(", ", field))}; {unread} not appraised, {unmet} short of a wield requirement{(shortOf.Count == 0 ? string.Empty : " (" + string.Join("; ", shortOf) + ")")}{(heldBack.Count == 0 ? string.Empty : $", {heldBack.Count} held back for the run ({string.Join("; ", heldBack)})")}; {Caster}");
+        if (best is null || bestScore is null || !GearScore.CasterBeats(bestScore, wieldedScore, wielded is null ? 0 : Caster.Weights.SwapMargin))
         {
-            why = string.Create(CultureInfo.InvariantCulture, $"gear: caster pick: keep {heldName}: none of the {eligible} usable caster(s) held beats it on the plan's element 0x{Element:X} ({unread} not appraised, {unmet} short of a requirement)");
+            // with the hands empty a caster that scores nothing is the rearm's (HeldCaster.Rearm), as before
+            why = string.Create(CultureInfo.InvariantCulture, $"gear: caster pick: keep {heldName}: none of the {eligible} usable caster(s) held beats it by the score's margin {Caster.Weights.SwapMargin:0.##} on the plan's element 0x{Element:X}; {tail}");
             return null;
         }
 
         var choice = JudgeCaster(best, best.Appraisal!, worn, skills);
-        why = string.Create(CultureInfo.InvariantCulture, $"gear: caster pick: '{best.Name}' 0x{best.Guid:X8}, the best of {eligible} usable caster(s) held, over {heldName}");
+        why = string.Create(CultureInfo.InvariantCulture, $"gear: caster pick: '{best.Name}' 0x{best.Guid:X8} ({bestScore.CasterScore:0.##}), the best of {eligible} usable caster(s) held, over {heldName}; {tail}");
         return choice.Kind is SelfEquipKind.Swap or SelfEquipKind.Wear ? choice : null;
+    }
+
+    /// <summary>
+    /// M6 14 (<c>m6-caster-spend</c>; the owner's ruling, 2026-11-14: she should definitely use the fire wand she has): every caster of <paramref name="held"/> whose wield requirement she does not meet, scored as if wielded: her skills with the
+    /// skill-base points it is short added (<see cref="SkillBaseShorts"/>), so its element and damage bonuses on the plan's element, its Mana Conversion and its defences count as the pick counts a usable one's (<see cref="GearScore.Caster"/>),
+    /// against the caster she wields. One with another requirement unmet even with those points (a level, a training, a current skill), or held back for the run, is listed with that reason (<see cref="CasterShortfall.Other"/>), so the
+    /// spend's line names it. Pure; the experience spend reads it (<see cref="CasterSpend.Decide"/>).
+    /// </summary>
+    /// <param name="held">The casters held in the packs, with their appraisals.</param>
+    /// <param name="worn">The pieces worn and wielded now.</param>
+    /// <param name="skills">Her numbers.</param>
+    public IReadOnlyList<CasterShortfall> ShortCasters(IReadOnlyList<GearCandidate> held, IReadOnlyList<WornPiece> worn, IGearSkills skills)
+    {
+        ArgumentNullException.ThrowIfNull(held);
+        ArgumentNullException.ThrowIfNull(worn);
+        ArgumentNullException.ThrowIfNull(skills);
+        var wielded = worn.FirstOrDefault(w => (w.Location & Held) != 0 && (w.ItemType & CasterType) != 0);
+        var wieldedScore = wielded?.Appraisal is { IsNotFound: false } wa ? GearScore.Caster(wielded.Guid, wielded.Name, wa, Context(skills, worn)) : null;
+        var list = new List<CasterShortfall>();
+        foreach (var c in held)
+        {
+            if ((c.ItemType & CasterType) == 0 || c.Appraisal is not { IsNotFound: false } a || WieldUnmet(a, skills) is null)
+            {
+                continue;
+            }
+
+            var shortfall = ShortfallOf(c, a, skills, wielded, wieldedScore, worn);
+            list.Add(HeldBack.IsHeldBack(c.Guid, out var failed) ? shortfall with { Other = "held back for the run (" + failed + ")" } : shortfall);
+        }
+
+        return list;
+    }
+
+    /// <summary>
+    /// M6 14 (<c>m6-caster-spend</c>): the skill-base wield requirements (ACE's RawSkill, type 2, read against the skill's <c>Base</c>: <c>CheckWieldRequirement</c>, Player_Inventory.cs:2133-2146 @95ef426d) of <paramref name="appraisal"/> she is
+    /// short of, one a skill (the highest requirement on it); empty when none.
+    /// </summary>
+    /// <param name="appraisal">The caster's appraisal.</param>
+    /// <param name="skills">Her numbers.</param>
+    public static IReadOnlyList<CasterSkillShort> SkillBaseShorts(Appraisal appraisal, IGearSkills skills)
+    {
+        ArgumentNullException.ThrowIfNull(appraisal);
+        ArgumentNullException.ThrowIfNull(skills);
+        var shorts = new List<CasterSkillShort>();
+        foreach (var r in appraisal.WieldRequirements)
+        {
+            if (r.Type != 2 || skills.Base((uint)r.Skill) is not { } value || value >= r.Difficulty)
+            {
+                continue;
+            }
+
+            var at = shorts.FindIndex(s => s.Skill == (uint)r.Skill);
+            if (at < 0)
+            {
+                shorts.Add(new CasterSkillShort((uint)r.Skill, value, r.Difficulty));
+            }
+            else if (shorts[at].Need < r.Difficulty)
+            {
+                shorts[at] = shorts[at] with { Need = r.Difficulty };
+            }
+        }
+
+        return shorts;
+    }
+
+    /// <summary>One caster short of a wield requirement, scored as if wielded (<see cref="ShortCasters"/>).</summary>
+    private CasterShortfall ShortfallOf(GearCandidate c, Appraisal a, IGearSkills skills, WornPiece? wielded, GearScoreResult? wieldedScore, IReadOnlyList<WornPiece> worn)
+    {
+        var shorts = SkillBaseShorts(a, skills);
+        IGearSkills raised = shorts.Count == 0 ? skills : new RaisedSkills(skills, shorts);
+        var other = WieldUnmet(a, raised);
+        var score = GearScore.Caster(c.Guid, c.Name, a, Context(raised, worn));
+        var margin = wielded is null ? 0 : Caster.Weights.SwapMargin;
+        var heldName = wielded is null ? "no caster held" : string.Create(CultureInfo.InvariantCulture, $"the held '{wielded.Name}' 0x{wielded.Guid:X8}");
+        var blocked = other is null ? null : "short of " + other + (shorts.Count == 0 ? string.Empty : " even with the skill-base points bought") + ", which no experience spend gives";
+        return new CasterShortfall(c.Guid, c.Name, shorts, blocked, score.CasterScore, heldName, wieldedScore?.CasterScore ?? 0, margin, GearScore.CasterBeats(score, wieldedScore, margin));
     }
 
     private SelfEquipChoice JudgeWearable(GearCandidate candidate, Appraisal appraisal, IReadOnlyList<WornPiece> worn, IGearSkills skills)
     {
+        if (Wear is { } wear && GearScore.SlotOf(candidate.ItemType, candidate.Coverage, candidate.ValidLocations) is GearSlot.Armour or GearSlot.Jewellery)
+        {
+            return WearScore.Judge(candidate, worn, Context(skills), wear).ToChoice(); // M6 14 (m6-armour): the score in percent of her hour
+        }
+
         var cantrips = UsefulCantrips(appraisal);
         if (cantrips.Count == 0)
         {
-            return new SelfEquipChoice(SelfEquipKind.None, candidate.Guid, candidate.Name, 0, 0, "no useful cantrip");
+            return JudgeArmour(candidate, worn, skills);
+        }
+
+        // M6 16 E5e5: a piece whose named cantrips cannot light for her now (she can wield it; an activation requirement is unmet) is a candidate on its armour alone, no better and no worse than a plain piece of
+        // its armour; when its armour wins it nothing, it is kept for the review below, as before
+        if (WieldUnmet(appraisal, skills) is null && ActivationUnmet(appraisal, skills) is { } dark && JudgeArmour(candidate, worn, skills) is { Kind: SelfEquipKind.Wear or SelfEquipKind.Replace } onArmour)
+        {
+            return onArmour with { Why = $"{string.Join(", ", cantrips)} would stay off ({dark}): judged on its armour alone: {onArmour.Why}" };
         }
 
         var wornCantrips = new HashSet<string>(worn.SelectMany(w => UsefulCantrips(w.Appraisal)), StringComparer.OrdinalIgnoreCase);
@@ -590,10 +972,116 @@ public sealed class SelfEquipJudge
         var met = new List<string>();
         if (Unmet(appraisal, skills, met) is { } unmet)
         {
-            return new SelfEquipChoice(SelfEquipKind.Review, candidate.Guid, candidate.Name, 0, 0, $"{list}, but {unmet}");
+            // M6 14 (m6-lore-spend; the owner, 2026-11-14: keep great cantrips while her Arcane Lore cannot light them, the lore will rise): the need named when her Arcane Lore alone stands between it and its spells
+            var loreNeed = WieldUnmet(appraisal, skills) is null && LoreShort(appraisal, skills, out var lore, out var difficulty) is not null && ActivationUnmet(appraisal, WithLore(skills, lore, difficulty)) is null ? difficulty : (int?)null;
+            return new SelfEquipChoice(SelfEquipKind.Review, candidate.Guid, candidate.Name, 0, 0, $"{list}, but {unmet}{(loreNeed is null ? string.Empty : "; her Arcane Lore alone keeps its spells off: a wear once it reaches " + loreNeed.Value.ToString(CultureInfo.InvariantCulture))}") { LoreNeed = loreNeed };
         }
 
         return new SelfEquipChoice(SelfEquipKind.Wear, candidate.Guid, candidate.Name, location, 0, string.Create(CultureInfo.InvariantCulture, $"casts {string.Join(", ", fresh)} that no worn piece casts, at the free location 0x{location:X8}; {(met.Count == 0 ? "no requirement" : string.Join(", ", met))}"));
+    }
+
+    /// <summary>
+    /// M6 2 a: a piece with no useful cantrip, judged as armour by its <see cref="GearScore"/>: worn in a free coverage when it scores above 0; in place of the one worn piece in its coverage when it beats that piece's score by
+    /// <see cref="ReplaceMargin"/> and, that piece off, ACE's coverage rule lets it on (<see cref="FreeLocation"/>); else nothing (never the review pack: the M5 den's review and keep-aside stay the cantrip pieces'). A worn piece not
+    /// appraised, or one that casts a useful cantrip (by the list's names, or a great one useful to her: <see cref="UsefulGreat"/>, M6 16 E5e2), is never replaced; two worn pieces in the way are not taken off for one.
+    /// M6 16 E5e5: a worn keeper whose great cantrip can never light for her (<see cref="GreatOnBodyKind.Never"/>) is the exception: it is replaced when beaten. Either piece is scored on what it gives: with an unmet
+    /// activation requirement its spells are off and its armour counts (<see cref="GearScore.Armour"/>), so a worn piece behind a skill limit is never beaten by weaker armour, and a find whose spells cannot light is a
+    /// candidate on its armour alone.
+    /// </summary>
+    private SelfEquipChoice JudgeArmour(GearCandidate candidate, IReadOnlyList<WornPiece> worn, IGearSkills skills)
+    {
+        if (GearScore.SlotOf(candidate.ItemType, candidate.Coverage, candidate.ValidLocations) != GearSlot.Armour)
+        {
+            return new SelfEquipChoice(SelfEquipKind.None, candidate.Guid, candidate.Name, 0, 0, "no useful cantrip");
+        }
+
+        var context = Context(skills);
+        var score = GearScore.Of(candidate, context);
+        if (score.Total <= 0)
+        {
+            return new SelfEquipChoice(SelfEquipKind.None, candidate.Guid, candidate.Name, 0, 0, "no useful cantrip and no armour gain: " + score);
+        }
+
+        var met = new List<string>();
+        var spellsOff = Unmet(candidate.Appraisal!, skills, met); // the wield requirements are met (the score is 0 when one is not); an unmet activation leaves its spells off and its armour counted (M6 16 E5e5)
+        var requirements = (met.Count == 0 ? "no requirement" : string.Join(", ", met)) + (spellsOff is null ? string.Empty : "; its spells stay off (" + spellsOff + "): its armour alone counts");
+        var inTheWay = worn.Where(w => (w.Coverage & candidate.Coverage) != 0).ToList();
+        if (inTheWay.Count == 0)
+        {
+            return new SelfEquipChoice(SelfEquipKind.Wear, candidate.Guid, candidate.Name, candidate.ValidLocations, 0, string.Create(CultureInfo.InvariantCulture, $"armour in a free coverage 0x{candidate.Coverage:X}: {score}; {requirements}"));
+        }
+
+        if (inTheWay.Count > 1)
+        {
+            return new SelfEquipChoice(SelfEquipKind.None, candidate.Guid, candidate.Name, 0, 0, $"no useful cantrip; its coverage 0x{candidate.Coverage:X} would take off {inTheWay.Count} worn pieces ({string.Join(", ", inTheWay.Select(w => $"'{w.Name}' 0x{w.Guid:X8}"))}): not replaced; {score}");
+        }
+
+        var piece = inTheWay[0];
+        if (piece.Appraisal is not { IsNotFound: false })
+        {
+            return new SelfEquipChoice(SelfEquipKind.None, candidate.Guid, candidate.Name, 0, 0, $"no useful cantrip; the worn '{piece.Name}' 0x{piece.Guid:X8} in its coverage is not appraised: no replacement on a guess; {score}");
+        }
+
+        // M6 16 E5e5 (the owner's decision of 2026-11-18: she wears what works): a worn keeper whose great cantrip can never light for her (GreatOnBody) holds its slot neither by the list's names nor by the guard below; it
+        // is judged on the armour it gives with its spells off, and taken off it is kept (the keep lists never asked whether she can activate it)
+        var onBody = context.GreatOn(piece.Guid, piece.Appraisal);
+        var dead = onBody.Kind == GreatOnBodyKind.Never;
+        if (!dead && UsefulCantrips(piece.Appraisal) is { Count: > 0 } kept)
+        {
+            return new SelfEquipChoice(SelfEquipKind.None, candidate.Guid, candidate.Name, 0, 0, $"no useful cantrip; the worn '{piece.Name}' 0x{piece.Guid:X8} casts {string.Join(", ", kept)}: kept; {score}");
+        }
+
+        if (onBody.HoldsSlot && context.GreatOn(candidate.Guid, candidate.Appraisal) is { HoldsSlot: false } own)
+        {
+            // M6 16 E5e2: the names of the keep-aside list are not every great cantrip useful to her (a Major Strength is on no list): the owner's rule is asked of the piece itself
+            return new SelfEquipChoice(SelfEquipKind.None, candidate.Guid, candidate.Name, 0, 0, $"no useful cantrip; the worn '{piece.Name}' 0x{piece.Guid:X8} casts a great cantrip useful to her and {GreatOnBody.CastsNone(own)}: never taken off for it; {score}");
+        }
+
+        var wornScore = GearScore.Of(piece, context); // M6 16 E5e5: a worn piece whose spells cannot light is scored on the armour it gives, never 0 (GearScore.Armour)
+        var deadNote = dead ? string.Create(CultureInfo.InvariantCulture, $"; {GreatOnBody.NoSlot(piece, onBody)}") : string.Empty;
+        if (score.Total <= (wornScore.Total * ReplaceMargin) + 1e-6)
+        {
+            return new SelfEquipChoice(SelfEquipKind.None, candidate.Guid, candidate.Name, 0, 0, string.Create(CultureInfo.InvariantCulture, $"not above the worn '{piece.Name}' 0x{piece.Guid:X8} by x{ReplaceMargin:0.##}: {score} against {wornScore}{deadNote}"));
+        }
+
+        if (FreeLocation(candidate, worn.Where(w => w.Guid != piece.Guid).ToList(), out var blocker) is not { } location)
+        {
+            return new SelfEquipChoice(SelfEquipKind.None, candidate.Guid, candidate.Name, 0, 0, $"better than the worn '{piece.Name}' 0x{piece.Guid:X8}, but with it off {blocker}; {score}");
+        }
+
+        // M6 2 f (2-R5): a Replace never leaves the chest bare. The Faran Robe with Hood (AL 0) scores 0, so any one-part piece in its coverage would out-score it and take the whole robe off; the floor would then buy a robe that cannot go on
+        // (the piece blocks its head or feet). Refused, not scored over the coverage it removes: the floor's chest rule is a floor, and a score that trades chest cover for armour level is tuning the plan does not ask for.
+        var coversChest = (candidate.ValidLocations & GearFloor.ChestArmor) != 0 || (candidate.Coverage & GearFloor.OuterwearChest) != 0;
+        if (!coversChest && GearFloor.ChestPiece([.. worn.Where(w => w.Guid != piece.Guid)]) is null && GearFloor.ChestPiece([piece]) is not null)
+        {
+            return new SelfEquipChoice(SelfEquipKind.None, candidate.Guid, candidate.Name, 0, 0, $"better than the worn '{piece.Name}' 0x{piece.Guid:X8}, but it is the only chest-covering piece worn and this one does not cover the chest: not replaced (it would leave the chest bare); {score}");
+        }
+
+        // M6 item 14 (armour instead of the robe): a Replace never bares a part the worn piece armours. The Pathwarden Plate Hauberk covers the chest, the abdomen and the arms (0x3C00); a looted breastplate (the chest alone) that out-scores it
+        // would take the whole hauberk off and leave three parts with no armour, and ACE reads a hit's armour by the part struck (Monster_Melee.cs:409-419 @95ef426d). A worn piece of armour level 0 (the Faran Robe with Hood) armours nothing,
+        // so its replacement is judged as before.
+        var bared = piece.Coverage & GearCoverage.Body & ~candidate.Coverage;
+        if (bared != 0 && piece.Appraisal.ArmorLevel is > 0 and var wornLevel)
+        {
+            return new SelfEquipChoice(SelfEquipKind.None, candidate.Guid, candidate.Name, 0, 0, string.Create(CultureInfo.InvariantCulture, $"better than the worn '{piece.Name}' 0x{piece.Guid:X8} where it covers, but that piece armours 0x{bared:X} more of the body (armour level {wornLevel}) which this one does not cover: not replaced (it would leave those parts bare); {score}"));
+        }
+
+        // M6 item 14: an attuned worn piece (the Pathwarden set) is replaced only by more armour, never by a lighter piece of less. The score weighs a burden against the capacity of the base Strength, so the hauberk (2,500) scores next
+        // to nothing on a Strength of 10 to 18 and a weaker, lighter coat would out-score it; but an attuned piece cannot be dropped (Player_Inventory.cs:1389-1393 @95ef426d), so taken off it is still carried until Thorolf takes it back,
+        // and its own lines (Strength Self II) go with it: no burden is saved and armour is lost.
+        var (armourNew, armourWorn) = (score.Part("armour") + score.Part("cantrip armour"), wornScore.Part("armour") + wornScore.Part("cantrip armour"));
+        if (GearScore.Attuned(piece.Appraisal) && armourNew < armourWorn)
+        {
+            return new SelfEquipChoice(SelfEquipKind.None, candidate.Guid, candidate.Name, 0, 0, string.Create(CultureInfo.InvariantCulture, $"lighter than the worn '{piece.Name}' 0x{piece.Guid:X8}, but its armour {armourNew:0.##} is under that piece's {armourWorn:0.##} and that piece is attuned (taken off it is still carried: no burden is saved): not replaced; {score} against {wornScore}"));
+        }
+
+        return new SelfEquipChoice(
+            SelfEquipKind.Replace,
+            candidate.Guid,
+            candidate.Name,
+            location,
+            piece.Guid,
+            string.Create(CultureInfo.InvariantCulture, $"above the worn '{piece.Name}' 0x{piece.Guid:X8} by more than x{ReplaceMargin:0.##}: {score} against {wornScore}; ACE lets it on with that piece off (Creature_Equipment.cs:50-58, 93-105); {requirements}{deadNote}"));
     }
 
     /// <summary>

@@ -70,6 +70,22 @@ public sealed class WorldObject
     /// <summary>The current position, or null while the object has none (parented, picked up, or created without one).</summary>
     public CellFrame? Position { get; internal set; }
 
+    /// <summary>
+    /// When the server last gave <see cref="Position"/> (the CreateObject's position, then each accepted UpdatePosition), in session-clock seconds; NaN while it never has. M6 item 14 (<c>m6-live-position</c>): the age
+    /// of the server's report, which the fight's measure prints beside the body's position (ACE sends no position for a monster that sticks to the player, so the report of one in melee grows old).
+    /// </summary>
+    public double PositionAt { get; internal set; } = double.NaN;
+
+    /// <summary>
+    /// M6 item 14 (the owner, 2026-11-12: use the information the server gives): where the server last named this object as the TARGET of a movement order, or null while it never has. A MoveToObject order
+    /// (F74C, movement type 6) carries "the location of the target" beside its guid (ACE <c>Network/Motion/MoveToObject.cs</c>:10 and 16: <c>Origin = new Origin(motion.Position)</c>), so each time the server
+    /// walks the player to a thing she used or attacked, and each time it sends a creature after something, it says where that thing stands. The client kept the order on the mover and dropped this.
+    /// </summary>
+    public CellFrame? OrderPosition { get; internal set; }
+
+    /// <summary>When the server last gave <see cref="OrderPosition"/>, in session-clock seconds; NaN while it never has.</summary>
+    public double OrderPositionAt { get; internal set; } = double.NaN;
+
     /// <summary>What holds the object, or null.</summary>
     public ObjectAttachment? Parent { get; internal set; }
 
@@ -104,6 +120,9 @@ public sealed class WorldObject
     /// <c>fix_chest_missing_inventory_window</c> property, and never sets it for a door: @95ef426d <c>WorldObject_Networking.cs:845-856</c>), so nothing is read from it.
     /// </summary>
     public bool? Locked { get; internal set; }
+
+    /// <summary>Where <see cref="Locked"/> was read from (M6 8 C, D117): <c>appraised</c> (the 0x00C9 answer, ACE's <c>AppraiseInfo.cs:135-165</c>), <c>property-update</c> (0x02D2) or <c>refused-use</c> (the Use's sound 0x94); null while unknown.</summary>
+    public string? LockedFrom { get; internal set; }
 
     /// <summary>Every public property the server changed for this instance since its CreateObject (GameMessages 0x02D0, 0x02D2, 0x02D4, 0x02D6, 0x02D8), by kind and key.</summary>
     public ObjectProperties Properties { get; } = new();

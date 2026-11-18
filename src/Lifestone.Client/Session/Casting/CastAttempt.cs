@@ -102,6 +102,11 @@ public readonly record struct CastRequest
 /// <see cref="CastEnd.ServerError"/>. <see cref="CastRules.MaxTries"/> bounds the tries in all and <see cref="CastRules.MaxSeconds"/> the attempt's time.</para>
 /// <para><b>Safety.</b> Before every send, the first included, an <see cref="ActionSource.Automation"/> attempt reads <see cref="IActionApi.KillSwitch"/>: on, it ends <see cref="CastEnd.Cancelled"/>
 /// with nothing sent (the kill switch applies to automation only, A0's R6). A try in flight cannot be unsent: it finishes, and the attempt then ends Cancelled instead of sending again.</para>
+/// <para><b>The air</b> (M6 14 airborne; live 2026-11-13, the Tusker Abode's pit: three Flame Bolt VI casts sent in the air, each answered 0x04EB, and the fight's refused-in-a-row rule dropped the spell for the fight). ACE refuses a cast
+/// while the body is off walkable ground (<c>Player.IsJumping</c>, <c>Player.cs</c>:49-62; <c>Player_Magic.cs</c>:105-109 and 296-300 @95ef426d), so a player in the air does not press the cast. Check before: every send reads the bound
+/// body (<see cref="MoveIntents.InTheAir"/>, the body the screen draws) and, while it is in the air, holds the try with nothing sent and nothing counted. Check after: a 0x04EB answer (the server had not yet seen the landing) is a wait, not
+/// a try (<see cref="CastReport.Tries"/> leaves it out, as every count and bound of the line's rules does): the same level goes again <see cref="AirRetrySeconds"/> on, once the body stands. The hold's seconds are left out of
+/// <see cref="CastRules.MaxSeconds"/>; past <see cref="MaxAirSeconds"/> of them the attempt ends <see cref="CastEnd.InTheAir"/>, which names the moment, not the spell.</para>
 /// <para><b>What it never does.</b> It never changes the combat mode (the callers own it and their caster swaps) and never reads the mana before the first try: the caller decided to cast, and retail's
 /// client never checks the mana either (<c>gmSpellcastingUI::Cast</c> 11.6096 0x004C6C40, <c>ClientMagicSystem::CastSpell</c> 0x00568DE0). The mana is read at each send, to count the mana tries, and
 /// before a fizzle's retry when <see cref="CastRules.CeilingBeforeRetry"/> says so.</para>
@@ -129,6 +134,21 @@ public sealed class CastAttempt
 
     /// <summary>ACE's <c>WeenieError.TargetNotAcquired</c> (<c>WeenieError.cs</c>:389 @95ef426d): a UseDone code, or a WeenieError before the cast's UseDone 0 (<c>Player_Magic.cs</c>:751-757, then <c>FinishCast</c> 935-985).</summary>
     public const uint NotAcquiredCode = 0x042C;
+
+    /// <summary>ACE's <c>WeenieError.YouCantDoThatWhileInTheAir</c> (<c>WeenieError.cs</c>:898 @95ef426d): the cast's UseDone code while the body is off walkable ground (<c>Player_Magic.cs</c>:105-109, 296-300).</summary>
+    public const uint InTheAirCode = 0x04EB;
+
+    /// <summary>
+    /// M6 14 airborne: the spacing after a 0x04EB answer before the same level goes again (and only once the body stands): the landing reaches ACE in the client's next AutonomousPosition, sent on the first frame on the ground
+    /// (<c>CommandInterpreter::SendPositionEvent</c>, 11.6096 0x006B56B0, on a changed cell or contact plane). Lifestone's own margin.
+    /// </summary>
+    public const double AirRetrySeconds = 0.25;
+
+    /// <summary>
+    /// M6 14 airborne: the most seconds an attempt holds its tries for the air (the body in the air, and the spacing after each 0x04EB) before it ends <see cref="CastEnd.InTheAir"/>: over the wayfinding runner's longest flight (4 s,
+    /// <c>NavRunner.JumpAirSeconds</c>) with a margin. Lifestone's own.
+    /// </summary>
+    public const double MaxAirSeconds = 6.0;
 
     /// <summary>The player's Max Mana vital id (<c>PropertyAttribute2nd</c> 5).</summary>
     private const uint MaxManaVital = 5;
@@ -163,6 +183,10 @@ public sealed class CastAttempt
     private int _busy;
     private int _resists;
     private int _proved;
+    private int _airRefusals; // M6 14 airborne: the 0x04EB answers, none a try
+    private double _airSeconds; // the closed holds' seconds
+    private double _airSince = double.NaN; // the open hold's start, NaN with none
+    private bool _airLogged; // the open hold's line was written
     private string? _why;
 
     private enum Phase : byte
@@ -226,6 +250,8 @@ public sealed class CastAttempt
         Busy = _busy,
         Resists = _resists,
         Proved = _proved,
+        AirRefusals = _airRefusals,
+        AirSeconds = AirTotal(_phase == Phase.Done ? _endedAt : _lastNow),
         Seconds = (_phase == Phase.Done ? _endedAt : _lastNow) - _start,
         Why = _why,
     };
@@ -266,7 +292,10 @@ public sealed class CastAttempt
         _lastNow = now;
         _manaTry = false;
         _chatMark = _state.Chat.Total;
-        _tries = _fizzles = _manaTries = _manaRefusals = _manaLanded = _busy = _resists = _proved = 0;
+        _tries = _fizzles = _manaTries = _manaRefusals = _manaLanded = _busy = _resists = _proved = _airRefusals = 0;
+        _airSeconds = 0;
+        _airSince = double.NaN;
+        _airLogged = false;
         _fizzleRetries = Math.Max(0, request.FizzlesSpent);
         _levelsDown = Math.Max(0, request.LevelsDownSpent);
         _why = null;
@@ -304,12 +333,17 @@ public sealed class CastAttempt
                     return Finish(CastEnd.Cancelled, now, _tries == 0 ? "the kill switch is on: nothing was sent" : "the kill switch is on: the next try was not sent");
                 }
 
-                if (now < _sendAt)
+                if (_actions.Move?.InTheAir == true)
                 {
-                    return now - _start >= _rules.MaxSeconds ? CapEnd(now) : CastEnd.Running;
+                    return HoldForAir(now); // M6 14 airborne: the check before every send: no cast leaves a body in the air
                 }
 
-                if (_tries > 0 && now - _start >= _rules.MaxSeconds)
+                if (now < _sendAt)
+                {
+                    return ActiveSeconds(now) >= _rules.MaxSeconds ? CapEnd(now) : CastEnd.Running;
+                }
+
+                if (_tries > 0 && ActiveSeconds(now) >= _rules.MaxSeconds)
                 {
                     return CapEnd(now);
                 }
@@ -330,13 +364,21 @@ public sealed class CastAttempt
         }
     }
 
-    /// <summary>Ends a running attempt <see cref="CastEnd.Cancelled"/> (the caller's own stop: a station aborted, the scenario ended). A try in flight is not unsent.</summary>
+    /// <summary>
+    /// Ends a running attempt <see cref="CastEnd.Cancelled"/> (the caller's own stop: a station aborted, the scenario ended). A try in flight is not unsent; a try still waiting its turn in the Action API is withdrawn
+    /// (<see cref="IActionApi.Withdraw"/>; M6 14 recall unblock: a stopped fight's queued cast went out 12 s later and was the busy reason its recall failed on), named in the log.
+    /// </summary>
     /// <param name="why">Why, for the log and the report.</param>
     /// <param name="now">The session clock.</param>
     public void Stop(string why, double now)
     {
         if (IsRunning)
         {
+            if (_pending is { IsCompleted: false } queued && queued.SentAt is null && _actions.Withdraw(queued, "the cast's caller stopped it: " + why))
+            {
+                _log.Info(LogCategory, $"{_request.Purpose}: the try #{queued.Id} had not been sent (it waited its turn in the Action API): withdrawn, nothing goes out");
+            }
+
             Finish(CastEnd.Cancelled, now, "stopped by the caller: " + why);
         }
     }
@@ -345,6 +387,38 @@ public sealed class CastAttempt
         CastEnd.TimeCap,
         now,
         string.Create(CultureInfo.InvariantCulture, $"the attempt's cap of {_rules.MaxSeconds:0.##} s ({_rules.Name}) passed after {_tries} tries"));
+
+    /// <summary>M6 14 airborne: the seconds held for the air so far (the closed holds and the open one).</summary>
+    private double AirTotal(double now) => _airSeconds + (double.IsNaN(_airSince) ? 0 : Math.Max(0, now - _airSince));
+
+    /// <summary>M6 14 airborne: the attempt's seconds less those held for the air (what <see cref="CastRules.MaxSeconds"/> bounds).</summary>
+    private double ActiveSeconds(double now) => now - _start - AirTotal(now);
+
+    /// <summary>M6 14 airborne: the check before found the body in the air: the try is held, nothing sent and nothing counted, logged once a hold; past <see cref="MaxAirSeconds"/> the attempt ends <see cref="CastEnd.InTheAir"/>.</summary>
+    private CastEnd HoldForAir(double now)
+    {
+        if (double.IsNaN(_airSince))
+        {
+            _airSince = now;
+        }
+
+        if (!_airLogged)
+        {
+            _airLogged = true;
+            _log.Info(
+                LogCategory,
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"{_request.Purpose}: the body is in the air: {(_tries == 0 ? "the cast" : "the next try")} of {NameOf(_request.Levels[_level])} waits for the landing, nothing sent (ACE refuses a cast in the air, 0x{InTheAirCode:X4} YouCantDoThatWhileInTheAir, Player_Magic.cs:105-109 @95ef426d)"));
+        }
+
+        return AirTotal(now) >= MaxAirSeconds ? AirEnd(now) : CastEnd.Running;
+    }
+
+    private CastEnd AirEnd(double now) => Finish(
+        CastEnd.InTheAir,
+        now,
+        string.Create(CultureInfo.InvariantCulture, $"held {AirTotal(now):0.0#} s for the air, over the {MaxAirSeconds:0} s bound ({_airRefusals} answer(s) 0x{InTheAirCode:X4}): the moment's, not the spell's; the caller decides again"));
 
     // M5 7: the Mana Conversion tries gated on the model. A try below the level's ceiling is sent only when the model gives it the request's landing chance at the mana held; else the attempt ends ManaShort with nothing sent (the caller dances or waits).
     private bool ModelCannotRaise(double now)
@@ -385,6 +459,16 @@ public sealed class CastAttempt
             _manaTries++;
         }
 
+        var held = 0.0;
+        if (!double.IsNaN(_airSince))
+        {
+            // M6 14 airborne: the body stands again (the check before passed): the hold closes as the try goes out
+            held = Math.Max(0, now - _airSince);
+            _airSeconds += held;
+            _airSince = double.NaN;
+            _airLogged = false;
+        }
+
         _tries++;
         _pending = _request.Target == 0 ? _actions.Cast(spell, _request.Source) : _actions.Cast(spell, _request.Target, _request.Source);
         _phase = Phase.InFlight;
@@ -395,7 +479,7 @@ public sealed class CastAttempt
                 LogCategory,
                 string.Create(
                     CultureInfo.InvariantCulture,
-                    $"{_request.Purpose}: try {_tries} {NameOf(spell)} ({spell}){(_request.Target == 0 ? string.Empty : $" at 0x{_request.Target:X8}")}, level {_level + 1} of {_request.Levels.Count}, mana {(known ? mana.ToString(CultureInfo.InvariantCulture) : "unknown")}{(ceiling > 0 ? $" of up to {ceiling}" : string.Empty)}{(_manaTry ? " (a mana try)" : string.Empty)} ({_rules.Name}, {_request.Source})"));
+                    $"{_request.Purpose}: try {_tries} {NameOf(spell)} ({spell}){(_request.Target == 0 ? string.Empty : $" at 0x{_request.Target:X8}")}, level {_level + 1} of {_request.Levels.Count}, mana {(known ? mana.ToString(CultureInfo.InvariantCulture) : "unknown")}{(ceiling > 0 ? $" of up to {ceiling}" : string.Empty)}{(_manaTry ? " (a mana try)" : string.Empty)} ({_rules.Name}, {_request.Source}){(held > 0 ? $"; the body stands, after {held:0.0#} s held for the air" : string.Empty)}"));
         }
     }
 
@@ -461,6 +545,9 @@ public sealed class CastAttempt
             case ComponentsCode:
                 Finish(CastEnd.NoComponents, now, "a component is missing (UseDone 0x0400): a kit problem, never retried");
                 return;
+            case InTheAirCode:
+                SettleInTheAir(now);
+                return;
             case NotAcquiredCode when _request.Target != 0 && _request.TargetGone is { } gone && !gone(_request.Target):
                 // M5 7 D124: ACE sends 0x042C only when the target object is not on its landblock (Player_Magic.cs:137-140, 173-179, 197-203, 751-757 @95ef426d); the client's table lags its deletion. Never out of range.
                 Finish(CastEnd.TargetDied, now, string.Create(CultureInfo.InvariantCulture, $"the target 0x{_request.Target:X8} was not acquired at the release (0x{outcome.Code:X4} TargetNotAcquired: ACE no longer holds it, though it still shows here): the caller picks another, no walk"));
@@ -504,6 +591,36 @@ public sealed class CastAttempt
                 Finish(CastEnd.Unproven, now, _request.Proof is null ? "sent (UseDone 0) with no proof asked: TODO(m3-cast-other-target-proof)" : "sent (UseDone 0) and the proof found nothing: TODO(m3-cast-other-target-proof)");
                 return;
         }
+    }
+
+    /// <summary>
+    /// M6 14 airborne, the check after: ACE answered 0x04EB, the body was in the air when the cast reached it (the server had not yet seen the landing, or the check before had no body to read). Not a try (taken back out of
+    /// <see cref="CastReport.Tries"/>, and out of the mana tries), not a fizzle and not a refusal of the spell: the hold starts at the answer and the same level goes again <see cref="AirRetrySeconds"/> on, once the body stands.
+    /// </summary>
+    private void SettleInTheAir(double now)
+    {
+        _airRefusals++;
+        _tries--;
+        if (_manaTry)
+        {
+            _manaTries--;
+            _manaTry = false;
+        }
+
+        _airSince = now;
+        _airLogged = true; // this line is the hold's
+        _log.Info(
+            LogCategory,
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"{_request.Purpose}: ACE answered 0x{InTheAirCode:X4} YouCantDoThatWhileInTheAir: the body was in the air when {NameOf(_request.Levels[_level])} reached it (Player_Magic.cs:105-109 @95ef426d): a wait for the landing, not a try and not a refusal of the spell; the same level goes again {AirRetrySeconds:0.##} s on once the body stands (in the air {_airRefusals})"));
+        if (AirTotal(now) >= MaxAirSeconds)
+        {
+            AirEnd(now);
+            return;
+        }
+
+        Again(_level, now + AirRetrySeconds);
     }
 
     private void SettleFizzle(double now)
@@ -665,13 +782,20 @@ public sealed class CastAttempt
         _phase = Phase.Done;
         _endedAt = now;
         _why = why;
+        if (!double.IsNaN(_airSince))
+        {
+            _airSeconds += Math.Max(0, now - _airSince); // M6 14 airborne: an open hold closes with the attempt
+            _airSince = double.NaN;
+        }
+
         var spell = _request.Levels[_level];
         var severity = end.Succeeded() ? LogSeverity.Info : LogSeverity.Warning;
         if (_log.IsEnabled(severity))
         {
+            var air = _airRefusals > 0 || _airSeconds > 0 ? string.Create(CultureInfo.InvariantCulture, $", in the air {_airRefusals} ({_airSeconds:0.0#} s held)") : string.Empty;
             var line = string.Create(
                 CultureInfo.InvariantCulture,
-                $"{_request.Purpose}: {end.Name()} after {_tries} tries ({NameOf(spell)}, level {_level + 1}, {now - _start:0.0#} s; fizzles {_fizzles}, mana tries {_manaTries}, mana refusals {_manaRefusals}, busy {_busy}, resists {_resists}, proved {_proved}): {why}");
+                $"{_request.Purpose}: {end.Name()} after {_tries} tries ({NameOf(spell)}, level {_level + 1}, {now - _start:0.0#} s; fizzles {_fizzles}, mana tries {_manaTries}, mana refusals {_manaRefusals}, busy {_busy}, resists {_resists}, proved {_proved}{air}): {why}");
             if (severity == LogSeverity.Info)
             {
                 _log.Info(LogCategory, line);

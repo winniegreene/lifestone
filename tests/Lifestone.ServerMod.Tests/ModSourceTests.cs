@@ -47,6 +47,10 @@ public sealed partial class ModSourceTests
             "server/mod/Lifestone.ServerMod/Mod.cs",
             "server/mod/Lifestone.ServerMod/LifestoneCommand.cs",
             "server/mod/Lifestone.ServerMod/StartupWatch.cs",
+            "server/mod/Lifestone.ServerMod/ArrivalGuard.cs",
+            "server/mod/Lifestone.ServerMod/CorpseCoin.cs",
+            "server/mod/Lifestone.ServerMod/HouseAccountAge.cs",
+            "server/mod/Lifestone.ServerMod/BuffBot.cs",
             "server/mod/Lifestone.ServerMod/ToolCall.cs",
             "server/mod/Lifestone.ServerMod/AceFacts.cs",
             "server/mod/Lifestone.ServerMod/Verbs/StatusVerb.cs",
@@ -61,6 +65,10 @@ public sealed partial class ModSourceTests
             "server/mod/Lifestone.ServerMod/Verbs/ItemVerb.cs",
             "server/mod/Lifestone.ServerMod/Verbs/CorpsesVerb.cs",
             "server/mod/Lifestone.ServerMod/Core/CorpseRotRules.cs",
+            "server/mod/Lifestone.ServerMod/Core/ArrivalKeepRules.cs",
+            "server/mod/Lifestone.ServerMod/Core/CorpseCoinRules.cs",
+            "server/mod/Lifestone.ServerMod/Core/HouseAccountAgeRules.cs",
+            "server/mod/Lifestone.ServerMod/Core/BuffBotRules.cs",
             "server/mod/Lifestone.ServerMod/Core/ItemCreateRules.cs",
             "server/mod/Lifestone.ServerMod/Core/ToolRouting.cs",
             "server/mod/Lifestone.ServerMod/Core/CharPurgeRules.cs",
@@ -70,6 +78,7 @@ public sealed partial class ModSourceTests
             "server/mod/Lifestone.ServerMod/Core/QuestChange.cs",
             "server/mod/Shared/ToolsWire.cs",
             "server/mod/Shared/PlaceRules.cs",
+            "server/mod/Shared/BuffBotWire.cs",
         ];
         var found = Files.Select(Relative).ToArray();
         Assert.All(expected, e => Assert.Contains(e, found));
@@ -205,12 +214,20 @@ public sealed partial class ModSourceTests
     [Fact]
     public void The_mod_writes_no_files_and_opens_nothing_to_the_network()
     {
-        var offences = Files
+        // D138 (the owner, 2026-11-14: the bot's credits survive a restart): one named writer, the buff bot's state file, written to a side file and moved over the old one, in ACE's runtime folder (the parent of
+        // the mods folder, BuffBot.Start); its two calls are the whole exception.
+        const string Ledger = "server/mod/Lifestone.ServerMod/Core/BuffBotLedger.cs";
+        string[] stateFile = ["File.WriteAllText(side, ", "File.Move(side, path, "];
+        var calls = Files
             .Where(p => !p.EndsWith(".editorconfig", StringComparison.Ordinal))
             .SelectMany(p => File.ReadAllLines(p).Select((line, i) => (p, i, line)))
-            .SelectMany(x => ForbiddenCall().Matches(x.line).Select(m => $"{Relative(x.p)}:{x.i + 1}: {m.Value}"))
+            .SelectMany(x => ForbiddenCall().Matches(x.line).Select(m => (
+                Where: $"{Relative(x.p)}:{x.i + 1}: {m.Value}",
+                Allowed: Relative(x.p) == Ledger && stateFile.Any(s => x.line.TrimStart().StartsWith(s, StringComparison.Ordinal)))))
             .ToArray();
+        var offences = calls.Where(c => !c.Allowed).Select(c => c.Where).ToArray();
         Assert.True(offences.Length == 0, "forbidden calls in the server mod:\n" + string.Join('\n', offences));
+        Assert.Equal(stateFile.Length, calls.Count(c => c.Allowed));
     }
 
     [Theory]
@@ -379,7 +396,7 @@ public sealed partial class ModSourceTests
         Assert.Contains("caller.Session.Characters.RemoveAll(c => c.Id == target.Guid);", code, StringComparison.Ordinal);
 
         // The graduated test characters are spelled once, in the rules.
-        Assert.Contains("[\"Lifestone Smoke\", \"Lifestone Loopback\", \"BSD Mage\", \"Holtburg Hunter\", \"Holtburg Brawler\", \"Holtburg Archer\", \"Lifestone Tools\"]", File.ReadAllText(Path.Combine(ProjectFolder, "Core", "CharPurgeRules.cs")), StringComparison.Ordinal);
+        Assert.Contains("[\"Lifestone Smoke\", \"Lifestone Loopback\", \"BSD Mage\", \"Holtburg Hunter\", \"Holtburg Brawler\", \"Holtburg Archer\", \"Lifestone Tools\", \"Winnie\", \"Qwinnie\"]", File.ReadAllText(Path.Combine(ProjectFolder, "Core", "CharPurgeRules.cs")), StringComparison.Ordinal);
         var spelled = CSharp(ModRoot)
             .Where(p => !p.EndsWith("CharPurgeRules.cs", StringComparison.Ordinal))
             .Where(p => File.ReadAllLines(p).Any(l => !l.TrimStart().StartsWith("//", StringComparison.Ordinal) && l.Contains("Lifestone Smoke", StringComparison.Ordinal)))

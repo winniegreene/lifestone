@@ -36,7 +36,8 @@ public sealed class P1PlacesTests(DatSetFixture fixture) : IClassFixture<DatSetF
         }
     }
 
-    private static HuntingGround Another(HuntingGround ground) => GroundCatalog.All.First(g => g.Kind == GroundKind.Dungeon && g.Key != ground.Key);
+    // M6 4 R1: another dungeon WITH a tie record (a Portal): item 3's island dungeons are NoRecall and carry none (D51), so the first catalog dungeon is no longer one.
+    private static HuntingGround Another(HuntingGround ground) => GroundCatalog.All.First(g => g.Kind == GroundKind.Dungeon && g.Portal is not null && g.Key != ground.Key);
 
     private static TravelRequest ToArrival(HuntingGround ground) => new(ground.ArrivalDestination(), TravelPurpose.Ground);
 
@@ -87,7 +88,7 @@ public sealed class P1PlacesTests(DatSetFixture fixture) : IClassFixture<DatSetF
             var den = t.Travel.GoTo(t.View, ToArrival(ground), t.Now);
             Assert.Equal(TravelStatus.Arrived, t.RunLeg(den));
             Assert.Equal((PortalTie.Tied, 0), (t.Facts.PortalTieOf(key), t.Facts.Teleports));
-            Assert.Equal(PortalTie.Unknown, t.Facts.PortalTieOf(Another(ground).Key));
+            Assert.Equal(PortalTie.Untied, t.Facts.PortalTieOf(Another(ground).Key)); // M6 4 F1 (4-R2): the recall landed, so the one slot holds the den: the other ground with a tie record is known untied
             Assert.Empty(t.PlacesTo);
         }
     }
@@ -118,11 +119,18 @@ public sealed class P1PlacesTests(DatSetFixture fixture) : IClassFixture<DatSetF
         var t = new J1JourneyRig();
         t.Context(budget: 5);
         t.Facts.SetPortalTie(key, PortalTie.Untied);
+        var routed = key != DenGround.Profile.Key; // M6 4 F1 (4-R1): the travel file routes the Temple, so its arrival is the rung change's (here its plan's named gate), never the untied refusal; the den has no route
 
-        foreach (var request in new[] { ToArrival(ground), ToPortalFront(ground) })
+        foreach (var (request, arrival) in new[] { (ToArrival(ground), true), (ToPortalFront(ground), false) })
         {
             var leg = t.Travel!.GoTo(t.View, request, t.Now);
             Assert.Equal(TravelStatus.Failed, t.RunLeg(leg));
+            if (routed && arrival)
+            {
+                Assert.StartsWith(key == "crater-caves" ? "travel:rung-change:holtburg-to-network:" : "travel:rung-change:gate:", leg.Failure, StringComparison.Ordinal); // M6 8 B1: no portal of the Crater Caves route is gated: at level 1 the plan is admitted and its first hop is what fails on this rig
+                continue;
+            }
+
             Assert.Equal("travel:ground:untied", leg.Failure);
             Assert.Equal(JourneyTravel.UntiedFailure, leg.Failure);
         }
@@ -130,8 +138,8 @@ public sealed class P1PlacesTests(DatSetFixture fixture) : IClassFixture<DatSetF
         Assert.Empty(t.PlacesTo);
         Assert.Empty(t.Casts);
         Assert.Equal((0, 0, 0), (t.Facts.Teleports, t.Travel!.Places, t.Travel.Refused));
-        Assert.Equal(2, t.Log.Entries.Count(e => e.Severity == LogSeverity.Warning && e.Message.Contains("TODO(m6-first-tie-walk)", StringComparison.Ordinal) && e.Message.Contains("travel:ground:untied", StringComparison.Ordinal)));
-        Assert.DoesNotContain(t.Log.Entries, e => e.Severity >= LogSeverity.Error);
+        Assert.Equal(routed ? 1 : 2, t.Log.Entries.Count(e => e.Severity == LogSeverity.Warning && e.Message.Contains("TODO(m6-first-tie-walk)", StringComparison.Ordinal) && e.Message.Contains("travel:ground:untied", StringComparison.Ordinal)));
+        Assert.DoesNotContain(t.Log.Entries, e => e.Severity >= LogSeverity.Error && !e.Message.Contains("FAILED", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -145,7 +153,9 @@ public sealed class P1PlacesTests(DatSetFixture fixture) : IClassFixture<DatSetF
         t.Facts.SetPortalTie(other.Key, PortalTie.Untied);
 
         var toOther = t.Travel!.GoTo(t.View, ToArrival(other), t.Now);
-        Assert.Equal("travel:ground:untied", toOther.Failure); // the den's tie did not recall a journey bound for the other ground
+        Assert.Equal(TravelMeans.Run, toOther.Means); // the den's tie did not recall a journey bound for the other ground: untied and routed, it is the rung change (M6 4 F1, 4-R1)
+        Assert.Contains(t.Log.Entries, e => e.Message.StartsWith($"journey travel: the travel rule: direction=out way=rung-change ground={other.Key} ", StringComparison.Ordinal));
+        toOther.Dispose();
         var toDen = t.Travel.GoTo(t.View, ToArrival(den), t.Now);
         Assert.Equal(TravelMeans.Recall, toDen.Means);
         toDen.Dispose();
@@ -154,7 +164,8 @@ public sealed class P1PlacesTests(DatSetFixture fixture) : IClassFixture<DatSetF
         var context = JourneyScenario.NewContext(JourneyPlans.Mage, new RecordingLogSink(), new Dictionary<uint, SpellInfo>(), dungeon: other);
         Assert.Equal(other.Key, context.Dungeon.Key);
         context.Facts.SetPortalTie(other.Key, PortalTie.Untied);
-        Assert.Equal("travel:ground:untied", context.Travel.GoTo(t.View, ToArrival(other), t.Now).Failure);
+        Assert.Same(context, ((JourneyTravel)context.Travel).Context); // M6 4 F1: the built context is the travel's own
+        Assert.Equal(TravelMeans.Run, context.Travel.GoTo(t.View, ToArrival(other), t.Now).Means);
         Assert.Equal(other.Key, JourneyGrounds.DungeonOf(other.Arrival.Cell, other)!.Key);
         Assert.Equal(den.Key, JourneyGrounds.DungeonOf(den.Arrival.Cell, other)!.Key); // a cell outside the journey's ground falls back to the catalog's search
     }

@@ -78,7 +78,7 @@ public sealed class SoakOptionTests
         Assert.Contains("--soak-line-s", names.Keys);
         Assert.Contains("--log-copies", names.Keys);
         Assert.Contains("console|file|all", names["--log-copies"].Value ?? string.Empty, StringComparison.Ordinal);
-        Assert.Contains("TODO(m5-soak-tallies)", names["--soak-line-s"].Help, StringComparison.Ordinal);
+        Assert.Contains("m5-soak-tallies (closed)", names["--soak-line-s"].Help, StringComparison.Ordinal);
         Assert.Contains("lifestone.log", names["--log-copies"].Help, StringComparison.Ordinal);
     }
 

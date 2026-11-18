@@ -70,6 +70,12 @@ public sealed class ToolsPanel : IUiElementListener, IDisposable
     /// </summary>
     public const uint AutopilotButtonId = 0x7F000128;
 
+    /// <summary>
+    /// M6 6 MD2 (L1): the Jobs button, above the Autopilot button: <see cref="ToggleJobs"/> opens and closes the automation menu (the play host wires it to the game screen's <c>Menu.Toggle</c>). The word "Jobs" is Lifestone's own
+    /// literal and the button a <b>placeholder</b>: retail had no menu.
+    /// </summary>
+    public const uint JobsButtonId = 0x7F000129;
+
     /// <summary>The message the panel shows against a server that is not on loopback (a Lifestone literal on the retail message dialog).</summary>
     public const string NotLoopbackText = "The Lifestone tools work only against the bundled server on this computer. This server is not on loopback, so the tools are switched off.";
 
@@ -98,6 +104,12 @@ public sealed class ToolsPanel : IUiElementListener, IDisposable
 
     /// <summary>How many times the Autopilot button was pressed.</summary>
     public int AutopilotPresses { get; private set; }
+
+    /// <summary>M6 6 MD2: what the Jobs button does: the play host wires the automation menu's toggle. Null until it is wired; a press then says so in the status line and the chat.</summary>
+    public Action? ToggleJobs { get; set; }
+
+    /// <summary>How many times the Jobs button was pressed.</summary>
+    public int JobsPresses { get; private set; }
 
     /// <summary>The button's text when the dial is off or done (Lifestone's own literal; a placeholder button, retail never had one).</summary>
     public const string AutopilotStartText = "Autopilot";
@@ -209,6 +221,7 @@ public sealed class ToolsPanel : IUiElementListener, IDisposable
         _up = Find<UiButton>(UpId);
         _down = Find<UiButton>(DownId);
         _autopilotButton = Find<UiButton>(AutopilotButtonId);
+        _ = Find<UiButton>(JobsButtonId); // M6 6 MD2: a layout without the Jobs button says so (TODO(g7-tools-layout)); its click is the element message below
         RefreshAutopilotText();
         Window.SetVisible(false);
         Window.RegisterForElementMessages(this);
@@ -368,6 +381,9 @@ public sealed class ToolsPanel : IUiElementListener, IDisposable
             case AutopilotButtonId:
                 PressAutopilot();
                 return UiListenResult.Handled;
+            case JobsButtonId:
+                PressJobs();
+                return UiListenResult.Handled;
             case HideButtonId:
                 Close();
                 return UiListenResult.Handled;
@@ -420,7 +436,23 @@ public sealed class ToolsPanel : IUiElementListener, IDisposable
         const string unwired = "The autopilot is not available in this host.";
         Model.SetStatus(unwired);
         _chat("Lifestone: " + unwired);
-        _context.Manager.Services.Log.Warn(UiElementManager.Category, "the Autopilot button was pressed but nothing is wired to it (TODO(m5-autopilot-key-unwired): the play host wires ToggleAutopilot when it starts)");
+        _context.Manager.Services.Log.Warn(UiElementManager.Category, "the Autopilot button was pressed but nothing is wired to it (m5-autopilot-key-unwired (closed): the play host wires ToggleAutopilot when it starts)");
+    }
+
+    /// <summary>M6 6 MD2: the Jobs button's press (the checks and tests press it by this too): the menu toggle the host wired, or a plain line when none is.</summary>
+    public void PressJobs()
+    {
+        JobsPresses++;
+        if (ToggleJobs is { } toggle)
+        {
+            toggle();
+            return;
+        }
+
+        const string unwired = "The automation menu is not available in this host.";
+        Model.SetStatus(unwired);
+        _chat("Lifestone: " + unwired);
+        _context.Manager.Services.Log.Warn(UiElementManager.Category, "the Jobs button was pressed but nothing is wired to it (the play host wires ToggleJobs to the automation menu when it starts)");
     }
 
     private void RefreshAutopilotText() => _autopilotButton?.SetText(AutopilotText);

@@ -173,6 +173,9 @@ internal sealed class ReducerHarness
         Track<ObjectSoundPlayed>();
         Track<ObjectScriptPlayed>();
         Track<PlayerTeleportAnnounced>();
+        Track<GuardianOpened>(); // M6 villa
+        Track<GuardianProfileChanged>();
+        Track<GuardianClosed>();
         Track<SelfTravelChanged>();
         Track<ServerTimeUpdated>();
         Track<ChatReceived>();

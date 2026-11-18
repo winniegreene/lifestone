@@ -29,6 +29,12 @@ public interface IJourneyWalks
     IHuntFollow? HuntFollow(JourneyContext context);
 
     /// <summary>
+    /// M6 14 body (one world picture): true when the host's body is the player the screen draws (the game). Under such a host a fight never walks through the offline <see cref="GroundWalk"/>, whose own walker would move the server player
+    /// apart from the drawn body (<see cref="FightWalkChoice"/>). False (the default): the headless body, which nothing draws.
+    /// </summary>
+    bool DrawsBody => false;
+
+    /// <summary>
     /// Where the host's own body stands, or null when the host cannot say or the body is not placed (M5 item 5 c1, closes <c>TODO(m5-godot-body-position)</c>): the recall-home station's step-off measures this body against the lifestone's collision.
     /// The default reads <see cref="HuntFollow"/> (the headless host's view); the Godot host answers from the player's walker without giving the hunt a follower (its hunt reads the player from the session).
     /// </summary>
@@ -77,6 +83,7 @@ public sealed class HeadlessJourneyRunnerHost : IJourneyRunnerHost, IJourneyWalk
 
     private readonly DatSet _dats;
     private readonly Func<uint, float?> _setupExtent;
+    private Func<uint, float?>? _setupRadius; // the NPCs' Setup radii (HostileCreatureFeed.SetupRadii), made at the first runner
     private readonly ILogSink _log;
     private readonly HeadlessBody _body;
     private readonly JourneyLegPlanner _planner;
@@ -210,6 +217,11 @@ public sealed class HeadlessJourneyRunnerHost : IJourneyRunnerHost, IJourneyWalk
         ArgumentNullException.ThrowIfNull(request);
         ObjectDisposedException.ThrowIf(_disposed, this);
         Legs++;
+        if (session.Actions.Shots is null)
+        {
+            session.Actions.UseShots(new Casting.PhysicsShotCheck(() => _body.Placed ? _body.Walker?.World : null, _dats)); // M6 8 L: the headless body's physics world answers the shot check, as the player's does in the game
+        }
+
         return new JourneyRunLeg(_planner, _legBody, request, request.Purpose.ToString().ToLowerInvariant() + "-" + Legs.ToString(CultureInfo.InvariantCulture), session.Clock.Now, _log);
     }
 
@@ -275,7 +287,12 @@ public sealed class HeadlessJourneyRunnerHost : IJourneyRunnerHost, IJourneyWalk
         public string WaitFailure(IGameSessionView session, string reason) =>
             string.Create(CultureInfo.InvariantCulture, $"travel:run:not-placed: the body was not placed within {PlaceWaitSeconds:0} s ({reason})");
 
-        public NavRunner NewRunner(IGameSessionView session, INavPathSource source, string name) => host._body.NewRunner(source, name, ConfirmBudgetMilliseconds);
+        public NavRunner NewRunner(IGameSessionView session, INavPathSource source, string name)
+        {
+            var runner = host._body.NewRunner(source, name, ConfirmBudgetMilliseconds);
+            runner.BodyFeed = new NpcBodyFeed(session.State.Objects, session.State.Self.Guid, host._log, host._setupRadius ??= HostileCreatureFeed.SetupRadii(host._dats)); // the NPCs' bodies on the plan (M6 4 W2, m6-npc-in-door-lane)
+            return runner;
+        }
 
         public void FollowRoute(NavRunner runner) => host._body.FollowRoute(runner);
     }
@@ -296,17 +313,68 @@ public sealed class HeadlessJourneyRunnerHost : IJourneyRunnerHost, IJourneyWalk
         private uint _goal;
         private int _legs;
         private double _legStart;
+        private bool _spot; // M6 6 B1: the leg under way is BeginLegTo's (a spot of the fight's own), not the tour's: its end is Arrived either way and the tour hears nothing of it
+        private IReadOnlyList<CellFrame>? _floorSpots;
 
         public string? Failure { get; private set; }
 
         public IGroundTour Tour => tour;
 
+        /// <summary>M6 6 B1 (<c>m5-loot-walk-back-walk</c>): a leg over the room graph to <paramref name="goal"/> (the host's runner, the same seam as the tour's legs); a leg that fails ends Arrived, logged (IFightWalk.BeginLegTo).</summary>
+        public bool BeginLegTo(IGameSessionView session, double now, in CellFrame goal, out string description)
+        {
+            host.Frame(session, now);
+            if (!host._body.Placed || host._body.Walker is not { } walker)
+            {
+                description = $"the journey's body is not placed where the server has the player ({host.PlaceBlocker ?? "no reason recorded"})";
+                return false;
+            }
+
+            var from = walker.Position;
+            if (host.GroundGraph(ground).Plan(from.CellId, from.Origin, goal.CellId, goal.Origin) is null)
+            {
+                description = $"no walk of the room graph joins the player's cell 0x{from.CellId:X8} and the spot's cell 0x{goal.CellId:X8}";
+                return false;
+            }
+
+            _pacing.Stop();
+            _leg?.Dispose();
+            var destination = new Navigation.TeleportDestination("ground spot", [], new World.WorldLocation("ground spot", new World.CellPosition(goal.CellId, goal.Origin), HasHeight: true, HeadingDegrees: 0), "journey: the fight's own spot");
+            _leg = host.Run(session, new TravelRequest(destination, TravelPurpose.Spot), now);
+            (_goal, _spot) = (goal.CellId, true);
+            _legs++;
+            _pacing.BeginWalk(now);
+            _legStart = session.Clock.Now;
+            description = $"leg {_legs} from 0x{from.CellId:X8} to the spot in 0x{goal.CellId:X8} on foot (the room graph)";
+            return true;
+        }
+
+        /// <summary>M5 7 P7s (<c>m5-loot-approach-trace</c>): the cells of a straight line on the host's walker's physics world (<see cref="GameFightWalk.TraceCells"/>); not traced before the body is made.</summary>
+        public LineTrace CellsOnLine(in CellFrame from, in CellFrame to, List<uint> cells)
+        {
+            if (host._body.Walker is not { } walker)
+            {
+                ArgumentNullException.ThrowIfNull(cells);
+                cells.Clear();
+                return LineTrace.NotTraced;
+            }
+
+            return GameFightWalk.TraceCells(walker.World, in from, in to, cells);
+        }
+
+        /// <summary>M5 7 P7s (<c>m5-defend-step-spots</c>): the middle of every room of the host's room graph for the ground (<see cref="GameFightWalk.RoomSpots"/>), built once.</summary>
+        public IReadOnlyList<CellFrame> FloorSpots => _floorSpots ??= GameFightWalk.RoomSpots(host.GroundGraph(ground));
+
         public void Prepare(IGameSessionView session, double now) => host.Frame(session, now);
+
+        /// <summary>M6 14 airborne and pit-hold: the leg's runner has a jump committed (<see cref="NavRunner.JumpCommitted"/>: the run for the brink with the jump key down, or the flight).</summary>
+        public bool JumpInFlight => (_leg as JourneyRunLeg)?.Runner?.JumpCommitted == true;
 
         public bool BeginLeg(IGameSessionView session, double now, out string description)
         {
             description = string.Empty;
             host.Frame(session, now);
+            _spot = false;
             if (!host._body.Placed)
             {
                 Failure = $"the journey's body is not placed where the server has the player ({host.PlaceBlocker ?? "no reason recorded"})";
@@ -350,12 +418,16 @@ public sealed class HeadlessJourneyRunnerHost : IJourneyRunnerHost, IJourneyWalk
                     _leg.Dispose();
                     _leg = null;
                     _recovery.Arrived();
-                    tour.LegWalked(_goal, session.Clock.Now, _pacing.WalkSeconds);
+                    if (!_spot)
+                    {
+                        tour.LegWalked(_goal, session.Clock.Now, _pacing.WalkSeconds);
+                    }
+
                     return FightWalkStatus.Arrived;
                 case TravelStatus.Failed:
                     return Recover(session, now, _leg.Failure ?? "the leg failed without saying why");
                 default:
-                    return session.Clock.Now - _legStart > ground.Walk.LegSeconds
+                    return session.Clock.Now - _legStart > ground.Walk.LegSeconds && !JumpInFlight // M6 14 airborne: the leg's clock waits for the jump's landing check
                         ? Recover(session, now, string.Create(CultureInfo.InvariantCulture, $"the leg did not finish within {ground.Walk.LegSeconds:0.#} s"))
                         : FightWalkStatus.Walking;
             }
@@ -415,6 +487,15 @@ public sealed class HeadlessJourneyRunnerHost : IJourneyRunnerHost, IJourneyWalk
         {
             _leg?.Dispose();
             _leg = null;
+            if (_spot)
+            {
+                // BeginLegTo's contract: a failed spot leg ends Arrived, logged; the fight reads where the player stands and the tour is not told.
+                _spot = false;
+                _pacing.Stop();
+                host._log.Warn(LogCategory, $"the leg to the spot in 0x{_goal:X8} failed ({reason}); ended Arrived without recovery onto the tour");
+                return FightWalkStatus.Arrived;
+            }
+
             tour.LegFailed(_goal, session.Clock.Now);
             if (_recovery.Failed(_legs, _goal, reason) is { } ended)
             {
@@ -508,13 +589,47 @@ public sealed class HeadlessJourneyScenario(JourneyPlan plan, IReadOnlyList<stri
         ArgumentNullException.ThrowIfNull(session);
         if (_journey is null)
         {
-            var keeper = JourneyStations.CreateKeeper(Plan, session, spells, arguments, log);
+            JourneyScenario.BindPitLog(log); // M6 4 R2: TODO(m6-abode-pits) reaches the run's log file
+            var keeper = JourneyStations.CreateKeeper(Plan, session, spells, arguments, log, kitAccount); // M6 1 w: the keeper's floors read the login name
             var context = JourneyScenario.NewContext(Plan, log, spells, keeper, dats, Host, dungeon: JourneyLimits.FightOf(arguments).GroundProfile); // --fight-ground: a bad key is the station factory's error and keeps the default
+            context.Facts.BuffBotOn = BotStopOf(Plan, arguments); // M6 item 14: the Pathwarden station's stop at the buff bot before the chest reads the same option as the autopilot
+            context.Facts.BuffBotProfile = BotProfileOf(arguments); // and the same word (--autopilot-buff-bot-word, 'all' by default)
             _journey = new JourneyScenario(Plan, JourneyStations.Create(Plan, arguments, dats, kitAccount), context);
         }
 
         Host.Tick(session, now);
         return _journey.Step(session, now);
+    }
+
+    /// <summary>
+    /// M6 item 14: whether the stop at the buff bot applies to a headless journey (<see cref="JourneyFacts.BuffBotOn"/>). Only a plan with the Pathwarden station reads it (the climbers' first journey, in Holtburg, the bot's town): the
+    /// answer is the autopilot's own option (<c>--autopilot-buff-bot</c>, on by default), so the journey that opens the chest and the level up job that follows it never disagree. Any other plan: null, as before (no station of theirs
+    /// stops at the bot in a headless journey).
+    /// </summary>
+    /// <param name="plan">The journey's plan.</param>
+    /// <param name="arguments">The host's command line.</param>
+    public static Func<bool>? BotStopOf(JourneyPlan plan, IReadOnlyList<string> arguments)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(arguments);
+        if (!plan.Stations.Any(s => s.Kind == StationKinds.Pathwarden))
+        {
+            return null;
+        }
+
+        var on = Autopilot.AutopilotOptions.FromArguments(Lifestone.Client.Options.CommandLineArgument.ParseAll(arguments)).BuffBot;
+        return () => on;
+    }
+
+    /// <summary>
+    /// M6 item 14: the profile a headless journey asks the buff bot for (<see cref="JourneyFacts.BuffBotProfile"/>): the autopilot's own option (<c>--autopilot-buff-bot-word</c>, <c>all</c> by default), so the journey that opens the
+    /// chest and the level up job that follows it tell the bot the same word. A word the bot does not know is the option's own error (the host reports it); here it keeps the default.
+    /// </summary>
+    /// <param name="arguments">The host's command line.</param>
+    public static Lifestone.ServerTools.BuffBotProfile BotProfileOf(IReadOnlyList<string> arguments)
+    {
+        ArgumentNullException.ThrowIfNull(arguments);
+        return Autopilot.AutopilotOptions.FromArguments(Lifestone.Client.Options.CommandLineArgument.ParseAll(arguments)).BuffBotProfile;
     }
 
     /// <summary>Releases the journey and the runner host.</summary>

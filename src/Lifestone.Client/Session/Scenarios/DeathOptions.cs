@@ -57,6 +57,12 @@ public enum DeathStages
 /// </summary>
 public sealed record DeathOptions
 {
+    /// <summary>M6 7 AY: the ladder a corpse run asks (<see cref="Autopilot.RungOwner.CorpseRun"/>). Null: the war mage's ladder for the ladder's character, none for any other (a test passes its own).</summary>
+    internal Grounds.Ladder? CorpseLadder { get; init; }
+
+    /// <summary>M6 7 AY: a test's buffs for that ask. Null: the live ones.</summary>
+    internal Autopilot.RungBuffRead? CorpseBuffsForTest { get; init; }
+
     /// <summary>The default of <c>--death-seconds</c>.</summary>
     public const double DefaultSeconds = 600;
 
@@ -173,6 +179,12 @@ public sealed record DeathOptions
     /// (<see cref="ResupplyRun"/>: its log, travel seam and ground). Null (the standalone death leg): the rearm cannot shop and fails by name (<c>TODO(m5-death-rearm-standalone)</c>). Not on the command line.
     /// </summary>
     public JourneyContext? Journey { get; init; }
+
+    /// <summary>
+    /// M6 6 C1 (the item's contract, map-death section 9): the worn set of before the death the handler wears again and reads for what left the inventory, owned by the caller (the autopilot keeps one per run). Null (the default) is
+    /// <see cref="Mage.WornMemory.Shared"/>, today's process-wide memory, so every caller still builds; it goes once every caller passes its own (the lead's call at the merge). Not on the command line.
+    /// </summary>
+    public Mage.WornMemory? Worn { get; init; }
 
     /// <summary>
     /// M4 P5b (3.4): the stage the run begins at (an embedded run: the journey's death station begins at <see cref="DeathStages.Death"/>, after the den fight), or null for the first enabled one. One of

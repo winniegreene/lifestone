@@ -1,0 +1,73 @@
+{
+  "key": "minor-stinging-stone",
+  "name": "The Minor Stinging Stone (the stone from the swamp cave south-west of the Blackmire Temple drop)",
+  "giver": null,
+  "start": {
+    "cell": "0xA9B40019",
+    "point": [
+      84.0,
+      7.7,
+      94.0
+    ],
+    "name": "Holtburg's lifestone point"
+  },
+  "steps": [
+    {
+      "kind": "go",
+      "what": "to the Minor Stinging Stone",
+      "place": {
+        "cell": "0xBA600100",
+        "point": [
+          132.208,
+          176.637,
+          -0.328499
+        ],
+        "name": "where the Minor Stinging Stone lies"
+      },
+      "target": {
+        "wcid": 6319,
+        "name": "Minor Stinging Stone"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/villa/writ-caves.md): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x7BA60011: weenie 6319, cell 0xBA600100; by the Town Network, the Facility Hub and the Blackmire Temple portal 42151 (travel-routes.json network-to-facility-hub, facility-hub-to-blackmire; MinLevel 10 and 45, checked by the trip rule's gates, not a file level); the run from the drop 0xBB64001B is TownNetworkWalkDatTests.The_run_from_the_drop_reaches_the_minor_stone(minor-stinging-stone); the cave has no door; the guards: eleven Sewer Rats (7106, level 50, Health 150) stand in the stone's room within 1 to 10 m of it, two Mosswart Zealots (8429, level 40) and three Mosswart Soul Trappers (8430, level 50) at the cave's mouth 0xBA600103, one generator 0x7BA6001F (wcid 7925, 600 s); fire resist 0.51 (rats), 0.25 (mosswarts): a fire mage hurts all of them",
+      "todo": "TODO(villa-blackmire-portal-ground): the Facility Hub's Blackmire Temple portal 0x78A02082 stands where the confirmer's ground probe finds no walkable ground (the hop's walk, TownNetworkWalkDatTests Known); TODO(villa-stinging-cave-walk): the run from the drop reaches the cave's mouth (723 m), but no doorway lane leads into the stone's room 0xBA600100, 6 m under the mouth's 0xBA600103"
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Minor Stinging Stone from the floor",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 6319,
+        "name": "Minor Stinging Stone"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/villa/writ-caves.md): the item's own Quest string stingingstoneminor (quest row 1398: min_Delta 3600, max_Solves -1) gates the pick-up for one hour (ACE Player_Inventory.cs:1249-1262 @95ef426d); refused, the run stops pick-up:too-recent; the stone is a child of the 25 s item generator 0x7BA60023 (wcid 5085), which also lays a Soiled Parchment (wcid 6415), a Textbook (wcid 6407) beside it: not this step's",
+      "todo": null
+    }
+  ],
+  "done": {
+    "stamp": null,
+    "reply": null,
+    "item": {
+      "wcid": 6319,
+      "name": "Minor Stinging Stone"
+    }
+  },
+  "timer_seconds": 3600,
+  "sources": [
+    "cache/m6/villa/writ-caves.md: nobody starts it and nobody takes it; two minor stones of any kind are one Writ of Refuge at an Agent of the Arcanum (WritHandInStation), the villa's price and rent",
+    "timer_seconds 3600: the pinned world SQL quest row stingingstoneminor (id 1398): min_Delta 3600, max_Solves -1",
+    "level: none in the file: the run's portals' gates are the trip rule's (TownNetworkTrip.Judge); the cave is open ground at 24.4S 47.4E, landblock 0xBA60",
+    "the way home is Lifestone Recall (the travel file has no portal way back from the drop); the villa's writ run calls it, off the ladder (no ladder field)"
+  ]
+}

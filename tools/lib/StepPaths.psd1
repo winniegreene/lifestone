@@ -40,6 +40,7 @@
         'src/Lifestone.Game/scripts/Main.cs.uid',
         'tools/slice-check.ps1', 'tools/commit.ps1', 'tools/live-gate.ps1', 'tools/lib/GateAreas.psd1', 'tools/hero-video.ps1', 'tools/installer/', 'tools/protocol/', 'tools/research/', 'tools/data/',
         'tools/lib/StepPaths.psd1', 'tools/lib/TestTimes.psm1', 'tools/lib/GateJudge.psm1', 'tools/lib/GateHost.psm1', 'tools/soak-watch.ps1',
+        'tools/fight-sim.ps1', 'tools/fight-sim/',   # the fight simulator (docs/fight-sim.md): ACE's combat code run offline, outside Lifestone.slnx; no Godot step reads it
         'src/Lifestone.Client/Session/Autopilot/'   # M5 4 c1: the autopilot's logic is covered by the tests (AutopilotTests, AutopilotHostTests, the scripted ACE); its Godot rows are play-checks' AutopilotDialAsync, which the Session/ prefixes above already select
     )
 

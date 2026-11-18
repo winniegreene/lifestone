@@ -202,6 +202,18 @@ public sealed class StandInRetail6Tests
         Assert.Equal(1, rig.Server.ChatAnswers.MarketplaceRecalls);
     }
 
+    /// <summary>M6 14: the stand-in has no creature that answers a direct talk, so it does not take one: the Action API refuses it offline and nothing is sent.</summary>
+    [Fact]
+    public void A_direct_talk_is_not_answered_by_the_stand_in_and_is_refused_offline()
+    {
+        using var rig = new Rig();
+        Assert.False(StandInWorld.Answers(ActionKind.TalkDirect));
+        var talk = rig.Session.Actions.TalkDirect(0x7A9B4F14, "tusker", ActionSource.Automation);
+        rig.Run(1.0);
+        Assert.Equal(ActionOutcomeKind.Refused, talk.Outcome!.Value.Kind);
+        Assert.Contains("offline", talk.Outcome.Value.Detail, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void An_emote_is_echoed_to_the_emoter_a_tell_is_refused_as_not_online_and_afk_answers_0x02D1()
     {

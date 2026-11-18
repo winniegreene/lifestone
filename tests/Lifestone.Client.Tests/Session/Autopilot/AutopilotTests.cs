@@ -27,12 +27,28 @@ namespace Lifestone.Client.Tests.Session.Autopilot;
 /// </summary>
 public sealed class AutopilotTests(ITestOutputHelper output)
 {
+
+    /// <summary>M6 7 AT: a pass in the ground is the start's pass (the unattended, start-pass station) with the fight's reach for its wait's cut.</summary>
+    internal static void AssertGroundPass(StationSpec spec)
+    {
+        Assert.Equal((AutopilotScenario.BuffSpec.Name, AutopilotScenario.BuffSpec.Kind), (spec.Name, spec.Kind));
+        foreach (var key in AutopilotScenario.BuffSpec.Arguments.Keys)
+        {
+            Assert.True(spec.Arguments.ContainsKey(key), key);
+        }
+
+        Assert.True(spec.Arguments.ContainsKey(JourneyStations.ShootFirstArgument));
+        Assert.True(spec.Arguments.ContainsKey(JourneyStations.FieldArgument)); // M6 14 (m6-banes): and it is the field's pass: the six other armour banes are left to the pass at home
+    }
+    /// <summary>M6 6 F2: the vitae ledger's fields after <c>s=</c> on the cycle and done lines.</summary>
+    private static readonly string[] VitaeNames = ["vitae", "vitae_steps"];
+
     [Theory]
     [InlineData(Den)]
     [InlineData(Temple)]
     public void A_scripted_run_makes_a_cycle_by_the_scripted_death_and_one_by_the_forced_trip_then_stops_on_request(string key)
     {
-        var w = new ApWorld(key, output);
+        var w = new ApWorld(key, output, sidePacks: 3); // M6 8 D: the layout is whole, so the forced trip buys no pack
         var autopilot = w.Autopilot(new AutopilotOptions { TripAfterKills = 3, TestDeath = true });
         var status = w.Run(autopilot, a => a.Cycles == 2 && a.State == AutopilotState.Fight);
         Assert.Equal(ScenarioStatus.Running, status);
@@ -57,8 +73,8 @@ public sealed class AutopilotTests(ITestOutputHelper output)
         Assert.Contains(w.Lines, l => l.Contains("trigger=forced", StringComparison.Ordinal));
         var done = lines[3];
         Assert.StartsWith("autopilot done ok=yes cycles=2 stop=request:test ", done, StringComparison.Ordinal);
-        Assert.Equal(DoneNames, Names(done, "autopilot done "));
-        Assert.Equal(CycleNames, Names(lines[0], "autopilot cycle "));
+        Assert.Equal([.. DoneNames, .. VitaeNames], Names(done, "autopilot done ")); // M6 6 F2: the vitae fields close the line
+        Assert.Equal([.. CycleNames, .. VitaeNames, "hour_load", "villa", "every_spell", "threat_shadow_agree", "threat_shadow_differ"], Names(lines[0], "autopilot cycle ")); // M6 14 hour load: hour_load=, then M6 villa's villa=, M6 14's every_spell= and M6 16 E2a's two threat-shadow counts, close the cycle line
         Assert.Equal((1, 1, 0, 0), (Int(done, "deaths"), Int(done, "trips"), Int(done, "granted"), Int(done, "places")));
         Assert.Equal(Int(lines[0], "kills") + Int(lines[1], "kills") + Int(lines[2], "kills"), Int(done, "kills"));
         Assert.Equal((0, 0, 0), (Int(done, "interrupted"), Int(done, "resumed"), Int(done, "reconnects"))); // a2's and h2's fields read 0, never omitted
@@ -302,7 +318,7 @@ public sealed class AutopilotTests(ITestOutputHelper output)
         Assert.Equal(ScenarioStatus.Succeeded, status);
         Assert.Equal(["buff", "den-fight", "buff", "den-fight", "buff"], Kinds(w).Take(5)); // the cold buff in the ground, the fight, the upkeep's buff, the fight again, the next upkeep
         Assert.Same(AutopilotScenario.UpkeepSpec, w.Factory.Made[2]); // the journey's buff station, where the mage stands; D126 (a): the upkeep's, with the re-buff margin, not the start pass's
-        Assert.Same(AutopilotScenario.BuffSpec, w.Factory.Made[0]); // the cold buff in the ground is a start's pass
+        AssertGroundPass(w.Factory.Made[0]); // the cold buff in the ground is a start's pass
         Assert.Contains(arrows, a => a.To == AutopilotState.Upkeep && a.Why.StartsWith("buff-margin: ", StringComparison.Ordinal));
         Assert.Contains(w.Lines, l => l.Contains("stop asked (buff-margin)", StringComparison.Ordinal));
         var stopped = autopilot.Lines[0];
@@ -373,7 +389,7 @@ public sealed class AutopilotTests(ITestOutputHelper output)
         var lines = autopilot.Lines;
         Assert.StartsWith("autopilot cycle n=1 state=death why=test-death:1 ", lines[0], StringComparison.Ordinal);
         Assert.StartsWith("autopilot cycle n=2 state=trip why=forced-trip:1 ", lines[1], StringComparison.Ordinal);
-        Assert.Equal(CycleNames, Names(lines[0], "autopilot cycle "));
+        Assert.Equal([.. CycleNames, .. VitaeNames, "hour_load", "villa", "every_spell", "threat_shadow_agree", "threat_shadow_differ"], Names(lines[0], "autopilot cycle ")); // M6 14 hour load: hour_load=, then M6 villa's villa=, M6 14's every_spell= and M6 16 E2a's two threat-shadow counts, close the cycle line
         Assert.Equal(Int(lines[0], "kills") / 2, Int(lines[0], "fizzles")); // the scripted fight's fizzles= (the cast policy's tally on the real line, M5 4 a3)
         Assert.Equal(Int(lines[1], "kills") / 2, Int(lines[1], "fizzles"));
         Assert.True(Int(lines[1], "fizzles") > 0);
@@ -408,6 +424,16 @@ public sealed class AutopilotTests(ITestOutputHelper output)
         Assert.Equal(AutopilotPlace.Ground, AutopilotScenario.Classify(w.Trip.Vendor.H.State, g));
         w.Trip.Vendor.StandAt(0x7D640013, new Vector3(12, 12, 0));
         Assert.Equal(AutopilotPlace.Elsewhere, AutopilotScenario.Classify(w.Trip.Vendor.H.State, g));
+    }
+
+    /// <summary>M6 8 (the long round): the Redoubt's Surface portal lands in a landblock of the travel file's home place, which the rung change calls home: the known state must agree, or a route home ends the run.</summary>
+    [Fact]
+    public void The_known_state_reads_the_travel_files_home_place_as_home()
+    {
+        var w = new ApWorld(Den, output);
+        w.Trip.Vendor.StandAt(0xAAB10020, new Vector3(95.6f, 174.5f, 124));
+
+        Assert.Equal(AutopilotPlace.Home, AutopilotScenario.Classify(w.Trip.Vendor.H.State, w.Ground));
     }
 
     [Fact]
@@ -482,10 +508,9 @@ public sealed class AutopilotTests(ITestOutputHelper output)
         }
     }
 
-    [Theory]
-    [InlineData(Den, "request", "trip")]
+    [Theory] // M6 item 14: a stop request during a trip no longer lets the whole trip finish: it is cut at home at its safe point (AutopilotRestartTests); a stop rule of the run (the level, the minutes) and a death are as they were
     [InlineData(Den, "level", "trip")]
-    [InlineData(Temple, "request", "trip")]
+    [InlineData(Temple, "level", "trip")]
     [InlineData(Den, "request", "death")]
     [InlineData(Den, "level", "death")]
     [InlineData(Temple, "level", "death")]
@@ -520,5 +545,29 @@ public sealed class AutopilotTests(ITestOutputHelper output)
         Assert.Equal(1, Int(lines[0], station == "trip" ? "trips" : "deaths"));
         Assert.Equal(1, Int(lines[2], station == "trip" ? "trips" : "deaths"));
         Assert.StartsWith("autopilot done ok=yes cycles=1 stop=", lines[2], StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// M6 6 F2 (B2's first check: <c>WornRestorer.Plan</c>'s "Collection was modified" under parallel tests): each run owns its worn memory, hands it to its journey's facts (the death station's <c>DeathOptions.Worn</c>), and two runs
+    /// stepped at the same time on two threads never share one.
+    /// </summary>
+    [Fact]
+    public void Two_runs_in_parallel_do_not_share_a_worn_memory()
+    {
+        var one = new ApWorld(Den, output, atHome: false);
+        var two = new ApWorld(Temple, output, atHome: false);
+        var contextOne = one.Context();
+        var contextTwo = two.Context();
+        var a = new AutopilotScenario(new AutopilotOptions(), one.Factory, contextOne);
+        var b = new AutopilotScenario(new AutopilotOptions(), two.Factory, contextTwo);
+        Parallel.Invoke(
+            () => one.Run(a, s => s.State == AutopilotState.Fight && one.Now > 120),
+            () => two.Run(b, s => s.State == AutopilotState.Fight && two.Now > 120));
+
+        Assert.NotSame(a.Worn, b.Worn);
+        Assert.NotSame(WornMemory.Shared, a.Worn);
+        Assert.NotSame(WornMemory.Shared, b.Worn);
+        Assert.Same(a.Worn, contextOne.Facts.Worn);
+        Assert.Same(b.Worn, contextTwo.Facts.Worn);
     }
 }

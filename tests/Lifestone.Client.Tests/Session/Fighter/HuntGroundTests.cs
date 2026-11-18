@@ -301,6 +301,17 @@ public sealed class HuntGroundTests
         Assert.True(Math.Pow(1 - PerSpot, Forest.CellCap!.Value) < 0.003); // 0.833^33
     }
 
+    /// <summary>
+    /// M6 item 7: the fight shoots all eight children of the outskirts' generator 2007, the Gnawer Shreth included (a creature the fight skips holds its spot's one creature for good),
+    /// and the Black Rabbit and Chicken of generator 5150; the Shreth's own young, level 2 and 35 XP, holds no spot and stays below the band. Literal, from the pinned world SQL.
+    /// </summary>
+    [Fact]
+    public void The_outskirts_fight_shoots_every_creature_that_holds_a_spot()
+    {
+        var targets = FightTargets.Of(GroundCatalog.Get("holtburg-outskirts")).Select(t => t.Wcid).Order().ToArray();
+        Assert.Equal(new uint[] { 2566, 19256, 19257, 19258, 19259, 19260, 19261, 19262, 19263, 24937 }, targets);
+    }
+
     [Fact]
     public void Every_creature_has_a_spawn_mass_and_a_roll_never_exceeds_a_whole()
     {

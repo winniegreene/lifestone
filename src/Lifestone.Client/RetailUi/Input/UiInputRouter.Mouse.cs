@@ -92,6 +92,9 @@ public sealed partial class UiInputRouter
         SwitchMouseOver(null);
     }
 
+    /// <summary>How many mouse presses the router has taken (every button down): lets a listener tell the two list messages of one press from two presses.</summary>
+    public long MousePresses { get; private set; }
+
     /// <summary>
     /// A mouse button went down or up at the current mouse position (<see cref="MouseMove"/> first), a double click's
     /// press flagged by <paramref name="doubleClick"/> (the host's, as retail took Windows' double-click time). The button
@@ -102,6 +105,11 @@ public sealed partial class UiInputRouter
     public bool MouseButton(UiMouseButton button, bool down, bool doubleClick = false)
     {
         _mouseTaken = false;
+        if (down)
+        {
+            MousePresses++;
+        }
+
         if (down && button is UiMouseButton.Left or UiMouseButton.Right)
         {
             _manager.TargetMode.MousePressed(); // ClientUISystem::OnAction: a press ends a target mode, after it is handled (UiTargetMode.UseTime)

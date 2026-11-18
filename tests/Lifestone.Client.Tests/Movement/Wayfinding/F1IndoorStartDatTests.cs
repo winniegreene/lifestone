@@ -69,7 +69,7 @@ public sealed class F1IndoorStartDatTests(DatSetFixture fixture, ITestOutputHelp
         Assert.Contains("no path: indoor-start-unreachable:0xA9B40141", runner.FailureReason, StringComparison.Ordinal);
         Assert.Equal(0f, runner.RouteMetres);
         Assert.Equal(0, runner.Rungs);
-        Assert.NotEmpty(source.AvoidedCells); // the physics refused the ways out over the steps, TODO(room-steps)
+        Assert.Empty(source.AvoidedCells); // M6 4 W4: the sill rule (CellRoutePlanner.HasFloorsAtSill) refuses the ways out over the thresholds at the plan; before W4 the physics refused them (TODO(room-steps))
     }
 
     [RequiresDatsFact]

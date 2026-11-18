@@ -11,6 +11,7 @@ using Lifestone.Client.Session.Hosting;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Session.Scenarios.Journey;
+using Lifestone.Client.Session.Travel;
 using Lifestone.Client.World;
 using Lifestone.Data.Animation;
 using Lifestone.Data.Dat;
@@ -96,12 +97,19 @@ public sealed class J5bJourneyPlannerTests(DatSetFixture fixture, ITestOutputHel
         Assert.Equal(0xA9B40000u, Assert.IsType<IndoorOutdoorPathSource>(planner.SourceFor(Lifestone, 0xA9B40117, map, out why)).Rooms.LandblockId);
         Assert.Contains("the goal is a room", why, StringComparison.Ordinal);
 
-        // A room start and a room goal in two landblocks: the goal's rooms, and the plan fails by its own name (TODO(cross-landblock-rooms)), not the unreachable room the journey recovers from.
-        var across = planner.SourceFor(0xA9B30100, 0xA9B40117, map, out why);
-        Assert.Contains("TODO(cross-landblock-rooms)", why, StringComparison.Ordinal);
+        // A room start and a room goal in two landblocks (M6 4 W1, cross-landblock-rooms): both landblocks' rooms, the start's named while the walk starts in them. With no tile attached
+        // the plan out of the start's room fails by the start landblock's tile (the settle gate's to wait for), never the old gap.
+        var across = Assert.IsType<IndoorOutdoorPathSource>(planner.SourceFor(0xA9B30100, 0xA9B40117, map, out why));
+        Assert.Contains("two landblocks' rooms", why, StringComparison.Ordinal);
+        Assert.Equal(0xA9B30000u, across.Rooms.LandblockId);
+        Assert.Equal(0xA9B40000u, across.GoalRooms.LandblockId);
+        Assert.Equal(0xA9B30000u, across.StartRooms!.LandblockId);
         var failed = across.Plan(new CellFrame(0xA9B30100, new AcFrame(new Vector3(100, 100, 100), Quaternion.Identity)), NavGoal.ToPoint(new NavPoint(0xA9B40000, new Vector3(155.42f, 134.31f, 66.01f)), 0xA9B40117), new NavScars());
         Assert.Equal(NavPathStatus.Failed, failed.Status);
-        Assert.StartsWith(IndoorOutdoorPathSource.IndoorStartOtherLandblock + ":0xA9B30100", failed.Reason, StringComparison.Ordinal);
+        Assert.StartsWith("no-tile:0xA9B30000", failed.Reason, StringComparison.Ordinal);
+        var lone = new IndoorOutdoorPathSource(new PathPlanner(map), planner.CellsOf(0xA9B40117)); // a source of one landblock's rooms keeps the gap's own name
+        var gap = lone.Plan(new CellFrame(0xA9B30100, new AcFrame(new Vector3(100, 100, 100), Quaternion.Identity)), NavGoal.ToPoint(new NavPoint(0xA9B40000, new Vector3(155.42f, 134.31f, 66.01f)), 0xA9B40117), new NavScars());
+        Assert.StartsWith(IndoorOutdoorPathSource.IndoorStartOtherLandblock + ":0xA9B30100", gap.Reason, StringComparison.Ordinal);
 
         // The headless host's source is the planner's (the den needs no nav map, so no body is built here).
         using var host = new HeadlessJourneyRunnerHost(Dats, new RecordingLogSink());
@@ -135,6 +143,34 @@ public sealed class J5bJourneyPlannerTests(DatSetFixture fixture, ITestOutputHel
         Assert.Equal(TravelStatus.Failed, leg.Step(rig.View, rig.Now));
         Assert.StartsWith("travel:run:no-path-source: the journey built no den room graph", leg.Failure, StringComparison.Ordinal);
         Assert.Equal(0, body.Runners);
+    }
+
+    /// <summary>M6 7 AI: a leg hands its request's portals to its runner, those near its way, and says so. M6 14 (m6-14-plaza): with the world's placed portals near its way, a request with none among them.</summary>
+    [RequiresDatsFact]
+    public void A_leg_gives_its_runner_the_portals_near_its_way()
+    {
+        const uint Room = 0x0105036F;
+        var at = new Vector3(100.08f, -140.87f, 0f);
+        var rig = new J1JourneyRig(Room);
+        rig.TeleportNow(Room, at);
+        var global = new NavPoint(0x01050000u, at).Global;
+        var keep = new PortalKeepOff([new KeptPortal("Near", global + new Vector2(30f, 0f), 0f, false), new KeptPortal("Far", global + new Vector2(900f, 0f), 0f, true)]);
+        var log = new RecordingLogSink();
+        var body = new J5bScriptedBody(rig) { Settled = true };
+        using var leg = new JourneyRunLeg(new JourneyLegPlanner(Dats), body, Request(0x01050377, new Vector3(110.02f, -139.07f, 0.01f)) with { KeepOff = keep }, "cell-7", rig.View.Clock.Now, log);
+        leg.Step(rig.View, rig.Now);
+        // M6 14 (m6-14-plaza): the request's near portal first, its far one left off, then the den's placed portals near the way (the world file's Surface Portals near the den's way)
+        var placed = WorldPortals.All.Where(p => p.Cell >> 16 == 0x0105 && p.Name == "Surface Portal").ToList();
+        Assert.NotEmpty(placed);
+        Assert.Equal(["Near", "Surface Portal", "Surface Portal", "Surface Portal"], leg.Runner!.KeepOff!.Portals.Select(p => p.Name));
+        Assert.All(placed, w => Assert.Contains(leg.Runner.KeepOff.Portals, k => Vector2.Distance(k.Global, w.Global) <= 0.5f));
+        Assert.Contains(log.Lines, l => l.Contains("the leg keeps clear of portals leg=cell-7 portals=4 of=4", StringComparison.Ordinal));
+
+        // a request with no list keeps the placed portals near its way all the same (before: none)
+        using var plain = new JourneyRunLeg(new JourneyLegPlanner(Dats), new J5bScriptedBody(rig) { Settled = true }, Request(0x01050377, new Vector3(110.02f, -139.07f, 0.01f)), "cell-8", rig.View.Clock.Now, log);
+        plain.Step(rig.View, rig.Now);
+        Assert.Equal(["Surface Portal", "Surface Portal", "Surface Portal"], plain.Runner!.KeepOff!.Portals.Select(p => p.Name));
+        Assert.All(placed, w => Assert.Contains(plain.Runner.KeepOff.Portals, k => Vector2.Distance(k.Global, w.Global) <= 0.5f));
     }
 
     /// <summary>
@@ -269,8 +305,9 @@ public sealed class J5bJourneyPlannerTests(DatSetFixture fixture, ITestOutputHel
     /// it never saw: <c>fight: no walk could be planned: the den walker is not placed: no teleport of the player reached it</c>, and the death after it timed out.
     /// The Godot host now gives the den fight and the death the M3 fight leg's walk over the player's own body (<see cref="GameFightWalk"/>), which the play places
     /// wherever the server has the player. Here the server places the player in the den first; a body that follows the server (the headless host's, standing in
-    /// for the play's player) is placed there; only then is the walk made: it begins a leg on the room graph and arrives. The offline walker made at the same
-    /// moment still fails by its old name (the live failure).
+    /// for the play's player) is placed there; only then is the walk made: it begins a leg on the room graph and arrives. M6 14 motes (live 2026-11-17 01:12:50, the
+    /// same class on the Crater Caves, where the offline walker is still the fight's): the offline walker made at the same moment is now placed where the player
+    /// stands (present, on the ground's landblock) and begins a leg too; it used to fail "the ground walker is not placed: no teleport of the player reached it".
     /// </summary>
     [Trait("Tier", "Exhaustive")]
     [RequiresDatsFact]
@@ -286,7 +323,7 @@ public sealed class J5bJourneyPlannerTests(DatSetFixture fixture, ITestOutputHel
         Assert.Null(probe.Failure);
         Assert.Equal("done", probe.Stage);
         Assert.Contains("from 0x01050375 to 0x0105", probe.Walk, StringComparison.Ordinal);
-        Assert.Equal("the ground walker is not placed: no teleport of the player reached it", probe.OfflineFailure);
+        Assert.Equal("began a leg", probe.OfflineFailure); // M6 14 motes: placed where she stands, no teleport needed
         Assert.NotEqual(DenGround.Arrival.CellId, host.Body.Walker!.Position.CellId);
     }
 

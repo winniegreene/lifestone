@@ -27,11 +27,21 @@ public sealed partial class LogisticsCountersTests
         private readonly List<(uint Guid, uint Wcid, uint Count)> _held = [];
         private byte _seq;
 
-        public Pack(IEnumerable<(uint Wcid, uint Count)> stacks, uint burden = 0, bool describe = true, uint extraUndescribed = 0)
+        public Pack(IEnumerable<(uint Wcid, uint Count)> stacks, uint burden = 0, bool describe = true, uint extraUndescribed = 0, IReadOnlyDictionary<uint, uint>? values = null, IReadOnlyList<uint>? worn = null, IReadOnlyList<uint>? foci = null)
         {
             R = new WorldActionRig();
             var guid = FirstItem;
             var pack = new List<ContentDesc>();
+            var equipped = new List<EquippedDesc>();
+            foreach (var wcid in worn ?? [])
+            {
+                // M6 14 T: a worn piece (the Pathwarden Robe, while the leather swap is still to come)
+                var piece = ReducerHarness.Create(guid, ReducerHarness.Stamps(), null, name: "Worn " + wcid);
+                R.H.R.Reducer.OnCreateObject(R.H.R.Context, piece with { Weenie = piece.Weenie with { Header = WeenieHeaderFlags.Wielder, WielderId = WorldActionRig.Player, WeenieClassId = wcid, ItemType = 0x4 } }, isUpdate: false);
+                equipped.Add(new EquippedDesc(guid, 0x200, 0));
+                guid++;
+            }
+
             foreach (var (wcid, count) in stacks)
             {
                 if (count == 0)
@@ -43,9 +53,18 @@ public sealed partial class LogisticsCountersTests
                 var basis = ReducerHarness.Create(guid, ReducerHarness.Stamps(), null, name: "Ware " + wcid);
                 R.H.R.Reducer.OnCreateObject(
                     R.H.R.Context,
-                    basis with { Weenie = basis.Weenie with { Header = WeenieHeaderFlags.Container, ContainerId = WorldActionRig.Player, WeenieClassId = wcid, ItemType = 0x80 } },
+                    basis with { Weenie = basis.Weenie with { Header = WeenieHeaderFlags.Container, ContainerId = WorldActionRig.Player, WeenieClassId = wcid, ItemType = 0x80, Value = values is not null && values.TryGetValue(wcid, out var listed) ? listed : null } },
                     isUpdate: false);
                 pack.Add(new ContentDesc(guid, 0));
+                guid++;
+            }
+
+            foreach (var wcid in foci ?? [])
+            {
+                // M6 14 pack rules: a focus, which ACE lists beside the side packs as ContainerType 2 (WorldObject.cs:453-462 @95ef426d)
+                var focus = ReducerHarness.Create(guid, ReducerHarness.Stamps(), null, name: "Focus " + wcid);
+                R.H.R.Reducer.OnCreateObject(R.H.R.Context, focus with { Weenie = focus.Weenie with { Header = WeenieHeaderFlags.Container, ContainerId = WorldActionRig.Player, WeenieClassId = wcid, ItemType = 0x80 } }, isUpdate: false);
+                pack.Add(new ContentDesc(guid, 2));
                 guid++;
             }
 
@@ -60,18 +79,21 @@ public sealed partial class LogisticsCountersTests
                 {
                     Attributes = [new AttributeDesc(Strength, 0, 100, 0)],
                     Inventory = [.. pack],
+                    Equipped = [.. equipped],
                 });
             }
 
-            foreach (var (g, _, count) in _held)
+            foreach (var (g, held, count) in _held)
             {
-                R.Raw(AceM3Writers.SetStackSize(++_seq, g, count, count * 10));
+                R.Raw(AceM3Writers.SetStackSize(++_seq, g, count, values is not null && values.TryGetValue(held, out var worth) ? worth : count * 10));
             }
 
             if (burden > 0)
             {
                 R.PrivateInt(PlayerInventory.EncumbranceProperty, (int)burden);
             }
+
+            R.PrivateInt(PlayerQualities.CoinValueProperty, 10_000_000); // M6 7 V: a purse that pays any trip, so the verdicts below are about the stock (the purse tests set their own coin)
         }
 
         public WorldActionRig R { get; }
@@ -439,5 +461,36 @@ public sealed partial class LogisticsCountersTests
         Assert.Equal(LogisticsKind.None, counters.Check(new Pack(Stocked(den), burden: atLine).State).Kind);
         var over = counters.Check(new Pack(Stocked(den), burden: atLine + (uint)(capacity / 100)).State);
         Assert.Equal((LogisticsKind.Trip, LogisticsCause.Burden, 85), (over.Kind, over.Cause, over.LinePercent));
+    }
+
+    /// <summary>
+    /// M6 item 14 (m6-goldscarab; live 2026-11-12: the Temple 20-40's carried Gold Scarab line stopped the ladder's character at the rung's door, "under its stop line", and no seller was known): on the grounds whose town stock buys the Gold
+    /// and the Pyreal Scarab, neither is a stock line, so a pack that holds none of them is neither a stop nor a trip, and the buy-trip's rule finds no carried line to buy for.
+    /// </summary>
+    [Theory]
+    [InlineData("tusker-cave")]
+    [InlineData("tusker-cavern")]
+    [InlineData("tusker-abode")]
+    [InlineData("tusker-habitat")]
+    [InlineData("tusker-quarters")]
+    [InlineData("tusker-barracks")]
+    public void A_pack_with_no_Gold_and_no_Pyreal_Scarab_is_neither_a_stop_nor_a_trip_where_the_town_stock_buys_them_M6_14_goldscarab(string key)
+    {
+        var ground = Ground(key);
+        Assert.NotNull(ground.TownStockOf(687));
+        Assert.NotNull(ground.TownStockOf(690));
+        var counters = new LogisticsCounters(ground);
+        var pack = new Pack(Stocked(ground), burden: 100); // every line of the home walk at its keep; no scarab of the town stock
+
+        var verdict = counters.Check(pack.State);
+
+        Assert.Equal((LogisticsKind.None, "all well"), (verdict.Kind, verdict.Reason));
+        for (var i = 0; i < counters.LineCount; i++)
+        {
+            Assert.False(counters.LineAt(i).Wcid is 687 or 690, "no counted line is a scarab of the town stock");
+        }
+
+        var buyTrip = Lifestone.Client.Session.Scenarios.Journey.BuyTripRule.Decide(ground, counters, 6, "a test at level VI", ScrivenerCatalog.Default, GroundCatalog.All);
+        Assert.Equal((Lifestone.Client.Session.Scenarios.Journey.BuyTripKind.NotDue, "none"), (buyTrip.Kind, buyTrip.Token));
     }
 }

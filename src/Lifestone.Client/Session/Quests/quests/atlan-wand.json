@@ -1,0 +1,650 @@
+{
+  "key": "atlan-wand",
+  "name": "The Atlan Wand (16 Pyreal Motes from the Crater Caves, forged at Silencia's tower, set with the Minor Smoldering Stone)",
+  "giver": null,
+  "start": {
+    "cell": "0xA9B40019",
+    "point": [
+      84.0,
+      7.7,
+      94.0
+    ],
+    "name": "Holtburg's lifestone point"
+  },
+  "steps": [
+    {
+      "kind": "go",
+      "what": "to Crater Lake Village",
+      "place": {
+        "cell": "0x90D0001C",
+        "point": [
+          72.0,
+          84.0,
+          282.0
+        ],
+        "name": "Crater Lake Village's street, off the Crater Pathway building's porch"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "travel-routes.json (slice B1): the place crater-lake, the chain network-to-glenden, glenden-to-highland, highland-to-pathway, pathway-to-crater-lake; the point is the last of the pathway edge's walk_out, in the outdoor cell its x and y lie in",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "round the crater lake by the north shore",
+      "place": {
+        "cell": "0x8FD20010",
+        "point": [
+          40.0,
+          178.0,
+          279.75
+        ],
+        "name": "the crater lake's north shore"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "travel-routes.json grounds.crater-caves routes[0].run.via: the crater's floor reads water terrain from y 60 to 164 of 0x8FD2, so the direct plan is refused (slice B1, The_village_walk_reaches_the_crater_caves_portal)",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Crater Caves portal",
+      "place": {
+        "cell": "0x8FD20007",
+        "point": [
+          15.239,
+          154.71,
+          277.943
+        ],
+        "name": "in front of the Crater Caves portal"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 4): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z, angles_W, angles_Z FROM landblock_instance WHERE guid = 0x78FD2000: weenie 2387; the point is the hop's front side of it, the profile crater-caves' entry.front_point; the go stops short of the portal so the touch is the use step's",
+      "todo": null
+    },
+    {
+      "kind": "use",
+      "what": "enter the Crater Caves",
+      "place": {
+        "cell": "0x019A02CA",
+        "point": [
+          40,
+          -150,
+          0
+        ],
+        "name": "the arrival of the Crater Caves"
+      },
+      "target": {
+        "wcid": 2387,
+        "name": "Crater Caves Dungeon"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 4): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM weenie_properties_position WHERE object_Id = 2387 AND position_Type = 2: destination 0x019A02CA (40, -150, 0), no level gate; the stored cell is stale (the point stands in 0x019A02D6, the profile's arrival), and the step's check reads the landblock",
+      "todo": null
+    },
+    {
+      "kind": "hunt-until",
+      "what": "16 Pyreal Motes in the Crater Caves",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 6353,
+        "name": "Pyreal Mote"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 4): weenie_properties_create_list rows 46840 (Nubilous Golem 23082, destination 9 ContainTreasure, shade 0.04) and 46603 (Magma Golem 199, shade 0.01); the only droppers of 6353 placed in 0x019A; 16 is what the combines below consume (8 x 2). M6 14 the element line: fire does nothing to the Nubilous and Magma Golems (ResistFire 0, creature-resists.json), and the fight casts at each target the bolt line of her book that hits it hardest (BoltElement); the job's line is bought before the errand runs (LadderJobNeeds: the hunted slots' resistances choose Lightning Bolt, electric 1.0 on the 24 Nubilous Golems the walk reaches); fight-sim matchup 23082 --with \"Lightning Bolt VI\" (Qwinnie, level 78, 2026-11-16): 2.35 casts and 7.7 s a kill, Frost Bolt VI 2.77 and 9.1 s",
+      "todo": null,
+      "count": 16,
+      "ground": "crater-caves",
+      "carriers": [
+        {
+          "wcid": 23082,
+          "shade": 0.04,
+          "row": 46840
+        },
+        {
+          "wcid": 199,
+          "shade": 0.01,
+          "row": 46603
+        }
+      ],
+      "kill_rate": {
+        "wcid": 23082,
+        "kills": 35,
+        "minutes": 15,
+        "source": "M6 14 want loot: the live log cache/m6/14/live/ladder52/step3-levelup.log, 2026-11-17 from 04:05:37 UTC (Qwinnie, level 79, Lightning Bolt VI, mostly from 40-50 m): 35 Nubilous Golems killed in 15 minutes; the carriers' shades are the create-list rows above (SELECT id, weenie_Class_Id, destination_Type, shade FROM weenie_properties_create_list WHERE object_Id IN (23082, 199), cache/m6/4/world.sqlite read offline: 23082's set is 6353 at 0.04 and nothing at 0.96; 199's second set is 6353 at 0.01 and nothing at 0.99), rolled once a set by ACE's CreateListSelect (WorldObjects/Creature_Equipment.cs:636-679 @95ef426d) from Creature_Death.GenerateTreasure (WorldObjects/Creature_Death.cs:688-708); trophy_drop_rate is 1 on this server (SELECT `key`, value FROM ace_shard.config_properties_double, read-only, 2026-11-17)"
+      }
+    },
+    {
+      "kind": "recall",
+      "what": "home by Lifestone Recall, the motes in the pack",
+      "place": {
+        "cell": "0xA9B40019",
+        "point": [
+          84.0,
+          7.7,
+          94.0
+        ],
+        "name": "Holtburg's lifestone point"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the spell id is Fighter/RecallHome.cs LifestoneRecallSpell (1635); at from_level 75 she has it and her lifestone is Holtburg's (the home.lifestone_point of the ladder's grounds); a spell she lacks stops recall:not-known",
+      "todo": null,
+      "spell": 1635
+    },
+    {
+      "kind": "combine",
+      "what": "16 motes to 8 slivers",
+      "place": null,
+      "target": {
+        "wcid": 6353,
+        "name": "Pyreal Mote"
+      },
+      "item": {
+        "wcid": 6353,
+        "name": "Pyreal Mote"
+      },
+      "expect": {
+        "reply": "You combine the two motes into a larger sliver.",
+        "stamp": null,
+        "item": {
+          "wcid": 6355,
+          "name": "Pyreal Sliver"
+        }
+      },
+      "source": "the recipe row 790 and its cook_book pair (source 6353, target 6353; facts-fetch.md section 6; the lead confirmed the six rows by a read-only SELECT on the live world database, cache/m6/8/notes.md; QuestCatalogSqlTests reads them from the pinned zip): skill 0, difficulty 0, so no roll (RecipeManager.cs:151-157, 164: HasDifficulty false is chance 1.0), both consumed; done outside the Caves, away from its respawns",
+      "todo": null,
+      "count": 8
+    },
+    {
+      "kind": "combine",
+      "what": "8 slivers to 4 nuggets",
+      "place": null,
+      "target": {
+        "wcid": 6355,
+        "name": "Pyreal Sliver"
+      },
+      "item": {
+        "wcid": 6355,
+        "name": "Pyreal Sliver"
+      },
+      "expect": {
+        "reply": "You combine the two slivers into a larger nugget.",
+        "stamp": null,
+        "item": {
+          "wcid": 6354,
+          "name": "Pyreal Nugget"
+        }
+      },
+      "source": "the recipe row 792 and its cook_book pair (source 6355, target 6355; facts-fetch.md section 6; the lead confirmed the six rows by a read-only SELECT on the live world database, cache/m6/8/notes.md; QuestCatalogSqlTests reads them from the pinned zip): skill 0, difficulty 0, so no roll, both consumed",
+      "todo": null,
+      "count": 4
+    },
+    {
+      "kind": "combine",
+      "what": "4 nuggets to 2 bars",
+      "place": null,
+      "target": {
+        "wcid": 6354,
+        "name": "Pyreal Nugget"
+      },
+      "item": {
+        "wcid": 6354,
+        "name": "Pyreal Nugget"
+      },
+      "expect": {
+        "reply": "You combine the two nuggets into a larger bar.",
+        "stamp": null,
+        "item": {
+          "wcid": 6329,
+          "name": "Pyreal Bar"
+        }
+      },
+      "source": "the recipe row 791 and its cook_book pair (source 6354, target 6354; facts-fetch.md section 6; the lead confirmed the six rows by a read-only SELECT on the live world database, cache/m6/8/notes.md; QuestCatalogSqlTests reads them from the pinned zip): skill 0, difficulty 0, so no roll, both consumed",
+      "todo": null,
+      "count": 2
+    },
+    {
+      "kind": "combine",
+      "what": "2 bars to the Quality Pyreal Ingot (the one with a roll: a failure loses the 16 motes)",
+      "place": null,
+      "target": {
+        "wcid": 6329,
+        "name": "Pyreal Bar"
+      },
+      "item": {
+        "wcid": 6329,
+        "name": "Pyreal Bar"
+      },
+      "expect": {
+        "reply": "You combine the two bars into an ingot of high quality.",
+        "stamp": null,
+        "item": {
+          "wcid": 6331,
+          "name": "Quality Pyreal Ingot"
+        }
+      },
+      "source": "the recipe row 789 and its cook_book pair (source 6329, target 6329; facts-fetch.md section 6; the lead confirmed the six rows by a read-only SELECT on the live world database, cache/m6/8/notes.md; QuestCatalogSqlTests reads them from the pinned zip): skill 38 (Alchemy), difficulty 150; both bars are consumed on either branch; a failed roll makes the Pyreal Ingot 6330, which the golem only hands back (its Give emote 40739), so it is the named stop combine:failed-roll: the 16 motes are lost and the chain starts again; an untrained Alchemy is ACE's WeenieError YouAreNotTrainedInThatTradeSkill with nothing consumed (RecipeManager.cs:185-189), the named stop combine:untrained. M6 14 (D132, D136): the job needs Alchemy, so the ladder trains it from her banked credits (SkillCreditPlan.OrderOf's need, LadderJobNeeds) and the station trains it if it is still untrained; before the roll the station raises it with her unassigned experience to the ladder's plan_cast_chance (0.95: skill 249 against 150, RecipeChance; AtlanAlchemyDatTests prints the experience: 1,818,520 from a trained Alchemy of 144 on her buffed Coordination 145 and Focus 288), as far as the experience goes; the chance is logged before the roll. A failed roll keeps the errand callable: the next way home starts the chain again from the hunt (RecipeOutcomes.FailedRoll)",
+      "todo": null,
+      "count": 1,
+      "fail_item": {
+        "wcid": 6330,
+        "name": "Pyreal Ingot"
+      },
+      "fail_reply": "You combine the two bars into an ingot.",
+      "skill": 38,
+      "difficulty": 150
+    },
+    {
+      "kind": "go",
+      "what": "back to Crater Lake Village, to the street before the tower",
+      "place": {
+        "cell": "0x90D0001C",
+        "point": [
+          72.0,
+          84.0,
+          282.0
+        ],
+        "name": "Crater Lake Village's street, off the Crater Pathway building's porch"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the same chain and street point as the first go: from the Crater Caves she recalled home, because the walk round the crater from the Surface portal back to the village is refused by the physics in that direction (the lake floor; M6 8 B2b dat probe, facts in docs/handoff-m6-8-b2b.md), and the Surface walk and portal are then not needed",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "up the tower: inside the tower door",
+      "place": {
+        "cell": "0x90D00100",
+        "point": [
+          60.0,
+          107.0,
+          282.0
+        ],
+        "name": "inside the tower door"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the tower's spiral, no jump, a body walks it in the dat test (TownNetworkWalkDatTests.Crater.cs Flights, cache/m6/8 B1): the go names the floor room 0x90D00100 for every flight, and the physics takes the body through the shaft 0x90D00101 the room graph has no floor for",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "up the tower: the tower spiral, landing 1",
+      "place": {
+        "cell": "0x90D00100",
+        "point": [
+          60.0,
+          110.7,
+          283.6
+        ],
+        "name": "the tower spiral, landing 1"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the tower's spiral, no jump, a body walks it in the dat test (TownNetworkWalkDatTests.Crater.cs Flights, cache/m6/8 B1): the go names the floor room 0x90D00100 for every flight, and the physics takes the body through the shaft 0x90D00101 the room graph has no floor for",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "up the tower: the tower spiral, landing 2",
+      "place": {
+        "cell": "0x90D00100",
+        "point": [
+          57.3,
+          110.7,
+          284.4
+        ],
+        "name": "the tower spiral, landing 2"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the tower's spiral, no jump, a body walks it in the dat test (TownNetworkWalkDatTests.Crater.cs Flights, cache/m6/8 B1): the go names the floor room 0x90D00100 for every flight, and the physics takes the body through the shaft 0x90D00101 the room graph has no floor for",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "up the tower: the tower spiral, landing 3",
+      "place": {
+        "cell": "0x90D00100",
+        "point": [
+          57.4,
+          105.3,
+          287.6
+        ],
+        "name": "the tower spiral, landing 3"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the tower's spiral, no jump, a body walks it in the dat test (TownNetworkWalkDatTests.Crater.cs Flights, cache/m6/8 B1): the go names the floor room 0x90D00100 for every flight, and the physics takes the body through the shaft 0x90D00101 the room graph has no floor for",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "up the tower: the tower spiral, landing 4",
+      "place": {
+        "cell": "0x90D00100",
+        "point": [
+          62.2,
+          105.3,
+          290.8
+        ],
+        "name": "the tower spiral, landing 4"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the tower's spiral, no jump, a body walks it in the dat test (TownNetworkWalkDatTests.Crater.cs Flights, cache/m6/8 B1): the go names the floor room 0x90D00100 for every flight, and the physics takes the body through the shaft 0x90D00101 the room graph has no floor for",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "up the tower: the tower spiral, landing 5",
+      "place": {
+        "cell": "0x90D00100",
+        "point": [
+          62.8,
+          110.7,
+          294.0
+        ],
+        "name": "the tower spiral, landing 5"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the tower's spiral, no jump, a body walks it in the dat test (TownNetworkWalkDatTests.Crater.cs Flights, cache/m6/8 B1): the go names the floor room 0x90D00100 for every flight, and the physics takes the body through the shaft 0x90D00101 the room graph has no floor for",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "up the tower: the roof, by Silencia",
+      "place": {
+        "cell": "0x90D00100",
+        "point": [
+          58.2,
+          110.8,
+          297.2
+        ],
+        "name": "the roof, by Silencia"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the tower's spiral, no jump, a body walks it in the dat test (TownNetworkWalkDatTests.Crater.cs Flights, cache/m6/8 B1): the go names the floor room 0x90D00100 for every flight, and the physics takes the body through the shaft 0x90D00101 the room graph has no floor for",
+      "todo": null
+    },
+    {
+      "kind": "buy",
+      "what": "a Magic Glyph from Silencia",
+      "place": null,
+      "target": {
+        "wcid": 2498,
+        "name": "Silencia the Archmage"
+      },
+      "item": {
+        "wcid": 19410,
+        "name": "Magic Glyph"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 4): weenie_properties_create_list id 71411 (object 2498, weenie 19410, destination 4 Shop, stack -1 unlimited); 7,750 pyreals (Value 5,000 at SellPrice 1.55, ACE Vendor.cs:577-585 @95ef426d); Silencia stands 3.7 m from the roof's last point, inside the use reach (landblock_instance guid 0x790D0003)",
+      "todo": null,
+      "count": 1
+    },
+    {
+      "kind": "apply",
+      "what": "the Magic Glyph on the Quality Pyreal Ingot",
+      "place": null,
+      "target": {
+        "wcid": 6331,
+        "name": "Quality Pyreal Ingot"
+      },
+      "item": {
+        "wcid": 19410,
+        "name": "Magic Glyph"
+      },
+      "expect": {
+        "reply": "You strongly imbue the pyreal with the essence of war magic.",
+        "stamp": null,
+        "item": {
+          "wcid": 46141,
+          "name": "Superb Infused Pyreal Ingot"
+        }
+      },
+      "source": "the recipe row 6027 and its cook_book pair (source 19410, target 6331; facts-fetch.md section 6; the lead confirmed the six rows by a read-only SELECT on the live world database, cache/m6/8/notes.md; QuestCatalogSqlTests reads them from the pinned zip): skill 33, difficulty 0: no roll (its named skill is decorative); both consumed; 46141 on both branches",
+      "todo": null,
+      "fail_item": {
+        "wcid": 46141,
+        "name": "Superb Infused Pyreal Ingot"
+      },
+      "fail_reply": "You strongly imbue the pyreal with the essence of a wand."
+    },
+    {
+      "kind": "give",
+      "what": "the Superb Infused Pyreal Ingot to Silencia's Magma Golem for the Atlan Wand",
+      "place": null,
+      "target": {
+        "wcid": 6356,
+        "name": "Silencia's Magma Golem"
+      },
+      "item": {
+        "wcid": 46141,
+        "name": "Superb Infused Pyreal Ingot"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": {
+          "wcid": 46122,
+          "name": "Atlan Wand"
+        }
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 4): weenie_properties_emote id 40757 (object 6356, category 6 Give, weenie_Class_Id 46141): Motion, TurnToTarget, Give 46122 x1, no Tell, no quest, no XP; the golem stands 4.7 m from the roof's last point (landblock_instance guid 0x790D0007); the wand's arrival is the check",
+      "todo": null
+    },
+    {
+      "kind": "recall",
+      "what": "home by Lifestone Recall, down from the roof",
+      "place": {
+        "cell": "0xA9B40019",
+        "point": [
+          84.0,
+          7.7,
+          94.0
+        ],
+        "name": "Holtburg's lifestone point"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the spell id is Fighter/RecallHome.cs LifestoneRecallSpell (1635); at from_level 75 she has it and her lifestone is Holtburg's (the home.lifestone_point of the ladder's grounds); a spell she lacks stops recall:not-known; the roof is the outdoor cell 0x90D00015 and no plan leads from it back into the tower (the go steps up name a room; a go down has no path: the dat probe), so she recalls instead of walking down",
+      "todo": null,
+      "spell": 1635
+    },
+    {
+      "kind": "go",
+      "what": "to the Minor Smoldering Stone",
+      "place": {
+        "cell": "0xA66C0100",
+        "point": [
+          83.5479,
+          141.65,
+          16.8029
+        ],
+        "name": "where the Minor Smoldering Stone lies"
+      },
+      "target": {
+        "wcid": 6320,
+        "name": "Minor Smoldering Stone"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.3): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x7A66C000: weenie 6320, cell 0xA66C0100; by the Town Network and the Yinar Portal (travel-routes.json network-to-samsur, samsur-to-yinar; the walk from the Yinar drop is The_run_from_the_yinar_drop_reaches_the_minor_smoldering_stones_cave); no level gate on any portal of the route, no door in the landblock. M6 14 the element line: four Gouts (21164, level 50) stand within 1.0, 1.6, 7.5 and 7.4 m of the stone, three more at the cave's mouth (generator guid 0x7A66C00D), ResistFire 0 and ResistCold 0.65: her fight-back casts the line of her book that hits a Gout hardest (BoltElement; fight-sim matchup 21164 (Qwinnie, level 78, 2026-11-16): Frost Bolt I, which she knows, 6.63 casts and 10.1 s a kill, no death with up to three on her; Lightning Bolt VI 11.0 s). A stone already held skips this walk (the next step's pick-up item held: QuestStation.Go)",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Minor Smoldering Stone from the floor",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 6320,
+        "name": "Minor Smoldering Stone"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.3): the item's own Quest string smolderingstoneminor (quest row 1352: min_Delta 3600, max_Solves -1) gates the pick-up for one hour (ACE Player_Inventory.cs:1249-1262 @95ef426d); refused, the run stops pick-up:too-recent; a Textbook (wcid 6407) lies 4.3 m away and is not this step's",
+      "todo": null
+    },
+    {
+      "kind": "apply",
+      "what": "the Minor Smoldering Stone on the Atlan Wand",
+      "place": null,
+      "target": {
+        "wcid": 46122,
+        "name": "Atlan Wand"
+      },
+      "item": {
+        "wcid": 6320,
+        "name": "Minor Smoldering Stone"
+      },
+      "expect": {
+        "reply": "The gem slips into the weapon altering its properties.",
+        "stamp": null,
+        "item": {
+          "wcid": 46128,
+          "name": "Minor Smoldering Atlan Wand"
+        }
+      },
+      "source": "the recipe row 6068 and its cook_book pair (source 6320, target 46122; facts-fetch.md section 6; the lead confirmed the six rows by a read-only SELECT on the live world database, cache/m6/8/notes.md; QuestCatalogSqlTests reads them from the pinned zip): skill 0, difficulty 0; the stone stays (source destroy chance 0) and the wand is consumed; success and fail are one text and one result, so the item that arrives decides (RecipeOutcomes.Read)",
+      "todo": null,
+      "fail_item": {
+        "wcid": 46128,
+        "name": "Minor Smoldering Atlan Wand"
+      },
+      "fail_reply": "The gem slips into the weapon altering its properties."
+    },
+    {
+      "kind": "wear",
+      "what": "the Minor Smoldering Atlan Wand",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 46128,
+        "name": "Minor Smoldering Atlan Wand"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 7): weenie 46128: ValidLocations Held, WieldRequirements 2 (RawSkill), WieldSkillType 34 (War Magic), WieldDifficulty 290, the ladder's from_level; ItemDifficulty 100 (Arcane Lore) and ItemSpellcraft 275 decide whether its six spells activate, which the wear reads as worn only; a refused wield stops wear:not-worn",
+      "todo": null
+    }
+  ],
+  "done": {
+    "stamp": null,
+    "reply": null,
+    "item": {
+      "wcid": 46128,
+      "name": "Minor Smoldering Atlan Wand"
+    }
+  },
+  "timer_seconds": null,
+  "sources": [
+    "the chain and its order: cache/m6/8/brief-b2b.md, cache/m6/8/facts-fetch.md sections 3, 4, 6 and 7; the counts sum: 16 motes, 8 slivers, 4 nuggets, 2 bars, 1 ingot",
+    "giver: none; no NPC starts it and no quest row covers the chain (the golem's Give emote 40757 checks and stamps nothing)",
+    "timer_seconds: null, done once: the only timer is the stone's pick-up quest (3600 s) on one step; the ladder band runs it once (D118)",
+    "level: none in the file: no portal on the way has a level gate; the wield rule is base War Magic 290 (46128's WieldDifficulty, the ladder's from_level 75 is about where she reaches it)",
+    "ladder: from 75, before 126, once (cache/m6/8/brief-b2b.md, D118); the trigger's live proof is items 10 and 11's",
+    "recipe 789 is the one Alchemy check (skill 38, difficulty 150): M6 14 D132 and D136 train Alchemy from her credits on the job's need and the station raises it before the roll; no grant"
+  ],
+  "ladder": {
+    "from_level": 75,
+    "before_level": 126,
+    "once": true
+  }
+}

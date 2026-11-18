@@ -237,6 +237,33 @@ public sealed class J4JourneyHostTests(DatSetFixture fixture, ITestOutputHelper 
     }
 
     /// <summary>
+    /// M6 8 M: the real station's hand-over of a go step's way to the real leg (<see cref="QuestStation"/>, the Nen Ai file's step 1, over the headless host's <see cref="JourneyRunLeg"/>, the gap B2c named). From the door hall where step 0 leaves her (the live body's height) the go walks its way down the stair to the foot, by the file's way, no step off a raised start, and the step ends ok.
+    /// </summary>
+    [Trait("Tier", "Exhaustive")]
+    [RequiresDatsFact]
+    public void The_real_stations_go_walks_the_files_way_from_where_the_step_before_left_her()
+    {
+        var log = new RecordingLogSink();
+        using var host = new HeadlessJourneyRunnerHost(Dats, log);
+        var probe = new QuestGoProbe(host, log, "nen-ai-pet-drudge", "1-1", 0xD8540103, new System.Numerics.Vector3(84.75f, 10.5f, 31.26f));
+        using var run = new J4Run(probe, s => s.AcceptsMovement = true);
+        run.Finish(() => host.Body.Streamer is { Busy: true }, maxSeconds: 200);
+        output.WriteLine($"{probe.Stage}: {probe.Failure}; {probe.Verdict}");
+        foreach (var line in log.Lines.Where(l => l.Contains("quest_step", StringComparison.Ordinal) || l.Contains("raised start", StringComparison.Ordinal) || l.Contains("path source", StringComparison.Ordinal)))
+        {
+            output.WriteLine(line);
+        }
+
+        Assert.Null(probe.Failure);
+        Assert.Equal("done", probe.Stage);
+        Assert.Contains(log.Lines, l => l.Contains("quest_step: n=1 kind=go", StringComparison.Ordinal) && l.Contains("ok=yes", StringComparison.Ordinal));
+        Assert.DoesNotContain(log.Lines, l => l.Contains("raised start", StringComparison.Ordinal));
+        Assert.Contains(log.Lines, l => l.Contains("the authored way of 2 points", StringComparison.Ordinal));
+        var end = host.Body.Walker!.Position;
+        Assert.True(System.Numerics.Vector2.Distance(new System.Numerics.Vector2(end.Origin.X, end.Origin.Y), new System.Numerics.Vector2(84.75f, 18.5f)) < 2f, end.ToString());
+    }
+
+    /// <summary>
     /// Live round 2 (after F1): the Archer's walk from the lifestone to Thelnoth (object 0x7A9B402C within 3 m) was planned into his cellar 0xA9B40111, the
     /// room the station's request names, though he stands outdoors in 0xA9B4000F (round 1 arrived by the outdoor planner); the route's last leg through
     /// the cellar's wall was refused three times. An object outdoors is an outdoor goal: from the lifestone and from beside him in 0xA9B4000F, the leg
@@ -268,6 +295,33 @@ public sealed class J4JourneyHostTests(DatSetFixture fixture, ITestOutputHelper 
         Assert.Null(probe.LegFailure);
         Assert.True(metres <= 3.0f + 0.3f, $"{metres:F2} m");
         Assert.Contains(log.Lines, l => l.Contains("[journey-runner] a leg on foot begins leg=vendor-1", StringComparison.Ordinal) && l.Contains("cell=outdoor", StringComparison.Ordinal));
+    }
+
+    [Trait("Tier", "Exhaustive")]
+    [RequiresDatsFact]
+    public void The_headless_journey_host_points_the_pit_log_at_the_session_log_at_its_first_step()
+    {
+        var before = Lifestone.Client.Movement.Routes.CellRoutePlanner.PitLog;
+        try
+        {
+            var log = new RecordingLogSink();
+            var host = new HeadlessJourneyRunnerHost(Dats, log);
+            using var journey = new HeadlessJourneyScenario(JourneyPlans.Mage, [], Dats, SpellTableData.Load(Dats).Spells, log, "lifestone-test", host);
+            using var run = new J4Run(journey, s =>
+            {
+                s.AcceptsMovement = true;
+                s.Characters.Add(new AceCharacter(0x50000010, JourneyPlans.Mage.Character));
+            });
+            run.Finish(() => false, until: () => journey.Journey is not null, maxSeconds: 120);
+
+            Assert.NotNull(journey.Journey);
+            Assert.Same(log, Lifestone.Client.Movement.Routes.CellRoutePlanner.PitLog); // TODO(m6-abode-pits) reaches the run's log file
+        }
+        finally
+        {
+            Lifestone.Client.Movement.Routes.CellRoutePlanner.PitLog = before;
+            Lifestone.Client.Movement.Routes.CellRoutePlanner.ResetPitLog();
+        }
     }
 
     [Trait("Tier", "Exhaustive")]
@@ -621,6 +675,92 @@ public sealed class J4JourneyHostTests(DatSetFixture fixture, ITestOutputHelper 
             Failure = why;
             Stage = "failed";
             return ScenarioStatus.Failed;
+        }
+    }
+
+    /// <summary>M6 8 M: places the body, then runs the real quest station (a range of its steps) over the host's own legs.</summary>
+    private sealed class QuestGoProbe(HeadlessJourneyRunnerHost host, ILogSink log, string quest, string steps, uint startCell, System.Numerics.Vector3 start) : IScenario
+    {
+        private readonly LoginScenario _login = new("Amy") { StayInWorld = true };
+        private IStationRun? _run;
+        private double _since;
+
+        public string Name => "quest-go-probe";
+
+        public string Fields { get; private set; } = string.Empty;
+
+        public string Stage { get; private set; } = "login";
+
+        public string? Failure { get; private set; }
+
+        public string Verdict { get; private set; } = string.Empty;
+
+        public double? WhereMaxMetres => null;
+
+        public long Unmatched => 0;
+
+        public ScenarioStatus Step(IGameSessionView session, double now)
+        {
+            host.Tick(session, now);
+            switch (Stage)
+            {
+                case "login":
+                    var login = _login.Step(session, now);
+                    if (login == ScenarioStatus.Failed)
+                    {
+                        return Fail("login: " + _login.Failure);
+                    }
+
+                    if (login == ScenarioStatus.Succeeded)
+                    {
+                        session.Tools.Place(new TeleportDestination("start", [], new WorldLocation("start", new CellPosition(startCell, start), HasHeight: true, HeadingDegrees: 0), "m test"), ActionSource.Host);
+                        _since = session.Clock.Now;
+                        Stage = "placing";
+                    }
+
+                    return ScenarioStatus.Running;
+                case "placing":
+                    if (host.Body.Placed && host.Body.Walker!.Position.CellId == startCell)
+                    {
+                        var context = new JourneyContext { Character = "Amy", Account = "test", Log = log, Travel = new HostTravel(host), Spells = new Dictionary<uint, SpellInfo>(), Grounds = [] };
+                        _run = new QuestStation(quest, steps: steps).Start(context);
+                        Stage = "run";
+                        return ScenarioStatus.Running;
+                    }
+
+                    return session.Clock.Now - _since > 120 ? Fail("placing: the body was not placed: " + host.PlaceBlocker) : ScenarioStatus.Running;
+                case "run":
+                    var status = _run!.Step(session, now);
+                    if (status == ScenarioStatus.Running)
+                    {
+                        return ScenarioStatus.Running;
+                    }
+
+                    Verdict = _run.VerdictFields();
+                    if (status == ScenarioStatus.Failed)
+                    {
+                        return Fail("run: " + _run.Failure + " " + Verdict);
+                    }
+
+                    Stage = "done";
+                    return ScenarioStatus.Succeeded;
+                default:
+                    return Failure is null ? ScenarioStatus.Succeeded : ScenarioStatus.Failed;
+            }
+        }
+
+        private ScenarioStatus Fail(string why)
+        {
+            Failure = why;
+            Stage = "failed";
+            return ScenarioStatus.Failed;
+        }
+
+        private sealed class HostTravel(HeadlessJourneyRunnerHost runners) : IJourneyTravel
+        {
+            public bool Busy => false;
+
+            public ITravelLeg GoTo(IGameSessionView session, TravelRequest request, double now) => runners.Run(session, request, now);
         }
     }
 

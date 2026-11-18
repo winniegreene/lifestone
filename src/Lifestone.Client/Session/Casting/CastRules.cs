@@ -21,7 +21,7 @@ namespace Lifestone.Client.Session.Casting;
 /// <item><see cref="Timed(double)"/>: <c>HarmHealScript</c>'s harm and heal casts (60): fizzles retried without a count inside the time cap, the mana checked again before each retry (<see cref="CeilingBeforeRetry"/>,
 /// M5 1 fix A, 1-R1: a retry the mana cannot pay ends <see cref="CastEnd.ManaShort"/> with nothing sent, and the script goes back to its top-up).</item>
 /// </list>
-/// No caller retried a busy refusal (0x001D) of a cast before M5 item 1; the owner's DoD 2 ("busy waits and resends") and the review's 1-R6 adopt the design's busy rule (<see cref="WithBusyRetries"/>: wait
+/// No caller retried a busy refusal (0x001D) of a cast before M5 item 1; the owner's DoD 2 (busy waits and resends) and the review's 1-R6 adopt the design's busy rule (<see cref="WithBusyRetries"/>: wait
 /// <see cref="DefaultBusyWaitSeconds"/> and send again, <see cref="DefaultBusyRetries"/> times, the vitals keeper's own numbers for its kits and potions) on every preset, each wait and resend counted
 /// (<see cref="CastReport.Busy"/>, <c>busy=</c>); the preset's <see cref="Name"/> is unchanged (<see cref="WithBusyRetries"/> on a preset adds "+busy(n)"). No caller retries a resist (none casts a debuff on another
 /// target), so <see cref="MaxResists"/> is 0 and the design's rule is <see cref="WithResistRetries"/>.</para>
@@ -164,7 +164,7 @@ public sealed record CastRules
         };
     }
 
-    /// <summary>These rules under the owner's fizzle rule (M5 D14): <see cref="FizzleRuleSameLevel"/> same-level retries, then one level down once, then a named miss.</summary>
+    /// <summary>These rules under the fizzle rule of M5 D14: <see cref="FizzleRuleSameLevel"/> same-level retries, then one level down once, then a named miss.</summary>
     public CastRules WithFizzleRule() => this with { Name = Name + "+D14", MaxFizzles = FizzleRuleSameLevel, LevelsDown = 1 };
 
     /// <summary>These rules with the Mana Conversion tries (M5 D15, K5's option): a 0x0401 inside the tries waits <paramref name="spacingSeconds"/> after the answer and sends again; outside them it ends <see cref="CastEnd.ManaShort"/>.</summary>

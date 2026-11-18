@@ -1,9 +1,12 @@
 using System.Numerics;
 using Lifestone.Client.Movement.Wayfinding;
+using Lifestone.Client.Session.Autopilot;
 using Lifestone.Client.Session.Fighter;
 using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Mage;
+using Lifestone.Client.Session.Vitals;
 using Lifestone.Data.Magic;
+using Lifestone.Data.Motion;
 using Lifestone.Data.Physics;
 using Lifestone.Data.Terrain;
 using Lifestone.Data.Tests;
@@ -26,7 +29,10 @@ public sealed class HuntingGroundDatTests(DatSetFixture fixture, ITestOutputHelp
     /// <summary>How far under the arrival's z a floor may be and still be stood on (the origin is the player's feet; the dats' floors are polygons, the origin a figure of the world data), in metres.</summary>
     private const float FloorSlackMetres = 0.5f;
 
-    public static TheoryData<string> OutdoorKeys() => new() { HuntGround.BeltKey, HuntGround.ForestKey };
+    /// <summary>The key of the 5-9 rung's own ground (M6 item 0, slice belt): Holtburg's outskirts, the cells of the Newbie Aluvian Generator round the town.</summary>
+    public const string OutskirtsKey = "holtburg-outskirts";
+
+    public static TheoryData<string> OutdoorKeys() => new() { HuntGround.BeltKey, HuntGround.ForestKey, OutskirtsKey };
 
     /// <summary>What the dats say of an outdoor cell: water at a corner vertex, else a normal under the physics floor, else dry (the rule of <c>HuntGroundDatTests.Read</c>).</summary>
     private GroundTerrain Read(OutdoorCell cell, out float lowestNormalZ)
@@ -149,10 +155,19 @@ public sealed class HuntingGroundDatTests(DatSetFixture fixture, ITestOutputHelp
         Assert.NotEmpty(ground.SpellPlan);
         foreach (var row in ground.SpellPlan)
         {
-            var line = ArenaProfile.Lines.Single(l => l.Name == row.Family);
-            var spell = line.Spells.Single(s => s.Position == row.SpellLevel);
-            var info = spells[spell.Id];
-            Assert.Equal(spell.Name, info.Name);
+            // M6 8 B1: a ground that plans another line than the fight's (the Crater Caves' Frost Bolt, TODO(m6-fight-element-line)) names it by the line and the numeral: the foci formula is the same for every war line of a level.
+            SpellInfo info;
+            if (ArenaProfile.Lines.SingleOrDefault(l => l.Name == row.Family) is { } line)
+            {
+                var spell = line.Spells.Single(s => s.Position == row.SpellLevel);
+                info = spells[spell.Id];
+                Assert.Equal(spell.Name, info.Name);
+            }
+            else
+            {
+                var name = $"{row.Family} {new[] { "I", "II", "III", "IV", "V", "VI", "VII", "VIII" }[row.SpellLevel - 1]}";
+                info = spells.Values.Single(s => s.Name == name);
+            }
 
             // The cast of a mage that holds its school's foci burns the foci formula (the kit carries it: GearKit.FociFormulaCounts): the level's scarab, then Prismatic Tapers by its power.
             var needed = GearKit.FociFormulaCounts(info.Formula);
@@ -160,7 +175,7 @@ public sealed class HuntingGroundDatTests(DatSetFixture fixture, ITestOutputHelp
             var wanted = needed.ToDictionary(
                 n => ComponentWeenies.TryGetByComponent(n.Key, out var w) ? w.Wcid : throw new InvalidOperationException($"component {n.Key} of {info.Name} is not in the component map"),
                 n => n.Value);
-            output.WriteLine($"{info.Name} (spell {spell.Id}, character levels {row.MinLevel}-{row.MaxLevel}): the formula needs {string.Join(", ", wanted.Select(w => $"{w.Value} x wcid {w.Key}"))}; the profile holds {string.Join(", ", have.Select(h => $"{h.Value} x wcid {h.Key}"))}");
+            output.WriteLine($"{info.Name} (spell {info.Id}, character levels {row.MinLevel}-{row.MaxLevel}): the formula needs {string.Join(", ", wanted.Select(w => $"{w.Value} x wcid {w.Key}"))}; the profile holds {string.Join(", ", have.Select(h => $"{h.Value} x wcid {h.Key}"))}");
 
             Assert.NotEmpty(wanted);
             foreach (var (wcid, count) in wanted)
@@ -168,12 +183,267 @@ public sealed class HuntingGroundDatTests(DatSetFixture fixture, ITestOutputHelp
                 Assert.True(have.TryGetValue(wcid, out var perCast) && perCast >= count, $"{info.Name}: the formula burns {count} x wcid {wcid}, the profile's components for spell level {row.SpellLevel} hold {(have.TryGetValue(wcid, out var p) ? p.ToString(System.Globalization.CultureInfo.InvariantCulture) : "none")}");
             }
 
-            Assert.Equal(wanted.Keys.Order(), have.Keys.Order()); // and nothing the formula does not burn
+            // and nothing the formula does not burn: M6 3 F3 (closes TODO(m6-dungeon-account-formula)) widens "the formula" to the foci formula plus, on a climber's ground, the account test's lines
+            // (the lines of a school whose focus Winnie does not hold: SpellFormulaRules.CustomizeForAccount; ClimberAccountKeys), which A_climbers_dungeon_carries_the_account_test_formula_beside_the_foci_formula pins in full.
+            var allowed = new HashSet<uint>(wanted.Keys);
+            if (ClimberAccountKeys.Contains(key))
+            {
+                foreach (var id in SpellFormulaRules.CustomizeForAccount(info.Formula, info.FormulaVersion, "test").Where(i => i != 0))
+                {
+                    allowed.Add(ComponentWeenies.TryGetByComponent(id, out var w) ? w.Wcid : throw new InvalidOperationException($"component {id} is not in the component map"));
+                }
+            }
+
+            Assert.Empty(have.Keys.Except(allowed));
         }
     }
 
+    /// <summary>The dungeons the climber (Winnie, account <c>test</c>) hunts (M6 3 F3); M6 14 holding safety: the Holding too, its kit now the climber's general one (no longer BSD Mage's den lines); M6 14 armory: the Armory, the Holding rung's alternate with its kit.</summary>
+    public static readonly string[] ClimberAccountKeys =
+    [
+        "tusker-burrow", "tusker-lodge", "tusker-cavern", "tusker-cave", "tusker-temple-20-40", "tusker-abode", "tusker-habitat", "tusker-quarters", "tusker-barracks", "cave-of-alabree", "tusker-holding", "tusker-armory",
+    ];
+
+    public static TheoryData<string> ClimberKeys() => new(ClimberAccountKeys);
+
+    /// <summary>
+    /// M6 7 X (spells are the armor): the climber's low grounds stock every component of the protective lines' levels the rung reaches, on the account test's formula (<see cref="SpellFormulaRules.CustomizeForAccount"/>: she holds no focus of Life
+    /// Magic), a stock line of each, sold by a vendor of the profile, so a scroll the plan buys can be cast.
+    /// </summary>
+    [RequiresDatsTheory]
+    [InlineData("holtburg-outskirts", "Armor Self", 1, 2)]
+    [InlineData("holtburg-outskirts", "Mana Renewal Self", 1, 2)]
+    [InlineData("tusker-burrow", "Armor Self", 2, 3)]
+    [InlineData("tusker-burrow", "Bludgeoning Protection Self", 2, 3)]
+    [InlineData("tusker-burrow", "Mana Renewal Self", 2, 3)]
+    [InlineData("tusker-lodge", "Armor Self", 2, 3)]
+    [InlineData("tusker-lodge", "Bludgeoning Protection Self", 2, 3)]
+    [InlineData("tusker-lodge", "Mana Renewal Self", 2, 3)]
+    [InlineData("holtburg-outskirts", "Stamina to Mana Self", 1, 1)]
+    [InlineData("tusker-burrow", "Stamina to Mana Self", 1, 1)]
+    [InlineData("tusker-lodge", "Stamina to Mana Self", 1, 1)]
+    public void A_climbers_low_grounds_carry_the_protective_lines_formula(string key, string line, int from, int to)
+    {
+        var ground = GroundCatalog.Get(key);
+        var spells = SpellTableData.Load(fixture.Dats).Spells;
+        foreach (var spell in ScrivenerCatalog.Default.LineSpells(line).Where(s => s.Level >= from && s.Level <= to))
+        {
+            foreach (var id in SpellFormulaRules.CustomizeForAccount(spells[spell.SpellId].Formula, spells[spell.SpellId].FormulaVersion, "test").Where(i => i != 0))
+            {
+                Assert.True(ComponentWeenies.TryGetByComponent(id, out var w), $"component {id}");
+                Assert.True(ground.Supplies.StockOf(w.Wcid) is not null, $"{key} {spell.Name}: no stock line of {w.Name} {w.Wcid}");
+                Assert.True(ground.VendorSelling(w.Wcid) is not null, $"{key} {spell.Name}: no vendor sells {w.Name} {w.Wcid}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// M6 7 AD: what a press costs a caster with no Mana Conversion is the SpellTable's base mana, and the plan's level turns on it (<see cref="BuffStatMods.StaminaToManaBaseMana"/>). Revitalize Self's base is pinned beside it
+    /// (<see cref="BuffStatMods.RevitalizeBaseMana"/>): at level 10 the reason it stayed off the plan, and since M6 14 what the plan weighs a round on (<see cref="ScrivenerLearnPlan.RevitalizeTarget"/>). M6 14: the level floor pays a level by
+    /// its foci formula's scarab, so Revitalize Self VI burns a Pyreal Scarab 690 and VII (Robustification) a Platinum Scarab 8897, both of which she carries.
+    /// </summary>
+    [RequiresDatsFact]
+    public void The_stamina_to_mana_base_mana_is_the_spell_tables()
+    {
+        var spells = SpellTableData.Load(fixture.Dats).Spells;
+        Assert.Equal(BuffStatMods.StaminaToManaBaseMana, VitalsMeans.StaminaToManaSelf.Select(id => spells[id].BaseMana));
+        Assert.Equal([15u, 30u, 40u, 50u, 60u, 70u], VitalsMeans.RevitalizeSelf.Take(6).Select(id => spells[id].BaseMana));
+        Assert.Equal(BuffStatMods.RevitalizeBaseMana, VitalsMeans.RevitalizeSelf.Take(6).Select(id => spells[id].BaseMana));
+        uint Scarab(uint id) => GearKit.FociFormulaCounts(spells[id].Formula).Keys.Select(c => ComponentWeenies.TryGetByComponent(c, out var w) ? w : default).Single(w => w.Name?.EndsWith(" Scarab", StringComparison.Ordinal) == true).Wcid;
+        Assert.Equal((690u, 8897u), (Scarab(1182), Scarab(2083)));
+    }
+
+    /// <summary>
+    /// M6 3 F3 (3-R10, closes <c>m6-dungeon-account-formula</c> for the ladder's dungeons): Winnie on the account <c>test</c> holds no focus once the Foci of Strife is lost, and then ACE casts the account's full formula
+    /// (<see cref="SpellFormulaRules.CustomizeForAccount"/>). For each spell level of the profile's plan, every component of that formula is a component line of the profile at that level (at least the slots it burns), a stock line
+    /// that stops the loop at a count that still casts, and either sold by a vendor the profile lists or a carried line the profile names (<c>TODO(m6-island-vendors)</c> in its components source). The foci formula stays pinned
+    /// by <see cref="A_dungeons_components_cover_the_war_lines_formula_at_every_spell_level_its_plan_names"/>. M6 item 14 (m6-goldscarab): a component the profile buys in another town (its <c>town_stock</c>: the Gold Scarab of level V and the
+    /// Pyreal Scarab of level VI at Uziz) is no stock line and has no stop line: its town stock line keeps and restocks at least a cast's worth, and the level floor casts the level under it while the pack holds none.
+    /// </summary>
+    [RequiresDatsTheory]
+    [MemberData(nameof(ClimberKeys))]
+    public void A_climbers_dungeon_carries_the_account_test_formula_beside_the_foci_formula(string key)
+    {
+        var ground = GroundCatalog.Get(key);
+        var spells = SpellTableData.Load(fixture.Dats).Spells;
+        var missing = new List<string>();
+        var carried = new List<string>();
+        foreach (var row in ground.SpellPlan)
+        {
+            var info = spells[ArenaProfile.Lines.Single(l => l.Name == row.Family).Spells.Single(s => s.Position == row.SpellLevel).Id];
+            var wanted = new Dictionary<uint, int>();
+            foreach (var id in SpellFormulaRules.CustomizeForAccount(info.Formula, info.FormulaVersion, "test").Where(i => i != 0))
+            {
+                var wcid = ComponentWeenies.TryGetByComponent(id, out var w) ? w.Wcid : throw new InvalidOperationException($"component {id} is not in the component map");
+                wanted[wcid] = wanted.GetValueOrDefault(wcid) + 1;
+            }
+
+            foreach (var (wcid, perCast) in wanted)
+            {
+                var have = ground.Components.Where(c => c.Wcid == wcid && c.SpellLevel == row.SpellLevel).Select(c => c.PerCast).DefaultIfEmpty(0).Max();
+                var stock = ground.Supplies.StockOf(wcid);
+                output.WriteLine($"{key} {info.Name}: wcid {wcid} x{perCast}: component {have}, stock {(stock is null ? "none" : stock.StopUnder.ToString(System.Globalization.CultureInfo.InvariantCulture))}, {(ground.IsCarried(wcid) ? "carried" : "sold by " + ground.VendorSelling(wcid)!.Name)}");
+                if (have < perCast)
+                {
+                    missing.Add($"{info.Name}: component wcid {wcid} x{perCast} (profile {have})");
+                }
+
+                if (stock is null && ground.TownStockOf(wcid) is { } town)
+                {
+                    // M6 item 14 (m6-goldscarab): bought in another town on the way out; never a stop
+                    Assert.True(town.Keep >= perCast && town.TripUnder >= perCast, $"{key} {info.Name}: the town stock line of wcid {wcid} keeps {town.Keep} and restocks under {town.TripUnder}, a cast burns {perCast}");
+                    Assert.True(ComponentWeenies.TryGetByWcid(wcid, out _));
+                    continue;
+                }
+
+                if (stock is null || stock.StopUnder < perCast)
+                {
+                    missing.Add($"{info.Name}: stock line wcid {wcid} stops under {(stock is null ? "none" : stock.StopUnder.ToString(System.Globalization.CultureInfo.InvariantCulture))}, a cast burns {perCast}");
+                }
+
+                if (ground.IsCarried(wcid))
+                {
+                    carried.Add($"wcid {wcid}");
+                }
+            }
+        }
+
+        Assert.True(missing.Count == 0, key + ": the account test's formula is not carried: " + string.Join("; ", missing));
+        if (carried.Count > 0)
+        {
+            Assert.Contains("TODO(m6-island-vendors)", ground.Sources["components"], StringComparison.Ordinal); // a carried line is named, not silent
+        }
+    }
+
+    /// <summary>
+    /// M6 item 0 (slice belt): the outskirts profile's components are the formula the account <c>test</c> (Winnie's) casts, not the foci formula: for each spell level its plan reaches, the components are exactly the slots of
+    /// <see cref="SpellFormulaRules.CustomizeForAccount"/> over the line's spell at that position, every one is a stock line a vendor of the profile sells, and a stack that stops the loop stops it at a count that still casts
+    /// (stop_under at least the slots per cast). The foci formula's wares (the Prismatic Taper and the scarab, for a mage that keeps its starter Foci of Strife) and the level I self spells' (Armor Self I, Heal Self I) are stock lines too.
+    /// </summary>
+    [RequiresDatsFact]
+    public void The_outskirts_components_are_the_full_formula_of_the_account_test()
+    {
+        const string account = "test";
+        var ground = GroundCatalog.Get(OutskirtsKey);
+        var spells = SpellTableData.Load(fixture.Dats).Spells;
+        Assert.NotEmpty(ground.SpellPlan);
+
+        static Dictionary<uint, int> WcidCounts(IEnumerable<uint> componentIds)
+        {
+            var counts = new Dictionary<uint, int>();
+            foreach (var id in componentIds.Where(i => i != 0))
+            {
+                var wcid = ComponentWeenies.TryGetByComponent(id, out var w) ? w.Wcid : throw new InvalidOperationException($"component {id} is not in the component map");
+                counts[wcid] = counts.GetValueOrDefault(wcid) + 1;
+            }
+
+            return counts;
+        }
+
+        void RequireStocked(string what, Dictionary<uint, int> wanted)
+        {
+            foreach (var (wcid, perCast) in wanted)
+            {
+                var line = ground.Supplies.StockOf(wcid);
+                Assert.True(line is not null, $"{what}: wcid {wcid} is not a stock line");
+                Assert.True(line!.StopUnder >= perCast, $"{what}: {line.Name} stops the loop under {line.StopUnder}, a cast burns {perCast}");
+                Assert.True(ground.VendorSelling(wcid) is not null, $"{what}: no vendor of the profile sells {line.Name}");
+            }
+        }
+
+        var foci = (SpellInfo info) => WcidCounts(GearKit.FociFormulaCounts(info.Formula).SelectMany(f => Enumerable.Repeat(f.Key, f.Value)));
+        foreach (var row in ground.SpellPlan)
+        {
+            var line = ArenaProfile.Lines.Single(l => l.Name == row.Family);
+            for (var level = 1; level <= row.SpellLevel; level++)
+            {
+                var atLevel = line.Spells.Single(sp => sp.Position == level);
+                var info = spells[atLevel.Id];
+                var wanted = WcidCounts(SpellFormulaRules.CustomizeForAccount(info.Formula, info.FormulaVersion, account));
+                var have = ground.Components.Where(c => c.SpellLevel == level).ToDictionary(c => c.Wcid, c => c.PerCast);
+                output.WriteLine($"{info.Name} (spell {atLevel.Id}) on account {account}: needs {string.Join(", ", wanted.Select(w => $"{w.Value} x wcid {w.Key}"))}; the profile holds {string.Join(", ", have.Select(h => $"{h.Value} x wcid {h.Key}"))}");
+                Assert.Equal(wanted.OrderBy(w => w.Key), have.OrderBy(h => h.Key));
+                RequireStocked(info.Name, wanted);
+                RequireStocked(info.Name + " (foci formula)", foci(info));
+            }
+
+            Assert.Equal(ground.SpellPlan.Max(r => r.SpellLevel), ground.Components.Max(c => c.SpellLevel)); // M6 7 AR: two rows now
+        }
+
+        foreach (var id in new uint[] { 24, 6 }) // Armor Self I and Heal Self I: the level I self spells of the War Magic specialist who trains Life Magic
+        {
+            var info = spells[id];
+            RequireStocked(info.Name, WcidCounts(SpellFormulaRules.CustomizeForAccount(info.Formula, info.FormulaVersion, account)));
+            RequireStocked(info.Name + " (foci formula)", foci(info));
+        }
+    }
+
+    /// <summary>
+    /// M6 item 0 (slice belt): the outskirts profile as data (no dats): the cells stand in its landblocks and are dry, the creatures' levels and masses make the band and the yield it says, the hunt's band for a level 5 and a level 9 mage is
+    /// 5-8, the Holtburg lifestone is the den's, every stock line has a vendor and a price, and one full restock at the keeps (less the starter pack's 10 Lead Scarabs and 50 Prismatic Tapers) fits the 10,000 pyreals a new character holds.
+    /// </summary>
+    [Fact]
+    public void The_outskirts_profile_is_an_outdoor_ground_the_starting_purse_stocks()
+    {
+        var ground = GroundCatalog.Get(OutskirtsKey);
+        var den = GroundCatalog.Get("black-spawn-den-aluvian");
+        Assert.Equal(GroundKind.Outdoor, ground.Kind);
+        Assert.Equal(den.Home, ground.Home); // Holtburg's lifestone, as the den profile names it
+        Assert.Null(ground.Portal);
+        Assert.Equal((4, 8), (ground.LevelBand.Min, ground.LevelBand.Max));
+        Assert.Equal((4, 8), AutopilotScenario.TargetBand(ground, 5, 5));
+        Assert.Equal((4, 8), AutopilotScenario.TargetBand(ground, 9, 5));
+
+        var outdoor = ground.Outdoor!;
+        Assert.Equal(10, outdoor.Cells.Count);
+        Assert.All(outdoor.Cells, c => Assert.True(ground.InLandblocks(c.Cell), $"cell 0x{c.Cell:X8} is outside the landblocks"));
+        Assert.All(outdoor.Cells, c => Assert.Equal(GroundTerrain.Dry, c.Terrain));
+        Assert.Equal(outdoor.Cells[0].Cell, ground.Arrival.Cell);
+        Assert.Equal(1.0, outdoor.Creatures.Sum(c => c.SpawnMass), 3); // one roll of the one generator spawns exactly one of the eight
+        var inBand = outdoor.Creatures.Where(c => c.Level >= ground.LevelBand.Min && c.Level <= ground.LevelBand.Max).ToArray();
+        Assert.Equal(outdoor.ExpectedYieldPerSpot, inBand.Sum(c => c.SpawnMass), 4);
+        Assert.All(outdoor.Creatures.Where(c => c.Level >= 5), c => Assert.Equal(8, c.Level)); // the drudges, mites, banderlings and mosswarts: the rung's 'L8'
+        Assert.Contains(outdoor.Creatures, c => c.Name == "Drudge Skulker");
+
+        // The supplies: every line is bought at Holtburg (none carried), at a price; the kit is empty (the chest dresses the mage); the purse is the starting stack.
+        var supplies = ground.Supplies;
+        Assert.Empty(supplies.Kit);
+        Assert.Equal((30_000, 1), (supplies.Purse.Coin, supplies.Purse.Notes.Count)); // M6 8 I: the floor 30,000 as the Burrow and the Lodge read (it was 4,500); // M6 2 d: the purse is the floor the coin is kept at (one trip's spend; the climber starts with 10,000, starterGear.json) and the one note the trips buy toward
+        Assert.Equal(10_000, supplies.Purse.MinNote); // M6 7 AU's 250,000, set to 10,000 by M6 8 I (round 1: 89,190 coin carried, no note could be bought)
+        long restock = 0;
+        long restockBurden = 0;
+        foreach (var line in supplies.Stock)
+        {
+            Assert.True(ground.VendorSelling(line.Wcid) is not null, $"{line.Name} has no vendor in the profile");
+            var price = ground.PriceOf(line.Wcid)!.Value;
+            var inPack = line.Wcid switch { 691 => 10, 20631 => 50, _ => 0 }; // ACE creation: 5 Lead Scarabs and 25 Prismatic Tapers per trained magic school (War, Life)
+            restock += (long)price * Math.Max(0, line.Keep - inPack);
+            var unit = line.Wcid switch { 20631 => GearKit.PrismaticTaperBurden, 379 => 15, _ => GearKit.ComponentBurden }; // world SQL v0.9.296 PropertyInt 5: a component 4, the Prismatic Taper 6, the Mana Potion 15
+            restockBurden += (long)unit * Math.Max(0, line.Keep - inPack);
+        }
+
+        output.WriteLine($"first restock at the keeps: {restock} pyreals of {supplies.Purse.Coin}");
+        Assert.True(restock <= supplies.Purse.Coin, $"the first restock costs {restock}, the purse holds {supplies.Purse.Coin}");
+
+        // M6 0 F8 (the first climb probe: 129% of the capacity after one restock): a Strength 10 mage (capacity 150 x 10 = 1,500, the burden line 90%) read 872 before the trip; the restock adds 104 + 15 = 119 and the Pathwarden's trinket 60 and robe 200
+        // (quests/pathwarden.json, whose carry gate holds the same arithmetic) leave her at 1,251, 83% of the capacity.
+        var capacity = EncumbranceSystem.EncumbranceCapacity(10, 0);
+        Assert.Equal(1_500, capacity);
+        Assert.Equal(1_114, restockBurden); // M6 14 (m6-life-through): 8 for Mandrake and Hemlock Talisman at keep 1 (Harm Other's components on the account formula); M6 14 T: 96 for two more of each of the twelve full-formula lines (keep 4: a visit leaves them clear of their lines); M6 8 (the owner, 2026-11-11): 735 for forty-nine more Mana Potions at 15; M6 7 AR: 24 for the scarabs and tapers of the III lines; M6 7 AK: 84 for the 21 new component lines at keep 1; M6 7 lead: 119 plus four more Iron Scarabs (the line keeps 6 since Flame Bolt II burns them: the rehearsal stopped at level 7 on the keep of 2); M6 7 X: 16 for the four protective lines at keep 1; M6 7 AD: 8 for Saffron and Quicksilver at keep 1
+        var line90 = capacity * supplies.BurdenTripPercent / 100;
+        Assert.True(872 + restockBurden + 60 + 200 <= line90, $"the climber after one restock, the trinket and the robe: {872 + restockBurden + 60 + 200} of the line {line90}");
+    }
+
     /// <summary>True when (x, y) lies inside the polygon's footprint (even-odd rule over the cell-local vertices' x and y).</summary>
+    /// <summary>M6 5 q6b: a portal can land a body exactly on a floor polygon's edge (the Cave of Alabree's arrival is on the edge x = 0 of its cell), where the strict crossing test says outside: a point within 1 cm of the polygon counts as under the footprint.</summary>
     private static bool FootprintHolds(IReadOnlyList<Vector3> vertices, float x, float y)
+    {
+        const float Edge = 0.01f;
+        return FootprintHoldsStrict(vertices, x, y) || FootprintHoldsStrict(vertices, x - Edge, y) || FootprintHoldsStrict(vertices, x + Edge, y)
+            || FootprintHoldsStrict(vertices, x, y - Edge) || FootprintHoldsStrict(vertices, x, y + Edge);
+    }
+
+    private static bool FootprintHoldsStrict(IReadOnlyList<Vector3> vertices, float x, float y)
     {
         var inside = false;
         for (int i = 0, j = vertices.Count - 1; i < vertices.Count; j = i++)

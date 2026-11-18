@@ -62,6 +62,48 @@ public sealed class RoomPatches
         return null;
     }
 
+    /// <summary>M6 14 next grounds: true when a seeded box (an avoid region) is in force.</summary>
+    public bool HasBoxes => _patches.Exists(p => p.Name is not null);
+
+    /// <summary>
+    /// M6 14 next grounds (the Tusker Holding's plates were such boxes until M6 14 holding plates made them walls, <see cref="PlateKeepOff"/>): true when the straight step from <paramref name="a"/> to <paramref name="b"/> passes through a seeded box. The room graph's walk inside a room goes round such a box when its floor
+    /// lets it (<see cref="RoomGraph"/>'s in-room detour): a box's cost alone steers only between doorways, and the Tusker Holding's plate in 0x5B4802D3 stood on the straight line between two of its doorways.
+    /// </summary>
+    /// <param name="a">The step's start, landblock-local.</param>
+    /// <param name="b">Its end.</param>
+    public bool MeetsBox(Vector3 a, Vector3 b)
+    {
+        foreach (var p in _patches)
+        {
+            if (p.Name is not null && p.Meets(a, b))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>M6 14 next grounds: the seeded box holding <paramref name="point"/> (landblock-local), its corners and name; false when no seeded box holds it (a stuck spot's disc is not a box).</summary>
+    /// <param name="point">The point.</param>
+    /// <param name="min">The box's low corner.</param>
+    /// <param name="max">The box's high corner.</param>
+    /// <param name="name">The box's name.</param>
+    public bool TryBoxAt(Vector3 point, out Vector3 min, out Vector3 max, out string name)
+    {
+        foreach (var p in _patches)
+        {
+            if (p.Name is { } n && p.Holds(point))
+            {
+                (min, max, name) = (p.Min, p.Max, n);
+                return true;
+            }
+        }
+
+        (min, max, name) = (Vector3.Zero, Vector3.Zero, string.Empty);
+        return false;
+    }
+
     /// <summary>The extra cost of the step from <paramref name="a"/> to <paramref name="b"/>: each patch's metres when the step passes through it.</summary>
     public float Cost(Vector3 a, Vector3 b)
     {

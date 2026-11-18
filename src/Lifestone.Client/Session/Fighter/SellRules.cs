@@ -48,10 +48,10 @@ public enum SellDecision
 /// </remarks>
 public sealed class SellRules
 {
-    /// <summary>The weenie class ids the sale never sells: the healing kits (Handy 628, Adept 629), the restoratives (Potion of Healing 377, Stamina Potion 378, Mana Potion 379, Health Draught 2457, Mana Draught 2460, Stamina Tincture 27326), the templates' Mace 331, Shortbow 307, Longbow 31092, Arrow 300 and Greater Frost Arrow 5307, the caster 8552, the gear's Titan Mana Charge 9060 (closes TODO(m4-gear-mana)) and the pyreal 273. Any spell component (ItemType 0x1000) is kept too, by type.</summary>
+    /// <summary>The weenie class ids the sale never sells: the healing kits (Handy 628, Adept 629), the restoratives (Potion of Healing 377, Stamina Potion 378, Mana Potion 379, Health Draught 2457, Mana Draught 2460, Stamina Tincture 27326; M6 14 T: the Health Tincture 27319, the Mana Tincture 27322 and the bigger health drinks 2458, 27320 and 27318, bought in another town to be drunk), the templates' Mace 331, Shortbow 307, Longbow 31092, Arrow 300 and Greater Frost Arrow 5307, the caster 8552, the gear's Titan Mana Charge 9060 (closes TODO(m4-gear-mana)) and the pyreal 273. Any spell component (ItemType 0x1000) is kept too, by type.</summary>
     public static IReadOnlyList<uint> KeptWeenies { get; } =
     [
-        FighterKit.HealingKitWcid, 629, FighterKit.PotionWcid, FighterKit.StaminaPotionWcid, FighterKit.ManaPotionWcid, 2457, 2460, 27326, FighterKit.MaceWcid, FighterKit.ShortbowWcid, FighterKit.ArrowWcid, FighterKit.LongbowWcid, FighterKit.GreaterFrostArrowWcid, PyrealWcid,
+        FighterKit.HealingKitWcid, 629, FighterKit.PotionWcid, FighterKit.StaminaPotionWcid, FighterKit.ManaPotionWcid, 2457, 2460, 27326, 27319, 27322, 2458, 27320, 27318, FighterKit.MaceWcid, FighterKit.ShortbowWcid, FighterKit.ArrowWcid, FighterKit.LongbowWcid, FighterKit.GreaterFrostArrowWcid, PyrealWcid,
         .. FighterGearSet.AllWcids, // M4 P5a C6: the fighters' magic gear (worn items are never sold; a spare in the pack is not either)
         8552, // the caster the fighters keep in the pack for the buff pass (GearKit.Wand): the swap needs it
         FighterKit.ManaChargeWcid, // the gear's mana charge (GearRecharge): the build tops a used one up, and the shopkeeper's mask has no ManaStone bit anyway

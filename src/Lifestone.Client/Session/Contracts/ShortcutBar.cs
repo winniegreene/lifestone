@@ -47,6 +47,15 @@ public enum ShortcutChange
 public readonly record struct ShortcutsChanged(ShortcutChange Change, int Slot, uint ObjectId, uint SpellId) : IGameEvent;
 
 /// <summary>
+/// M6 item 15 (the player's rules on the automation): an automation drink went out, and this is the shortcut slot it is the use of. The toolbar shows it as a person's key press on that slot shows (the cooldown overlay until the
+/// action completes: <c>GameHotbar.TrackBusy</c>). Published by the Action API as the drink is sent, only while the rule is on (<c>--autopilot-player-rules</c>); a person's own use publishes nothing (the toolbar started it).
+/// </summary>
+/// <param name="Slot">The slot (0 to 17).</param>
+/// <param name="ObjectId">The item on the slot, the one drunk.</param>
+/// <param name="Action">The drink's handle (it completes when the server ends the drink).</param>
+public readonly record struct ShortcutUsed(int Slot, uint ObjectId, ActionHandle Action) : IGameEvent;
+
+/// <summary>
 /// The player's shortcut bar (<see cref="SelfState.Shortcuts"/>): 18 slots, each empty or an object (retail's toolbar, <c>gmToolbarUI::InitShortcutArray</c>, 11.6096 0x004BE9E0), filled from the PlayerDescription's list at login
 /// (option flag 0x1; <c>gmToolbarUI::UpdateFromPlayerDesc</c>, 0x004C04A0) and changed by the client's own AddShortcut and RemoveShortcut (<see cref="IActionApi.AddShortcut"/>) and by an item leaving the inventory (#219).
 /// ACE keeps the list and answers neither send (<c>Player_Character.cs</c> 245-262), so the model changes at the send, and the next login's description shows whether the server took it.

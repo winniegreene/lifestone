@@ -480,6 +480,56 @@ public sealed class GameSpellcastingPanelTests(DatSetFixture fixture) : IClassFi
     }
 
     [RequiresLocalDatsFact]
+    public void M6_15_an_automation_cast_shows_as_a_persons_cast_shows_its_tab_is_the_open_tab_and_the_spell_is_the_selected_one()
+    {
+        using var g = Enter();
+        var strength = Named("Strength Self I");
+        var bolt1 = Named("Flame Bolt I");
+        var frost = Named("Frost Bolt I");
+        g.Describe([strength.Id, bolt1.Id, frost.Id], Bars([strength.Id], [bolt1.Id, frost.Id]));
+        g.ChangeMode(CombatMode.Magic);
+        var window = g.Cast;
+        Assert.Equal(0, window.OpenTab);
+        Assert.Equal(0u, window.SelectedSpell);
+
+        // The Action API's notice of an automation cast from tab II, position 2 (PlayerRulesGate.CastSent): no click, no cast of the window's own.
+        g.Rig.Session.ActionApi.PublishSpellBarCast(frost.Id, 1, 1);
+        g.Rig.Frame();
+        Assert.Equal(1, window.OpenTab); // the spell's tab is the shown tab
+        Assert.True(window.ListOf(1)!.IsShown);
+        Assert.Equal(frost.Id, window.SelectedSpell); // and the spell is the selected one
+        Assert.True(g.Cell(1, 1).IsSelected);
+        Assert.False(g.Cell(1, 0).IsSelected);
+        Assert.Equal(frost.Name, window.NameText!.Text); // the name text and the cast button name it, as after a person's click
+        Assert.NotEqual(UiStateIds.Ghosted, window.CastButton!.State);
+        Assert.Equal(0, window.Casts); // the window cast nothing: the automation's cast is already on its way
+        Assert.Equal(1, window.BarCastsShown);
+
+        // The next cast is from tab I: the window follows, and tab II keeps its own selection for when it opens again.
+        g.Rig.Session.ActionApi.PublishSpellBarCast(strength.Id, 0, 0);
+        g.Rig.Frame();
+        Assert.Equal(0, window.OpenTab);
+        Assert.Equal(strength.Id, window.SelectedSpell);
+        Assert.True(g.Cell(0, 0).IsSelected);
+        g.Click(window.TabElement(1)!);
+        Assert.Equal(frost.Id, window.SelectedSpell);
+
+        // A hidden window (the mode is not Magic) opens the tab and keeps the selection for when it shows.
+        g.ChangeMode(CombatMode.NonCombat);
+        Assert.False(window.Visible);
+        g.Rig.Session.ActionApi.PublishSpellBarCast(bolt1.Id, 1, 0);
+        g.Rig.Frame();
+        g.ChangeMode(CombatMode.Magic);
+        Assert.Equal(1, window.OpenTab);
+        Assert.Equal(bolt1.Id, window.SelectedSpell);
+        Assert.True(g.Cell(1, 0).IsSelected);
+
+        // A spell the tab does not show selects nothing (a cast named for a bar that no longer holds it).
+        Assert.False(window.ShowCastFromBar(0, frost.Id));
+        Assert.Equal(0u, window.SelectedSpell);
+    }
+
+    [RequiresLocalDatsFact]
     public void The_list_waits_for_the_SpellTable_and_fills_when_it_arrives()
     {
         using var g = Enter(tables: false);

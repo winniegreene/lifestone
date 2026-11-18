@@ -376,7 +376,7 @@ public sealed class CastAttemptTests
         _ => throw new ArgumentOutOfRangeException(nameof(family), family, "no such preset"),
     };
 
-    // M5 1 fix A, 1-R6 (the owner's DoD 2, "busy waits and resends"): every preset waits out a busy refusal (0x001D) for one second and sends the same cast again, three times; the fourth ends Busy. Each busy answer is
+    // M5 1 fix A, 1-R6 (the owner's DoD 2, busy waits and resends): every preset waits out a busy refusal (0x001D) for one second and sends the same cast again, three times; the fourth ends Busy. Each busy answer is
     // counted (busy=). Before the fix every preset ended Busy on the first.
     [Theory]
     [InlineData("BuffLine")]
@@ -834,7 +834,7 @@ public sealed class CastAttemptTests
             };
             R.Spells(spells);
             Spells = spells.ToImmutableDictionary(s => s.Id);
-            R.H.Describe(new PlayerDescriptionMsg { Vitals = [new VitalDesc(5, 100, 0, 0, mana)] });
+            R.H.Describe(new PlayerDescriptionMsg { Vitals = [new VitalDesc(5, 100, 0, 0, mana)], Spells = spells.ToImmutableDictionary(s => s.Id, _ => 2f) }); // M6 15: the character knows the spells it casts (the player's rule puts each on a spell bar before its cast)
             R.CombatModeIs(CombatModes.Magic);
             R.H.R.Reducer.OnCreateObject(R.H.R.Context, ReducerHarness.Create(Monster, ReducerHarness.Stamps(), null, name: MonsterName), isUpdate: false);
             Proof = new CastChatProof(R.H.State, Spells);

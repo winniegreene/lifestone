@@ -480,12 +480,48 @@ public sealed class GearScenarioTests(DatSetFixture fixture) : IClassFixture<Dat
     public void A_cast_the_server_refuses_is_reported_as_cast_failed_and_the_mage_still_returns_to_peace()
     {
         using var rig = new Rig(Mage(300)); // the spell is not in the spellbook: ACE's UseDone 0x03FC
+        rig.Session.PlayerRules = false; // M6 15: with the player's rules on the cast never reaches the server (the test below); this one keeps the server's refusal
         var scenario = new GearScenario(SmallKit(), rig.Log, endSession: false);
 
         Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
 
         Assert.Equal("gear=wielded worn=5 kit=7/7 gear_steps=12 topup=1 cast=failed", scenario.VerdictFields());
         Assert.Contains(rig.Log.Entries, e => e.Message.Contains("cast Strength Self V", StringComparison.Ordinal) && e.Message.Contains(": failed (ServerError code 0x03FC", StringComparison.Ordinal) && e.Message.Contains("during the cast", StringComparison.Ordinal));
+        Assert.Equal(CombatModes.NonCombat, rig.Session.State.Self.Qualities.CombatMode);
+    }
+
+    [Fact]
+    public void M6_15_the_stand_in_tells_the_clients_spellbook_of_each_spell_the_tool_teaches_as_ACE_does()
+    {
+        // ACE's LearnSpellWithNetworking sends GameEvent 0x02C1 MagicUpdateSpell for each spell it adds (the mod's spell verb calls it): the client's book, the one the player's rule reads, holds the spell.
+        using var rig = new Rig(Mage(300));
+        var strengthV = ArenaProfile.LineNamed("Strength Self")!.Spells[4].Id;
+        var book = rig.Session.State.Self.Spellbook;
+        Assert.False(book.Knows(strengthV));
+        var before = book.Count;
+
+        rig.Learn(strengthV);
+        Assert.True(book.Knows(strengthV));
+        Assert.Equal(before + 1, book.Count);
+        Assert.Contains("02C1", rig.World.AnswerLog);
+
+        rig.Learn(strengthV); // already known: nothing is sent a second time
+        Assert.Equal(1, rig.World.AnswerLog.Count(a => a == "02C1"));
+        Assert.Equal(before + 1, book.Count);
+    }
+
+    [Fact]
+    public void M6_15_with_the_players_rules_a_cast_of_a_spell_the_book_lacks_is_refused_by_name_before_it_is_sent_and_reported_as_cast_failed()
+    {
+        using var rig = new Rig(Mage(300)); // skill 300 picks Strength Self V, which the build's spell learn did not teach
+        Assert.True(rig.Session.PlayerRules); // on by default
+        var scenario = new GearScenario(SmallKit(), rig.Log, endSession: false);
+
+        Assert.Equal(ScenarioStatus.Succeeded, rig.Run(scenario));
+
+        Assert.Equal("gear=wielded worn=5 kit=7/7 gear_steps=12 topup=1 cast=failed", scenario.VerdictFields());
+        Assert.Contains(rig.Log.Entries, e => e.Severity == LogSeverity.Error && e.Message.StartsWith("player rules: Strength Self V (spell ", StringComparison.Ordinal) && e.Message.Contains("is not in the spellbook", StringComparison.Ordinal));
+        Assert.DoesNotContain(rig.Log.Entries, e => e.Message.Contains("0x03FC", StringComparison.Ordinal)); // the server never saw the cast
         Assert.Equal(CombatModes.NonCombat, rig.Session.State.Self.Qualities.CombatMode);
     }
 

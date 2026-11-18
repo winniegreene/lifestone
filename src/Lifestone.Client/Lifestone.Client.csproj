@@ -32,10 +32,32 @@
   <ItemGroup>
     <!-- M5 item 2 (D22, D43): the hunting-ground profiles, one JSON file per ground, read once by Session/Grounds/GroundCatalog.cs. -->
     <EmbeddedResource Include="Session\Grounds\profiles\*.json" LogicalName="Lifestone.Client.Session.Grounds.profiles.%(Filename)%(Extension)" />
+    <!-- M6 item 0 a1 (DoD 1): the ladders, one JSON file per ladder, read by Session/Grounds/LadderLoader.cs. -->
+    <EmbeddedResource Include="Session\Grounds\ladder\*.json" LogicalName="Lifestone.Client.Session.Grounds.ladder.%(Filename)%(Extension)" />
+    <!-- M6 item 1 c (D28, D40): the scrivener catalog, read by Session/Grounds/ScrivenerCatalog.cs. -->
+    <EmbeddedResource Include="Session\Grounds\scriveners.json" LogicalName="Lifestone.Client.Session.Grounds.scriveners.json" />
+    <!-- M6 14 (the every-spell rule): every scroll the catalog's scriveners sell, read by Session/Grounds/ScrivenerStock.cs. -->
+    <EmbeddedResource Include="Session\Grounds\scrivener-stock.json" LogicalName="Lifestone.Client.Session.Grounds.scrivener-stock.json" />
+    <EmbeddedResource Include="Session\Grounds\creatures.json" LogicalName="Lifestone.Client.Session.Grounds.creatures.json" />
+    <!-- M6 14 the element line: every creature weenie's seven damage resistances, read by Session/Grounds/CreatureResists.cs. -->
+    <EmbeddedResource Include="Session\Grounds\creature-resists.json" LogicalName="Lifestone.Client.Session.Grounds.creature-resists.json" />
+    <!-- M6 14 the derived incoming: every creature weenie's magic and attack skills and its weapons' WeaponSkill, read by Session/Grounds/CreatureSkills.cs. -->
+    <EmbeddedResource Include="Session\Grounds\creature-skills.json" LogicalName="Lifestone.Client.Session.Grounds.creature-skills.json" />
+    <!-- M6 16 E1d: every creature weenie's behaviour facts (senses, temper, stamina and mana, rates, Run, experience, body), read by Session/Grounds/CreatureBehaviour.cs. -->
+    <EmbeddedResource Include="Session\Grounds\creature-behaviour.json" LogicalName="Lifestone.Client.Session.Grounds.creature-behaviour.json" />
+    <!-- M6 item 4 D50: the travel routes (portal edges, routes per ground, ways home), read by Session/Travel/TravelRoutes.cs. -->
+    <EmbeddedResource Include="Session\Travel\travel-routes.json" LogicalName="Lifestone.Client.Session.Travel.travel-routes.json" />
+    <!-- M6 14 (m6-14-plaza): every placed portal of the world (the pinned world SQL), read by Session/Travel/WorldPortals.cs: the portals every walk keeps off, and the portal a teleport came from. -->
+    <EmbeddedResource Include="Session\Travel\world-portals.json" LogicalName="Lifestone.Client.Session.Travel.world-portals.json" />
+    <!-- M6 item 4 t4a (D26): the doors that open only by a linked lever, read by Session/Scenarios/Journey/TownNetworkTrip.cs. -->
+    <EmbeddedResource Include="Session\Scenarios\Journey\lever-doors.json" LogicalName="Lifestone.Client.Session.Scenarios.Journey.lever-doors.json" />
+    <!-- M6 item 0 a2 (DoD 7, D26): the quest files, one JSON file per quest, read once by Session/Quests/QuestCatalog.cs. -->
+    <EmbeddedResource Include="Session\Quests\quests\*.json" LogicalName="Lifestone.Client.Session.Quests.quests.%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Lifestone.Client.Tests" />
+    <InternalsVisibleTo Include="Lifestone.WorldWalk" />
     <InternalsVisibleTo Include="Lifestone.Loopback.Tests" />
     <InternalsVisibleTo Include="Lifestone.ServerMod.Tests" />
   </ItemGroup>

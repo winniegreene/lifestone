@@ -18,7 +18,7 @@ $script:CharacterPattern = "^[A-Za-z][A-Za-z' -]{0,63}$"
 $script:OwnedOptions = @('--play', '--account', '--character', '--server')
 # Automated runs (-Offscreen) use only these four test accounts (M4 D31 and D39; the owner's play account is never used by an agent or a test).
 # The same list is Lifestone.Client.Session.Credentials.TestAccounts.Keys (a test pins that they agree).
-$script:AutomatedAccounts = @('test', 'test-melee', 'test-archer', 'test-tools')
+$script:AutomatedAccounts = @('test', 'test-melee', 'test-archer', 'test-tools', 'qwinnie')
 
 function Get-PlayBackendPlan {
     <#

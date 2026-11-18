@@ -1,0 +1,691 @@
+{
+  "key": "worcer-heirlooms",
+  "name": "Worcer's Missing Heirlooms (eight heirlooms from the Holtburg Redoubt, handed to Worcer in Holtburg's inn)",
+  "giver": {
+    "wcid": 5035,
+    "name": "Worcer"
+  },
+  "start": {
+    "cell": "0xA9B40019",
+    "point": [
+      84.0,
+      7.7,
+      94.0
+    ],
+    "name": "Holtburg's lifestone point"
+  },
+  "steps": [
+    {
+      "kind": "go",
+      "what": "to the Holtburg Redoubt portal",
+      "place": {
+        "cell": "0xAAB10028",
+        "point": [
+          96.991,
+          179.354,
+          124.005
+        ],
+        "name": "in front of Holtburg Redoubt"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z, angles_W, angles_Z FROM landblock_instance WHERE guid = 0x7AAB1000: weenie 4935, cell 0xAAB10000, (99.7059, 180.63, 124.005); the point is the hop's front side of it (PortalHopLeg.FrontOf), walked in the dat tests (FetchQuestWalkDatTests): the go stops short of the portal so the touch is the use step's",
+      "todo": null
+    },
+    {
+      "kind": "use",
+      "what": "enter the Holtburg Redoubt",
+      "place": {
+        "cell": "0x016301AC",
+        "point": [
+          140,
+          -40,
+          0
+        ],
+        "name": "the arrival of Holtburg Redoubt"
+      },
+      "target": {
+        "wcid": 4935,
+        "name": "Holtburg Redoubt"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM weenie_properties_position WHERE object_Id = 4935 AND position_Type = 2: destination 0x016301AC (140, -40, 0); levels MinLevel 1, MaxLevel 20 (weenie_properties_int types 86, 87), enforced (use_portal_max_level_requirement is on, the lead's read of the live database, D118)",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Bronze Candlestick",
+      "place": {
+        "cell": "0x016301A3",
+        "point": [
+          133.717,
+          -27.9558,
+          0.005
+        ],
+        "name": "where the Bronze Candlestick lies"
+      },
+      "target": {
+        "wcid": 30484,
+        "name": "Bronze Candlestick"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x7016302F: weenie 30484, cell 0x016301A3; its pick-up quest HoltburgRedoubtCandlestick1204 (weenie_properties_string type 33; quest row min_Delta 72000, max_Solves -1)",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Bronze Candlestick from the floor",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 30484,
+        "name": "Bronze Candlestick"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): the item's own Quest string HoltburgRedoubtCandlestick1204 gates the pick-up for 20 h (ACE Player_Inventory.cs:1249-1262 @95ef426d); refused, the run stops pick-up:too-recent",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Antique Bowl",
+      "place": {
+        "cell": "0x01630158",
+        "point": [
+          92.1639,
+          -23.1106,
+          -11.9752
+        ],
+        "name": "where the Antique Bowl lies"
+      },
+      "target": {
+        "wcid": 30481,
+        "name": "Antique Bowl"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x7016302E: weenie 30481, cell 0x01630158; its pick-up quest HoltburgRedoubtBowl1204 (weenie_properties_string type 33; quest row min_Delta 72000, max_Solves -1)",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Antique Bowl from the floor",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 30481,
+        "name": "Antique Bowl"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): the item's own Quest string HoltburgRedoubtBowl1204 gates the pick-up for 20 h (ACE Player_Inventory.cs:1249-1262 @95ef426d); refused, the run stops pick-up:too-recent",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Antique Platter",
+      "place": {
+        "cell": "0x01630149",
+        "point": [
+          73.2336,
+          -53.4773,
+          -11.8762
+        ],
+        "name": "where the Antique Platter lies"
+      },
+      "target": {
+        "wcid": 5026,
+        "name": "Antique Platter"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x70163011: weenie 5026, cell 0x01630149; its pick-up quest AntiquePlatterQuest (weenie_properties_string type 33; quest row min_Delta 72000, max_Solves -1)",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Antique Platter from the floor",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 5026,
+        "name": "Antique Platter"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): the item's own Quest string AntiquePlatterQuest gates the pick-up for 20 h (ACE Player_Inventory.cs:1249-1262 @95ef426d); refused, the run stops pick-up:too-recent",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Bronze Lamp",
+      "place": {
+        "cell": "0x01630143",
+        "point": [
+          56.4147,
+          -57.4803,
+          -11.995
+        ],
+        "name": "where the Bronze Lamp lies"
+      },
+      "target": {
+        "wcid": 30483,
+        "name": "Bronze Lamp"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x7016302D: weenie 30483, cell 0x01630143; its pick-up quest HoltburgRedoubtLamp1204 (weenie_properties_string type 33; quest row min_Delta 72000, max_Solves -1)",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Bronze Lamp from the floor",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 30483,
+        "name": "Bronze Lamp"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): the item's own Quest string HoltburgRedoubtLamp1204 gates the pick-up for 20 h (ACE Player_Inventory.cs:1249-1262 @95ef426d); refused, the run stops pick-up:too-recent",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Antique Goblet",
+      "place": {
+        "cell": "0x0163011F",
+        "point": [
+          42.9357,
+          -16.6179,
+          -17.995
+        ],
+        "name": "where the Antique Goblet lies"
+      },
+      "target": {
+        "wcid": 30482,
+        "name": "Antique Goblet"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x7016302B: weenie 30482, cell 0x0163011F; its pick-up quest HoltburgRedoubtGoblet1204 (weenie_properties_string type 33; quest row min_Delta 72000, max_Solves -1)",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Antique Goblet from the floor",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 30482,
+        "name": "Antique Goblet"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): the item's own Quest string HoltburgRedoubtGoblet1204 gates the pick-up for 20 h (ACE Player_Inventory.cs:1249-1262 @95ef426d); refused, the run stops pick-up:too-recent",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Hope Chest that holds the Wedding Band",
+      "place": {
+        "cell": "0x0163012C",
+        "point": [
+          33.638,
+          -33.575,
+          -12.0
+        ],
+        "name": "beside the Hope Chest"
+      },
+      "target": {
+        "wcid": 5036,
+        "name": "Hope Chest"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x7016300D: weenie 5036, cell 0x0163012C, (32.3377, -33.575, -12), no Locked row; the point is on the floor beside it, within the use reach (FetchQuestWalkDatTests)",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Wedding Band from the Hope Chest",
+      "place": null,
+      "target": {
+        "wcid": 5036,
+        "name": "Hope Chest"
+      },
+      "item": {
+        "wcid": 5032,
+        "name": "Wedding Band"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): the chest's own generator row makes the item (corpus cache/m6/8/tools/corpus-extra.sqlite: weenie_properties_generator of 5036, Contain, delay 0; the pinned copy has no generator table, section 0), ItemUseable 48, unlocked; the item's Quest string HardunnaBandQuest gates it for 20 h",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Bronze Handbell",
+      "place": {
+        "cell": "0x01630127",
+        "point": [
+          18.0996,
+          -18.8014,
+          -11.9875
+        ],
+        "name": "where the Bronze Handbell lies"
+      },
+      "target": {
+        "wcid": 30485,
+        "name": "Bronze Handbell"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x7016302C: weenie 30485, cell 0x01630127; its pick-up quest HoltburgRedoubtHandbell1204 (weenie_properties_string type 33; quest row min_Delta 72000, max_Solves -1)",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Bronze Handbell from the floor",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 30485,
+        "name": "Bronze Handbell"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): the item's own Quest string HoltburgRedoubtHandbell1204 gates the pick-up for 20 h (ACE Player_Inventory.cs:1249-1262 @95ef426d); refused, the run stops pick-up:too-recent",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Antique Mug",
+      "place": {
+        "cell": "0x0163010A",
+        "point": [
+          -3.57426,
+          -51.1414,
+          -17.976
+        ],
+        "name": "where the Antique Mug lies"
+      },
+      "target": {
+        "wcid": 30480,
+        "name": "Antique Mug"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x7016302A: weenie 30480, cell 0x0163010A; its pick-up quest HoltburgRedoubtMug1204 (weenie_properties_string type 33; quest row min_Delta 72000, max_Solves -1)",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Antique Mug from the floor",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 30480,
+        "name": "Antique Mug"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): the item's own Quest string HoltburgRedoubtMug1204 gates the pick-up for 20 h (ACE Player_Inventory.cs:1249-1262 @95ef426d); refused, the run stops pick-up:too-recent",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Redoubt's Surface portal",
+      "place": {
+        "cell": "0x016301A9",
+        "point": [
+          129.714,
+          -50.129,
+          0
+        ],
+        "name": "in front of Surface"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z, angles_W, angles_Z FROM landblock_instance WHERE guid = 0x70163026: weenie 4936, cell 0x016301A9, (129.714, -53.1287, 0); the point is the hop's front side of it (PortalHopLeg.FrontOf), walked in the dat tests (FetchQuestWalkDatTests): the go stops short of the portal so the touch is the use step's",
+      "todo": null
+    },
+    {
+      "kind": "use",
+      "what": "out of the Redoubt by its Surface portal",
+      "place": {
+        "cell": "0xAAB10020",
+        "point": [
+          95.6,
+          174.5,
+          124
+        ],
+        "name": "the arrival of Surface"
+      },
+      "target": {
+        "wcid": 4936,
+        "name": "Surface"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM weenie_properties_position WHERE object_Id = 4936 AND position_Type = 2: destination 0xAAB10020 (95.6, 174.5, 124); levels MinLevel None, MaxLevel None (weenie_properties_int types 86, 87), enforced (use_portal_max_level_requirement is on, the lead's read of the live database, D118)",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to Worcer",
+      "place": {
+        "cell": "0xA9B40169",
+        "point": [
+          107.673,
+          46.0672,
+          94.005
+        ],
+        "name": "Worcer's place"
+      },
+      "target": {
+        "wcid": 5035,
+        "name": "Worcer"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x7A9B405C: weenie 5035, cell 0xA9B40169",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "give Worcer the Antique Platter",
+      "place": null,
+      "target": {
+        "wcid": 5035,
+        "name": "Worcer"
+      },
+      "item": {
+        "wcid": 5026,
+        "name": "Antique Platter"
+      },
+      "expect": {
+        "reply": "My mother's antique platter! Thank you so much!",
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): weenie_properties_emote id 43863 (object 5035, category 6 Give, weenie_Class_Id 5026): Tell, AwardNoShareXP (type 62) amount_64 4500; no quest test on the hand-in; AllowGive true (weenie_properties_bool type 8)",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "give Worcer the Antique Mug",
+      "place": null,
+      "target": {
+        "wcid": 5035,
+        "name": "Worcer"
+      },
+      "item": {
+        "wcid": 30480,
+        "name": "Antique Mug"
+      },
+      "expect": {
+        "reply": "I never thought I'd see this again! You have my thanks!",
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): weenie_properties_emote id 43864 (object 5035, category 6 Give, weenie_Class_Id 30480): Tell, AwardNoShareXP (type 62) amount_64 4500; no quest test on the hand-in; AllowGive true (weenie_properties_bool type 8)",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "give Worcer the Antique Goblet",
+      "place": null,
+      "target": {
+        "wcid": 5035,
+        "name": "Worcer"
+      },
+      "item": {
+        "wcid": 30482,
+        "name": "Antique Goblet"
+      },
+      "expect": {
+        "reply": "Look, it's the old goblet I remember so well! Thank you for bringing it back to me!",
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): weenie_properties_emote id 43865 (object 5035, category 6 Give, weenie_Class_Id 30482): Tell, AwardNoShareXP (type 62) amount_64 4500; no quest test on the hand-in; AllowGive true (weenie_properties_bool type 8)",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "give Worcer the Antique Bowl",
+      "place": null,
+      "target": {
+        "wcid": 5035,
+        "name": "Worcer"
+      },
+      "item": {
+        "wcid": 30481,
+        "name": "Antique Bowl"
+      },
+      "expect": {
+        "reply": "I always hated this bowl. But my mother loved it, bless her heart. It will make a great addition to our little memorial. Thank you.",
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): weenie_properties_emote id 43866 (object 5035, category 6 Give, weenie_Class_Id 30481): Tell, AwardNoShareXP (type 62) amount_64 4500; no quest test on the hand-in; AllowGive true (weenie_properties_bool type 8)",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "give Worcer the Wedding Band",
+      "place": null,
+      "target": {
+        "wcid": 5035,
+        "name": "Worcer"
+      },
+      "item": {
+        "wcid": 5032,
+        "name": "Wedding Band"
+      },
+      "expect": {
+        "reply": "This wedding band belonged to the mother of my good friend Hardunna. She'll be thrilled to have this back!",
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): weenie_properties_emote id 43867 (object 5035, category 6 Give, weenie_Class_Id 5032): Tell, AwardNoShareXP (type 62) amount_64 4500; no quest test on the hand-in; AllowGive true (weenie_properties_bool type 8)",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "give Worcer the Bronze Candlestick",
+      "place": null,
+      "target": {
+        "wcid": 5035,
+        "name": "Worcer"
+      },
+      "item": {
+        "wcid": 30484,
+        "name": "Bronze Candlestick"
+      },
+      "expect": {
+        "reply": "Hardunna and I use to \"borrow\" this candlestick to go roaming about at night. Ah, those were innocent days.",
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): weenie_properties_emote id 43868 (object 5035, category 6 Give, weenie_Class_Id 30484): Tell, AwardNoShareXP (type 62) amount_64 4500; no quest test on the hand-in; AllowGive true (weenie_properties_bool type 8)",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "give Worcer the Bronze Handbell",
+      "place": null,
+      "target": {
+        "wcid": 5035,
+        "name": "Worcer"
+      },
+      "item": {
+        "wcid": 30485,
+        "name": "Bronze Handbell"
+      },
+      "expect": {
+        "reply": "Hardunna's mother would ring this bell to call us in to dinner. Thank you so much for bringing it back to us!",
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): weenie_properties_emote id 43869 (object 5035, category 6 Give, weenie_Class_Id 30485): Tell, AwardNoShareXP (type 62) amount_64 4500; no quest test on the hand-in; AllowGive true (weenie_properties_bool type 8)",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "give Worcer the Bronze Lamp",
+      "place": null,
+      "target": {
+        "wcid": 5035,
+        "name": "Worcer"
+      },
+      "item": {
+        "wcid": 30483,
+        "name": "Bronze Lamp"
+      },
+      "expect": {
+        "reply": "Hardunna's father, Roland, brought this with him from Ispar. He gave it to Hope, his wife, when they met. I am so glad to have this for our museum. You have my sincere thanks.",
+        "stamp": null,
+        "item": {
+          "wcid": 5029,
+          "name": "Directions to the Cave of Alabree "
+        }
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): weenie_properties_emote id 43870 (object 5035, category 6 Give, weenie_Class_Id 30483): Tell, AwardNoShareXP (type 62) amount_64 4500, Give 5029; no quest test on the hand-in; AllowGive true (weenie_properties_bool type 8)",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "home to Holtburg",
+      "place": {
+        "cell": "0xA9B40019",
+        "point": [
+          84.0,
+          7.7,
+          94.0
+        ],
+        "name": "Holtburg's lifestone point"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): the travel file's start: Holtburg's lifestone point 0xA9B40019 (84, 7.7, 94), the home.lifestone_point of the Holtburg grounds; below level 16 she has no Lifestone Recall, so the quest ends here on foot or by the Network (D118)",
+      "todo": null
+    }
+  ],
+  "done": {
+    "stamp": null,
+    "reply": "Hardunna's father, Roland, brought this with him from Ispar. He gave it to Hope, his wife, when they met. I am so glad to have this for our museum. You have my sincere thanks.",
+    "item": null
+  },
+  "timer_seconds": 72000,
+  "level": {
+    "min": 1,
+    "max": 20
+  },
+  "experience": {
+    "amount": 36000,
+    "kind": "fixed",
+    "max": null,
+    "percent": null,
+    "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): the sum of the Give emotes' AwardNoShareXP amount_64 (the give steps' sources); quest_xp_modifier and xp_modifier are 1 (the lead's read of the live database, D118)"
+  },
+  "sources": [
+    "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): Worcer 5035 gives and receives; each of the eight items carries its own pick-up quest (min_Delta 72000 s, max_Solves -1)",
+    "timer_seconds 72000: the pick-up quests' gate; the hand-in has no timer and no stamp check (cache/m6/8/facts-fetch2.md section 2); the ladder band runs it once (D118)",
+    "level: min 1 and max 20 are the entry portal 4935's MinLevel and MaxLevel (weenie_properties_int types 86 and 87), enforced on this server",
+    "ladder: the band 5 to 10 is the owner's D118 (cache/m6/8/brief-b2a.md): the items' XP is about two levels at 8",
+    "the order of the walk: the items by distance from the arrival (section 2's table), the Wedding Band in the Hope Chest in its place; the way out is the Surface portal 14 m from the arrival; no locked door, no lever (section 2)"
+  ],
+  "ladder": {
+    "from_level": 10,
+    "before_level": 18,
+    "once": true
+  }
+}

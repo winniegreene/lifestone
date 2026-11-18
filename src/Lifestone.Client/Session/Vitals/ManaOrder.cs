@@ -129,6 +129,9 @@ public readonly record struct ManaOrderInput
 
     /// <summary>The Stamina Potions held (0 when set aside); the refill's fallback when no Revitalize Self level is payable (<see cref="ManaStep.StaminaPotion"/>).</summary>
     public int StaminaPotions { get; init; }
+
+    /// <summary>M6 7 AD: the dance's level is the one that nets the most (<see cref="ManaOrder.PressLevelOf"/>), not the highest that lands: the fight of a caster with no Mana Conversion, who pays each press's whole base, and the owner's ruling, 2026-11-08: pick by the sum: every press of the ladder's character at any Mana Conversion (<see cref="CharacterPolicy.ManaBySum"/>). The other callers leave it off and press their highest.</summary>
+    public bool BestNetPress { get; init; }
 }
 
 /// <summary>The decision (<see cref="ManaOrder.Decide"/>): the step, the dance's level, the targets and a fixed reason (no allocation).</summary>
@@ -137,7 +140,9 @@ public readonly record struct ManaOrderInput
 /// <param name="Target">The mana this step works toward: the floor, or the ceiling once the tries are spent.</param>
 /// <param name="StaminaTarget">The stamina <see cref="ManaStep.RestStamina"/> rests to, or <see cref="ManaStep.Revitalize"/> and <see cref="ManaStep.StaminaPotion"/> refill to (0 otherwise).</param>
 /// <param name="Reason">Why, in a few words (a literal).</param>
-public readonly record struct ManaDecision(ManaStep Step, int DanceIndex, uint Target, uint StaminaTarget, string Reason);
+/// <param name="NoNetLevel">M6 7 C (m6-mana-dance-net-yield): the dance level (index in the levels given) whose press the order passed over because it would net no mana at the stamina held (<see cref="ManaOrder.NetYield"/> at most 0), or -1.</param>
+/// <param name="NetYield">The net mana of that level's press (the give less its expected cost); 0 when <paramref name="NoNetLevel"/> is -1.</param>
+public readonly record struct ManaDecision(ManaStep Step, int DanceIndex, uint Target, uint StaminaTarget, string Reason, int NoNetLevel = -1, double NetYield = 0);
 
 /// <summary>
 /// One mana order for every caller (M5 item 1 lane K5; D15, D27, the P5b design's §3.3-§3.4): a pure, allocation-free decision with no I/O. The vitals keeper and the buff cycle's mana loop call it now, the fight
@@ -150,6 +155,7 @@ public readonly record struct ManaDecision(ManaStep Step, int DanceIndex, uint T
 /// for stamina to <see cref="StaminaFor"/>; with the stamina enough but no press able to land (no mana at all), the wait. With no Stamina to Mana Self known: a potion, else the wait.</item>
 /// <item>Under it, the fighters (D40): a Mana Potion; else the dance at their stamina gate within their cap; else the wait (a rest in peace).</item>
 /// </list>
+/// M6 7 AD: the dance needs no Mana Conversion (ACE only discounts the cost with it, <c>Creature_Magic.cs:41-44</c> @95ef426d). A mage with none pays each press's whole base, so the level is <see cref="BestNetLevel"/>, and the fight keeps one press in hand (<see cref="KeepPress"/>).
 /// The owner's order for the mage (M5 7 F5, D88: in the fight the mana may run down to nearly empty and the stamina is kept near full): with <see cref="ManaOrderInput.StaminaFullPercent"/> set, whenever the mana is at or
 /// over the target (the next bolt can be paid: after a transfer landed, and between kills) and the stamina is under that share, a Revitalize Self level the mana pays for with that bolt still paid
 /// (<see cref="RevitalizeLevelOf"/>, the highest), or, with no payable level at all, a Stamina Potion. The transfer still comes first, when the bolt cannot be paid.
@@ -229,6 +235,15 @@ public static class ManaOrder
     }
 
     /// <summary>
+    /// M6 7 C (m6-mana-dance-net-yield): the mana one landed press of <paramref name="level"/> nets from <paramref name="stamina"/>: the give (<see cref="Give"/>, ACE <c>HandleCastSpell_Transfer</c>) less the press's expected cost
+    /// (<see cref="ManaConversionModel.ExpectedCost"/>: the base for an untrained caster, the mean of the rolled cost with Mana Conversion). Both numbers are read from the spell's row and its base mana, never a constant: a low level at a low
+    /// stamina gives about what it costs (Stamina to Mana I: 10 mana for about 9), so a press can lose mana.
+    /// </summary>
+    /// <remarks>A landing never costs more than the mana held (ACE refuses a dearer roll and charges nothing, <c>Player_Magic.cs:566-585</c> @95ef426d), so the cost is capped at <paramref name="mana"/>.</remarks>
+    public static double NetYield(in DanceLevel level, uint stamina, uint manaConversion, uint mana = uint.MaxValue) =>
+        Give(level.Row, stamina) - Math.Min(ManaConversionModel.ExpectedCost(level.BaseMana, level.Power, manaConversion), mana);
+
+    /// <summary>
     /// The named rule "stamina enough for a transfer" (Lifestone's own): after a landed press of <paramref name="row"/> from <paramref name="stamina"/>, at its worst roll, the mana reaches <paramref name="target"/>,
     /// or as much as a full stamina would bring when even that is less. The worst roll costs the level's base or the mana held, whichever is less (ACE refuses a dearer roll and charges nothing,
     /// <c>Player_Magic.cs:566-585</c> @95ef426d), so the mana after it is at least <see cref="Kept"/> plus the give, whatever the roll; item 0 measured 1.75 mana a point of stamina drained (158 stamina gave 277).
@@ -303,6 +318,74 @@ public static class ManaOrder
 
         return best;
     }
+
+    /// <summary>
+    /// M6 7 AD: the level of <paramref name="levels"/> whose press nets the most (<see cref="NetYield"/>) at the <paramref name="stamina"/> and <paramref name="mana"/> held, of those that land with at least <paramref name="minChance"/>; the lower on a tie; -1 when none lands. For a
+    /// caster with no Mana Conversion (the base is the whole cost), where <see cref="DanceLevelOf"/>'s highest level loses: at 50 stamina Stamina to Mana I nets 12.5, II 5, III -2.5.
+    /// </summary>
+    /// <param name="levels">The levels, lowest first.</param>
+    /// <param name="stamina">The stamina held.</param>
+    /// <param name="mana">The mana held.</param>
+    /// <param name="manaConversion">The caster's Mana Conversion (0: untrained).</param>
+    /// <param name="minChance">The least landing chance.</param>
+    /// <param name="net">The net of the level chosen (0 when none).</param>
+    public static int BestNetLevel(ReadOnlySpan<DanceLevel> levels, uint stamina, uint mana, uint manaConversion, double minChance, out double net)
+    {
+        var best = -1;
+        net = 0;
+        for (var i = 0; i < levels.Length; i++)
+        {
+            if (ManaConversionModel.LandingChance(levels[i].BaseMana, levels[i].Power, manaConversion, mana) < minChance)
+            {
+                continue;
+            }
+
+            var yield = NetYield(in levels[i], stamina, manaConversion, mana);
+            if (best < 0 || yield > net)
+            {
+                (best, net) = (i, yield);
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>
+    /// The owner's ruling, 2026-11-08 (pick by the sum): the level of a press: <see cref="BestNetLevel"/> (the most net mana at the stamina and the mana held, at the caster's Mana Conversion, of the levels that land at the chance); when none reaches the chance, <see cref="DanceLevelOf"/>'s
+    /// fallback (the best chance above 0), so a press still happens at a Mana Conversion that makes every level a roll; -1 when no press can land.
+    /// </summary>
+    /// <param name="levels">The levels, lowest first.</param>
+    /// <param name="stamina">The stamina held.</param>
+    /// <param name="mana">The mana held.</param>
+    /// <param name="manaConversion">The caster's Mana Conversion (0: untrained).</param>
+    /// <param name="minChance">The least landing chance.</param>
+    /// <param name="net">The net of the level chosen (0 when none).</param>
+    public static int PressLevelOf(ReadOnlySpan<DanceLevel> levels, uint stamina, uint mana, uint manaConversion, double minChance, out double net)
+    {
+        var level = BestNetLevel(levels, stamina, mana, manaConversion, minChance, out net);
+        if (level >= 0)
+        {
+            return level;
+        }
+
+        level = DanceLevelOf(levels, mana, manaConversion, minChance);
+        net = level >= 0 ? NetYield(in levels[level], stamina, manaConversion, mana) : 0;
+        return level;
+    }
+
+    /// <summary>The share of the bolt's mana a press must net to be sent before a bolt that can still be paid (<see cref="KeepPress"/>; Lifestone's own: under half a bolt the press spends its seconds for nothing a fight would notice).</summary>
+    public const double KeepPressBoltShare = 0.5;
+
+    /// <summary>
+    /// M6 7 AD: the press before the bolt that would leave none. With no Mana Conversion a press costs its whole base, so a bolt that takes the mana under the base ends the dance: r3d's 8 mana could pay neither (Flame Bolt II costs 10, and so does the press). True when the bolt can be
+    /// paid but the press after it could not, and the press nets at least <see cref="KeepPressBoltShare"/> of a bolt; so she presses at 10 to 19 mana with Flame Bolt II, once a refill: a second press from half the stamina nets about 1 and is not sent.
+    /// </summary>
+    /// <param name="mana">The mana held.</param>
+    /// <param name="boltMana">The bolt's mana.</param>
+    /// <param name="level">The level to press (<see cref="BestNetLevel"/>).</param>
+    /// <param name="net">Its net.</param>
+    public static bool KeepPress(uint mana, uint boltMana, in DanceLevel level, double net) =>
+        mana >= level.BaseMana && mana < boltMana + (ulong)level.BaseMana && net > 0 && net >= KeepPressBoltShare * boltMana;
 
     /// <summary>
     /// F1's pre-emptive transfer test (D27: "transfer before stamina reaches its maximum"): the stamina at or over <paramref name="share"/> of its maximum and the missing mana at or over <paramref name="minMissing"/>.
@@ -434,11 +517,19 @@ public static class ManaOrder
         }
 
         var dance = DanceLevelOf(levels, input.Mana, input.ManaConversion, options.TryChance);
+        var noNet = -1;
+        var net = 0.0;
         if (input.Profile == ManaProfile.Fighter)
         {
             if (input.ManaPotions > 0)
             {
                 return new(ManaStep.Potion, -1, target, 0, "the fighters' order: a Mana Potion first");
+            }
+
+            if (dance >= 0 && (net = NetYield(levels[dance], input.Stamina, input.ManaConversion, input.Mana)) <= 0)
+            {
+                noNet = dance; // M6 7 C: a press that nets no mana is not sent
+                dance = -1;
             }
 
             var gate = input.StaminaMax > 0 && 100.0 * input.Stamina / input.StaminaMax >= input.FighterGatePercent && input.FighterTransfersLeft > 0;
@@ -447,7 +538,7 @@ public static class ManaOrder
                 return new(ManaStep.Dance, dance, target, 0, "the fighters' order: the dance at the stamina gate");
             }
 
-            return new(ManaStep.Wait, -1, target, 0, "the fighters' order: no potion, no transfer at the gate: a rest in peace");
+            return new(ManaStep.Wait, -1, target, 0, "the fighters' order: no potion, no transfer at the gate: a rest in peace", noNet, net);
         }
 
         if (levels.IsEmpty)
@@ -457,26 +548,49 @@ public static class ManaOrder
                 : new(ManaStep.Wait, -1, target, 0, "no Stamina to Mana Self known and no potion: the wait");
         }
 
+        if (dance >= 0 && input.BestNetPress)
+        {
+            dance = PressLevelOf(levels, input.Stamina, input.Mana, input.ManaConversion, options.TryChance, out _); // M6 7 AD, the owner's ruling (pick by the sum): the level that nets the most at her own Mana Conversion, not the highest
+        }
+
         if (dance >= 0 && input.StaminaFullPercent > 0 && input.StaminaFloor > 0 && input.Stamina >= input.StaminaFloor)
         {
             // M5 7 F5 (D88): uptime is the goal. With stamina there to transfer (at or over its floor) the mage presses until a roll lands, however far the give falls short of the target: no Mana Potion, no rest.
             return new(ManaStep.Dance, dance, target, 0, "under the floor with stamina to transfer: the dance, pressed until it lands");
         }
 
+        // M6 7 C (m6-mana-dance-net-yield): the D88 branch above holds a stamina whose give already covers a press and a Revitalize (StaminaFloorOf); below it a press that would net no mana is not sent: the order rests (or drinks).
+        if (dance >= 0 && (net = NetYield(levels[dance], input.Stamina, input.ManaConversion, input.Mana)) <= 0)
+        {
+            noNet = dance;
+            dance = -1;
+        }
+
         var level = levels[dance >= 0 ? dance : levels.Length - 1];
         var row = level.Row;
         if (Funds(in row, input.Stamina, input.StaminaMax, target, input.Mana, level.BaseMana))
         {
-            return dance >= 0
-                ? new(ManaStep.Dance, dance, target, 0, "under the floor: the dance")
-                : new(ManaStep.Wait, -1, target, 0, "no press can land at the mana held: the wait");
+            if (dance >= 0)
+            {
+                return new(ManaStep.Dance, dance, target, 0, "under the floor: the dance");
+            }
+
+            // M6 8 (live 2026-11-11 18:52 UTC, the climb's third death): mana 0 with five tuskers on her and 83 Mana Potions in the pack: the stamina "funded" the target, no press could land at no mana, and the order waited
+            // until she died. With a potion held the wait is never the answer: she cannot cast, so the potion is drunk (the owner's rule: no drink in a fight while she can go on casting; here she cannot).
+            // The ladder's character only (BestNetPress): the den's mage keeps M5's wait, where a level 80's regeneration pays a press in a second or two.
+            if (input.ManaPotions > 0 && input.BestNetPress)
+            {
+                return new(ManaStep.Potion, -1, target, 0, noNet >= 0 ? "the press would net no mana at this stamina: a Mana Potion" : "no press can land at the mana held: a Mana Potion", noNet, net);
+            }
+
+            return new(ManaStep.Wait, -1, target, 0, noNet >= 0 ? "the press would net no mana at this stamina: the wait" : "no press can land at the mana held: the wait", noNet, net);
         }
 
         if (input.ManaPotions > 0)
         {
-            return new(ManaStep.Potion, -1, target, 0, "the stamina is too low for a transfer: a Mana Potion");
+            return new(ManaStep.Potion, -1, target, 0, "the stamina is too low for a transfer: a Mana Potion", noNet, net);
         }
 
-        return new(ManaStep.RestStamina, -1, target, StaminaFor(in row, input.StaminaMax, target, input.Mana, level.BaseMana), "the stamina is too low for a transfer and no potion: a rest in peace for stamina");
+        return new(ManaStep.RestStamina, -1, target, StaminaFor(in row, input.StaminaMax, target, input.Mana, level.BaseMana), "the stamina is too low for a transfer and no potion: a rest in peace for stamina", noNet, net);
     }
 }

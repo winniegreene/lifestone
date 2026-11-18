@@ -33,6 +33,9 @@ public sealed record BuffResult
     /// <summary>The lines whose buff is active at the end (<c>buffs=&lt;active&gt;/&lt;wanted&gt;</c>).</summary>
     public int Active { get; init; }
 
+    /// <summary>M6 7 AO: a climber's pass: it ended Done with what stands (a fizzle, a short component, the mana limit: each named), so its station judges no line as failed (M6 7 AN: never a stop of the run).</summary>
+    public bool EndsWithWhatStands { get; init; }
+
     /// <summary>The level of every line, short names, comma-separated, in the cycle's order (<c>Focus:VI,Will:VI,...</c>; <c>-</c> for a line with no active buff).</summary>
     public string Levels { get; init; } = string.Empty;
 
@@ -157,7 +160,7 @@ public sealed record BuffResult
 /// <b>upgrade pass</b> (the lead's, M3 2.1 s1; closes <c>TODO(m3-buff-upgrade-skip)</c>): the casts of the ordered pass raised the skills, so each line holding a level below the one the rule gives now (Focus and Willpower, cast at VI from
 /// skill 316, are chosen at VII from 373) is cast once more at that level, never retried; a second cycle on a buffed mage then casts nothing. A <b>forced</b> re-buff pass (D25 as narrowed) recasts only the one line closest to expiry.</para>
 /// <para><b>Regeneration waits in NonCombat</b>: ACE halves stamina and health regeneration in any combat mode (<c>Creature_Vitals.cs</c> <c>GetStanceMod</c>); the mana wait sets NonCombat first and returns to Magic before the next cast, each change an awaited <see cref="IActionApi.SetCombatMode"/>.</para>
-/// <para><b>The form</b> is <see cref="GearCasts.FormOf"/>, except the armour lines (Impenetrability, Bludgeon Bane: an Item Enchantment whose <c>NonComponentTargetType</c> is Vestements, not SelfTargeted), cast at the
+/// <para><b>The form</b> is <see cref="GearCasts.FormOf"/>, except the armour lines (Impenetrability, Bludgeon Bane and, for the ladder's character, the six other banes of <see cref="ArmourBanes"/>: an Item Enchantment whose <c>NonComponentTargetType</c> is Vestements, not SelfTargeted), cast at the
 /// caster's own guid (D23). ACE redirects such a cast to every equipped clothing piece and shield that is enchantable (<c>WorldObject_Magic.cs</c> 2067-2121, <c>TryCastItemEnchantment_WithRedirects</c>;
 /// <c>Player_Magic.cs</c> 1391-1393 accepts a creature for Vestements), calls <c>HandleCastSpell(spell, item)</c> for each (the chat line "You cast &lt;spell&gt; on &lt;item&gt;", Magic chat, and no GameEvent 0x02C2 to the
 /// player, <c>WorldObject_Magic.cs</c> 430-452) and ends the cast with UseDone 0 (<see cref="Actions.Trackers.CastTracker"/> ends such a cast as Sent). So the cycle takes the pieces from the chat lines the cast
@@ -166,7 +169,10 @@ public sealed record BuffResult
 /// <see cref="PlayerQualities.ActiveEnchantments"/>); an armour line's is the cast's UseDone time plus the SpellTable duration, kept per worn piece in the
 /// <see cref="ArmourBuffLedger"/> (M4 4.1 lane b; closes <c>TODO(m3-buff-armour-memory)</c>): the ledger is the session's, so a new cycle object knows an earlier object's armour casts, a piece taken off loses its lines, and after a login
 /// that left the ledger empty the worn pieces are appraised once (<see cref="ArmourLedgerSeeder"/>; the server sends no registry for an item, only an appraisal's enchantment ids, which carry no clock). A line found that way has an unknown time
-/// left and is due at once (no saved time: the conservative rule; with the host's store the previous session's seconds left are restored, ACE's clock stopping while the owner is offline). A piece whose line says "surpassed" holds a stronger version of the line and is counted active (retail keeps the stronger enchantment; <see cref="BuffResult.Surpassed"/>, <c>surpassed=</c>; closes <c>TODO(m3-buff-armour-surpassed)</c>).</para>
+/// left and is due at once (no saved time: the conservative rule; with the host's store the previous session's seconds left are restored, ACE's clock stopping while the item's owner is offline). A piece whose line says surpassed holds a stronger version of the line and is counted active (retail keeps the stronger enchantment; <see cref="BuffResult.Surpassed"/>, <c>surpassed=</c>; closes <c>TODO(m3-buff-armour-surpassed)</c>).</para>
+/// <para><b>Another's stronger spell</b> (M6 14 S2b): ACE stacks enchantments by spell category and power, so the buff bot's Other spell at level VII is the one in effect over her own Self line and a cast of hers under it
+/// is surpassed, its mana spent. A creature or life line whose category's entry in effect is no spell of her profile reads as standing at the level of the line's spell of that power, for that entry's time
+/// (or her own entry's underneath when it lasts longer): the pass skips it and the re-buff comes due on that clock. The item lines are untouched.</para>
 /// <para><b>The level floor</b> (M5 item 3 w1): a pack that holds a school's focus casts that school on the foci formula, so a level whose components the pack does not hold (a school short of level VI would need a Gold Scarab no stock line carries) is never chosen
 /// and never stepped down onto: it is skipped, logged once by name, and the line is reported down with the reason (miss <c>down</c> when the level below it that the pack can pay for is cast, <c>no-level</c> when there is none).</para>
 /// <para><b>The mana loop</b> (D24, retail's way): before a cast whose cost (<see cref="GearCasts.ManaCeiling"/>: the base mana and ACE's armour surcharge, <c>Creature_Magic.cs</c> 14-60) is above the current mana,
@@ -279,6 +285,12 @@ public sealed class BuffCycle
         ["Mana Renewal Self"] = "ManaR",
         ["Impenetrability"] = "Impen",
         ["Bludgeon Bane"] = "BludB",
+        ["Piercing Bane"] = "PierceB",
+        ["Blade Bane"] = "BladeB",
+        ["Lightning Bane"] = "LightB",
+        ["Flame Bane"] = "FlameB",
+        ["Frost Bane"] = "FrostB",
+        ["Acid Bane"] = "AcidB",
         ["Hermetic Link"] = "Herm",
         ["Defender"] = "Def",
         ["Spirit Drinker"] = "Spirit",
@@ -330,6 +342,45 @@ public sealed class BuffCycle
 
         public bool Armour { get; } = armour;
 
+        /// <summary>M6 14 (<c>m6-banes</c>): the DamageType bit the line cuts when it is one of the six banes of <see cref="ArmourBanes"/> (wanted in the field only where the creatures deal it), else 0 (looked up once: the per-frame reads allocate nothing).</summary>
+        public uint BaneBit { get; } = ArmourBanes.DamageBitOf(line.Name);
+
+        /// <summary>M6 14 S2b: true for a creature or life line, the lines another's stronger spell of the category can stand for (an Other spell cast on her); the item lines (the armour's and the wand's) are read as before.</summary>
+        public bool ByCategory { get; } = line.Role is ProfileRole.CreatureBuff or ProfileRole.LifeBuff;
+
+        /// <summary>The line's spell category from the SpellTable (the one category its levels share), or 0 when the table holds none of its spells or its levels disagree; then her own registry entry of the line gives it.</summary>
+        public uint Category { get; } = CategoryOf(infos);
+
+        /// <summary>The standing spell of another's cast last logged for the line (its id and its expiry on the session clock): one log line per line and standing spell.</summary>
+        public uint StandsBySpell { get; set; }
+
+        /// <summary>See <see cref="StandsBySpell"/>.</summary>
+        public double StandsByExpiry { get; set; }
+
+        /// <summary>True once the line's unreadable category was logged by name.</summary>
+        public bool NoCategoryNoted { get; set; }
+    }
+
+    /// <summary>The one spell category the levels of a line share in the SpellTable; 0 when the table holds none of them or they disagree.</summary>
+    private static uint CategoryOf(SpellInfo?[] infos)
+    {
+        var category = 0u;
+        foreach (var info in infos)
+        {
+            if (info is null || info.Category == 0)
+            {
+                continue;
+            }
+
+            if (category != 0 && info.Category != category)
+            {
+                return 0;
+            }
+
+            category = info.Category;
+        }
+
+        return category;
     }
 
     private readonly IActionApi _actions;
@@ -337,8 +388,9 @@ public sealed class BuffCycle
     private readonly BuffOptions _options;
     private readonly ILogSink _log;
     private readonly WantedLine[] _order;
-    private readonly sbyte[] _byPlayNoted; // M5 7 P7j: per line learned by play, what was last logged of it (0 nothing, -1 not in the spellbook, 1 in it)
+    private readonly sbyte[] _byPlayNoted; // M5 7 P7j: per line learned by play, what was last logged of it (0 nothing, -1 not in the spellbook, 1 in it, 2 in it with the school untrained: M6 0, 3 in it and left to the pass at home: M6 14)
     private int _onlyNext = -1;
+    private string? _abortWhy;
     private int _only = -1;
     private readonly Dictionary<uint, (int Line, int Index)> _spellOf = [];
     private readonly ProfileLine _transferLine;
@@ -376,6 +428,7 @@ public sealed class BuffCycle
     private int _ceilingAttempts;
     private bool _dancing;
     private bool _danceOff;
+    private bool _netYieldNoted; // M6 7 C: the pass's one line naming a dance the net yield passed over
     private bool _passDanceDue; // M5 7: the pass's first buff has not been funded yet; a mana under its cost dances before it (and Revitalizes after). A start's pass re-arms it at every line (P7c, the reserve)
     private bool _passDancing; // the dance in flight is the pre-pass one
     private bool _reserveDancing; // P7c: the dance in flight is a start pass's reserve dance (a later line's), not the pre-pass one
@@ -429,6 +482,32 @@ public sealed class BuffCycle
     private uint _manaMin = uint.MaxValue;
     private int _passRecast;
     private bool _upgrading;
+    private readonly double _buffBar;
+    private readonly int _bootstrapLines;
+    private const int MaxBootstrapSweeps = 3;
+    private int _bootstrapSweeps;
+    private bool _bootstrapEnded;
+    private bool _sweeping;
+    private int _sweepStartUpgraded;
+    private int _passCasts;
+    private long _passMana;
+    private readonly bool _climbing;
+    private int _passPotionsMark;
+    private int _passRests;
+    private int _passPresses;
+    private bool _passLying;
+    private bool _passLieNoted;
+    private double _passStoodAt = double.NaN;
+    private uint _passCutFor;
+    private uint _passCutPending;
+    private double _passStandUntil = double.NegativeInfinity;
+    private uint _passLieHealth;
+    private bool _passLieEchoed;
+    private double _passLieAt;
+    private double _stepNow;
+    private uint _passLieStamina;
+    private uint _passLieMana;
+    private ActionHandle? _passStance;
     private int _upgraded;
     private int _forcedLine = -1;
     private bool _awayFromMagic;
@@ -449,7 +528,11 @@ public sealed class BuffCycle
     public BuffCycle(IGameSessionView session, IReadOnlyDictionary<uint, SpellInfo> spells, BuffOptions options, ILogSink log, ArmourBuffLedger? ledger = null, IArmourLedgerStore? store = null, IBuffProfile? profile = null)
         : this((session ?? throw new ArgumentNullException(nameof(session))).Actions, session.State, spells, options, log, ledger, store, profile)
     {
+        _view = session;
     }
+
+    /// <summary>M6 16 E2b: the session this cycle was built over, or null (the other constructor): where a creature stands for the pass's lie-down is read from its <see cref="IGameSessionView.Live"/>; with none, from the server's reports.</summary>
+    private readonly IGameSessionView? _view;
 
     /// <summary>The buff cycle over an Action API and a read model.</summary>
     /// <param name="actions">The Action API the casts go through (<see cref="IActionApi.Cast(uint, ActionSource)"/>).</param>
@@ -472,7 +555,14 @@ public sealed class BuffCycle
         _options = options;
         _log = log;
         _ledger = ledger ?? new ArmourBuffLedger();
-        Profile = profile ?? ArenaProfile.Buffs;
+        // M6 0 lead (live probe 6: the climber's buff station cast the arena's lines, Focus Self among them, which her spellbook lacks): no profile given is the character's own
+        // (BuffProfiles.For: Winnie's every line learned by play), else the mage's arena profile as before; BSD Mage's is the arena profile either way.
+        Profile = profile ?? (CharacterPolicy.For(state.Self.Name).BuffsByPlay ? BuffProfiles.For(state.Self.Name) : null) ?? ArenaProfile.Buffs;
+        var climbing = ReferenceEquals(Profile, BuffProfiles.Climber);
+        _climbing = climbing;
+        FieldDamageTypes = options.FieldDamageTypes;
+        _buffBar = climbing ? Grounds.LadderLoader.WarMage.PlanBuffChance : options.CastChance; // M6 7 AK (the owner, 2026-11-06): 0.75 is the bar during buffing, read on the live skill; 0.95 stays for combat
+        _bootstrapLines = climbing ? BuffReach.Bootstrap.Count : 0;
 
         var lines = Profile.BuffOrder;
         _order = new WantedLine[lines.Count];
@@ -537,6 +627,14 @@ public sealed class BuffCycle
 
     /// <summary>The buff profile this cycle casts (the character's lines and their order).</summary>
     public IBuffProfile Profile { get; }
+
+    /// <summary>
+    /// M6 14 (<c>m6-banes</c>): where the cycle's lines are read and cast. Null (the default, <see cref="BuffOptions.FieldDamageTypes"/>): a pass at home or anywhere a whole pass belongs: every armour line the book holds is
+    /// wanted. A value: the field (a fight's refresh, a pass in the ground), whose creatures deal these DamageType bits: one of the six banes of <see cref="ArmourBanes"/> is wanted only when the mask holds its damage type
+    /// (<see cref="ArmourBanes.KeptInField"/>), so it is not cast, not read and not due there; every other line is wanted as before. An owner that reads one cycle object in both places (the autopilot's) sets it
+    /// before each read; a pass in flight keeps the lines it began with a frame at a time, as it reads the book.
+    /// </summary>
+    public uint? FieldDamageTypes { get; set; }
 
     /// <summary>The mage's buff lines in the order the cycle casts them: Focus, Willpower and Creature Enchantment Mastery first, then the other Mastery lines, then the rest in the profile's order (the owner's dependency order; the spell bars use it too). Another profile's order is <see cref="IBuffProfile.BuffOrder"/>.</summary>
     public static IReadOnlyList<ProfileLine> OrderedLines => ArenaProfile.Buffs.BuffOrder;
@@ -674,6 +772,11 @@ public sealed class BuffCycle
                 continue; // M5 7 P7j: a line learned by play is not due while the spellbook lacks it (logged once by Wants)
             }
 
+            if (_climbing && ((now < _ledger.PassLeftUntil && _ledger.PassLeft.Contains(w.Line.Name)) || Grounds.LadderLoader.WarMage.Vitals.StartOnly(w.Line.Name)))
+            {
+                continue; // M6 7 AN: a line the last pass left at its mana limit waits; a start-only line (the ladder's data) is not kept up in a fight
+            }
+
             ActiveState(w, now, out _, out var remaining);
             if (remaining < margin)
             {
@@ -736,10 +839,52 @@ public sealed class BuffCycle
         return double.IsPositiveInfinity(min) ? double.NaN : min;
     }
 
+    /// <summary>
+    /// M6 7 AZ (live, 2026-11-06 23:25 to 23:27 UTC: a refresh pass stood in the mana wait in peace mode while tuskers hit her to her death): ends the running pass at the next point between casts, by name. A cast in flight finishes first (it cannot be
+    /// recalled); from the mana wait or a stamina rest she comes back to the magic mode (an awaited change), then the pass ends as done with what stands. Check before: the pass is running; check after: the pass's end line, <see cref="Status"/> done.
+    /// False when no pass is running or an abort is already pending.
+    /// </summary>
+    /// <param name="why">The reason, logged once.</param>
+    public bool Abort(string why)
+    {
+        if (Status != BuffStatus.Running || _abortWhy is not null)
+        {
+            return false;
+        }
+
+        _abortWhy = why;
+        _log.Info(LogCategory, "buff: pass: abort asked: " + why);
+        return true;
+    }
+
+    /// <summary>True while an abort is pending (<see cref="Abort"/>).</summary>
+    public bool Aborting => _abortWhy is not null;
+
+    private bool AbortStep(double now)
+    {
+        switch (_phase)
+        {
+            case Phase.NextLine:
+            case Phase.Mana:
+            case Phase.ManaWait:
+                if (_awayFromMagic)
+                {
+                    return BeginMode(CombatMode.Magic, Phase.ModeBack);
+                }
+
+                _waitStart = double.NaN;
+                _log.Info(LogCategory, "buff: pass: aborted: " + _abortWhy + "; the missing lines are due again at the next lull or at home");
+                return Finish(now);
+            default:
+                return false; // a cast or a mode change in flight: its outcome first
+        }
+    }
+
     /// <summary>Advances the pass: reads a cast's outcome, decides the next cast or the mana step, sends it. Call every frame while <see cref="BuffStatus.Running"/>; it allocates nothing while it waits.</summary>
     /// <param name="now">The session clock's time.</param>
     public BuffStatus Step(double now)
     {
+        _stepNow = now;
         if (Status != BuffStatus.Running)
         {
             return Status;
@@ -748,6 +893,17 @@ public sealed class BuffCycle
         while (true)
         {
             bool again;
+            if (_abortWhy is not null && _phase is Phase.NextLine or Phase.Mana or Phase.ManaWait)
+            {
+                again = AbortStep(now);
+                if (!again || Status != BuffStatus.Running)
+                {
+                    return Status;
+                }
+
+                continue;
+            }
+
             switch (_phase)
             {
                 case Phase.NextLine:
@@ -790,6 +946,7 @@ public sealed class BuffCycle
             return false;
         }
 
+        _abortWhy = null;
         _only = _onlyNext; // M5 7 F24: a one-line pass (StartRebuffLine), else -1
         _rebuff = rebuff;
         _forced = forced;
@@ -797,6 +954,18 @@ public sealed class BuffCycle
         _forcedLine = -1;
         _passRecast = 0;
         _upgrading = false;
+        _bootstrapSweeps = 0;
+        _bootstrapEnded = false;
+        _sweeping = false;
+        _passCasts = 0;
+        _passMana = 0;
+        _passPotionsMark = _manaPotions;
+        _passRests = 0;
+        _passPresses = 0;
+        _passLying = false;
+        _passLieNoted = false;
+        _passStoodAt = double.NaN;
+        _passStance = null;
         _upgraded = 0;
         _awayFromMagic = false;
         _passStart = now;
@@ -820,6 +989,7 @@ public sealed class BuffCycle
         _dances = _dancesLanded = _dancePresses = 0;
         _dancing = false;
         _danceOff = false;
+        _netYieldNoted = false;
         _passDanceDue = true;
         _passDancing = false;
         _reserveDancing = false;
@@ -896,6 +1066,11 @@ public sealed class BuffCycle
         CollectExpected();
         while (_line < _order.Length)
         {
+            if (BootstrapSweep())
+            {
+                continue;
+            }
+
             var w = _order[_line];
             if (!Wants(w))
             {
@@ -977,9 +1152,12 @@ public sealed class BuffCycle
                 _log.Info(LogCategory, $"upgrade: {w.Line.Name} holds {w.Line.Spells[activeIndex].Name} and the rule now gives {w.Infos[index]!.Name} (D10: the highest level the current skill gives)");
             }
 
+            NoteBootstrapStep(w, index);
             _castIndex = index;
             _wasActive = active;
             _spentFizzles = 0;
+            _passCasts++;
+            _passMana += w.Infos[index]!.BaseMana;
             _spentDown = 0;
             _manaCasts = 0;
             _castsSincePeak = 0;
@@ -1013,6 +1191,88 @@ public sealed class BuffCycle
         return Finish(now);
     }
 
+    /// <summary>M6 7 AK: the level of the line named <paramref name="name"/> standing on her (on every worn piece for an armor line), 0 when none.</summary>
+    /// <param name="name">The profile's line name.</param>
+    /// <param name="now">The session clock's time.</param>
+    public int ActiveLevel(string name, double now)
+    {
+        CollectExpected();
+        foreach (var w in _order)
+        {
+            if (w.Line.Name == name && ActiveState(w, now, out var index, out _))
+            {
+                return index + 1;
+            }
+        }
+
+        return 0;
+    }
+
+    /// <summary>M6 7 AK: the highest level of the line named <paramref name="name"/> the rule gives on the live skill, 0 when none.</summary>
+    /// <param name="name">The profile's line name.</param>
+    public int ReachLevel(string name)
+    {
+        foreach (var w in _order)
+        {
+            if (w.Line.Name == name)
+            {
+                var index = Choose(w, out _);
+                return index >= 0 ? index + 1 : 0;
+            }
+        }
+
+        return 0;
+    }
+
+    /// <summary>
+    /// M6 7 AK (the owner: Focus II, Willpower II, Creature Mastery II; then Focus III, Willpower III, Creature Mastery III; then the rest): at the end of the bootstrap's lines a start's pass walks them again on the skill that really stands, as the upgrade pass does, until a sweep raises nothing;
+    /// the steps after a fizzle read the skill the fizzle left. True when the walk moved and the caller looks again.
+    /// </summary>
+    private bool BootstrapSweep()
+    {
+        if (_bootstrapLines == 0 || _rebuff || _only >= 0 || _forced)
+        {
+            return false;
+        }
+
+        if (_sweeping && _line >= _bootstrapLines)
+        {
+            _sweeping = false;
+            _upgrading = false;
+            _bootstrapSweeps = _upgraded == _sweepStartUpgraded ? MaxBootstrapSweeps : _bootstrapSweeps;
+            return BootstrapSweep();
+        }
+
+        if (!_upgrading && _line == _bootstrapLines && _bootstrapSweeps < MaxBootstrapSweeps)
+        {
+            _bootstrapSweeps++;
+            _sweeping = true;
+            _upgrading = true;
+            _sweepStartUpgraded = _upgraded;
+            _line = 0;
+            return true;
+        }
+
+        if (!_upgrading && _line == _bootstrapLines && !_bootstrapEnded)
+        {
+            _bootstrapEnded = true;
+            _log.Info(LogCategory, "buff: bootstrap: end: " + string.Join(" ", new[] { MageTemplate.CreatureEnchantment, MageTemplate.LifeMagic, MageTemplate.WarMagic, MageTemplate.ItemEnchantment }.Select(id => MageTemplate.SkillName(id).Replace(" ", string.Empty, StringComparison.Ordinal) + "=" + (GearCasts.TryCurrentSkill(_state.Self.Qualities, id, out var v, out _) ? v.ToString(CultureInfo.InvariantCulture) : "untrained"))));
+        }
+
+        return false;
+    }
+
+    /// <summary>M6 7 AK: the report-only line of a bootstrap step: the line, the level chosen, the skill it was chosen on (the next step's line is this one's after).</summary>
+    private void NoteBootstrapStep(WantedLine w, int index)
+    {
+        if (w.Index >= _bootstrapLines || !GearCasts.TryCurrentSkill(_state.Self.Qualities, GearCasts.SkillOf(w.Line.School), out var skill, out _))
+        {
+            return;
+        }
+
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"buff: bootstrap: step {w.Line.Name}: level {ScrivenerLearnPlan.Numeral(index + 1)} chosen on skill {skill} at {GearCasts.Chance(skill, w.Line.Spells[index].Power):0.00} (bar {_buffBar:0.00})"));
+    }
+
     /// <summary>
     /// M5 7 P7j (D143, D141): whether the cycle wants <paramref name="w"/>: every line the build teaches, and a line learned by play (<see cref="ProfileLine.ByPlay"/>) only while the spellbook (the state, never an assumption) holds a level of
     /// it. The first answer and every change are logged once ("no level is in the spellbook ... not wanted", then "... is in the spellbook now ... wanted"), never each frame. Allocates nothing once logged.
@@ -1037,16 +1297,27 @@ public sealed class BuffCycle
             }
         }
 
-        var seen = (sbyte)(known is null ? -1 : 1);
+        // M6 0 lead (live probe 5: the climber's Focus Self, a Creature Enchantment line, failed the cycle with "skill 31 is not trained"): a line learned by play is wanted only while its
+        // school's skill is trained (a fresh climber trains Creature and Item Enchantment from the levels' credits, item 1's plan, TODO(m6-climber-creation-credits)); logged once by name.
+        var untrained = string.Empty;
+        var trained = known is null || GearCasts.TryCurrentSkill(_state.Self.Qualities, GearCasts.SkillOf(w.Line.School), out _, out untrained);
+
+        // M6 14 (m6-banes): one of the six other banes is the pass at home's: in the field it is wanted only where the creatures deal its damage type (ArmourBanes.KeptInField); logged once by name, and again when the place changes.
+        var homeOnly = known is not null && trained && w.BaneBit != 0 && FieldDamageTypes is { } field && (field & w.BaneBit) == 0;
+        var seen = (sbyte)(known is null ? -1 : !trained ? 2 : homeOnly ? 3 : 1);
         if (_byPlayNoted[w.Index] != seen)
         {
             _byPlayNoted[w.Index] = seen;
             _log.Info(LogCategory, known is null
                 ? $"{w.Line.Name}: no level is in the spellbook{(book.IsKnown ? string.Empty : " (the spellbook is not read yet)")}; a line learned by play (D143), so it is not wanted until a level is learned"
-                : $"{w.Line.Name}: {known.Name} ({known.Id}) is in the spellbook now: the line is wanted and kept up as the other auras (D143)");
+                : !trained
+                    ? $"{w.Line.Name}: {known.Name} is in the spellbook but {untrained}: the line is not wanted until the skill is trained"
+                    : homeOnly
+                        ? string.Create(CultureInfo.InvariantCulture, $"{w.Line.Name}: {known.Name} ({known.Id}) is in the spellbook; in the field (the ground's creatures deal damage types 0x{FieldDamageTypes:X}, not its 0x{w.BaneBit:X}) it is not cast and not kept up: the pass at home casts it (m6-banes)")
+                        : $"{w.Line.Name}: {known.Name} ({known.Id}) is in the spellbook now: the line is wanted and kept up as the other auras (D143)");
         }
 
-        return known is not null;
+        return known is not null && trained && !homeOnly;
     }
 
     /// <summary>
@@ -1063,18 +1334,19 @@ public sealed class BuffCycle
 
         // M5 3 w1: a pack that holds the school's focus casts on the foci formula, whose components it must hold: a level whose components the pack lacks is skipped (logged once, by name), the level below it that the pack can
         // pay for is the next candidate, and the caller reports the line down with the reason (`why` is then the first skip's text and the index is >= 0). No level the pack can pay for: -1 with that reason.
-        var held = LevelFloor.HeldFor(_state, w.Line.School);
+        var held = LevelFloor.HeldForAccount(_state, w.Line.School, _options.AccountName); // M6 1 h1: a school without its focus is read on the account's full formula (TODO(m6-account-formula-callers) closed here)
         _floorOn = held is not null;
         string? skipped = null;
         for (var i = w.Line.Spells.Count - 1; i >= 0; i--)
         {
-            if (GearCasts.Chance(skill, w.Line.Spells[i].Power) < _options.CastChance || (w.Line.ByPlay && !_state.Self.Spellbook.Knows(w.Line.Spells[i].Id)))
+            if (GearCasts.Chance(skill, w.Line.Spells[i].Power) < _buffBar || (w.Line.ByPlay && !_state.Self.Spellbook.Knows(w.Line.Spells[i].Id)))
             {
                 continue; // M5 7 P7j: of a line learned by play only the levels the spellbook holds are cast
             }
 
-            if (held is not null && w.Infos[i] is { } info && LevelFloor.ShortOf(held, info, out var need))
+            if (held is not null && w.Infos[i] is { } info && LevelFloor.ShortComponent(held, info, out var need, out var shortWeenie, out var perCast, _options.AccountName))
             {
+                NoteComponent(w.Line.Name, shortWeenie, perCast);
                 var text = LevelFloor.SkipText(w.Line.Spells[i], need);
                 skipped ??= text;
                 if (_floorLogged.Add(info.Id))
@@ -1091,8 +1363,20 @@ public sealed class BuffCycle
 
         why = skipped is not null
             ? "no level the pack can pay for (" + skipped + ")"
-            : string.Create(CultureInfo.InvariantCulture, $"no level reaches a chance of {_options.CastChance} at {w.Line.School} skill {skill}");
+            : string.Create(CultureInfo.InvariantCulture, $"no level reaches a chance of {_buffBar} at {w.Line.School} skill {skill}");
         return -1;
+    }
+
+    /// <summary>
+    /// M6 7 AT: a level skipped for want of a component is named to <see cref="ComponentNeeds"/> (when the station gave the buff options one: the autopilot's own passes), so the counters call the trip that buys it, by name, and no
+    /// pass lapses for it again. Logged when the want rises.
+    /// </summary>
+    private void NoteComponent(string line, Lifestone.Data.Magic.ComponentWeenie weenie, int perCast)
+    {
+        if (_options.ComponentNeeds is { } needs && needs.Note(weenie.Wcid, weenie.Name, line, perCast))
+        {
+            _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"buff: component: {line} is short of {weenie.Name} {weenie.Wcid} ({perCast} a cast): the want is now {needs.WantOf(weenie.Wcid)} ({ComponentNeeds.PassesKept} passes of the lines that burn it); the counters call the trip stock:{weenie.Name}"));
+        }
     }
 
     /// <summary>The cast policy's <see cref="CastRequest.Usable"/> for a level down while the floor applies (D14 steps one level down after two fizzles): a level the SpellTable lacks or whose foci components the pack does not hold is not stepped onto.</summary>
@@ -1109,7 +1393,7 @@ public sealed class BuffCycle
             return false; // M5 7 P7j: a level of a line learned by play that the spellbook lacks is never stepped onto
         }
 
-        return LevelFloor.HeldFor(_state, w.Line.School) is not { } held || !LevelFloor.ShortOf(held, info, out _);
+        return LevelFloor.HeldForAccount(_state, w.Line.School, _options.AccountName) is not { } held || !LevelFloor.ShortOf(held, info, out _, _options.AccountName);
     }
 
     // ------------------------------------------------------------------------------------------------ the mana loop
@@ -1309,14 +1593,41 @@ public sealed class BuffCycle
 
         if (max < need)
         {
+            if (_climbing)
+            {
+                _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"buff: pass: {info.Name} costs up to {need} mana and the maximum is {max}: the line is passed over, missing, by name"));
+                Miss(w, "mana-max", string.Create(CultureInfo.InvariantCulture, $"costs up to {need} of a maximum {max}"));
+                _line++;
+                return false; // M6 7 AN: never a fail on mana
+            }
+
             return Fail(now, string.Create(CultureInfo.InvariantCulture, $"{info.Name} costs up to {need} mana and the maximum is {max} (current {mana})"));
+        }
+
+        if (_climbing && now - _passStart > Grounds.LadderLoader.WarMage.Vitals.BuffPassWaitSeconds)
+        {
+            return PassLimit(now, info.Name, mana, max); // M6 7 AN: the pass's named limit: it goes on with what stands
+        }
+
+        if (_passCutPending != 0)
+        {
+            return PassCut(now, info.Name, mana, max); // M6 7 AW: read before the wait: PassCut comes back to the magic mode first, and the wait is left then; read only inside it the cut never ended (stretch 12: 901 s of mode changes, rests=730)
         }
 
         if (_phase == Phase.ManaWait)
         {
-            if (now - _waitStart > _options.ManaWaitSeconds)
+            if (!_climbing && now - _waitStart > _options.ManaWaitSeconds)
             {
                 return Fail(now, string.Create(CultureInfo.InvariantCulture, $"the mana wait ran out: {mana} of {max} after {_options.ManaWaitSeconds:0.#} s, {floor} needed for {info.Name} and the mana order had nothing to press or drink"));
+            }
+
+            if (_climbing && _awayFromMagic)
+            {
+                PassLieDown(now);
+                if (_passCutPending != 0)
+                {
+                    return PassCut(now, info.Name, mana, max); // M6 7 AT: an attackable creature near her: the fight shoots it first
+                }
             }
 
             if (now < _nextEvaluate)
@@ -1325,7 +1636,7 @@ public sealed class BuffCycle
             }
         }
 
-        if (_manaCasts >= ManaCastLimitPerLine)
+        if (!_climbing && _manaCasts >= ManaCastLimitPerLine)
         {
             return Fail(now, string.Create(CultureInfo.InvariantCulture, $"{ManaCastLimitPerLine} mana casts did not bring the mana to the {floor} {info.Name} needs ({mana} of {max})"));
         }
@@ -1363,8 +1674,10 @@ public sealed class BuffCycle
             Profile = Profile.TransfersAhead ? Vitals.ManaProfile.Fighter : Vitals.ManaProfile.Mage,
             FighterGatePercent = Vitals.VitalsOptions.DefaultStaminaUntilPercent,
             FighterTransfersLeft = FighterTransferCap - _fighterTransfers,
+            BestNetPress = PicksByNet, // M6 7 AN, the owner's ruling, 2026-11-08: pick by the sum: as the fight, at her own Mana Conversion
         };
         var decision = Vitals.ManaOrder.Decide(input, _danceLevels.AsSpan(0, count), _options.Mana);
+        NoteNoNetYield(in decision, count, stamina, staminaMax);
         if (Profile.TransfersAhead && potions == 0 && !_capNoted)
         {
             _capNoted = true;
@@ -1399,6 +1712,7 @@ public sealed class BuffCycle
                     return BeginMode(CombatMode.Magic, Phase.ModeBack); // the next step decides again, in the magic mode
                 }
 
+                _passPresses++;
                 SendDance(_danceIndex[decision.DanceIndex], mana, max, floor, now);
                 return false;
             default:
@@ -1409,6 +1723,7 @@ public sealed class BuffCycle
                     _phase = Phase.ManaWait;
                     Stage = StageManaWait;
                     _waitStart = now;
+                    _passRests++;
                     _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana wait: {mana} of {max}, stamina {stamina} of {staminaMax}, {floor} needed for {info.Name}; {decision.Reason}{(forStamina ? $" (to stamina {decision.StaminaTarget}), NonCombat now" : $"; NonCombat after {NonCombatAfterSeconds:0.#} s of it")}; at most {_options.ManaWaitSeconds:0.#} s (ACE halves stamina and health regeneration in a combat mode, Creature_Vitals.cs GetStanceMod)"));
                 }
 
@@ -1476,8 +1791,10 @@ public sealed class BuffCycle
             Profile = Profile.TransfersAhead ? Vitals.ManaProfile.Fighter : Vitals.ManaProfile.Mage,
             FighterGatePercent = Vitals.VitalsOptions.DefaultStaminaUntilPercent,
             FighterTransfersLeft = FighterTransferCap - _fighterTransfers,
+            BestNetPress = PicksByNet, // the owner's ruling, 2026-11-08: pick by the sum: the pass's own dance too
         };
         var decision = Vitals.ManaOrder.Decide(input, _danceLevels.AsSpan(0, count), _options.Mana);
+        NoteNoNetYield(in decision, count, stamina, staminaMax);
         if (decision.Step != Vitals.ManaStep.Dance)
         {
             _passDanceDue = false;
@@ -1543,6 +1860,23 @@ public sealed class BuffCycle
         return true;
     }
 
+    /// <summary>The owner's ruling, 2026-11-08: pick by the sum. The ladder's character picks every press's level by its net (<see cref="CharacterPolicy.ManaBySum"/>); a cycle told it is climbing does too.</summary>
+    private bool PicksByNet => _climbing || CharacterPolicy.For(_state.Self.Name).ManaBySum;
+
+    /// <summary>M6 7 C (m6-mana-dance-net-yield): once a pass, the one line that says the order passed over a Stamina to Mana press because it would net no mana (the give at the stamina held less the press's expected cost, read from the spell), and so rests.</summary>
+    private void NoteNoNetYield(in Vitals.ManaDecision decision, int count, uint stamina, uint staminaMax)
+    {
+        if (decision.NoNetLevel < 0 || decision.NoNetLevel >= count || _netYieldNoted)
+        {
+            return;
+        }
+
+        _netYieldNoted = true;
+        var level = _danceLevels[decision.NoNetLevel];
+        var give = Vitals.ManaOrder.Give(level.Row, stamina);
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"{_transferLine.Name}: no dance: the press of spell {level.SpellId} would net {decision.NetYield:0.0} mana at stamina {stamina} of {staminaMax} (a give of {give} for an expected cost of {give - decision.NetYield:0.0}): it rests ({decision.Step}: {decision.Reason})"));
+    }
+
     /// <summary>The Stamina to Mana Self levels of the profile's transfer line at the cast chance (from <paramref name="skill"/>), lowest first, into <c>_danceLevels</c> (their line index in <c>_danceIndex</c>); their count. No allocation.</summary>
     private int FillDanceLevels(uint skill)
     {
@@ -1551,7 +1885,7 @@ public sealed class BuffCycle
         var floored = 0;
         for (var i = 0; i < _transferInfos.Length; i++)
         {
-            if (_transferInfos[i] is { } info && _transferRows[i] is { } row && GearCasts.Chance(skill, _transferLine.Spells[i].Power) >= _options.CastChance)
+            if (_transferInfos[i] is { } info && _transferRows[i] is { } row && GearCasts.Chance(skill, _transferLine.Spells[i].Power) >= _options.CastChance && InBook(_transferLine, i))
             {
                 if (!_transferPayable[i])
                 {
@@ -1585,9 +1919,9 @@ public sealed class BuffCycle
         }
 
         _payableKnown = true;
-        var held = LevelFloor.HeldFor(_state, _transferLine.School);
+        var held = LevelFloor.HeldForAccount(_state, _transferLine.School, _options.AccountName);
         FillPayable(_transferLine, _transferInfos, _transferPayable, held);
-        FillPayable(_boostLine, _boostInfos, _boostPayable, _boostLine.School == _transferLine.School ? held : LevelFloor.HeldFor(_state, _boostLine.School));
+        FillPayable(_boostLine, _boostInfos, _boostPayable, _boostLine.School == _transferLine.School ? held : LevelFloor.HeldForAccount(_state, _boostLine.School, _options.AccountName));
     }
 
     private void FillPayable(ProfileLine line, SpellInfo?[] infos, bool[] payable, Dictionary<uint, int>? held)
@@ -1595,7 +1929,7 @@ public sealed class BuffCycle
         for (var i = 0; i < infos.Length; i++)
         {
             payable[i] = true;
-            if (held is not null && infos[i] is { } info && LevelFloor.ShortOf(held, info, out var need))
+            if (held is not null && infos[i] is { } info && LevelFloor.ShortOf(held, info, out var need, _options.AccountName))
             {
                 payable[i] = false;
                 if (_floorLogged.Add(info.Id))
@@ -1625,8 +1959,21 @@ public sealed class BuffCycle
 
         _phase = Phase.ManaCasting;
         Stage = StageManaCasting;
-        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: the dance: {info.Name} ({info.Id}) pressed until it lands ({_danceRules.Name}), mana {mana} of {max}, {need} needed for {_order[_line].Line.Name}"));
+        // TODO(m6-mana-dance-net-yield) (M6 6 live round 2, placed item 7): a low-level mage's transfer can net less mana than it costs (level 6: Stamina to Mana Self I costs 10 and returned about 9 from 19 stamina), so the pass gains only by its rests; judge the yield from the stamina and the spell before the press
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: the dance: {info.Name} ({info.Id}) pressed until it lands ({_danceRules.Name}), mana {mana} of {max}, {need} needed for {_order[_line].Line.Name}{DanceNet(index, mana)}"));
         _cast.Start(new CastRequest { Levels = _transferIds, Index = index, Rules = _danceRules, Purpose = "mana dance Stamina to Mana", Proof = _danceProof }, now);
+    }
+
+    /// <summary>What the press of the transfer line's level <paramref name="index"/> nets, for the dance's log line (the ladder's character, whose level is picked by it), else empty.</summary>
+    private string DanceNet(int index, uint mana)
+    {
+        if (!PicksByNet || _transferRows[index] is not { } row || _transferInfos[index] is not { } info || !_state.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxStamina, out var stamina, out _))
+        {
+            return string.Empty;
+        }
+
+        var level = new Vitals.DanceLevel(info.Id, GearCasts.ManaCeiling(info, 0), info.Power, row);
+        return string.Create(CultureInfo.InvariantCulture, $", stamina {stamina}, net {Vitals.ManaOrder.NetYield(in level, stamina, _manaConversion, mana):0.#}");
     }
 
     /// <summary>
@@ -1756,13 +2103,60 @@ public sealed class BuffCycle
     {
         for (var i = line.Spells.Count - 1; i >= 0; i--)
         {
-            if (infos[i] is { } info && payable[i] && GearCasts.Chance(skill, line.Spells[i].Power) >= _options.CastChance && GearCasts.ManaCeiling(info, 0) <= mana)
+            if (infos[i] is { } info && payable[i] && GearCasts.Chance(skill, line.Spells[i].Power) >= _options.CastChance && GearCasts.ManaCeiling(info, 0) <= mana && InBook(line, i))
             {
                 return i;
             }
         }
 
         return -1;
+    }
+
+    private bool _transferBookNoted;
+    private bool _boostBookNoted;
+
+    /// <summary>
+    /// M6 item 0 F2 (closes <c>m6-ladder-mana-line-book</c>): whether level <paramref name="index"/> of a mana line may be cast. A line the build teaches (not <see cref="ProfileLine.ByPlay"/>: BSD Mage) is always held; a line learned by play (Winnie) only while the
+    /// spellbook (the state, never an assumption) holds that level, and when it holds none of the line a read book's lack is logged once by name. A spellbook not read yet holds nothing. Allocates nothing once logged.
+    /// </summary>
+    private bool InBook(ProfileLine line, int index)
+    {
+        if (!line.ByPlay)
+        {
+            return true;
+        }
+
+        var book = _state.Self.Spellbook;
+        if (book.IsKnown && book.Knows(line.Spells[index].Id))
+        {
+            return true;
+        }
+
+        var isTransfer = ReferenceEquals(line, _transferLine);
+        if (book.IsKnown && !(isTransfer ? _transferBookNoted : _boostBookNoted))
+        {
+            var any = false;
+            foreach (var spell in line.Spells)
+            {
+                any |= book.Knows(spell.Id);
+            }
+
+            if (!any)
+            {
+                if (isTransfer)
+                {
+                    _transferBookNoted = true;
+                }
+                else
+                {
+                    _boostBookNoted = true;
+                }
+
+                _log.Warn(LogCategory, $"{line.Name}: no level is in the spellbook; a mana line learned by play (D143), so the cycle does not cast it until a level is learned (m6-ladder-mana-line-book closed)");
+            }
+        }
+
+        return false;
     }
 
     /// <summary>True when a held Mana Potion exists (M4 P5a C7); no allocation.</summary>
@@ -1958,6 +2352,13 @@ public sealed class BuffCycle
 
     private bool BeginMode(CombatMode mode, Phase phase)
     {
+        if (mode != CombatMode.NonCombat && _passLying)
+        {
+            PassLieEnds(_stepNow);
+            _log.Info(LogCategory, "buff: pass: standing up (the stop key) before the magic mode");
+            _actions.Move.Command(Lifestone.Data.Animation.MotionCommands.Ready, true, ActionSource.Automation);
+        }
+
         _pending = _actions.SetCombatMode(mode, ActionSource.Automation);
         _phase = phase;
         Stage = StageMode;
@@ -2115,6 +2516,13 @@ public sealed class BuffCycle
             return Fail(now, w.Line.Name + ": the cast was not carried out: " + ExplainEnd(report));
         }
 
+        if (report.End == CastEnd.InTheAir)
+        {
+            // M6 14 airborne: the body was in the air past the cast's hold (CastAttempt.MaxAirSeconds): the moment's, not the line's; missed this pass only, by that name.
+            Miss(w, "in-the-air", w.Line.Name + ": " + ExplainEnd(report));
+            return NextLine();
+        }
+
         if (!report.End.Succeeded())
         {
             // Any other answer (a refusal for mana the read model did not know of, busy, a missing component, out of range): a named miss, never retried.
@@ -2187,6 +2595,7 @@ public sealed class BuffCycle
         string? missing = null;
         var missingCount = 0;
         var recorded = 0;
+        List<(uint Guid, string Name)>? silentGuids = null;
         for (var p = 0; p < count; p++)
         {
             var found = false;
@@ -2220,6 +2629,33 @@ public sealed class BuffCycle
                 _ledger.Forget(_expectedGuid[p], w.Line.Name); // a cast that did not name the piece leaves nothing known about it
                 missingCount++;
                 missing = (missing is null ? string.Empty : missing + ";") + _expectedName[p].Replace(' ', '_');
+                silentGuids ??= [];
+                silentGuids.Add((_expectedGuid[p], _expectedName[p]));
+            }
+        }
+
+        if (missingCount > 0 && recorded > 0 && silentGuids is not null)
+        {
+            // ACE names every piece a self-cast armour line enchanted (WorldObject_Magic.cs 430-452, 2096-2122 @95ef426d); one it passed over while it named the others is not enchantable by ACE's own rule
+            // (IsEnchantable: ResistMagic under 9999, WorldObject_Weapon.cs:532; every cloak in the world data is 9999). Live 2026-11-16 00:35: a worn Chevron Cloak not yet appraised this session read every bane as
+            // level 0 of 3. Learned here for the session (until it is taken off), as the appraisal would say; the line stands on the pieces ACE named.
+            var learned = 0;
+            foreach (var (guid, name) in silentGuids)
+            {
+                var times = _ledger.SilentCasts.TryGetValue(guid, out var n) ? n + 1 : 1;
+                _ledger.SilentCasts[guid] = times;
+                if (times >= SilentCastsToLearn && _ledger.NotEnchanted.Add(guid))
+                {
+                    _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"{w.Line.Name}: ACE named {recorded} worn piece(s) and passed over '{name}' 0x{guid:X8} for the {times}th cast: it is not enchantable (ACE's IsEnchantable, ResistMagic 9999), so no armour line counts it from now"));
+                }
+
+                learned += _ledger.NotEnchanted.Contains(guid) ? 1 : 0;
+            }
+
+            if (learned == silentGuids.Count)
+            {
+                missingCount = 0; // every piece passed over is one ACE cannot enchant: the line stands on the pieces it named
+                missing = null;
             }
         }
 
@@ -2250,12 +2686,20 @@ public sealed class BuffCycle
     /// <summary>
     /// Whether <paramref name="w"/> has an active buff at <paramref name="now"/>: its level's index and the seconds left on it. A self line reads the registry (the entry of the highest level of the line that has not
     /// expired: its start plus its duration, <see cref="ActiveEnchantment.RemainingSeconds"/>); an armour line reads the cycle's memory (the cast's UseDone time plus the duration, per worn piece: every worn piece must
-    /// hold an unexpired one, the least time left counts). <paramref name="remaining"/> is 0 when it is not active.
+    /// hold an unexpired one, the least time left counts). <paramref name="remaining"/> is 0 when it is not active. A creature or life line also stands when another's stronger spell of its category is the one in
+    /// effect on her (M6 14 S2b, <see cref="StandsByAnother"/>): every reader of a line's state comes through here.
     /// </summary>
-    private bool ActiveState(WantedLine w, double now, out int index, out double remaining)
+    private bool ActiveState(WantedLine w, double now, out int index, out double remaining) => ActiveState(w, now, out index, out remaining, out _, out _);
+
+    /// <summary>
+    /// <see cref="ActiveState(WantedLine, double, out int, out double)"/>, and whether the line stands by a spell of another's cast (M6 14 S2b): <paramref name="another"/> with that registry entry in <paramref name="standing"/>.
+    /// </summary>
+    private bool ActiveState(WantedLine w, double now, out int index, out double remaining, out ActiveEnchantment standing, out bool another)
     {
         index = -1;
         remaining = 0;
+        standing = default;
+        another = false;
         if (w.Armour)
         {
             // The ledger's memory (M4 4.1 lane b; closes TODO(m3-buff-armour-memory)): every worn piece must hold the line, the least time left counts and the lowest level among the pieces is the line's level. A piece the
@@ -2293,6 +2737,7 @@ public sealed class BuffCycle
             return true;
         }
 
+        var category = w.Category;
         var active = _state.Self.Qualities.ActiveEnchantments;
         for (var i = 0; i < active.Length; i++)
         {
@@ -2300,6 +2745,11 @@ public sealed class BuffCycle
             if (!_spellOf.TryGetValue(e.SpellId, out var at) || at.Line != w.Index)
             {
                 continue;
+            }
+
+            if (category == 0)
+            {
+                category = e.Enchantment.SpellCategory; // the table gave none: her own entry of the line names the category
             }
 
             var left = e.RemainingSeconds(now);
@@ -2315,8 +2765,148 @@ public sealed class BuffCycle
             }
         }
 
+        if (StandsByAnother(w, category, now, out standing, out var level))
+        {
+            another = true;
+            // M6 14 S2b: another's stronger spell of the category is the one in effect (the buff bot's Other spell over her Self line), so the line reads its level. The time is its own, or her own entry's underneath
+            // when that one lasts longer: hers takes effect when the stronger one ends, so the line is covered until then and is not cast again under it.
+            index = level;
+            remaining = Math.Max(remaining, standing.RemainingSeconds(now));
+        }
+
         return index >= 0;
     }
+
+    /// <summary>
+    /// M6 14 S2b: whether a creature or life line stands by a spell that is none of her profile's: the registry's entry in effect for the line's category (<see cref="EffectRules.TryInEffectOf"/>; ACE keeps the
+    /// highest power of a category in effect, a lower one cast later lands under it, surpassed, <c>Managers/EnchantmentManager.cs</c> 134-204 @95ef426d). <paramref name="level"/> is the index of the line's own spell of the
+    /// same power, else of its highest spell at or under that power; a standing spell under the line's first level is not read. The category is data (the SpellTable's, else her own entry's); a line whose category
+    /// cannot be read is read as before, logged once by name. Logged once per line and standing spell; allocates nothing otherwise.
+    /// </summary>
+    private bool StandsByAnother(WantedLine w, uint category, double now, out ActiveEnchantment standing, out int level)
+    {
+        standing = default;
+        level = -1;
+        if (!w.ByCategory)
+        {
+            return false;
+        }
+
+        if (category == 0)
+        {
+            if (!w.NoCategoryNoted)
+            {
+                w.NoCategoryNoted = true;
+                _log.Warn(LogCategory, $"buff: {w.Line.Name}: its spell category cannot be read (the SpellTable given to the cycle holds no one category for its levels and no entry of her own stands), so another's stronger spell of the category is not read for it: the line is read by her own spells only (TODO(m6-buff-line-category))");
+            }
+
+            return false;
+        }
+
+        if (!EffectRules.TryInEffectOf(_state.Self.Qualities, category, now, out standing) || _spellOf.ContainsKey(standing.SpellId))
+        {
+            return false; // nothing of the category stands, or a spell of her own profile is the one in effect: as before
+        }
+
+        var power = standing.Enchantment.PowerLevel;
+        var spells = w.Line.Spells;
+        for (var s = 0; s < spells.Count; s++)
+        {
+            if (spells[s].Power > power)
+            {
+                continue;
+            }
+
+            level = s; // the highest level at or under the power
+            if (spells[s].Power == power)
+            {
+                break; // the line's own spell of the same power
+            }
+        }
+
+        if (level < 0)
+        {
+            return false;
+        }
+
+        var expiry = standing.ExpirySeconds;
+        if (w.StandsBySpell != standing.SpellId || w.StandsByExpiry != expiry)
+        {
+            w.StandsBySpell = standing.SpellId;
+            w.StandsByExpiry = expiry;
+            var whose = standing.Enchantment.Caster == _state.Self.Guid ? "her own cast of a spell outside the line" : "another's cast";
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"buff: {w.Line.Name} stands by spell {standing.SpellId} (power {power}, {whose}): reads level {Roman[Math.Clamp(spells[level].Position - 1, 0, Roman.Length - 1)]}, {standing.RemainingSeconds(now):0} s left: her own cast is not needed"));
+        }
+
+        return true;
+    }
+
+    /// <summary>M6 14 S2b: a line that stands by another's stronger spell of its category, as <see cref="TryStandsByAnother"/> reads it.</summary>
+    /// <param name="SpellId">The standing spell (none of her profile's).</param>
+    /// <param name="Power">Its power level.</param>
+    /// <param name="Level">The level of the line it reads as (1 is level I).</param>
+    /// <param name="Remaining">The seconds left on the standing spell itself (not her own entry's underneath).</param>
+    public readonly record struct StandingByAnother(uint SpellId, uint Power, int Level, double Remaining);
+
+    /// <summary>
+    /// M6 14 S2b: whether the line named <paramref name="name"/> stands by a spell of another's cast, stronger than or as strong as any of her own on her (the buff bot's): the spell, the level of the line it reads as
+    /// and the seconds left on that spell itself. False for an item line, a line that stands by her own spell or not at all. <see cref="ActiveLevel"/>, <see cref="ReadLines"/> and <see cref="RebuffDue"/> already read such a line as standing.
+    /// </summary>
+    /// <param name="name">The profile's line name.</param>
+    /// <param name="now">The session clock's time.</param>
+    /// <param name="standing">What stands.</param>
+    public bool TryStandsByAnother(string name, double now, out StandingByAnother standing)
+    {
+        standing = default;
+        foreach (var w in _order)
+        {
+            if (w.Line.Name != name || w.Armour)
+            {
+                continue;
+            }
+
+            if (!ActiveState(w, now, out var index, out _, out var entry, out var another) || !another)
+            {
+                return false;
+            }
+
+            standing = new StandingByAnother(entry.SpellId, entry.Enchantment.PowerLevel, index + 1, entry.RemainingSeconds(now));
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// True when the worn piece's appraisal names ResistMagic 9999 or more: ACE gives a self-cast armour line only to equipped Clothing and shields that are enchantable (<c>IsEnchantable</c>: ResistMagic under 9999,
+    /// WorldObjects/WorldObject_Weapon.cs:532; WorldObject_Magic.cs 2096-2122 @95ef426d), so such a piece (every cloak in the world data: the Chevron Cloak 44849-44852 is 9999) never holds one and is not counted.
+    /// Live 2026-11-15 23:01:43 UTC: the gear restore wore a Chevron Cloak, every bane then read "level 0 of 3" over it, every rung gate from the Holding down shut, and the ladder sent her to Holtburg's outskirts
+    /// for 47 minutes. A piece not yet appraised is counted, as before.
+    /// </summary>
+    private bool Unenchantable(uint guid)
+    {
+        if (_ledger.NotEnchanted.Contains(guid))
+        {
+            return true;
+        }
+
+        if (_state.Appraisals.TryGet(guid, out var appraisal) && appraisal.Int(AppraisalIds.ResistMagic) is >= 9999)
+        {
+            // M6 14 (live ladder42 19:51:19 UTC): learned once into the session's ledger, so the fact outlives the appraisal (ACE's IsEnchantable: ResistMagic 9999 is never enchanted, WorldObject_Weapon.cs:532 @95ef426d)
+            _ledger.NotEnchanted.Add(guid);
+            return true;
+        }
+
+        return false;
+    }
+
+
+
+    /// <summary>
+    /// The casts that must pass over a piece, naming others, before it is learned not enchantable: two (Lifestone's own: one cast's lines could in principle arrive after its end, so one silence stays a named miss;
+    /// the home pass casts Impenetrability and Bludgeon Bane back to back, so a cloak is learned within the pass, before the way out reads the gates).
+    /// </summary>
+    public const int SilentCastsToLearn = 2;
 
     /// <summary>The worn armour and clothing pieces the read model knows (ACE enchants Clothing and shields, <c>WorldObject_Magic.cs</c> 2096): their guids and names into the scratch arrays.</summary>
     private int CollectExpected()
@@ -2330,9 +2920,10 @@ public sealed class BuffCycle
         }
 
         _ledger.Prune(_wornGuid.AsSpan(0, worn)); // a piece taken off loses its lines
+
         for (var i = 0; i < equipped.Count && count < MaxPieces; i++)
         {
-            if (_state.Objects.TryGet(equipped[i].Guid, out var item) && (item.ItemType & ArmourOrClothing) != 0)
+            if (_state.Objects.TryGet(equipped[i].Guid, out var item) && (item.ItemType & ArmourOrClothing) != 0 && !Unenchantable(equipped[i].Guid))
             {
                 _expectedGuid[count] = equipped[i].Guid;
                 _expectedName[count] = item.Name;
@@ -2351,15 +2942,211 @@ public sealed class BuffCycle
 
     private const uint ArmourOrClothing = 0x2 | 0x4; // ItemType Armor | Clothing
 
+    /// <summary>
+    /// M6 7 AN (the owner: the pass never fails on mana): the wait of a climber's pass lies down where nothing is awake within reach (the walker's stance first; <see cref="Vitals.PullRestRule"/>'s numbers: stamina at 1.8 a second, x1.25 and more with Rejuvenation; a press is what the wait is for), and stands at the first hit (M5 D88).
+    /// </summary>
+    private void PassLieDown(double now)
+    {
+        var self = _state.Self;
+        if (_passLying)
+        {
+            if (self.Qualities.TryGetVitalLevels(MageTemplate.MaxHealth, out var health, out _))
+            {
+                if (health < _passLieHealth)
+                {
+                    _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"buff: pass: the health fell from {_passLieHealth} to {health} at rest: she stands (M5 D88)"));
+                    PassStands(now);
+                    return;
+                }
+
+                _passLieHealth = health; // M6 7 AO: the last health seen: a hit after the regeneration counts too
+            }
+
+            // M6 7 AO, the check after: only the server's motion says she lies down
+            if (!_passLieEchoed)
+            {
+                if (Vitals.RestEcho.Shows(_state, Vitals.VitalsKeeper.LieCommand))
+                {
+                    _passLieEchoed = true;
+                    _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"buff: pass: check after: the server's motion shows the posture {Vitals.RestEcho.Read(_state)} {now - _passLieAt:0.0} s after the key"));
+                }
+                else if (now - _passLieAt >= Vitals.RestEcho.WaitSeconds)
+                {
+                    _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"buff: pass: check after: failed=no-echo: she was asked to lie down, but the server's motion shows {Vitals.RestEcho.Read(_state)} after {now - _passLieAt:0.0} s (TODO(m6-rest-lie-echo)); the wait stands"));
+                    PassStands(now);
+                }
+            }
+
+            return;
+        }
+
+        if (now < _passStandUntil || _actions.KillSwitch || self.Position is not { } here || self.Qualities.CombatMode is not (0 or CombatModes.NonCombat))
+        {
+            return; // M6 7 AO: peace is a precondition (retail refuses Sleeping outside non-combat, CMotionInterp::DoMotion 11.6096 0x00529930)
+        }
+
+        var block = Vitals.RestBlockerRule.Read(_state.Objects, in here, self.Guid, Vitals.VitalsKeeper.QuietMetres, (float)_options.ShootFirstMetres, out var near, _view?.Live); // M6 16 E2b: where the client draws it
+        if (block != Vitals.RestBlock.None && _options.ShootFirstMetres > 0 && near != _passCutFor)
+        {
+            _passCutFor = near; // M6 7 AT: once for that creature: a second pass with it still standing waits as before, never a loop. M6 7 AW: a pass in the ground never stands for one past the fight's reach either (stretch 12: 19.1 m of body radius, the wait stood)
+            _passCutPending = near;
+            return;
+        }
+
+        if (block != Vitals.RestBlock.None)
+        {
+            if (!_passLieNoted)
+            {
+                _passLieNoted = true;
+                _passStoodAt = now;
+                self.Qualities.TryGetVitalLevels(MageTemplate.MaxStamina, out _passLieStamina, out _);
+                self.Qualities.TryGetVitalLevels(MageTemplate.MaxMana, out _passLieMana, out _);
+                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"buff: pass: 0x{near:X8} is within {Vitals.VitalsKeeper.QuietMetres:0} m: the wait stands"));
+            }
+
+            return;
+        }
+
+        PassStoodEnds(now);
+
+        if (_passStance is null)
+        {
+            _passStance = _actions.Move.Command(CombatStances.NonCombat, true, ActionSource.Automation);
+            return;
+        }
+
+        if (_passStance.Outcome is not { } synced)
+        {
+            return;
+        }
+
+        _passStance = null;
+        if (synced.Kind is not (ActionOutcomeKind.Local or ActionOutcomeKind.Confirmed or ActionOutcomeKind.Sent))
+        {
+            _passStandUntil = now + Vitals.VitalsKeeper.StandAfterHitSeconds;
+            _log.Warn(LogCategory, $"buff: pass: the walker's stance was not synced to non-combat ({synced.Kind}: {synced.Detail}); the wait stands");
+            return;
+        }
+
+        _actions.Move.Command(Vitals.VitalsKeeper.LieCommand, true, ActionSource.Automation);
+        _actions.Move.Command(Vitals.VitalsKeeper.LieCommand, false, ActionSource.Automation);
+        _passLying = true;
+        _passLieEchoed = false;
+        _passLieAt = now;
+        self.Qualities.TryGetVitalLevels(MageTemplate.MaxHealth, out _passLieHealth, out _);
+        self.Qualities.TryGetVitalLevels(MageTemplate.MaxStamina, out _passLieStamina, out _);
+        self.Qualities.TryGetVitalLevels(MageTemplate.MaxMana, out _passLieMana, out _);
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"buff: pass: lying down for the wait: check before: peace, the walker's stance synced, nothing that can attack within {Vitals.VitalsKeeper.QuietMetres:0} m"));
+    }
+
+    /// <summary>M6 7 AW: a wait she stood through ends (she lies down, or the pass ends): one line with the posture and the rates, as a lie-down's.</summary>
+    private void PassStoodEnds(double now)
+    {
+        if (double.IsNaN(_passStoodAt))
+        {
+            return;
+        }
+
+        var seconds = now - _passStoodAt;
+        _passStoodAt = double.NaN;
+        var q = _state.Self.Qualities;
+        q.TryGetVitalLevels(MageTemplate.MaxStamina, out var stamina, out _);
+        q.TryGetVitalLevels(MageTemplate.MaxMana, out var mana, out _);
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"buff: pass: rest: posture stand, {seconds:0.#} s, stamina {_passLieStamina} -> {stamina} ({(seconds > 0 ? ((double)stamina - _passLieStamina) / seconds : 0):0.##} a second, net of the presses), mana {_passLieMana} -> {mana} ({(seconds > 0 ? ((double)mana - _passLieMana) / seconds : 0):0.##} a second)"));
+    }
+
+    /// <summary>M6 7 AO: she gets up in the wait (a hit, or no echo): she does not lie down again for <see cref="Vitals.VitalsKeeper.StandAfterHitSeconds"/>.</summary>
+    private void PassStands(double now)
+    {
+        PassLieEnds(now);
+        _passStandUntil = now + Vitals.VitalsKeeper.StandAfterHitSeconds;
+        _actions.Move.Command(Lifestone.Data.Animation.MotionCommands.Ready, true, ActionSource.Automation);
+    }
+
+    /// <summary>M6 7 AO: a lie-down of the wait ends: one line with what the server's motion showed, the seconds and the rates reached.</summary>
+    private void PassLieEnds(double now)
+    {
+        _passLying = false;
+        var seconds = now - _passLieAt;
+        var q = _state.Self.Qualities;
+        q.TryGetVitalLevels(MageTemplate.MaxStamina, out var stamina, out _);
+        q.TryGetVitalLevels(MageTemplate.MaxMana, out var mana, out _);
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"buff: pass: rest: posture {(_passLieEchoed ? "lie" : "stand")}, {seconds:0.#} s, stamina {_passLieStamina} -> {stamina} ({(seconds > 0 ? ((double)stamina - _passLieStamina) / seconds : 0):0.##} a second), mana {_passLieMana} -> {mana} ({(seconds > 0 ? ((double)mana - _passLieMana) / seconds : 0):0.##} a second)"));
+    }
+
+    /// <summary>
+    /// M6 7 AN: the named limit (<see cref="Grounds.LadderVitals.BuffPassWaitSeconds"/>): the pass ends as done, with what stands; every line still wanted and missing is named and is not due again for as long; never a fail, never a stop of the run. From the wait it comes back to the magic mode first.
+    /// </summary>
+    private bool PassLimit(double now, string line, uint mana, uint max)
+    {
+        if (_awayFromMagic)
+        {
+            return BeginMode(CombatMode.Magic, Phase.ModeBack);
+        }
+
+        var limit = Grounds.LadderLoader.WarMage.Vitals.BuffPassWaitSeconds;
+        _ledger.PassLeft.Clear();
+        foreach (var w in _order)
+        {
+            if (Wants(w) && !ActiveState(w, now, out _, out _))
+            {
+                _ledger.PassLeft.Add(w.Line.Name);
+            }
+        }
+
+        _ledger.PassLeftUntil = now + limit;
+        _waitStart = double.NaN;
+        _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"buff: pass: the mana limit of {limit:0} s is up at {line}, mana {mana} of {max}: she goes on with what stands; missing, by name, not due again for {limit:0} s: {string.Join(", ", _ledger.PassLeft)}"));
+        return Finish(now);
+    }
+
+    /// <summary>
+    /// M6 7 AT (live, 2026-11-06: a Drudge Skulker at 17 m held her standing two rests of about three minutes): the pass ends as done, with what stands, when an attackable creature within the fight's reach keeps her from lying down; the
+    /// fight that follows shoots it by its own rule, and the lines still missing are due again at the next audit. From the wait it comes back to the magic mode first. Check before: the blocker named, check after: the pass's end line.
+    /// </summary>
+    private bool PassCut(double now, string line, uint mana, uint max)
+    {
+        if (_awayFromMagic)
+        {
+            return BeginMode(CombatMode.Magic, Phase.ModeBack);
+        }
+
+        var guid = _passCutPending;
+        _passCutPending = 0;
+        _waitStart = double.NaN;
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"buff: pass: cut at {line}, mana {mana} of {max}: 0x{guid:X8} can attack and keeps her on her feet (within {Vitals.VitalsKeeper.QuietMetres:0} m; the fight's reach {_options.ShootFirstMetres:0} m): the fight shoots it first, by its rule, or she walks home when many lines are left; the missing lines are due again at the next audit"));
+        return Finish(now);
+    }
+
     // ------------------------------------------------------------------------------------------------ the end of a pass
 
     private bool Finish(double now)
     {
+        PassStoodEnds(now);
         Stage = StageDone;
         _phase = Phase.Idle;
         Status = BuffStatus.Done;
         Result = Build(now, null);
         _log.Info(LogCategory, "pass done: " + Result.Fields + " " + Result.CastFields);
+        if (_bootstrapLines > 0)
+        {
+            int Level(string name)
+            {
+                foreach (var w in _order)
+                {
+                    if (w.Line.Name == name && Wants(w) && ActiveState(w, now, out var index, out _))
+                    {
+                        return index + 1;
+                    }
+                }
+
+                return 0;
+            }
+
+            var armorWorn = ArmorReport.Read(SelfEquipJudge.Worn(_state), out var armorUnread); // M6 item 14: the factor is read on the pieces she wears (the armour set), not on the robe alone
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"buff: pass: casts={_passCasts} mana_base={_passMana} seconds={now - _passStart:0} potions={_manaPotions - _passPotionsMark} rests={_passRests} presses={_passPresses} stands={Result.Active}/{Result.Wanted} levels={Result.Levels} (report-only; {ArmorReport.Line(armorWorn, armorUnread, Level("Armor Self"), Level("Bludgeon Protection Self"), Level("Impenetrability"), Level("Bludgeon Bane"))}; TODO(m6-armor-buffs-live))"));
+        }
+
         return false;
     }
 
@@ -2407,6 +3194,7 @@ public sealed class BuffCycle
         {
             Wanted = wanted,
             Active = active,
+            EndsWithWhatStands = _climbing && failure is null,
             Levels = levels.ToString(),
             RecastWhileActive = _passRecast,
             MinRemainingSeconds = double.IsPositiveInfinity(min) ? double.NaN : min,

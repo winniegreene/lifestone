@@ -31,6 +31,7 @@ internal sealed class FightRefill
     private readonly RevitalizeLevel[] _levels = new RevitalizeLevel[7];
     private readonly int[] _index = new int[7];
     private readonly HashSet<uint> _floorNoted = [];
+    private readonly string? _accountName;
     private CastAttempt? _cast;
     private CastChatProof? _proof;
     private int _count;
@@ -42,9 +43,10 @@ internal sealed class FightRefill
     /// <param name="spells">The SpellTable's spells.</param>
     /// <param name="log">Where it logs.</param>
     /// <param name="percent"><c>--fight-stamina-full</c>: 0 is off.</param>
-    public FightRefill(IReadOnlyDictionary<uint, SpellInfo> spells, ILogSink log, int percent)
+    /// <param name="accountName">M6 item 1 h1: the account's name (<see cref="BuffOptions.AccountName"/>), so a level of a school without its focus in the pack is floored on the account's full formula (<see cref="AccountFormula"/>); null: the foci formula (today's rule).</param>
+    public FightRefill(IReadOnlyDictionary<uint, SpellInfo> spells, ILogSink log, int percent, string? accountName = null)
     {
-        (_spells, _log, Percent) = (spells, log, percent);
+        (_spells, _log, Percent, _accountName) = (spells, log, percent, accountName);
     }
 
     /// <summary>The stamina share the refill goes to, in percent (0: off).</summary>
@@ -149,7 +151,7 @@ internal sealed class FightRefill
     /// <param name="position">The level's place in its line, 0 for I.</param>
     public bool Payable(IReadOnlyDictionary<uint, int>? held, SpellInfo info, string line, int position)
     {
-        if (held is null || !LevelFloor.ShortOf(held, info, out var need))
+        if (held is null || !LevelFloor.ShortOf(held, info, out var need, _accountName))
         {
             return true;
         }
@@ -193,6 +195,13 @@ internal sealed class FightRefill
                 _log.Warn(FightScenario.LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: {MaxCastsInARow} Revitalize Self casts in a row left the stamina at {stamina} of {staminaMax}; the refill is set aside {AsideSeconds:0} s"));
             }
 
+            return;
+        }
+
+        if (end == CastEnd.InTheAir)
+        {
+            // M6 14 airborne: held in the air past the cast's bound: the moment's, not the refill's; not set aside.
+            _log.Info(FightScenario.LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: Revitalize Self was held in the air ({why}); the refill is not set aside"));
             return;
         }
 

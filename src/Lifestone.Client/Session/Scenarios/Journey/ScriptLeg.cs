@@ -18,7 +18,7 @@ namespace Lifestone.Client.Session.Scenarios.Journey;
 /// </summary>
 /// <param name="name">The leg's name (the log's <c>[live name]</c>, the scenario's <see cref="Name"/>).</param>
 /// <param name="log">Where the leg's lines go.</param>
-public abstract class ScriptLeg(string name, Action<string> log) : IStationRun
+public abstract class ScriptLeg(string name, Action<string> log) : IStationRun, IStationHeld
 {
     private const double BailSeconds = 30;
     private readonly List<string> _problems = [];
@@ -153,11 +153,18 @@ public abstract class ScriptLeg(string name, Action<string> log) : IStationRun
 
     // ---------------------------------------------------------------------------------------- helpers a script uses
 
+    /// <summary>M6 8 K: the seconds the survival layer has held this leg; a wait under way has as long left afterwards as it had (<see cref="Pause"/>, <see cref="Until"/>).</summary>
+    protected double HeldSeconds { get; private set; }
+
+    /// <inheritdoc />
+    public void NoteHeld(double seconds) => HeldSeconds += seconds;
+
     /// <summary>Waits <paramref name="seconds"/> of session time.</summary>
     protected IEnumerable<ActionHandle?> Pause(double seconds)
     {
         var until = S.Clock.Now + seconds;
-        while (S.Clock.Now < until)
+        var held = HeldSeconds;
+        while (S.Clock.Now - (HeldSeconds - held) < until)
         {
             yield return null;
         }
@@ -167,14 +174,15 @@ public abstract class ScriptLeg(string name, Action<string> log) : IStationRun
     protected IEnumerable<ActionHandle?> Until(Func<bool> done, double max)
     {
         var until = S.Clock.Now + max;
-        while (!done() && S.Clock.Now < until)
+        var held = HeldSeconds;
+        while (!done() && S.Clock.Now - (HeldSeconds - held) < until)
         {
             yield return null;
         }
     }
 
     /// <summary>A handle's outcome in one phrase.</summary>
-    protected static string Describe(ActionHandle handle) =>
+    protected internal static string Describe(ActionHandle handle) =>
         handle.Outcome is { } o ? o.Kind + (o.Code == 0 ? string.Empty : $" (code 0x{o.Code:X})") + (o.Detail is null ? string.Empty : ": " + o.Detail) : "not settled";
 
     /// <summary>The handle settled as Confirmed; a failed check names <paramref name="what"/>. A 0x001D (busy) is also its own check: the Action API's lane rule says no move is sent into a busy chain.</summary>

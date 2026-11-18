@@ -131,6 +131,7 @@ public sealed class CollisionStreamerCorridorTests
     }
 
     [Fact]
+    [Trait("Tier", "Timing")] // m6-6-a: rides a 100 ms frame budget; the collision-streamer settle family (M5 item 0's flakes row); a timing subject
     public void The_frame_budget_path_attaches_a_corridor_too()
     {
         var world = new PhysicsWorld();

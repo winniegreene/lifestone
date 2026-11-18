@@ -31,6 +31,8 @@ internal sealed class StartupWatch : IDisposable
 
     private readonly CancellationTokenSource stop = new();
     private readonly Thread thread;
+    private volatile ArrivalGuard? guard;
+    private volatile BuffBot? buffBot;
 
     private StartupWatch()
     {
@@ -49,6 +51,8 @@ internal sealed class StartupWatch : IDisposable
     public void Dispose()
     {
         stop.Cancel();
+        guard?.Stop();
+        buffBot?.Stop();
         if (thread.IsAlive && Thread.CurrentThread != thread && !thread.Join(TimeSpan.FromSeconds(2)))
         {
             ModManager.Log("Lifestone startup watch did not stop within 2 s", ModManager.LogLevel.Warn);
@@ -94,6 +98,21 @@ internal sealed class StartupWatch : IDisposable
             }
 
             AutoPromotion.Recheck("the world opened");
+            guard = ArrivalGuard.Start(); // M6 7 AJ: ACE cannot unload a landblock from under a player who has just arrived
+            if (!CorpseCoin.Apply()) // M6 7 finish: a dead player's coin lies on the corpse, as in retail
+            {
+                ModManager.Log("Lifestone mod not ready: the corpse coin rule could not be set", ModManager.LogLevel.Error);
+                return;
+            }
+
+            if (!HouseAccountAge.Apply()) // M6 villa, the owner 2026-11-16: a house needs no account age
+            {
+                ModManager.Log("Lifestone mod not ready: the house account-age rule could not be set", ModManager.LogLevel.Error);
+                return;
+            }
+
+            buffBot = BuffBot.Start(); // M6 item 14: the buff bot by Holtburg's lifestone (D124), placed while a player is in Holtburg
+
             var network = ConfigManager.Config.Server.Network;
             ModManager.Log(string.Create(
                 CultureInfo.InvariantCulture,

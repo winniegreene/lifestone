@@ -181,6 +181,7 @@ internal sealed partial class GameStateReducer
         ReleaseDeletedHeld(guid);
         ForgetInViews(guid);
         ForgetVendor(guid);
+        ForgetGuardian(guid); // M6 villa
         Changed();
         Publish(new ObjectDeleted(guid));
     }
@@ -282,7 +283,24 @@ internal sealed partial class GameStateReducer
         if (moved.IsSelf)
         {
             CheckVendorRange(); // M4 3.2 s1
+            CheckGuardianRange(); // M6 villa
         }
+    }
+
+    /// <summary>
+    /// M6 item 14: a MoveToObject order names its target and the target's place (<see cref="WorldObject.OrderPosition"/>): the place is kept on the target, stamped with the session clock. An order whose
+    /// target is the mover itself, is not in the table, or names no cell is ignored. The orientation is the target's last known one (the order gives a point alone).
+    /// </summary>
+    private void NoteOrderTarget(uint mover, ServerMotionState motion)
+    {
+        if (motion.MovementType != MovementType.MoveToObject || motion.MoveTo is not { TargetGuid: { } named } move || named == mover || move.OriginCellId == 0 || !_state.Objects.TryGet(named, out var aimed))
+        {
+            return;
+        }
+
+        var frame = aimed.Position is { } known ? known.Frame with { Origin = move.Origin } : new AcFrame(move.Origin, System.Numerics.Quaternion.Identity);
+        aimed.OrderPosition = new CellFrame(move.OriginCellId, frame);
+        aimed.OrderPositionAt = _clock.Now;
     }
 
     /// <summary>
@@ -312,6 +330,7 @@ internal sealed partial class GameStateReducer
             return;
         }
 
+        NoteOrderTarget(message.Guid, message.Motion);
         SyncSelf(target!);
         Changed();
         Publish(new ObjectMotionChanged(message.Guid, target!.IsSelf, message.IsAutonomous, message.Motion));
@@ -624,6 +643,7 @@ internal sealed partial class GameStateReducer
         {
             target.Stamps = stamps with { Position = positionStamp };
             target.Position = position;
+            target.PositionAt = _clock.Now;
             Counters.ForceBlips++;
             moved = new ObjectMoved(target.Guid, position, PositionVerdict.ForceBlip, false, hasContact, velocity, placement);
             reason = default;
@@ -654,6 +674,7 @@ internal sealed partial class GameStateReducer
 
         target.Parent = null;
         target.Position = position;
+        target.PositionAt = _clock.Now;
         var teleportAdvanced = ObjectMessageGate.TryAdvance(ref stamps, ObjectStamp.Teleport, teleportStamp);
         target.Stamps = stamps;
         var verdict = isPlayer
@@ -771,6 +792,7 @@ internal sealed partial class GameStateReducer
         else if (physics.Position is { CellId: not 0 } p)
         {
             created.Position = ToFrame(p);
+            created.PositionAt = _clock.Now;
         }
 
         _state.Objects.Set(created);
@@ -837,6 +859,7 @@ internal sealed partial class GameStateReducer
         }
 
         target.Created = message;
+        _state.Objects.Described(); // M6 16 Eperf: a new description can change what kind of object it is: the table's version moves (WorldObjectTable.Version)
 
         // Parent, position or pickup.
         var parented = false;
@@ -963,6 +986,7 @@ internal sealed partial class GameStateReducer
         self.Shortcuts.Clear();
         var closedGround = _state.Containers.ViewedGuid;
         var closedVendor = DropVendorForLeave();
+        var closedGuardian = DropHouseForLeave(); // M6 villa
         _state.Containers.Clear();
         self.Qualities.ClearSessionOptions();
         _qualityStamps.Clear();
@@ -980,6 +1004,11 @@ internal sealed partial class GameStateReducer
         if (closedVendor != 0)
         {
             Publish(new VendorClosed(closedVendor));
+        }
+
+        if (closedGuardian != 0)
+        {
+            Publish(new GuardianClosed(closedGuardian));
         }
 
         PublishTravel(travel);

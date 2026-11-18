@@ -5,6 +5,7 @@ using Lifestone.Client.Session.Casting;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
 using Lifestone.Client.Session.Mage;
+using Lifestone.Client.Session.Threat;
 using Lifestone.Client.Session.Vitals;
 using Lifestone.Client.World;
 using Lifestone.Data.Magic;
@@ -119,7 +120,8 @@ public sealed class KitRefusedRun : StationLeg
 /// (<see cref="ScriptLeg.GrantIfMissing"/>, counted, an item: D23). The keeper is the context's when it has one (the journey's counters then include this station's heals), else the station builds its own for the character's means.
 /// </summary>
 /// <param name="options">The script's options, or null for the defaults.</param>
-public sealed class HarmHealStation(HarmHealOptions? options = null) : IStation
+/// <param name="accountName">M6 1 h2: the account's name as the server stores it (the login name, never the secrets key; the host's, as the cast-facts station's <c>kitAccount</c>), or null: the level floor then applies only to a pack that holds the Life Magic focus. Hashed, never logged or printed.</param>
+public sealed class HarmHealStation(HarmHealOptions? options = null, string? accountName = null) : IStation
 {
     /// <inheritdoc />
     public string Name => "harm-heal";
@@ -128,11 +130,11 @@ public sealed class HarmHealStation(HarmHealOptions? options = null) : IStation
     public StationNeeds Needs { get; } = new(Where: StationWhere.Here, Peace: true, MinHealthPercent: JourneyPlans.FightHealthPercent, MinManaPercent: JourneyPlans.CastManaPercent);
 
     /// <inheritdoc />
-    public IStationRun Start(JourneyContext context) => new HarmHealRun(context, options);
+    public IStationRun Start(JourneyContext context) => new HarmHealRun(context, options, accountName);
 }
 
 /// <summary>The harm-heal station's run (see <see cref="HarmHealStation"/>).</summary>
-public sealed class HarmHealRun : StationLeg
+public sealed partial class HarmHealRun : StationLeg
 {
     /// <summary>M5 7 P7p: the reach, centre to centre, inside which a creature heard attacking keeps the harm from starting (Lifestone's own: the gate's wasp bolts came from 12 to 14 m).</summary>
     public const double HostileReachMetres = HostileReach.DefaultMetres;
@@ -149,13 +151,24 @@ public sealed class HarmHealRun : StationLeg
     /// <summary>M5 7 P7p: the longest the pre-check waits for the reach to clear, in seconds, the steps included.</summary>
     public const double HostileWaitSeconds = 60;
 
+    /// <summary>M6 6 I (<c>m5-station-defend</c>): the fight-backs the pre-check makes at most before it falls back to the step away (Lifestone's own, as the run leg's cap).</summary>
+    public const int MaxFightBacks = 3;
+
+    /// <summary>M6 6 I: the longest one fight-back takes, in seconds (the Academy's kill bound, as the run leg's fight-back).</summary>
+    public const double FightBackSeconds = AcademyRun.KillSeconds;
+
+    /// <summary>M6 6 I: the cast chance the fight-back's bolt must reach on the War Magic skill (the run leg's, <see cref="WarBoltPick.DefaultMinChance"/>).</summary>
+    public const double FightBackChance = WarBoltPick.DefaultMinChance;
+
     private readonly HarmHealOptions? _options;
+    private readonly string? _accountName;
     private string? _notStarted;
 
-    internal HarmHealRun(JourneyContext context, HarmHealOptions? options)
+    internal HarmHealRun(JourneyContext context, HarmHealOptions? options, string? accountName = null)
         : base("harm-heal", context)
     {
         _options = options;
+        _accountName = accountName;
     }
 
     /// <summary>The script (null before the run reached it).</summary>
@@ -169,6 +182,14 @@ public sealed class HarmHealRun : StationLeg
 
     /// <summary>The steps away the pre-check made (M5 7 P7p).</summary>
     public int StepsAway { get; private set; }
+
+    /// <summary>M6 6 I: the fight-backs the pre-check made (M5 D88).</summary>
+    public int FoughtBack { get; private set; }
+
+    /// <summary>M6 6 I: the attackers the fight-backs killed.</summary>
+    public int FightBackKills { get; private set; }
+
+    private string? _fightBackRefusal;
 
     /// <inheritdoc />
     public override string VerdictFields()
@@ -200,8 +221,8 @@ public sealed class HarmHealRun : StationLeg
         }
 
         // M4 P5a C7: a caster swap is a fighter: its mana order is a Mana Potion, then a rest. The context's keeper wins when the journey has one.
-        var keeper = Context.Keeper ?? new VitalsKeeper(S, Context.Spells, swap is null ? VitalsOptions.Default : VitalsOptions.Default.ForFighter(), Context.Log);
-        Harm = new HarmHealScript(S, Context.Spells, keeper, swap, _options ?? new HarmHealOptions(), Context.Log);
+        var keeper = Context.Keeper ?? new VitalsKeeper(S, Context.Spells, swap is null ? VitalsOptions.Default : VitalsOptions.Default.ForFighter(), Context.Log) { AccountName = _accountName };
+        Harm = new HarmHealScript(S, Context.Spells, keeper, swap, _options ?? new HarmHealOptions(), Context.Log) { AccountName = _accountName }; // M6 1 h2: both floors read the account
         Stage = "harm-heal";
         Log($"health {HealthText()}; kits {InPack(StationItems.KitWcid).Count}; potion stack {PotionStack().Size}; {(swap is null ? "no swap (the caster wields its wand)" : "the caster swap runs once around the casts")}");
         while (Harm.Step(S.Clock.Now) == HarmHealState.Running)
@@ -216,22 +237,42 @@ public sealed class HarmHealRun : StationLeg
 
     private string HealthText() => S.State.Self.Qualities.TryGetVitalLevels(1, out var current, out var max) ? $"{current}/{max}" : "unknown";
 
+    private double _listenFrom;
+
+    /// <summary>The watch forgets the names it heard, and the board's question begins after now (the same forgetting).</summary>
+    private void ForgetHeard(AttackWatch watch)
+    {
+        watch.Clear();
+        _listenFrom = Math.BitIncrement(S.Clock.Now);
+    }
+
     /// <summary>
     /// M5 7 P7p (D141, D88): checks before the harm that no creature attacks the player: it listens <see cref="HostileListenSeconds"/> (<see cref="AttackWatch"/>), then looks for one it heard within <see cref="HostileReachMetres"/>
     /// (<see cref="HostileReach"/>). One that stands there is named and the station steps away from it on foot (<see cref="StepAwayMetres"/>, at most <see cref="MaxStepAways"/> times, inside <see cref="HostileWaitSeconds"/>),
-    /// listening and looking again after each step; still attacked, the station fails <c>precondition:hostile-in-reach:&lt;name&gt;</c> before any harm. <c>TODO(m5-station-defend)</c>: D88 says fight back; a station has no
-    /// fight of its own (the hunt that left the attacker standing is where that belongs), so it steps away.
+    /// listening and looking again after each step; still attacked, the station fails <c>precondition:hostile-in-reach:&lt;name&gt;</c> before any harm.
+    /// M6 6 I (<c>m5-station-defend</c>, M5 D88): an attacker is fought first (<see cref="FightBack"/>: a War Magic bolt, the run leg's pick <see cref="WarBoltPick"/>); the step away stays the named fallback when no fight-back is possible (no caster wielded, no bolt
+    /// known, no mana, out of cast range, a timeout) or when <see cref="MaxFightBacks"/> are spent.
     /// </summary>
     private IEnumerable<ActionHandle?> ClearOfHostiles()
     {
         var began = S.Clock.Now;
+        _ = ThreatBoard.For(S); // M6 16 Q1: the threat board hears from the pre-check's start at the latest, as the pre-check's own watch does
+        _listenFrom = Math.BitIncrement(began); // what the watch hears begins after this clock; an attack heard before the watch began is not the pre-check's
         using var watch = new AttackWatch(S, l => Log("pre-check: " + l));
         watch.Start();
+        _fightBackWatch = watch; // M6 16 Q8: the skirmish's hits come from the pre-check's watch
         while (true)
         {
             foreach (var h in Pause(HostileListenSeconds)) { yield return h; }
 
-            if (!HostileReach.TryNearest(S.State, HostileReachMetres, watch.Names, out var guid, out var name, out var metres))
+            // M6 16 Q1: the session's threat board answers: the nearest living creature that may be attacked, of a name heard attacking her since the watch last began to listen (its start or its last clear), within the reach,
+            // where the session draws it; the later of two at one distance, as the old scan took it. The watch stays for its lines (each name heard, once) and the names in the pre-check's words.
+            var now = S.Clock.Now;
+            var query = ThreatQuery.OnHer(HostileReachMetres, now - _listenFrom) with { Since = _listenFrom, TiesToLast = true };
+            var answer = ThreatBoard.For(S).Ask(S, in query, now);
+            var near = answer.Kind == ThreatAnswerKind.Standing;
+            var (guid, name, metres) = near ? (answer.Guid, answer.Name, answer.Metres) : (0u, string.Empty, double.NaN);
+            if (!near)
             {
                 var heard = watch.Names.Count == 0 ? "no attack heard" : $"heard {string.Join(", ", watch.Names.Select(n => "'" + n + "'"))}, none within {HostileReachMetres:0} m";
                 Log(StepsAway == 0
@@ -242,18 +283,41 @@ public sealed class HarmHealRun : StationLeg
 
             var waited = S.Clock.Now - began;
             var token = name.Replace(' ', '_');
+
+            // M6 6 I (D88, check, act, check): fight back first; the step away is the fallback with its reason named.
+            if (waited <= HostileWaitSeconds)
+            {
+                if (FoughtBack >= MaxFightBacks)
+                {
+                    Log($"pre-check: no fight-back of '{name}' 0x{guid:X8}: {FoughtBack} fight-back(s) are spent (at most {MaxFightBacks}); the step away follows");
+                }
+                else
+                {
+                    _fightBackRefusal = null;
+                    foreach (var h in FightBack(guid, name, metres)) { yield return h; }
+
+                    if (_fightBackRefusal is null)
+                    {
+                        ForgetHeard(watch); // the fight's own notices are not the next look's
+                        continue; // listen again: the harm begins when no attacker is left
+                    }
+
+                    Log($"pre-check: no fight-back of '{name}' 0x{guid:X8}: {_fightBackRefusal}; the step away follows (the named fallback)");
+                }
+            }
+
             if (StepsAway >= MaxStepAways || waited > HostileWaitSeconds)
             {
                 _notStarted = "precondition:hostile-in-reach:" + token;
-                Check(false, string.Create(CultureInfo.InvariantCulture, $"precondition:hostile-in-reach: '{name}' 0x{guid:X8} at {metres:0.0} m still attacks after {StepsAway} step(s) away and {waited:0.0} s (TODO(m5-station-defend): no fight of the station's own to fight back with, D88); no harm was cast"));
+                Check(false, string.Create(CultureInfo.InvariantCulture, $"precondition:hostile-in-reach: '{name}' 0x{guid:X8} at {metres:0.0} m still attacks after {StepsAway} step(s) away, {FoughtBack} fight-back(s) and {waited:0.0} s; no harm was cast"));
                 yield break;
             }
 
             var here = S.State.Self.Position!.Value;
-            var there = S.State.Objects.TryGet(guid, out var o) && o.Position is { } p ? p : here;
+            var there = S.State.Objects.TryGet(guid, out var o) && S.Live.At(o) is { } p ? p : here; // M6 14: where its body is drawn (the one world picture)
             StepsAway++;
-            Log(string.Create(CultureInfo.InvariantCulture, $"pre-check: a hostile in reach: '{name}' 0x{guid:X8} at {metres:0.0} m attacks the player: no harm while it does (D141); TODO(m5-station-defend): no fight of the station's own, so it steps away {StepAwayMetres:0} m (step {StepsAway} of {MaxStepAways})"));
-            watch.Clear();
+            Log(string.Create(CultureInfo.InvariantCulture, $"pre-check: a hostile in reach: '{name}' 0x{guid:X8} at {metres:0.0} m attacks the player: no harm while it does (D141); it steps away {StepAwayMetres:0} m (step {StepsAway} of {MaxStepAways})"));
+            ForgetHeard(watch);
             if (HostileReach.TryAwayPoint(here, there, StepAwayMetres, out var away))
             {
                 var label = $"away from {name}";
@@ -265,7 +329,7 @@ public sealed class HarmHealRun : StationLeg
                     Log($"pre-check: the step away from '{name}' failed: {why}; listening again");
                 }
 
-                watch.Clear(); // the walk's own notices are not the next look's
+                ForgetHeard(watch); // the walk's own notices are not the next look's
             }
             else
             {
@@ -274,11 +338,73 @@ public sealed class HarmHealRun : StationLeg
         }
     }
 
+    /// <summary>
+    /// M6 6 I (<c>m5-station-defend</c>, M5 D88): the station's fight-back, check, act, check. Before: a caster wielded (<see cref="CombatModeGuard"/>) and a War Magic bolt the pack pays for (the skirmish's pick, its components judged on the
+    /// station's account); either missing sets the refusal (named) and the caller steps away. M6 16 Q8 (the one fight-back, part 2): then the skirmish fights the attacker (<see cref="Skirmish"/>, the travel leg's fight-back: the bolt by the
+    /// attacker's element, the spell's own reach, Life Magic for an attacker beyond it or one its bolts do not hurt, the component refusals, the magic mode before each cast, the wait after a bolt ended by its line, its bound
+    /// <see cref="FightBackSeconds"/>) with this station as its host (<c>HealStations.Skirmish.cs</c>). A fight it cannot go on with (no mana, the bound, no components, an attacker it leaves, no magic mode) is the refusal, named, and the
+    /// caller steps away; after: peace and one line.
+    /// </summary>
+    private IEnumerable<ActionHandle?> FightBack(uint guid, string name, double metres)
+    {
+        var modeProblem = CombatModeGuard.Check(CombatMode.Magic, S.State);
+        if (modeProblem is not null)
+        {
+            _fightBackRefusal = "no-caster: " + modeProblem;
+            yield break;
+        }
+
+        var spell = Skirmish.BoltFor(S.State.Objects.TryGet(guid, out var o) ? o.Weenie.WeenieClassId : 0, out var bolt, out var lack);
+        if (spell is null)
+        {
+            var skillNote = GearCasts.TryCurrentSkill(S.State.Self.Qualities, MageTemplate.WarMagic, out _, out var skillWhy) ? string.Empty : " (" + skillWhy + ")";
+            _fightBackRefusal = lack == BoltLack.NoComponents
+                ? bolt // M6 6 R1F: "no-components: ..." (the pack's check before, or ACE's 0x0400 earlier in this station)
+                : "no-war-spell: the spellbook holds no War Magic projectile" + skillNote;
+            yield break;
+        }
+
+        FoughtBack++;
+        var started = S.Clock.Now;
+        var (castsBefore, killsBefore) = (_fightBackCasts, FightBackKills);
+        Log(string.Create(CultureInfo.InvariantCulture, $"fight-back {FoughtBack}: '{name}' 0x{guid:X8} at {metres:0.0} m attacks the player: {spell.Name} ({bolt}); health {HealthText()}, mana {ManaText()} (M5 D88: always fight back an attacker)"));
+        foreach (var h in SkirmishFightBack(guid, name)) { yield return h; }
+
+        if (S.State.Self.Qualities.CombatMode != CombatModes.NonCombat)
+        {
+            var peace = S.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Automation);
+            foreach (var h in Until(() => peace.IsCompleted && S.State.Self.Qualities.CombatMode == CombatModes.NonCombat, 5)) { yield return h; }
+        }
+
+        Log(string.Create(CultureInfo.InvariantCulture, $"fight-back {FoughtBack}: ended{(_fightBackRefusal is null ? string.Empty : " (" + _fightBackRefusal + ")")}; casts={_fightBackCasts - castsBefore} kills={FightBackKills - killsBefore} s={S.Clock.Now - started:0.0}; mode {(S.State.Self.Qualities.CombatMode == CombatModes.NonCombat ? "peace" : "NOT peace")}"));
+    }
+
+    private string ManaText() => S.State.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxMana, out var current, out var max) ? $"{current}/{max}" : "unknown";
+
+    private bool Alive(uint guid) =>
+        guid != 0 && S.State.Objects.TryGet(guid, out var o) && o.Health is not <= 0f && o.Motion is not { Forward: WorldObjectTable.DeadMotionLowWord };
+
     /// <summary>The held stack of Potions of Healing (the first in the main pack), its guid and size, or 0 and -1.</summary>
     private (uint Guid, int Size) PotionStack()
     {
         var guid = InPack(StationItems.PotionWcid).FirstOrDefault();
         return guid == 0 ? (0u, -1) : (guid, StackOf(guid));
+    }
+
+    /// <summary>M6 6 FXD2 (6-D7): the first WeenieError code the chat carried since <paramref name="mark"/> (<c>S.State.Chat.Total</c> before the cast), or 0: a 0x0400 that arrives only as chat is a component refusal too, as the run leg reads it (<c>RefusalSince</c>).</summary>
+    private uint ChatRefusalSince(long mark)
+    {
+        var chat = S.State.Chat;
+        var fresh = (int)Math.Min(chat.Count, chat.Total - mark);
+        for (var i = chat.Count - fresh; i < chat.Count; i++)
+        {
+            if (chat[i].Kind == ChatKind.WeenieError)
+            {
+                return chat[i].ChatType;
+            }
+        }
+
+        return 0;
     }
 }
 
@@ -344,7 +470,8 @@ public sealed class CastFactsRun : StationLeg
     protected override IEnumerable<ActionHandle?> Script()
     {
         Require(GearScenario.WrongCharacter(S) is null, GearScenario.WrongCharacter(S) ?? string.Empty);
-        _kit = GearKit.Build(Context.Spells, _account, ground: Context.Dungeon); // M5 3 w1 (D46): the kit of the journey's --fight-ground, not the default alone
+        var heldNow = GearInventory.CountAll(S.State, out _);
+        _kit = GearKit.Build(Context.Spells, _account, ground: Context.Dungeon, holdsFocus: school => AccountFormula.HoldsFocus(heldNow, school)); // M5 3 w1 (D46): the kit of the journey's --fight-ground, not the default alone; M6 6 MG (m6-kit-account-formula): a school whose focus the pack does not hold is kitted on the account's full formula
         var spells = Context.Spells;
         var inventory = S.State.Self.Inventory;
 
@@ -366,16 +493,16 @@ public sealed class CastFactsRun : StationLeg
         // The plan: every cast chosen from the read model before anything is spent.
         Stage = "plan";
         // M5 3 F6 (D46): each pick is a level the pack can pay for (the ground's kit carries the plan's scarabs only; ACE refuses any other 0x0400 before the skill is looked at, Player_Magic.cs:404-408 and 1227-1248 @95ef426d).
-        var creatureFloor = new PackFloor(S.State, spells);
+        var creatureFloor = new PackFloor(S.State, spells, _account);
         var creaturePick = GearCasts.Pick(q, ProfileRole.CreatureBuff, out var creatureWhy, creatureFloor);
         Require(creaturePick is not null, $"creature: no spell passes the {GearCasts.MinChance} rule: {creatureWhy}");
-        var lifeFloor = new PackFloor(S.State, spells);
+        var lifeFloor = new PackFloor(S.State, spells, _account);
         var lifePick = GearCasts.Pick(q, ProfileRole.LifeBuff, out var lifeWhy, lifeFloor);
         Require(lifePick is not null, $"life: no spell passes the {GearCasts.MinChance} rule: {lifeWhy}");
-        var itemFloor = new PackFloor(S.State, spells);
+        var itemFloor = new PackFloor(S.State, spells, _account);
         var itemPick = GearCasts.Pick(q, ProfileRole.ItemBuffWand, out var itemWhy, itemFloor);
         Require(itemPick is not null, $"item: no spell passes the {GearCasts.MinChance} rule: {itemWhy}");
-        var fizzleFloor = new PackFloor(S.State, spells);
+        var fizzleFloor = new PackFloor(S.State, spells, _account);
         var fizzlePick = GearCasts.PickFizzle(q, S.State.Self.Spellbook, out var fizzleWhy, fizzleFloor);
         foreach (var passedOver in creatureFloor.Skipped.Concat(lifeFloor.Skipped).Concat(itemFloor.Skipped))
         {
@@ -473,7 +600,7 @@ public sealed class CastFactsRun : StationLeg
             foreach (var h in CastOnce(fizzlePick.Spell.Id, 0, "cast-facts fizzle", proof: null)) { yield return h; }
 
             var fizzle = _attempt!.Handle!;
-            _made.Add((fizzleInfo, fizzlePick.Skill, LevelFloor.HeldFor(S.State, fizzleInfo.School) is not null));
+            _made.Add((fizzleInfo, fizzlePick.Skill, LevelFloor.HeldFor(S.State, fizzleInfo.School) is not null)); // a focus flag, not a floor: HeldFor (no account) is non-null only when the pack holds the school's focus (M6 1 h2)
             Require(
                 fizzle.Outcome is { Kind: ActionOutcomeKind.ServerError, Code: GearCasts.FizzleCode },
                 $"fizzle: expected a ServerError with WeenieError 0x0402 for {fizzlePick.Spell.Name} ({fizzlePick.Spell.Id}), got {Said(fizzle, fizzleMark)}");
@@ -619,7 +746,7 @@ public sealed class CastFactsRun : StationLeg
     /// <summary>The gear scenario over the same session (its cast off, embedded: it ends in the world), stepped to its end; <paramref name="done"/> gets it first.</summary>
     private IEnumerable<ActionHandle?> RunGear(string label, Action<GearScenario> done)
     {
-        var gear = new GearScenario(_kit!, Context.Log, endSession: false, cast: false) { RequireCharacter = true, NoGrant = true }; // M5 item 3 c1: the cast-facts station is the mage's, and play grants nothing
+        var gear = new GearScenario(_kit!, Context.Log, endSession: false, cast: false) { RequireCharacter = true, NoGrant = true, Account = _account }; // M5 item 3 c1: the cast-facts station is the mage's, and play grants nothing
         done(gear);
         for (;;)
         {
@@ -680,7 +807,7 @@ public sealed class CastFactsRun : StationLeg
         foreach (var h in CastOnce(pick.Spell.Id, castTarget, "cast-facts " + label, form == CastForm.Self ? null : _proof, tryFloor)) { yield return h; }
 
         cast = _attempt!.Handle!;
-        _made.Add((info, pick.Skill, LevelFloor.HeldFor(S.State, info.School) is not null));
+        _made.Add((info, pick.Skill, LevelFloor.HeldFor(S.State, info.School) is not null)); // a focus flag, not a floor (M6 1 h2): the burn is rolled on the foci formula only with the focus, else on the account's (NoBurnProbability takes both)
         if (form == CastForm.Self)
         {
             Require(cast.Outcome is { Kind: ActionOutcomeKind.Confirmed }, $"{label} cast of {pick.Spell.Name} ({pick.Spell.Id}): {Said(cast, chatMark)}");

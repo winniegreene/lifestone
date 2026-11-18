@@ -182,6 +182,58 @@ public sealed class FightF24Tests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void M6_14_gate_lapse_between_kills_the_horizon_and_the_safety_are_read_from_the_live_numbers()
+    {
+        // the Barracks of 2026-11-13: a kill 21.5 s; Bludgeon Bane VI a level VI self cast of 3.78 s (the ladder's cast_seconds_self) at a chance of 0.964; 6.4 damage a second; health 120 of 184; the heal line 50 % (92)
+        var plan = FightScenario.BetweenKillsPlan(21.5, 3.78, 0.964, 120, 6.4, 92);
+        Assert.Equal(3.78 / 0.964, plan.LandSeconds, 6); // the expected seconds to land it, fizzles retried
+        Assert.Equal(30 + 21.5 + (3.78 / 0.964), plan.Horizon(30), 6); // under the hard floor in the middle of the next kill otherwise
+        Assert.Equal(21.5 + plan.LandSeconds, plan.Horizon(0), 6); // no hard floor: it must still outlast the next kill and its own recast
+        Assert.Equal(120 - (6.4 * 3.78 / 0.964), plan.HealthAfter, 6);
+        Assert.True(plan.Safe);
+        Assert.False(FightScenario.BetweenKillsPlan(21.5, 3.78, 0.964, 110, 6.4, 92).Safe); // 110 less 25.1 is under the line: the heal first, the line at the first safe moment
+        Assert.False(FightScenario.BetweenKillsPlan(21.5, 3.78, 0.5, 120, 6.4, 92).Safe); // a poor chance doubles the time standing: 120 less 48.4
+        Assert.True(double.IsPositiveInfinity(FightScenario.LandSeconds(3.78, 0)));
+    }
+
+    [Fact]
+    public void M6_14_gate_lapse_under_constant_fire_a_line_is_recast_between_kills_before_it_falls_under_the_hard_floor()
+    {
+        // the Barracks' shape: a hostile always in reach (tuskers 12 m off and a hit every second), so no lull comes; Quickness Self has 40 s left, over the 30 s hard floor, Willpower Self 1,500 s
+        var r = new FightManaTests.Rig(mana: 400, stamina: 200, knowsDrain: true) { HitsToKill = 2, Fight = new FightOptions { Kills = 50 } };
+        r.Caster.ManaRegenPerSecond = 40;
+        r.Caster.HealthPerCast = 20;
+        for (var i = 0; i < 8; i++)
+        {
+            r.AddTusker(12 + (i * 0.5f));
+        }
+
+        Prime(r, l => l.Name == "Quickness Self" ? 40 : 1500);
+        var scenario = Armed(r);
+        var last = double.NegativeInfinity;
+        r.Run(scenario, 40, 0.1, () =>
+        {
+            if (r.Now - last >= 1)
+            {
+                last = r.Now;
+                Hit(r, 1);
+            }
+
+            return BuffCasts(r).Contains("Quickness Self");
+        });
+        Dump(r);
+
+        var between = Assert.Single(r.Log.Lines, l => l.Contains("buff refresh: between kills: Quickness Self has ", StringComparison.Ordinal));
+        Assert.Contains("the 30 s hard floor, the next kill's ", between, StringComparison.Ordinal);
+        Assert.Contains("over the heal line", between, StringComparison.Ordinal);
+        Assert.Contains("recast now, with ", between, StringComparison.Ordinal);
+        Assert.DoesNotContain(r.Log.Lines, l => l.Contains("buff refresh: hard: Quickness Self", StringComparison.Ordinal)); // never under the floor: it went at the kill before
+        Assert.Equal(["Quickness Self"], BuffCasts(r)); // the line with time to spare is left alone
+        Assert.True(((IStoppableFight)scenario).Kills >= 1, "it went between kills");
+        Assert.Null(scenario.StopReason);
+    }
+
+    [Fact]
     public void The_hard_margin_is_a_registered_option_defaulting_to_30_s()
     {
         Assert.Equal(30, new BuffOptions().HardMarginSeconds); // M5 7 F25 (D93): lowered from 120 s, the emergency case's floor

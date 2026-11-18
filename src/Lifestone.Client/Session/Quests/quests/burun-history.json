@@ -1,0 +1,435 @@
+{
+  "key": "burun-history",
+  "name": "Burun History (the three reports of the Hidden Entrance and the Underway, handed to Ydnew in Yanshi)",
+  "giver": {
+    "wcid": 28094,
+    "name": "Ydnew"
+  },
+  "start": {
+    "cell": "0xA9B40019",
+    "point": [
+      84.0,
+      7.7,
+      94.0
+    ],
+    "name": "Holtburg's lifestone point"
+  },
+  "steps": [
+    {
+      "kind": "go",
+      "what": "to the Swamp Temple Place Portal, south-east of Yanshi",
+      "place": {
+        "cell": "0xB872001D",
+        "point": [
+          84.656,
+          102.912,
+          19.3024
+        ],
+        "name": "in front of the Swamp Temple Place Portal"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 5): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z, angles_W, angles_Z FROM landblock_instance WHERE guid = 0x7B872003: weenie 12558; the point is the hop's front side of it",
+      "todo": "TODO(m6-burun-surface-walk): the 957 m from the Yanshi arrival to the Swamp Temple Place Portal and the 451 m from its drop to the Hidden Entrance are no place of the travel file, so this go stops go:town-network by name; neither walk is established"
+    },
+    {
+      "kind": "use",
+      "what": "through the Swamp Temple Place Portal",
+      "place": {
+        "cell": "0xB661003D",
+        "point": [
+          183.624,
+          116.438,
+          22.005
+        ],
+        "name": "the arrival of the Swamp Temple Place Portal"
+      },
+      "target": {
+        "wcid": 12558,
+        "name": "Swamp Temple Place Portal"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 5): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM weenie_properties_position WHERE object_Id = 12558 AND position_Type = 2: destination; no level gate",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Hidden Entrance",
+      "place": {
+        "cell": "0xB9610012",
+        "point": [
+          48.587,
+          25.331,
+          5.905
+        ],
+        "name": "in front of the Hidden Entrance"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 5): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z, angles_W, angles_Z FROM landblock_instance WHERE guid = 0x7B961000: weenie 28096, no level gate and no quest restriction; the wiki's blueprints are checked by nothing in the pinned data (facts-fetch2.md section 8 item 7: a live check settles it); the point is the portal's front side",
+      "todo": "TODO(m6-burun-surface-walk): the 957 m from the Yanshi arrival to the Swamp Temple Place Portal and the 451 m from its drop to the Hidden Entrance are no place of the travel file, so this go stops go:town-network by name; neither walk is established"
+    },
+    {
+      "kind": "use",
+      "what": "enter the Hidden Entrance",
+      "place": {
+        "cell": "0x017D016D",
+        "point": [
+          50,
+          -210,
+          0.005
+        ],
+        "name": "the arrival of the Hidden Entrance"
+      },
+      "target": {
+        "wcid": 28096,
+        "name": "Hidden Entrance"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 5): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM weenie_properties_position WHERE object_Id = 28096 AND position_Type = 2: destination; no level gate",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the report 28120",
+      "place": {
+        "cell": "0x017D0101",
+        "point": [
+          28.6309,
+          -9.21074,
+          -35.9366
+        ],
+        "name": "where the report 28120 lies"
+      },
+      "target": {
+        "wcid": 28120,
+        "name": "Report to Niarltah"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 5): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x7017D001: weenie 28120, cell 0x017D0101; its pick-up quest NoteBurunHistory1 (weenie_properties_string type 33; quest row min_Delta 72000, max_Solves -1)",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the report 28120 from the floor",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 28120,
+        "name": "Report to Niarltah"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 5): the item's own Quest string NoteBurunHistory1 gates the pick-up for 20 h (ACE Player_Inventory.cs:1249-1262 @95ef426d); refused, the run stops pick-up:too-recent",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Underway portal",
+      "place": {
+        "cell": "0x017D0100",
+        "point": [
+          29.9,
+          -6.5,
+          -35.995
+        ],
+        "name": "in front of the Underway portal"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 5): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z, angles_W, angles_Z FROM landblock_instance WHERE guid = 0x7017D000: weenie 28103, cell 0x017D0100, beside the report 28120; the point is 2.9 m from it on the side she comes from (its facing side is a wall: the dat test's physics refused it)",
+      "todo": null
+    },
+    {
+      "kind": "use",
+      "what": "enter the Underway",
+      "place": {
+        "cell": "0x017E019E",
+        "point": [
+          40,
+          -260,
+          0.005
+        ],
+        "name": "the arrival of the Underway"
+      },
+      "target": {
+        "wcid": 28103,
+        "name": "Underway"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 5): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM weenie_properties_position WHERE object_Id = 28103 AND position_Type = 2: destination; MinLevel 40 (weenie_properties_int type 86), the file's level",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the report 28121",
+      "place": {
+        "cell": "0x017E0140",
+        "point": [
+          70,
+          -80,
+          -11.9366
+        ],
+        "name": "where the report 28121 lies"
+      },
+      "target": {
+        "wcid": 28121,
+        "name": "Report to Niarltah"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 5): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x7017E01C: weenie 28121, cell 0x017E0140; its pick-up quest NoteBurunHistory2 (weenie_properties_string type 33; quest row min_Delta 72000, max_Solves -1)",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the report 28121 from the floor",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 28121,
+        "name": "Report to Niarltah"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 5): the item's own Quest string NoteBurunHistory2 gates the pick-up for 20 h (ACE Player_Inventory.cs:1249-1262 @95ef426d); refused, the run stops pick-up:too-recent",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the report 28122",
+      "place": {
+        "cell": "0x017E0123",
+        "point": [
+          40,
+          -3.29279,
+          -11.9366
+        ],
+        "name": "where the report 28122 lies"
+      },
+      "target": {
+        "wcid": 28122,
+        "name": "Report to Niarltah"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 5): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x7017E010: weenie 28122, cell 0x017E0123; its pick-up quest NoteBurunHistory3 (weenie_properties_string type 33; quest row min_Delta 72000, max_Solves -1)",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the report 28122 from the floor",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 28122,
+        "name": "Report to Niarltah"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 5): the item's own Quest string NoteBurunHistory3 gates the pick-up for 20 h (ACE Player_Inventory.cs:1249-1262 @95ef426d); refused, the run stops pick-up:too-recent",
+      "todo": null
+    },
+    {
+      "kind": "recall",
+      "what": "home by Lifestone Recall",
+      "place": {
+        "cell": "0xA9B40019",
+        "point": [
+          84.0,
+          7.7,
+          94.0
+        ],
+        "name": "Holtburg's lifestone point"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the spell id is Fighter/RecallHome.cs LifestoneRecallSpell; at from_level 78 she has it, and her lifestone is Holtburg's (the home.lifestone_point of the ladder's grounds); the Underway's own ways out are level 80 rooms she would have to cross again; a spell she lacks stops recall:not-known",
+      "todo": null,
+      "spell": 1635
+    },
+    {
+      "kind": "go",
+      "what": "to Ydnew in Yanshi",
+      "place": {
+        "cell": "0xB470014F",
+        "point": [
+          124.32,
+          90.0065,
+          42.005
+        ],
+        "name": "Ydnew's place"
+      },
+      "target": {
+        "wcid": 28094,
+        "name": "Ydnew"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 5): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x7B470071: weenie 28094, cell 0xB470014F",
+      "todo": "TODO(m6-yanshi-route): the travel file has no place for Yanshi (hub portal 42847, arrival 0xB46F001E, Ydnew 165 m away, Adrana 88 m), so this go stops go:town-network by name until one is added"
+    },
+    {
+      "kind": "give",
+      "what": "give Ydnew the report 28120",
+      "place": null,
+      "target": {
+        "wcid": 28094,
+        "name": "Ydnew"
+      },
+      "item": {
+        "wcid": 28120,
+        "name": "Report to Niarltah"
+      },
+      "expect": {
+        "reply": "This will provide us with more information than we currently have. You are to be thanked for your efforts.",
+        "stamp": null,
+        "item": {
+          "wcid": 28068,
+          "name": "Guardian's Uniform"
+        }
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 5): weenie_properties_emote id 49522 (object 28094, category 6 Give, weenie_Class_Id 28120): Tell, Give 28068, Goto Level (emote 49537: AwardLevelProportionalXP percent 0.175, max_64 4,500,000 for level 1-125); no quest test on the hand-in; AllowGive true (weenie_properties_bool type 8)",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "give Ydnew the report 28121",
+      "place": null,
+      "target": {
+        "wcid": 28094,
+        "name": "Ydnew"
+      },
+      "item": {
+        "wcid": 28121,
+        "name": "Report to Niarltah"
+      },
+      "expect": {
+        "reply": "This will provide us with more information than we currently have. You are to be thanked for your efforts.",
+        "stamp": null,
+        "item": {
+          "wcid": 28069,
+          "name": "Aphus Sun Guard"
+        }
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 5): weenie_properties_emote id 49523 (object 28094, category 6 Give, weenie_Class_Id 28121): Tell, Give 28069, Goto Level (emote 49537: AwardLevelProportionalXP percent 0.175, max_64 4,500,000 for level 1-125); no quest test on the hand-in; AllowGive true (weenie_properties_bool type 8)",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "give Ydnew the report 28122",
+      "place": null,
+      "target": {
+        "wcid": 28094,
+        "name": "Ydnew"
+      },
+      "item": {
+        "wcid": 28122,
+        "name": "Report to Niarltah"
+      },
+      "expect": {
+        "reply": "This will provide us with more information than we currently have. You are to be thanked for your efforts.",
+        "stamp": null,
+        "item": {
+          "wcid": 28070,
+          "name": "Silken Wrap"
+        }
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 5): weenie_properties_emote id 49524 (object 28094, category 6 Give, weenie_Class_Id 28122): Tell, Give 28070, Goto Level (emote 49537: AwardLevelProportionalXP percent 0.175, max_64 4,500,000 for level 1-125); no quest test on the hand-in; AllowGive true (weenie_properties_bool type 8)",
+      "todo": null
+    }
+  ],
+  "done": {
+    "stamp": null,
+    "reply": null,
+    "item": {
+      "wcid": 28070,
+      "name": "Silken Wrap"
+    }
+  },
+  "timer_seconds": 72000,
+  "level": {
+    "min": 40,
+    "max": null
+  },
+  "experience": {
+    "amount": null,
+    "kind": "proportional",
+    "max": 4500000,
+    "percent": 0.175,
+    "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 5): weenie_properties_emote 49535 (object 28094, TestSuccess of InqIntStat level 1-125): AwardLevelProportionalXP percent 0.175, max_64 4,500,000, for EACH report (three here; at level 78 and up the cap pays 4.5 M each); quest_xp_modifier and xp_modifier are 1 (the lead's read of the live database, D118)"
+  },
+  "sources": [
+    "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 5): three reports only (28120, 28121, 28122: cache/m6/8/brief-b2b.md): the seven others lie in the Tunnels and the Halls among levels 100 to 135; 28119 pays nothing (Ydnew has no Give emote for it)",
+    "timer_seconds 72000: the reports' pick-up quests (NoteBurunHistory1 to 3, quest rows min_Delta 72000, max_Solves -1); the hand-in has no timer and no stamp check; the ladder band runs it once (D118)",
+    "level: min 40 is the Underway portal 28103's MinLevel (weenie_properties_int type 86); the Hidden Entrance has none",
+    "ladder: from 78, before 126, once (cache/m6/8/brief-b2b.md, D118): at 78 and up each report pays the 4.5 M cap; the Hidden Entrance already holds level 80 swarms",
+    "the order: no locked door, no lever on the way (facts-fetch2.md section 5: 0x017D has no door, 0x017E one doorarchall, unlocked); the two rooms' walks are TownNetworkWalkDatTests.Atlan.cs"
+  ],
+  "ladder": {
+    "from_level": 78,
+    "before_level": 126,
+    "once": true
+  }
+}

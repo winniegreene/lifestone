@@ -254,6 +254,7 @@ public sealed partial class SessionHost : Node
     /// <inheritdoc/>
     public override void _Process(double delta)
     {
+        using var framePhase = Lifestone.Game.Diagnostics.FramePhases.Session(); // M6 16 Eperf2: this call's share of a long frame
         if (_session is null || _quitStarted)
         {
             return;

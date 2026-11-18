@@ -263,6 +263,7 @@ public sealed partial class PlayChecks
         _main.RemoveChild(host);
         host.Free();
         Check("the-dial-leaves-the-movement-keys-unlocked", !keys.Locked, $"keys_locked={keys.Locked}");
+        await AutomationMenuChecksAsync(session, ui); // M6 6 MD2: the automation menu (the Jobs button, its rows, errand, the inspector's Job line, stop) and its frame 11 (PlayChecks.Menu.cs)
     }
 
     /// <summary>An idle station for the dial's check: it runs until the check ends.</summary>

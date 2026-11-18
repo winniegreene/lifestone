@@ -264,6 +264,7 @@ public sealed class RecoveryRulesTests
     // ---------------------------------------------------------------------------------------------- the rule allocates nothing
 
     [Fact]
+    [Trait("Tier", "Timing")] // m6-alloc-flake-recoveryrules: a zero-byte allocation count; the untagged copy of the shared name (FightPickerTests and ManaOrderTests are already tiered)
     public void A_decision_allocates_nothing()
     {
         var inputs = new[] { In(43), In(100), In(100, kit: 0), In(100, kit: 0, potions: 0), In(188), In(150, active: true), In(75, potions: 0), In(47, potions: 0) };

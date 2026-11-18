@@ -152,6 +152,10 @@ public sealed partial class PlayerMovementController : IPlayerMovementIntents, I
     /// <inheritdoc/>
     public bool OnGround => _player.HasContact && _player.OnWalkable;
 
+    /// <inheritdoc/>
+    /// <remarks>Placed in a cell (not waiting on a placement) and not <see cref="OnGround"/>; an unplaced body is nowhere, not in the air.</remarks>
+    public bool InTheAir => _player.Cell is not null && !_player.PlacementPending && !OnGround;
+
     /// <summary>
     /// What the movement stack believes right now, in one line: the held keys, the interpreter's forward command and speed, the player's velocity and transient
     /// state. A walker that stalls logs it (the walk check's failure, <c>RoutePlay</c>'s stuck warning) so a stall can be told from a wall.
@@ -164,6 +168,12 @@ public sealed partial class PlayerMovementController : IPlayerMovementIntents, I
             System.Globalization.CultureInfo.InvariantCulture,
             $"enabled={Enabled} server={ControlledByServer} hold_run={HoldRun} keys(substates={_substates.Count} turns={_turns.Count}) raw(fwd=0x{raw.ForwardCommand:X8} hold={raw.CurrentHoldKey}) interpreted(fwd=0x{interpreted.ForwardCommand:X8} speed={interpreted.ForwardSpeed:F2}) pending={_motion.MotionsPending} moving_to={_player.IsMovingTo} velocity={_player.Velocity} cached={_player.CachedVelocity} transient={_player.TransientState} active={_player.IsActive} in_cell={_player.Cell is not null} placement_pending={_player.PlacementPending} now={_now:F3} last_step={LastStepTime:F3}");
     }
+
+    /// <inheritdoc/>
+    public string? MotionText => DescribeMotion();
+
+    /// <inheritdoc/>
+    public bool? ServerMoving => ControlledByServer && IsMovingTo;
 
     /// <summary>The controller's clock (seconds): the latest of the times it was given and the world's time.</summary>
     public double Now => _now;

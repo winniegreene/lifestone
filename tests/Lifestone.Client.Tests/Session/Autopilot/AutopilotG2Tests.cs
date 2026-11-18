@@ -1,4 +1,5 @@
 using Lifestone.Client.Session.Autopilot;
+using Lifestone.Client.Session.Vitals;
 using Lifestone.Client.Tests.Session.Mage;
 using Lifestone.Tests.Shared.Net;
 
@@ -22,6 +23,6 @@ public sealed class AutopilotG2Tests
         rig.R.Raw(AceWireWriters.ServerMessage("Critical hit! Virindi Mage scorches you for 31 points with Flame Bolt.", 7));
         Assert.True(watch.InReach(rig.Now, out var what));
         Assert.Contains("Virindi Mage attacked", what, StringComparison.Ordinal);
-        Assert.Equal(3.1, watch.IncomingPerSecond(rig.Now), 3);
+        Assert.Equal(31 / RecentHits.SeedAttackSeconds, watch.IncomingPerSecond(rig.Now), 3); // M6 7 Y: the pin moved from 3.1 (31 over the 10 s window) to one hit over the seed interval: the guard and the retreat read the recent hits
     }
 }

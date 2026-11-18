@@ -25,10 +25,11 @@ public sealed partial class ResupplyStationTests
         private uint _seq = 700;
         private int _seen;
 
-        public GearHome(int emptyStones = 24, bool refuseHeldMove = false)
+        public GearHome(int emptyStones = 24, bool refuseHeldMove = false, bool refuseSceptre = false)
         {
             Home = new Home(Den, 1000);
             RefuseHeldMove = refuseHeldMove;
+            RefuseSceptre = refuseSceptre;
             var r = Home.Vendor.R;
             r.PrivateInt(25, 81); // level 81: the den's plan at 81 is Fire (element 0x10)
             Components = Pack("Pack");
@@ -48,6 +49,9 @@ public sealed partial class ResupplyStationTests
         public Home Home { get; }
 
         public bool RefuseHeldMove { get; }
+
+        /// <summary>M6 14 (m6-caster-spend): ACE refuses the sceptre's wield as under a wield requirement: 0x00A0 with SkillTooLow 0x0468 (Player_Inventory.cs:1655-1661 @95ef426d), the sceptre left in its pack.</summary>
+        public bool RefuseSceptre { get; }
 
         public uint Components { get; }
 
@@ -96,6 +100,12 @@ public sealed partial class ResupplyStationTests
                         Appraise(s.Guid);
                         break;
                     case FakeSendKind.GetAndWieldItem:
+                        if (RefuseSceptre && s.Guid == Sceptre)
+                        {
+                            r.Raw(AceM3Writers.InventoryServerSaysFailed(VendorRig.Player, ++_seq, s.Guid, SelfEquipJudge.SkillTooLow));
+                            break;
+                        }
+
                         r.Raw(AceM3Writers.PublicUpdateInstanceId(++_wield, s.Guid, 3, 0));
                         r.Raw(AceM3Writers.PublicUpdatePropertyInt(_wield, s.Guid, 10, 0));
                         r.Server((p, q) => AceM3Writers.WieldObject(p, q, s.Guid, (int)s.Amount));
@@ -191,5 +201,46 @@ public sealed partial class ResupplyStationTests
         Assert.True(g.Home.Logged("inventory: the server refused the move of a wielded item after it had unwielded it"));
         Assert.True(g.Home.Logged("the hands hold nothing now (the server's updates)"));
         Assert.True(g.Home.Logged("gear: the hands hold no caster after the refused move (ACE's fallback put 0x" + g.Wand.ToString("X8", CultureInfo.InvariantCulture)));
+    }
+
+    [Fact]
+    public void M6_14_a_caster_swap_in_the_magic_mode_sets_peace_itself_and_the_sceptre_is_wielded_on_the_same_visit()
+    {
+        // Live 2026-11-14: the Fire Sceptre's swap waited two visits ("gear: no swap: the combat mode is 8, not peace") because she stood in the magic mode at home. Check, act, check: the station asks peace, reads the
+        // server's answer, then swaps.
+        var g = new GearHome(emptyStones: 0);
+        g.Home.Vendor.AnswersCombatMode = true;
+        g.Home.Vendor.R.CombatModeIs(CombatModes.Magic);
+        Assert.Equal(ScenarioStatus.Succeeded, g.Run(g.Home.Start(new ResupplyOptions(true, () => [], Gear: true))));
+
+        Assert.Equal(g.Sceptre, g.Inventory.EquippedAt(HeldSlot));
+        Assert.Contains(g.Home.Lines, l => l.Contains("setting peace for the swap of 'Fire Sceptre'", StringComparison.Ordinal));
+        Assert.Contains(g.Home.Lines, l => l.Contains("gear: peace for the swap: ", StringComparison.Ordinal));
+        Assert.DoesNotContain(g.Home.Lines, l => l.Contains("waits for the next visit", StringComparison.Ordinal));
+        Assert.True(g.Home.Vendor.R.H.Net.Of(FakeSendKind.ChangeCombatMode).Count >= 1);
+    }
+
+    [Fact]
+    public void M6_14_caster_spend_a_refused_wield_is_a_named_failure_the_old_caster_goes_back_on_and_the_sceptre_is_held_back_for_the_run()
+    {
+        // The check after the swap: ACE refuses the sceptre (0x00A0, SkillTooLow 0x0468: a wield requirement the client read wrong), so the server's answer is a refusal and the hands do not hold it.
+        var g = new GearHome(emptyStones: 0, refuseSceptre: true);
+        var heldBack = Lifestone.Client.Session.Quartermaster.Wardrobe.For(g.Home.Vendor.State).HeldBack; // M6 16 E5e2: the session's one memory, where the journey carried its own
+        var sceptre = g.Sceptre.ToString("X8", CultureInfo.InvariantCulture);
+        Assert.Equal(ScenarioStatus.Succeeded, g.Run(g.Home.Start(new ResupplyOptions(true, () => [], Gear: true))));
+
+        Assert.Equal(g.Wand, g.Inventory.EquippedAt(HeldSlot)); // the Wand back in the hands
+        var failed = Assert.Single(g.Home.Lines, l => l.Contains("gear: FAILED", StringComparison.Ordinal));
+        Assert.Contains($"gear: FAILED {ResupplyRun.CasterWieldFailed}: the wield of 'Fire Sceptre' 0x{sceptre} did not land: the server's answer ", failed, StringComparison.Ordinal);
+        Assert.Contains("the server's answer ServerError (code 0x468)", failed, StringComparison.Ordinal); // ACE's 0x00A0 with SkillTooLow
+        Assert.True(heldBack.IsHeldBack(g.Sceptre, out var why));
+        Assert.StartsWith(ResupplyRun.CasterWieldFailed + ": ", why, StringComparison.Ordinal);
+        Assert.Equal(2, g.Home.Vendor.R.H.Net.Of(FakeSendKind.GetAndWieldItem).Count); // the sceptre, then the Wand back
+
+        // The next visit of the run: the pick passes it over by name and sends nothing for it.
+        Assert.Equal(ScenarioStatus.Succeeded, g.Run(g.Home.Start(new ResupplyOptions(true, () => [], Gear: true))));
+        Assert.Equal(g.Wand, g.Inventory.EquippedAt(HeldSlot));
+        Assert.Equal(2, g.Home.Vendor.R.H.Net.Of(FakeSendKind.GetAndWieldItem).Count);
+        Assert.True(g.Home.Logged($"1 held back for the run ('Fire Sceptre' 0x{sceptre}: {ResupplyRun.CasterWieldFailed}: "));
     }
 }

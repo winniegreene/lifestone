@@ -1,0 +1,142 @@
+{
+  "ThreatDetectors": {
+    "src/Lifestone.Client/Session/Autopilot/AutopilotScenario.cs": 1,
+    "src/Lifestone.Client/Session/Autopilot/HostileWatch.cs": 2,
+    "src/Lifestone.Client/Session/Mage/DeathHandler.cs": 1,
+    "src/Lifestone.Client/Session/Mage/RebuffDriver.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/AttackWatch.cs": 4,
+    "src/Lifestone.Client/Session/Scenarios/FightScenario.SelfDefence.cs": 2,
+    "src/Lifestone.Client/Session/Scenarios/FightScenario.TargetSwitch.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/FightTally.cs": 2,
+    "src/Lifestone.Client/Session/Scenarios/HuntScenario.SelfDefence.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/HuntTally.cs": 2,
+    "src/Lifestone.Client/Session/Scenarios/Journey/HealStations.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/Journey/QuestStepLeg.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/Journey/TravelLegSafety.cs": 1,
+    "src/Lifestone.Client/Session/State/GameStateReducer.Combat.cs": 2,
+    "src/Lifestone.Client/Session/Threat/ThreatBoard.cs": 1,
+    "src/Lifestone.Client/Session/Vitals/HarmHealScript.cs": 1
+  },
+  "HealDeciders": {
+    "src/Lifestone.Client/Session/Autopilot/AutopilotVitalsGuard.cs": 2,
+    "src/Lifestone.Client/Session/Scenarios/FightScenario.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/FightScenario.Emergency.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/FightScenario.HealPick.cs": 1
+  },
+  "ManaDeciders": {
+    "src/Lifestone.Client/Session/Autopilot/SurvivalRule.ManaLoop.cs": 2,
+    "src/Lifestone.Client/Session/Mage/BuffCycle.cs": 2,
+    "src/Lifestone.Client/Session/Scenarios/FightScenario.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/FightScenario.ManaLoop.cs": 9,
+    "src/Lifestone.Client/Session/Scenarios/Journey/RungChangeStation.Recharge.cs": 5,
+    "src/Lifestone.Client/Session/Vitals/VitalsKeeper.cs": 1
+  },
+  "WayOutLine": {
+    "src/Lifestone.Client/Session/Autopilot/ApproachCrossing.cs": 1,
+    "src/Lifestone.Client/Session/Autopilot/AutopilotScenario.Retreat.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/Journey/TravelLegSafety.cs": 1
+  },
+  "BuffPasses": {
+    "src/Lifestone.Client/Session/Autopilot/AutopilotScenario.Ladder.cs": 1,
+    "src/Lifestone.Client/Session/Mage/DeathHandler.cs": 1,
+    "src/Lifestone.Client/Session/Mage/RebuffHostLogic.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/BuffScenario.cs": 2,
+    "src/Lifestone.Client/Session/Scenarios/FightScenario.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/FightScenario.Refresh.cs": 3
+  },
+  "BoltPickers": {
+    "src/Lifestone.Client/Session/Mage/WarSpellPicker.cs": 2,
+    "src/Lifestone.Client/Session/Scenarios/FightScenario.Castable.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/FightScenario.Picker.cs": 5,
+    "src/Lifestone.Client/Session/Scenarios/Journey/QuestStepLeg.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/Journey/Skirmish.cs": 1
+  },
+  "VendorSends": {
+    "src/Lifestone.Client/Session/Housing/LockpickBuyStation.cs": 1,
+    "src/Lifestone.Client/Session/Quartermaster/VendorCounter.cs": 2,
+    "src/Lifestone.Client/Session/Scenarios/HuntScenario.Vendor.cs": 3,
+    "src/Lifestone.Client/Session/Scenarios/Journey/BuyTripStation.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/Journey/QuestStation.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/Journey/ResupplyStation.cs": 4,
+    "src/Lifestone.Client/Session/Scenarios/Journey/ResupplyStation.Learn.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/Journey/ResupplyStation.TownStock.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/Journey/ShopStations.cs": 8
+  },
+  "WieldSends": {
+    "src/Lifestone.Client/Session/Fighter/GearRecharge.cs": 2,
+    "src/Lifestone.Client/Session/Quartermaster/Wardrobe.Wield.cs": 2,
+    "src/Lifestone.Client/Session/Scenarios/FighterBuildScenario.cs": 3,
+    "src/Lifestone.Client/Session/Scenarios/GearScenario.cs": 2,
+    "src/Lifestone.Client/Session/Scenarios/HuntScenario.cs": 3,
+    "src/Lifestone.Client/Session/Scenarios/MageBuildScenario.cs": 1
+  },
+  "EquipJudges": {
+    "src/Lifestone.Client/Session/Quartermaster/Wardrobe.cs": 1
+  },
+  "TripVerdict": {
+    "src/Lifestone.Client/Session/Quartermaster/TripDesk.cs": 1
+  },
+  "PackViews": {
+    "src/Lifestone.Client/Session/Actions/Trackers/VendorTrackers.cs": 3,
+    "src/Lifestone.Client/Session/Autopilot/Steer/SteerHistory.cs": 1,
+    "src/Lifestone.Client/Session/Autopilot/Steer/SteerPicture.cs": 1,
+    "src/Lifestone.Client/Session/Contracts/PlayerQualities.cs": 2,
+    "src/Lifestone.Client/Session/Contracts/VendorEvents.cs": 1,
+    "src/Lifestone.Client/Session/Fighter/FighterKit.cs": 1,
+    "src/Lifestone.Client/Session/Fighter/LootRules.cs": 1,
+    "src/Lifestone.Client/Session/Housing/VillaRules.cs": 1,
+    "src/Lifestone.Client/Session/Mage/ArmourSet.cs": 5,
+    "src/Lifestone.Client/Session/Mage/GearKit.cs": 3,
+    "src/Lifestone.Client/Session/Mage/MageSpendingPlanner.cs": 2,
+    "src/Lifestone.Client/Session/Mage/XpSpendRule.cs": 1,
+    "src/Lifestone.Client/Session/QualitiesWeenie.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/HuntScenario.Vendor.cs": 4,
+    "src/Lifestone.Client/Session/Scenarios/Journey/BuyTripStation.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/Journey/HoltburgStations.cs": 2,
+    "src/Lifestone.Client/Session/Scenarios/Journey/PathwardenStation.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/Journey/QuestStation.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/Journey/ShopStations.cs": 3,
+    "src/Lifestone.Client/Session/StandIn/StandInWorld.Vendor.cs": 6,
+    "src/Lifestone.Client/Session/State/GameStateReducer.Combat.cs": 2,
+    "src/Lifestone.Client/Session/State/GameStateReducer.Vendor.cs": 3
+  },
+  "CreatureReaders": {
+    "src/Lifestone.Client/Session/Bestiary/Bestiary.cs": 11,
+    "src/Lifestone.Client/Session/Vitals/AttackTiming.cs": 4,
+    "src/Lifestone.Client/Session/Vitals/CreatureFacts.cs": 2,
+    "src/Lifestone.Client/Session/Vitals/DefenceRead.cs": 1,
+    "src/Lifestone.Client/Session/Vitals/DrainResist.cs": 1
+  },
+  "NameAsMode": {
+    "src/Lifestone.Client/Session/Autopilot/AutopilotOptions.cs": 3,
+    "src/Lifestone.Client/Session/Mage/CharacterPolicy.cs": 1,
+    "src/Lifestone.Client/Session/Mage/MageTemplate.cs": 6,
+    "src/Lifestone.Client/Session/Mage/RebuffHostLogic.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/ClimberCreateScenario.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/GearScenario.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/Journey/JourneyPlans.cs": 3,
+    "src/Lifestone.Headless/Program.cs": 1
+  },
+  "ContextSideChannels": {
+    "src/Lifestone.Client/Session/Autopilot/AutopilotScenario.cs": 3,
+    "src/Lifestone.Client/Session/Autopilot/AutopilotScenario.DenRun.cs": 3,
+    "src/Lifestone.Client/Session/Autopilot/AutopilotScenario.FullAudit.cs": 1,
+    "src/Lifestone.Client/Session/Autopilot/AutopilotScenario.Restart.cs": 1,
+    "src/Lifestone.Client/Session/Housing/VillaSchedule.cs": 5,
+    "src/Lifestone.Client/Session/Scenarios/Journey/DenRunStation.cs": 6,
+    "src/Lifestone.Client/Session/Scenarios/Journey/JourneyStations.cs": 34,
+    "src/Lifestone.Client/Session/Scenarios/Journey/QuestStation.cs": 2,
+    "src/Lifestone.Client/Session/Scenarios/Journey/ResupplyStation.EverySpell.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/Journey/ResupplyStation.Gear.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/Journey/TravelLegCrossing.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/Journey/TravelLegFireDance.cs": 2,
+    "src/Lifestone.Client/Session/Scenarios/Journey/TravelLegSafety.cs": 6
+  },
+  "SaleDeciders": {
+    "src/Lifestone.Client/Session/Fighter/SellRules.cs": 1,
+    "src/Lifestone.Client/Session/Quartermaster/SaleVerdict.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/Journey/ResupplyStation.PackRoom.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/Journey/ResupplyStation.cs": 1,
+    "src/Lifestone.Client/Session/Scenarios/Journey/ShopStations.cs": 1
+  }
+}

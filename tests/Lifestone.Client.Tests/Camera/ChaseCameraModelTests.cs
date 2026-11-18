@@ -444,6 +444,7 @@ public sealed class ChaseCameraModelTests
     }
 
     [Fact]
+    [Trait("Tier", "Timing")] // m4-timing-tier-candidates: a zero-byte allocation count
     public void An_update_allocates_nothing_once_warm()
     {
         var model = new ChaseCameraModel();

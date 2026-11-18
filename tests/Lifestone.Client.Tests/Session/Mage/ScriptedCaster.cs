@@ -88,7 +88,7 @@ internal sealed class ScriptedCaster
         _rig.Tick();
         return WandGuid;
     }
-    private readonly IReadOnlyCollection<uint>? _known;
+    private readonly IReadOnlyCollection<uint> _known;
 
     /// <summary>
     /// M5 1 F1: a projectile spell (the fight's bolt) is answered by this hook after its mana is charged (a dearer roll than the mana held is refused 0x0401 first, as every cast): the test creates the projectile and lands
@@ -104,24 +104,37 @@ internal sealed class ScriptedCaster
 
     /// <param name="lines">The lines the spell table holds: the mage's <see cref="ArenaProfile.Lines"/> by default; a fighter's rig (M4 P5a C4) passes the fighter profile's buff and mana lines.</param>
     /// <param name="fighter">A fighter template (M4 P5a C4): the attributes, the three magic skills and the vitals are the fighter's level-55 build (Creature Enchantment and Life Magic 183, Max Mana about 225), not the mage's.</param>
-    /// <param name="known">M5 1 F1: the spells the PlayerDescription's spellbook holds (null, the default: none, as before).</param>
-    public ScriptedCaster(WorldActionRig rig, uint mana, uint stamina, int manaSeed = DefaultManaSeed, IReadOnlyList<ProfileLine>? lines = null, Lifestone.Client.Session.Fighter.FighterTemplate? fighter = null, uint manaPotions = 0, IReadOnlyCollection<uint>? known = null, uint staminaPotions = 0, bool withDrain = false, bool withStaminaDrain = false, uint lifeMagicRanks = 0)
+    /// <param name="known">M5 1 F1: the spells the PlayerDescription's spellbook holds (null, the default, since M6 15: every spell of the table's lines that are not learned by play, the build's book).</param>
+    public ScriptedCaster(WorldActionRig rig, uint mana, uint stamina, int manaSeed = DefaultManaSeed, IReadOnlyList<ProfileLine>? lines = null, Lifestone.Client.Session.Fighter.FighterTemplate? fighter = null, uint manaPotions = 0, IReadOnlyCollection<uint>? known = null, uint staminaPotions = 0, bool withDrain = false, bool withStaminaDrain = false, uint lifeMagicRanks = 0, IReadOnlyList<(uint Wcid, uint Count)>? healthDrinks = null, uint manaTinctures = 0)
     {
+        ManaTinctures = manaTinctures;
         _lifeMagicRanks = lifeMagicRanks;
+        _healthDrinks = [.. healthDrinks ?? []];
         _rig = rig;
         StaminaPotions = staminaPotions;
-        _known = known;
         _fighter = fighter;
         _manaRolls = new Random(manaSeed);
         _nextManaRoll = () => _manaRolls.NextSingle(); // the draws are floats, as before the model took the formula over (ACE's are doubles in [0, 1))
         ManaPotions = manaPotions;
-        Table = BuildTable([.. lines ?? ArenaProfile.Lines, .. (withDrain ? new[] { DrainLine, HealLine } : []), .. (withStaminaDrain ? new[] { StaminaDrainLine } : [])]);
+        ProfileLine[] tableLines = [.. lines ?? ArenaProfile.Lines, .. (withDrain ? new[] { DrainLine, HealLine } : []), .. (withStaminaDrain ? new[] { StaminaDrainLine } : [])];
+        Table = BuildTable(tableLines);
+
+        // M6 15 (the player's rules): the scripted ACE answers a cast of every spell of its table, so a rig that does not say what the character knows describes the build's character: every spell of the table's lines but
+        // those learned by play (which the build never teaches, M5 7 P7j). A cast of a spell the book lacks is one a person could not make (no spell bar takes it), and the rule refuses it.
+        _known = known ?? BuildBook(tableLines);
         Mana = mana;
         Stamina = stamina;
         rig.Spells([.. Table.Values]);
         Describe();
         rig.CombatModeIs(CombatModes.Magic); // after the description, which replaces the player's integer properties
     }
+
+    /// <summary>
+    /// M6 15: the book of the build's character over <paramref name="lines"/> (the mage's <see cref="ArenaProfile.Lines"/> by default): every spell of the lines that are not learned by play, and with <paramref name="manaLines"/>
+    /// false without the two mana lines (Stamina to Mana Self, Revitalize Self), for a rig whose character has no spell to refill its mana with.
+    /// </summary>
+    public static IReadOnlyCollection<uint> BuildBook(IEnumerable<ProfileLine>? lines = null, bool manaLines = true) =>
+        [.. (lines ?? ArenaProfile.Lines).Where(l => !l.ByPlay && (manaLines || !l.IsManaLine)).SelectMany(l => l.Spells).Select(s => s.Id)];
 
     /// <summary>M5 7 F7: Drain Health Other I to VII, the line the fight's drain rule casts (the extras' line, the dat's ids).</summary>
     public static ProfileLine DrainLine { get; } = ArenaProfile.ExtraNamed("Drain Health Other")!;
@@ -181,8 +194,34 @@ internal sealed class ScriptedCaster
     /// <summary>How many Stamina Potions were drunk (M5 7 F5).</summary>
     public int StaminaPotionsDrunk { get; private set; }
 
+    /// <summary>M6 14 T: the first health drink stack's guid; the stacks of the constructor's <c>healthDrinks</c> follow it in order.</summary>
+    public const uint HealthDrinkGuid = 0x80000270;
+
+    private readonly List<(uint Wcid, uint Count)> _healthDrinks;
+
+    /// <summary>M6 14 T: the health drinks drunk, in order, as (weenie, the health ACE's line said it restored).</summary>
+    public List<(uint Wcid, uint Restored)> HealthDrinksDrunk { get; } = [];
+
+    /// <summary>M6 14 T: the count left of the health drink stack <paramref name="index"/>.</summary>
+    public uint HealthDrinksLeft(int index) => _healthDrinks[index].Count;
+
+    /// <summary>M6 14 T: the next drinks of a health drink the server refuses as too busy (UseDone 0x1D), nothing drunk.</summary>
+    public int BusyHealthDrinks { get; set; }
+
+    /// <summary>M6 14 T: the Mana Tincture stack a rig may hold.</summary>
+    public const uint ManaTinctureGuid = 0x80000262;
+
+    /// <summary>M6 14 T: the Mana Tinctures held; each drink restores 50 mana, cut at the maximum.</summary>
+    public uint ManaTinctures { get; private set; }
+
+    /// <summary>M6 14 T: the mana each Mana Tincture drunk restored, in order (ACE's line).</summary>
+    public List<uint> ManaTincturesDrunk { get; } = [];
+
     /// <summary>How many Mana Potions were drunk (M4 P5a C7).</summary>
     public int PotionsDrunk { get; private set; }
+
+    /// <summary>M6 8: the next drinks of a Mana Potion the server refuses as too busy (UseDone 0x1D), nothing drunk.</summary>
+    public int BusyDrinks { get; set; }
 
     /// <summary>The mana each landed cast was charged, in order (the spell id and the cost).</summary>
     public List<(uint Spell, uint Cost)> Charged { get; } = [];
@@ -264,6 +303,12 @@ internal sealed class ScriptedCaster
                 case FakeSendKind.Use when send.Guid == StaminaPotionGuid:
                     DrinkStaminaPotion();
                     break;
+                case FakeSendKind.Use when send.Guid == ManaTinctureGuid:
+                    DrinkManaTincture();
+                    break;
+                case FakeSendKind.Use when send.Guid >= HealthDrinkGuid && send.Guid < HealthDrinkGuid + (uint)_healthDrinks.Count:
+                    DrinkHealth((int)(send.Guid - HealthDrinkGuid));
+                    break;
                 case FakeSendKind.GetAndWieldItem when AnswerWields:
                     // ACE's wield (Player_Inventory.cs 297-306 @95ef426d): 02DA Wielder 0, 02CE CurrentWieldedLocation 0, then 0023.
                     var item = (uint)send.Guid;
@@ -286,6 +331,28 @@ internal sealed class ScriptedCaster
             Answer(cast.Spell, cast.Target, now);
         }
     }
+
+    /// <summary>
+    /// An armour line's category, inside ACE's 160 to 189 (ArmorValueRaising to AcidicResistanceLowering: the armour surcharge's range): Impenetrability 160 and Bludgeon Bane 161 as this table always had them; M6 14 (m6-banes): the six
+    /// other banes each their own, the SpellTable's (Acid 162, Frost 166, Lightning 168, Flame 170, Piercing 172, Blade 174).
+    /// </summary>
+    private static uint ArmourCategory(string line) => line switch
+    {
+        "Impenetrability" => 160u,
+        "Acid Bane" => 162u,
+        "Frost Bane" => 166u,
+        "Lightning Bane" => 168u,
+        "Flame Bane" => 170u,
+        "Piercing Bane" => 172u,
+        "Blade Bane" => 174u,
+        _ => 161u,
+    };
+
+    /// <summary>M6 14 the hovering Zefir: a war projectile's range terms as the live fights logged them from the dat ("base 30 + 0.2 per point", e.g. range 68.2 m at War Magic init+ranks 191): the travel fight-back casts within ACE's range only.</summary>
+    public const float WarBoltRangeConstant = 30f;
+
+    /// <summary>M6 14 the hovering Zefir: the metres a point of War Magic init+ranks adds to a war projectile's range (see <see cref="WarBoltRangeConstant"/>).</summary>
+    public const float WarBoltRangeMod = 0.2f;
 
     private static Dictionary<uint, SpellInfo> BuildTable(IReadOnlyList<ProfileLine> lines)
     {
@@ -321,10 +388,11 @@ internal sealed class ScriptedCaster
                     Power = spell.Power,
                     Duration = spell.DurationSeconds,
                     BaseMana = baseMana,
-                    Category = armour ? 159 + (line.Name == "Impenetrability" ? 1u : 2u) : category,
+                    Category = armour ? ArmourCategory(line.Name) : category,
                     ManaMod = armour ? 14u : 0u,
                     NonComponentTargetType = armour ? 0x6u : line.Role == ProfileRole.ItemBuffWand ? 0x8000u : 0u,
-                    BaseRangeConstant = line.Role == ProfileRole.LifeDrain ? 33f : 0f,
+                    BaseRangeConstant = line.Role == ProfileRole.LifeDrain ? 33f : line.Role == ProfileRole.WarBolt ? WarBoltRangeConstant : 0f,
+                    BaseRangeMod = line.Role == ProfileRole.WarBolt ? WarBoltRangeMod : 0f,
                 };
             }
         }
@@ -354,9 +422,68 @@ internal sealed class ScriptedCaster
         _rig.UseDone();
     }
 
+    /// <summary>M6 14 T: a health drink (ACE <c>Food.BoostVital</c>): the weenie's boost in health cut at the maximum, the line, the stack, the use done.</summary>
+    private void DrinkHealth(int index)
+    {
+        if (BusyHealthDrinks > 0)
+        {
+            BusyHealthDrinks--;
+            _rig.UseDone(0x1D);
+            return;
+        }
+
+        var (wcid, count) = _healthDrinks[index];
+        var drink = HealthDrinks.All[HealthDrinks.IndexOf(wcid)];
+        _rig.H.State.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxHealth, out _, out var maxHealth);
+        var before = Health;
+        Health = Math.Min(maxHealth, Health + drink.Boost);
+        HealthDrinksDrunk.Add((wcid, Health - before));
+        SendVital(MageTemplate.MaxHealth, Health);
+        Chat($"The {drink.Name} restores {Health - before} points of your Health.");
+        _healthDrinks[index] = (wcid, --count);
+        if (count == 0)
+        {
+            _rig.Raw(AceM3Writers.InventoryRemoveObject(HealthDrinkGuid + (uint)index));
+        }
+        else
+        {
+            _rig.Raw(AceM3Writers.SetStackSize(++_potionSeq, HealthDrinkGuid + (uint)index, count, count * 170));
+        }
+
+        _rig.UseDone();
+    }
+
+    /// <summary>M6 14 T: a Mana Tincture (ACE <c>Food.BoostVital</c>): +50 mana cut at the maximum, the line, the stack, the use done.</summary>
+    private void DrinkManaTincture()
+    {
+        var before = Mana;
+        Mana = Math.Min(MaxMana, Mana + 50);
+        ManaTincturesDrunk.Add(Mana - before);
+        SendVital(MageTemplate.MaxMana, Mana);
+        Chat($"The Mana Tincture restores {Mana - before} points of your Mana.");
+        ManaTinctures--;
+        if (ManaTinctures == 0)
+        {
+            _rig.Raw(AceM3Writers.InventoryRemoveObject(ManaTinctureGuid));
+        }
+        else
+        {
+            _rig.Raw(AceM3Writers.SetStackSize(++_potionSeq, ManaTinctureGuid, ManaTinctures, ManaTinctures * 500));
+        }
+
+        _rig.UseDone();
+    }
+
     /// <summary>A Mana Potion (ACE <c>Food.BoostVital</c>): +25 mana, the line, the stack, the use done (M4 P5a C7).</summary>
     private void DrinkManaPotion()
     {
+        if (BusyDrinks > 0)
+        {
+            BusyDrinks--; // M6 8: ACE's YoureTooBusy (0x1D) on a use sent while the last motion still runs
+            _rig.UseDone(0x1D);
+            return;
+        }
+
         var before = Mana;
         Mana = Math.Min(MaxMana, Mana + (uint)Lifestone.Client.Session.Fighter.FighterKit.VitalPotionBoost);
         PotionsDrunk++;
@@ -428,8 +555,23 @@ internal sealed class ScriptedCaster
             pack.Add(new ContentDesc(StaminaPotionGuid, 0));
         }
 
+        if (ManaTinctures > 0)
+        {
+            var basis = ReducerHarness.Create(ManaTinctureGuid, ReducerHarness.Stamps(), null, name: "Mana Tincture");
+            _rig.H.R.Reducer.OnCreateObject(_rig.H.R.Context, basis with { Weenie = basis.Weenie with { Header = Lifestone.Net.Types.WeenieHeaderFlags.Container | Lifestone.Net.Types.WeenieHeaderFlags.StackSize, ContainerId = WorldActionRig.Player, ItemType = 0x80, WeenieClassId = ManaDrinks.TinctureWcid, StackSize = (ushort)ManaTinctures } }, isUpdate: false);
+            pack.Add(new ContentDesc(ManaTinctureGuid, 0));
+        }
+
+        for (var i = 0; i < _healthDrinks.Count; i++)
+        {
+            var (wcid, count) = _healthDrinks[i];
+            var basis = ReducerHarness.Create(HealthDrinkGuid + (uint)i, ReducerHarness.Stamps(), null, name: HealthDrinks.All[HealthDrinks.IndexOf(wcid)].Name);
+            _rig.H.R.Reducer.OnCreateObject(_rig.H.R.Context, basis with { Weenie = basis.Weenie with { Header = Lifestone.Net.Types.WeenieHeaderFlags.Container | Lifestone.Net.Types.WeenieHeaderFlags.StackSize, ContainerId = WorldActionRig.Player, ItemType = 0x80, WeenieClassId = wcid, StackSize = (ushort)count } }, isUpdate: false);
+            pack.Add(new ContentDesc(HealthDrinkGuid + (uint)i, 0));
+        }
+
         var description = new PlayerDescriptionMsg { Attributes = attributes.ToImmutable(), Skills = skills.ToImmutable(), Vitals = vitals.ToImmutable(), Equipped = [.. equipped], Inventory = [.. pack] };
-        _rig.H.Describe(_known is null ? description : description with { Spells = _known.ToImmutableDictionary(id => id, _ => 2f) });
+        _rig.H.Describe(description with { Spells = _known.ToImmutableDictionary(id => id, _ => 2f) });
     }
 
     private void Wear(uint guid, string name, uint itemType, uint wcid)

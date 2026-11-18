@@ -254,6 +254,33 @@ public sealed class DeathLegVerdictTests
         Assert.True(double.IsNaN(m.VitalsPercent ?? double.NaN));
     }
 
+    [Fact]
+    public void M6_7_AY_the_tally_reads_the_creatures_around_her_at_the_victim_notice()
+    {
+        var h = new ReducerHarness();
+        h.EnterWorld();
+        using var tally = new DeathTally();
+        tally.Start(new TallyView(h));
+        var here = h.State.Self.Position!.Value;
+        void Creature(uint guid, float east, uint flags = HostileReach.AttackableFlag)
+        {
+            var basis = ReducerHarness.Create(guid, ReducerHarness.Stamps(), ReducerHarness.Position(here.CellId, here.Origin.X + east, here.Origin.Y, here.Origin.Z), name: "Male Tusker");
+            h.Reducer.OnCreateObject(h.Context, basis with { Weenie = basis.Weenie with { ObjectDescriptionFlags = flags, ItemType = HostileReach.CreatureItemType } }, isUpdate: false);
+        }
+
+        Creature(0x7100, 3);
+        Creature(0x7101, 10);
+        Creature(0x7102, 23);
+        Creature(0x7103, 30); // past the awareness range
+        Creature(0x7104, 5, flags: 0); // no attackable flag: an NPC
+        Assert.Equal(0, tally.AwakeAtDeath(24)); // nothing is read before the death
+
+        h.Bus.Publish(new PlayerDied("You have been killed by a Male Tusker!", 0, DeathNoticeSource.VictimNotification));
+
+        Assert.Equal(3, tally.AwakeAtDeath(24));
+        Assert.Equal(4, tally.AwakeAtDeath(40));
+    }
+
     private static void Lifestone(ReducerHarness h, uint guid, AcPosition position)
     {
         var basis = ReducerHarness.Create(guid, ReducerHarness.Stamps(), position, name: "Lifestone");

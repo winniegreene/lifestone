@@ -14,7 +14,8 @@ namespace Lifestone.Client.Session.Grounds;
 /// <para><b>The purposes</b> (F5, D47: the character always moves with purpose). Every offer of <see cref="Next"/> carries a <see cref="TourPurpose"/>, in this order: <see cref="TourPurpose.Return"/> (the timed return),
 /// <see cref="TourPurpose.Seen"/> (the nearest living target the object table holds, <see cref="Look"/>; before any presumed slot), <see cref="TourPurpose.Presumed"/> (a slot standing by the schedule, not yet seen: walk to look),
 /// <see cref="TourPurpose.Due"/> (a dead slot due within the walk plus <see cref="ReturnMarginSeconds"/>). With none of these the tour holds (<see cref="TourPurpose.Hold"/>, the offer is the player's own cell): where the
-/// earliest due slot's cell is in view, or after one walk (purpose <see cref="TourPurpose.Due"/>) to that cell; the hold is logged once with its slot and due time. There is no walk without a purpose.</para>
+/// earliest due slot's cell is in view, or after one walk (purpose <see cref="TourPurpose.Due"/>) to that cell; the hold is logged once with its slot and due time. There is no walk without a purpose. M6 14 pit-hold: that slot is
+/// the earliest due one she can walk to now (<see cref="RoomMetres"/> over the jumps she can make); a dead slot no walk reaches is named in the hold and never waited for.</para>
 /// <para><b>The order.</b> The profile's storeys in their order (<see cref="HuntingGround.Storeys"/>, the arrival's first for the den and Tusker Temple), down to the last storey that has a hunted slot and back up, round and round.
 /// A presumed waypoint is the nearest cell (by the walk on the room graph) holding a standing hunted slot (<see cref="RespawnSchedule.IsHunted"/>) on the storey the player stands on; when none stands there, the nearest such cell
 /// of the next storey in the order that has one.</para>
@@ -67,6 +68,7 @@ public sealed class GroundTour : IGroundTour
     private readonly Dictionary<uint, double> _failedAt = [];
     private readonly Dictionary<uint, double> _avoidedAt = []; // M5 7 P7b (D139 g): creatures a stuck walk toward was given up
     private uint _purposeGuid;
+    private CellSet _keepOut = CellSet.Empty;
     private readonly Dictionary<uint, double> _lookedAt = [];
     private readonly Dictionary<uint, HashSet<uint>> _views = [];
     private readonly List<uint> _history = [];
@@ -141,7 +143,8 @@ public sealed class GroundTour : IGroundTour
 
     /// <summary>
     /// The walk between two cells on <paramref name="rooms"/>: the room graph's cell path (<see cref="RoomGraph.FindPath"/>) measured from room middle to room middle (<see cref="RoomGraph.RoomFrame"/>), infinity when no path joins
-    /// them. Each pair is worked out once and kept (a lower bound of the runner's walk, which the measured run speed absorbs).
+    /// them. Each pair is worked out once and kept (a lower bound of the runner's walk, which the measured run speed absorbs). M6 14 pit-hold: the pairs are kept for the jumps the body can make (<see cref="RoomGraph.JumpReachMetres"/>,
+    /// which the walk sets before it asks the tour): when that set changes (a buff run out, a load past 100%) they are worked out again, so a slot past a jump she cannot make now is no walk, not a walk the tour remembers.
     /// </summary>
     /// <param name="rooms">The ground's room graph.</param>
     public static Func<uint, uint, double> RoomMetres(RoomGraph rooms)
@@ -149,6 +152,18 @@ public sealed class GroundTour : IGroundTour
         ArgumentNullException.ThrowIfNull(rooms);
         var known = new Dictionary<ulong, double>();
         var middles = new Dictionary<uint, Vector3?>();
+        var jumpsKnown = -1L;
+        long JumpsMade()
+        {
+            var made = 0L;
+            var jumps = rooms.Jumps;
+            for (var i = 0; i < jumps.Count && i < 63; i++)
+            {
+                made |= rooms.JumpReachMetres is not { } reach || reach >= jumps[i].NeedMetres ? 1L << i : 0L;
+            }
+
+            return made;
+        }
         Vector3? Middle(uint cell)
         {
             if (!middles.TryGetValue(cell, out var m))
@@ -165,6 +180,12 @@ public sealed class GroundTour : IGroundTour
             if (from == to)
             {
                 return 0;
+            }
+
+            if (JumpsMade() is var made && made != jumpsKnown)
+            {
+                known.Clear(); // M6 14 pit-hold: the walks over the jumps she can make now
+                jumpsKnown = made;
             }
 
             var key = from < to ? ((ulong)from << 32) | to : ((ulong)to << 32) | from;
@@ -191,6 +212,23 @@ public sealed class GroundTour : IGroundTour
             known[key] = metres;
             return metres;
         };
+    }
+
+    /// <summary>M6 7 AR: the plain hunt leaves <paramref name="cells"/> alone (<see cref="GroundHunt.KeepOut"/>): no slot of them is offered, no target seen in them is walked to. <see cref="CellSet.Empty"/> gives them back.</summary>
+    /// <param name="cells">The cells kept out.</param>
+    public void KeepOut(CellSet cells)
+    {
+        ArgumentNullException.ThrowIfNull(cells);
+        _keepOut = cells;
+        Schedule.KeepOut(cells);
+        Array.Clear(_hasHunted);
+        for (var i = 0; i < Schedule.Count; i++)
+        {
+            if (Schedule.IsHunted(i) && Schedule.StoreyOf(i) >= 0)
+            {
+                _hasHunted[Schedule.StoreyOf(i)] = true;
+            }
+        }
     }
 
     /// <summary>The respawn schedule the tour reads (fed by <see cref="Killed"/>, <see cref="Created"/> and <see cref="Look"/>).</summary>
@@ -573,17 +611,53 @@ public sealed class GroundTour : IGroundTour
             return soon == from || InView(from, soon) ? Hold(from, DueNote(SlotDueIn(soon), now) + "; in view") : Offer(soon, TourPurpose.Due, DueNote(SlotDueIn(soon), now));
         }
 
-        // D47: no purpose to walk. Hold where the earliest due slot is in view; else walk once to its cell (purpose due) and hold there.
-        var first = Schedule.EarliestDueOn(-1);
+        // D47: no purpose to walk. Hold where the earliest due slot is in view; else walk once to its cell (purpose due) and hold there. M6 14 pit-hold: only a slot she can reach now is waited for (EarliestReachable).
+        var first = EarliestReachable(from, now, out var unreached);
         if (first < 0)
         {
-            return Hold(from, "no hunted slot is dead and none standing is left to look at (every standing one is looked at)");
+            return Hold(from, unreached > 0
+                ? string.Create(CultureInfo.InvariantCulture, $"no dead hunted slot she can walk to now: {unreached} dead slot(s) lie where no walk from 0x{from:X8} reaches now or their cells rest after a failed leg (the first, {DueNote(Schedule.EarliestDueOn(-1), now)}), and none is waited for (m6-pit-hold); no standing one is left to walk to")
+                : "no hunted slot is dead and none standing is left to look at (every standing one is looked at)");
         }
 
         var cell = Schedule.Slot(first).Cell;
-        return cell == from || InView(from, cell) || !Offerable(cell, from, now, looked: false)
-            ? Hold(from, DueNote(first, now) + (InView(from, cell) ? "; in view" : "; its cell is not offerable now"))
+        return cell == from || InView(from, cell)
+            ? Hold(from, DueNote(first, now) + (cell == from ? "; here" : "; in view"))
             : Offer(cell, TourPurpose.Due, DueNote(first, now) + "; the walk to where it is in view before the hold");
+    }
+
+    /// <summary>
+    /// M6 14 pit-hold (live 2026-11-13, the Tusker Abode: 438 holds in the pit's cell on "its cell is not offerable now"): the dead hunted slot due first that she can reach now: its cell is hers, or a walk on the room graph joins
+    /// the two (finite <c>metres</c>, over the jumps she can make) and the cell is in view (a hold) or may be offered (<see cref="Offerable"/>: not resting after a failed leg, not offered already in this leg's asking); -1 when none.
+    /// <paramref name="unreached"/> counts the dead hunted slots left out, which the hold names and never waits for.
+    /// </summary>
+    private int EarliestReachable(uint from, double now, out int unreached)
+    {
+        unreached = 0;
+        var best = -1;
+        var bestDue = double.PositiveInfinity;
+        for (var i = 0; i < Schedule.Count; i++)
+        {
+            if (!Schedule.IsHunted(i) || Schedule.IsStanding(i))
+            {
+                continue;
+            }
+
+            var cell = Schedule.Slot(i).Cell;
+            if (cell != from && (!double.IsFinite(_metres(from, cell)) || (!InView(from, cell) && !Offerable(cell, from, now, looked: false)))) // a cell in view is held for, not walked to
+            {
+                unreached++;
+                continue;
+            }
+
+            var due = Schedule.DueAt(i);
+            if (due < bestDue)
+            {
+                (best, bestDue) = (i, due);
+            }
+        }
+
+        return best;
     }
 
     /// <summary>The timed return: the cell to head for when the arrival's storey's earliest due slot comes due within the walk back plus the margin, or null. Sets the note.</summary>
@@ -637,7 +711,7 @@ public sealed class GroundTour : IGroundTour
         var bestMetres = double.PositiveInfinity;
         foreach (var o in _objects.All)
         {
-            if (o.Position is not { } at || !_ground.IsTarget(o.Weenie.WeenieClassId, at.CellId) || o.Health is <= 0f || o.Motion is { Forward: WorldObjectTable.DeadMotionLowWord }
+            if (o.Position is not { } at || !_ground.IsTarget(o.Weenie.WeenieClassId, at.CellId) || _keepOut.Contains(at.CellId) || o.Health is <= 0f || o.Motion is { Forward: WorldObjectTable.DeadMotionLowWord }
                 || (_avoidedAt.TryGetValue(o.Guid, out var avoided) && now - avoided < FailedCellRestSeconds))
             {
                 continue;

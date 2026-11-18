@@ -25,6 +25,7 @@ public sealed class DatAnimationSource(DatSet dats) : IAnimationSource
 {
     private readonly ConcurrentDictionary<uint, AnimationData?> _animations = new();
     private readonly ConcurrentDictionary<uint, MotionTableData?> _motionTables = new();
+    private readonly ConcurrentDictionary<uint, CombatTableData?> _combatTables = new();
 
     public DatSet Dats { get; } = dats;
 
@@ -34,6 +35,10 @@ public sealed class DatAnimationSource(DatSet dats) : IAnimationSource
     /// <summary>The MotionTable, or null when absent.</summary>
     public MotionTableData? GetMotionTable(uint motionTableId) =>
         _motionTables.GetOrAdd(motionTableId, id => Dats.TryGetPortal<DatMotionTable>(id, out var table) ? MotionTableData.FromDat(table) : null);
+
+    /// <summary>M6 14 attack timing: the CombatTable (0x30), or null when absent.</summary>
+    public CombatTableData? GetCombatTable(uint combatTableId) =>
+        _combatTables.GetOrAdd(combatTableId, id => Dats.TryGetPortal<DatReaderWriter.DBObjs.CombatTable>(id, out var table) ? CombatTableData.FromDat(table) : null);
 
     /// <summary>All Animation ids in the portal.</summary>
     public IReadOnlyList<uint> AllAnimationIds() => DatRaw.PortalIds<DatAnimation>(Dats);

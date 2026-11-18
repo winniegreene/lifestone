@@ -84,7 +84,14 @@ public static class AutomatedAccountRule
             return false;
         }
 
-        if (!tools && create is not null)
+        var model = string.Equals(account, TestAccounts.Qwinnie, StringComparison.Ordinal);
+        if (model && ((create is not null && !own.Contains(create, StringComparer.OrdinalIgnoreCase)) || (enter is not null && !own.Contains(enter, StringComparer.OrdinalIgnoreCase))))
+        {
+            refusal = "an automated run on the model's own account enters and creates only Qwinnie (TestAccounts.Characters)";
+            return false;
+        }
+
+        if (!tools && !model && create is not null)
         {
             refusal = "an automated run on a fighter test account (not the main test account) creates no character here (each holds exactly its one fighter, built by the fighter-build scenario; a new test character is the owner's decision): remove --create-character, or a login check that creates its character";
             return false;

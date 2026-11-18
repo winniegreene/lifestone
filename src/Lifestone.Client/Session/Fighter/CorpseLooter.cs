@@ -153,7 +153,7 @@ public sealed class CorpseLooter
     public string Summary =>
         string.Create(
             CultureInfo.InvariantCulture,
-            $"looted={Looted} skipped={Skipped} (value={SkippedBy(LootDecision.Value)} type={SkippedBy(LootDecision.Type)} burden={SkippedBy(LootDecision.Burden)} held={SkippedBy(LootDecision.AlreadyHeld)} unresolved={SkippedBy(LootDecision.NotResolved)}) refused={Refused} timed_out={TimedOut} stopped_by={(StoppedBy.Length == 0 ? "running" : StoppedBy)} stack_merges={StackMerges} merges_refused={MergesRefused}");
+            $"looted={Looted} skipped={Skipped} (value={SkippedBy(LootDecision.Value)} type={SkippedBy(LootDecision.Type)} burden={SkippedBy(LootDecision.Burden)} held={SkippedBy(LootDecision.AlreadyHeld)} unresolved={SkippedBy(LootDecision.NotResolved)}) refused={Refused} timed_out={TimedOut} stopped_by={(StoppedBy.Length == 0 ? "running" : StoppedBy)} stack_merges={StackMerges} merges_refused={MergesRefused}{(Left == 0 ? string.Empty : $" left={Left}")}");
 
     /// <summary>One step of the loop on a session; <paramref name="now"/> is the session clock's seconds.</summary>
     public LootStatus Step(IGameSessionView session, double now)
@@ -247,6 +247,12 @@ public sealed class CorpseLooter
             }
 
             var decision = _rules.Decide(item, in context);
+            if (decision == LootDecision.Replaced)
+            {
+                Leave(entry.Guid, item);
+                continue;
+            }
+
             if (decision != LootDecision.Take)
             {
                 Skip(entry.Guid, item, decision);
@@ -426,6 +432,21 @@ public sealed class CorpseLooter
         MergesRefused++;
         _mergeGaveUp.Add(from);
         _log.Warn(_category, string.Create(CultureInfo.InvariantCulture, $"loot: the merge of 0x{from:X8} into 0x{_mergeTo:X8} ended {outcome.Kind} ({outcome.Detail ?? "no detail"}); counted, the stack stays where it landed, going on"));
+    }
+
+    /// <summary>M6 7 AH: the entries left on the corpse because the replacement the handler bought already fills their slot (<c>take-back: left '&lt;name&gt;': replaced at the vendor</c>); not skipped, not refused, not lost.</summary>
+    public int Left => _left.Count;
+
+    /// <summary>M6 7 AH: the guids of the entries counted in <see cref="Left"/>.</summary>
+    public IReadOnlyCollection<uint> LeftGuids => _left;
+
+    private readonly List<uint> _left = [];
+
+    private void Leave(uint guid, WorldObject item)
+    {
+        _handled.Add(guid);
+        _left.Add(guid);
+        _log.Info(_category, string.Create(CultureInfo.InvariantCulture, $"take-back: left '{item.Name}' 0x{guid:X8}: replaced at the vendor"));
     }
 
     private void Skip(uint guid, WorldObject? item, LootDecision reason)

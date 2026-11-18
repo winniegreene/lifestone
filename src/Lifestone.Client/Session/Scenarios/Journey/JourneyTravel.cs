@@ -9,6 +9,9 @@ using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.World;
 using Lifestone.Data.World;
+using AutopilotTravelRule = Lifestone.Client.Session.Autopilot.AutopilotTravelRule;
+using TravelDecision = Lifestone.Client.Session.Autopilot.TravelDecision;
+using TravelWay = Lifestone.Client.Session.Autopilot.TravelWay;
 
 namespace Lifestone.Client.Session.Scenarios.Journey;
 
@@ -138,6 +141,10 @@ public static class JourneyGrounds
 /// <item><b>Seek, Cell, Vendor, Corpse, Spot, Bind</b>: on foot through the host's runner, the request passed unchanged (an object goal, <see cref="TravelRequest.ObjectGuid"/> not 0, is
 /// built by the host from the object, its range and its sight; the destination is then a hint); with no runner the leg fails <c>travel:run:no-runner</c>.</item>
 /// <item>For any purpose, an object goal without sight is none when the player already stands within its range of the object's current position.</item>
+/// <item>M6 4 F1 (4-R1, closes the journey half of <c>m6-first-tie-walk</c>): with a context (<see cref="Context"/>), a Ground travel into a dungeon ground and a Home travel ask the autopilot's own travel rule first
+/// (<see cref="AutopilotTravelRule.Out"/>, <see cref="AutopilotTravelRule.Home"/>: one rule for both sides, decided before the act, never chosen by a failure); where it says <c>rung-change</c> the leg is <see cref="RungChangeStation"/>
+/// (out to the ground, or home by portals), its verdict line logged and its <c>fail=</c> the leg's failure (<c>travel:rung-change:&lt;fail&gt;</c>). A Primary Portal Recall that lands in another known ground's arrival fails
+/// <c>travel:recall:portal:slot-holds:&lt;ground&gt;</c> and records that the one slot holds that ground (4-R2).</item>
 /// </list>
 /// A place is counted in <see cref="JourneyFacts.Teleports"/> when it is issued; one past <see cref="JourneyFacts.TeleportBudget"/> is refused loudly: the leg fails
 /// <c>travel:place:over-budget</c> and a WARN line (never an ERROR: the refusal is the rule working) names the request. The constants are Lifestone's own.
@@ -157,6 +164,8 @@ public sealed partial class JourneyTravel : IJourneyTravel
     private readonly JourneyPlace _place;
     private readonly HuntingGround? _dungeon;
     private Leg? _current;
+    private Leg? _rung;
+    private Leg? _heldWalk; // M6 8 K: the walk the survival layer paused
 
     /// <summary>The journey's travel for <paramref name="character"/>.</summary>
     /// <param name="character">The character (picks the recall: <see cref="RecallHome.ForCharacter"/>).</param>
@@ -175,8 +184,62 @@ public sealed partial class JourneyTravel : IJourneyTravel
         _place = place ?? ToolPlace;
     }
 
+    /// <summary>
+    /// M6 7 K (round 1c: <c>travel:recall:no-caster</c> on a Throwaway with Lifestone Recall in its book): the journey's reading of who casts a recall. <see cref="RecallHome.ForCharacter"/> goes by the name (the Brawler, the Archer, BSD Mage, Winnie), so a
+    /// character it does not name was no caster whatever its book held; the book decides now: a character no fighter template names, whose read spellbook holds <paramref name="spellId"/>, wields its own caster (no swap), as the mage does. The Hunter
+    /// (a template with no magic) and a book without the spell stay null, the named <c>travel:recall:no-caster</c>. The climber was never in this gap: its name is on the list.
+    /// </summary>
+    /// <param name="session">The session.</param>
+    /// <param name="character">The character's name.</param>
+    /// <param name="log">The log.</param>
+    /// <param name="homeLandblock">The lifestone's landblock (or the tied portal destination's).</param>
+    /// <param name="spellId">The recall spell.</param>
+    public static RecallHome? RecallFor(IGameSessionView session, string? character, ILogSink log, uint homeLandblock = RecallHome.HoltburgLandblock, uint spellId = RecallHome.LifestoneRecallSpell)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        if (RecallHome.ForCharacter(session, character, log, homeLandblock, spellId) is { } named)
+        {
+            return named;
+        }
+
+        if (FighterTemplate.ForName(character) is not null || session.State.Self.Spellbook is not { IsKnown: true } book || !book.Knows(spellId))
+        {
+            return null;
+        }
+
+        log.Info(LogCategory, $"journey travel: '{character}' is no named journey caster, and its spellbook holds {RecallHome.SpellName(spellId)}: it casts the recall with the caster it wields");
+        return new RecallHome(session, null, log, homeLandblock, spellId);
+    }
+
+    /// <summary>
+    /// M6 4 F1 (4-R1): the journey's context, set when the context is built over this travel (<see cref="JourneyContext.Travel"/>), else null: the rung change needs it (the routes, the grounds, the station's legs), and without it the
+    /// Ground and Home purposes keep the recalls.
+    /// </summary>
+    public JourneyContext? Context { get; internal set; }
+
     /// <inheritdoc />
-    public bool Busy => _current is { Done: false };
+    public bool Busy => _current is { Done: false } || _rung is { Done: false };
+
+    /// <inheritdoc />
+    public void HoldWalk()
+    {
+        if (_current is { Done: false } walk)
+        {
+            walk.Pause();
+            _heldWalk = walk;
+        }
+    }
+
+    /// <inheritdoc />
+    public void ReleaseWalk(double now)
+    {
+        if (_heldWalk is { Done: false } walk)
+        {
+            walk.Resume(now);
+        }
+
+        _heldWalk = null;
+    }
 
     /// <summary>The places issued (counted in <see cref="JourneyFacts.Teleports"/> too).</summary>
     public int Places { get; private set; }
@@ -237,8 +300,25 @@ public sealed partial class JourneyTravel : IJourneyTravel
                     return None(request);
                 }
 
+                var wayHome = _dungeon is null ? null : WayHomeRule.Choose(_dungeon, session.State.Self.Spellbook);
+                if (wayHome is { Kind: WayHomeKind.Walk })
+                {
+                    return WalkHome(session, request, _dungeon!, wayHome, now);
+                }
+
+                if (HomeByPortals(session, request, homeLandblock) is { } byPortals)
+                {
+                    return byPortals; // M6 4 F1 (4-R1): the book lacks Lifestone Recall (D43) and a way home by portals is known
+                }
+
+                if (wayHome is { Kind: not WayHomeKind.Recall })
+                {
+                    // No way but a recall that the book lacks: the recall is still tried so the failure is the recall's own by name (travel:recall:spell), and the rule's reason is logged beside it.
+                    _log.Warn(LogCategory, $"journey travel: no way home but a recall that the spellbook lacks: {wayHome.Why}");
+                }
+
                 _log.Info(LogCategory, $"journey travel: home by Lifestone Recall ({destination.Name})");
-                return new RecallLeg(this, RecallHome.ForCharacter(session, _character, _log, homeLandblock), home: true, ground: null);
+                return new RecallLeg(this, RecallFor(session, _character, _log, homeLandblock), home: true, ground: null);
 
             case TravelPurpose.Ground:
                 if (request.ObjectGuid == 0 && AlreadyThere(session, destination))
@@ -248,12 +328,27 @@ public sealed partial class JourneyTravel : IJourneyTravel
 
                 if (GroundOf(destination.Location.Position.CellId) is { } dungeon)
                 {
+                    if (Decide(session, dungeon, RungDirection.Out) is { Way: TravelWay.RungChange } routed)
+                    {
+                        return RungChange(session, request, dungeon, RungDirection.Out, routed); // M6 4 F1 (4-R1): a routed ground (untieable, or its tie not known tied): the rung change, never a recall tried
+                    }
+
                     return ToDungeon(session, request, dungeon);
                 }
 
                 if (PortalFrontOf(destination) is { } front)
                 {
                     return Untied(request, front, "the way to its portal's front");
+                }
+
+                if (CharacterPolicy.For(_character).CheatFree)
+                {
+                    return ClimberGround(session, request, now);
+                }
+
+                if (_facts.TeleportBudget == 0 && _dungeon is { } own && WayHomeRule.HomeOnFoot(own) && _runners is not null)
+                {
+                    return ClimberGround(session, request, now); // M6 7 H: a journey with no place in its budget (a cheat-free stand-in for the climber, LowRungDeathLiveTests) reaches an outdoor ground on foot as the climber does, not by a refused place
                 }
 
                 return Place(session, request);
@@ -267,6 +362,65 @@ public sealed partial class JourneyTravel : IJourneyTravel
 
                 return new RunLeg(this, _runners.Run(session, request, now));
         }
+    }
+
+    /// <summary>
+    /// The way home on foot (M6 item 0 F2, closes <c>m6-trip-way-home</c>): a character whose read spellbook lacks Lifestone Recall, on an outdoor ground hunted from home on foot (<see cref="WayHomeRule"/>), walks to the home's lifestone point
+    /// through the host's runner (<see cref="TravelPurpose.Bind"/>, a point goal), as the final recall's walk does. Check, act, check (M5 D141): the purpose and where the player stands are logged first; none when the player already stands within
+    /// <see cref="ToleranceMetres"/> of the point; the leg ends Arrived only when the player then stands in the point's landblock within the tolerance, else it fails <c>travel:home:arrival-off-point</c>.
+    /// </summary>
+    private Leg WalkHome(IGameSessionView session, TravelRequest request, HuntingGround ground, WayHomeChoice way, double now)
+    {
+        var to = new CellPosition(ground.Home.LifestoneCell, ground.Home.LifestonePoint);
+        var point = new TeleportDestination("home-lifestone-point", [], new WorldLocation("home-lifestone-point", to, HasHeight: true, HeadingDegrees: 0), "journey: home on foot (WayHomeRule)");
+        var from = session.State.Self.Position;
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"journey travel: home on foot: check before: purpose: the way home ({request.Purpose}) to {ground.Home.Town}'s lifestone point as a Bind point goal ({way.Why}); the player stands at {(from is { } f ? $"cell 0x{f.CellId:X8} ({f.Frame.Origin.X:0.#}, {f.Frame.Origin.Y:0.#})" : "an unknown place")}, the point is cell 0x{to.CellId:X8} ({to.Local.X:0.#}, {to.Local.Y:0.#})"));
+        if (AlreadyThere(session, point))
+        {
+            return None(new TravelRequest(point, TravelPurpose.Bind));
+        }
+
+        if (_runners is null)
+        {
+            _log.Warn(LogCategory, "journey travel: no runner for the walk home (the host gave none): travel:run:no-runner");
+            return new FixedLeg(TravelMeans.Run, "travel:run:no-runner");
+        }
+
+        var walk = new TravelRequest(point, TravelPurpose.Bind);
+        return new RunLeg(this, _runners.Run(session, walk, now), s => ArrivedAt(s, point)
+            ? null
+            : string.Create(CultureInfo.InvariantCulture, $"travel:home:arrival-off-point: the walk home ended at {(s.State.Self.Position is { } q ? $"cell 0x{q.CellId:X8} ({q.Frame.Origin.X:0.#}, {q.Frame.Origin.Y:0.#})" : "an unknown place")}, not within {ToleranceMetres:0.#} m of ({to.Local.X:0.#}, {to.Local.Y:0.#}) in cell 0x{to.CellId:X8}"));
+    }
+
+    /// <summary>
+    /// A Ground travel the climber cannot make by a recall or the tie (M6 0 F3, item 3: the climber is cheat-free, so <c>place=0</c>): to an outdoor ground hunted from home on foot (<see cref="WayHomeRule"/>) it is a walk, a point goal through the host's runner
+    /// (<see cref="TravelPurpose.Cell"/>), check, act, check (the leg ends Arrived only when the player stands in the point's landblock within <see cref="ToleranceMetres"/>, else <c>travel:ground:arrival-off-point</c>); anywhere else it is a loud stop by name,
+    /// <c>travel:ground:climber-no-place</c>, never a place (<c>TODO(m6-first-tie-walk)</c>).
+    /// </summary>
+    private Leg ClimberGround(IGameSessionView session, TravelRequest request, double now)
+    {
+        var destination = request.Destination;
+        var to = destination.Location.Position;
+        var from = session.State.Self.Position;
+        if (_dungeon is null || !WayHomeRule.HomeOnFoot(_dungeon) || _runners is null)
+        {
+            const string failure = "travel:ground:climber-no-place";
+            _log.Warn(LogCategory, $"journey travel: REFUSED the {request.Purpose} travel to '{destination.Name}': the climber is never placed (place=0), and {(_dungeon is null ? "the journey has no ground" : _runners is null ? "the host gave no runner" : $"{_dungeon.Key} is not an outdoor ground hunted from {_dungeon.Home.Town} on foot")}: {failure} (TODO(m6-first-tie-walk))");
+            return new FixedLeg(TravelMeans.None, failure);
+        }
+
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"journey travel: ground on foot: check before: purpose: {request.Purpose} to '{destination.Name}' (no place for the climber); the player stands at {(from is { } f ? $"cell 0x{f.CellId:X8} ({f.Frame.Origin.X:0.#}, {f.Frame.Origin.Y:0.#})" : "an unknown place")}, the point is cell 0x{to.CellId:X8} ({to.Local.X:0.#}, {to.Local.Y:0.#})"));
+        var walk = new TravelRequest(destination, TravelPurpose.Cell);
+        return new RunLeg(this, _runners.Run(session, walk, now), s => ArrivedAt(s, destination)
+            ? null
+            : string.Create(CultureInfo.InvariantCulture, $"travel:ground:arrival-off-point: the walk ended at {(s.State.Self.Position is { } q ? $"cell 0x{q.CellId:X8} ({q.Frame.Origin.X:0.#}, {q.Frame.Origin.Y:0.#})" : "an unknown place")}, not within {ToleranceMetres:0.#} m of ({to.Local.X:0.#}, {to.Local.Y:0.#}) in cell 0x{to.CellId:X8}"));
+    }
+
+    private static bool ArrivedAt(IGameSessionView session, TeleportDestination destination)
+    {
+        var to = destination.Location.Position;
+        return session.State.Self.Position is { } at && at.CellId >> 16 == to.CellId >> 16
+            && Vector2.Distance(new Vector2(at.Frame.Origin.X, at.Frame.Origin.Y), new Vector2(to.Local.X, to.Local.Y)) <= ToleranceMetres;
     }
 
     /// <summary>The ground a Ground travel to <paramref name="cell"/> enters: the journey's own, else the catalog's (<see cref="JourneyGrounds.DungeonOf(uint, HuntingGround?)"/>).</summary>
@@ -293,9 +447,87 @@ public sealed partial class JourneyTravel : IJourneyTravel
         return null;
     }
 
+    /// <summary>
+    /// M6 4 F1 (4-R1): the travel rule's decision for <paramref name="ground"/> in <paramref name="direction"/> (<see cref="AutopilotTravelRule"/>, the autopilot's Travel state's own), logged on one line; null without a context or a ground
+    /// (the recalls as before).
+    /// </summary>
+    /// <param name="session">The session.</param>
+    /// <param name="ground">The ground.</param>
+    /// <param name="direction">Out to the ground, or home.</param>
+    public TravelDecision? Decide(IGameSessionView session, HuntingGround? ground, RungDirection direction)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        if (Context is not { } context || ground is null)
+        {
+            return null;
+        }
+
+        var state = session.State;
+        var input = AutopilotTravelRule.Input(state, ground, _facts, context.Routes, direction, context.Grounds);
+        var bookRead = AutopilotTravelRule.BookRead(state.Self.Spellbook);
+        var decided = direction == RungDirection.Home ? AutopilotTravelRule.Home(input, bookRead, context.Routes) : AutopilotTravelRule.Out(input, bookRead, context.Routes);
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"journey travel: the travel rule: direction={(direction == RungDirection.Home ? "home" : "out")} way={decided.WayName} ground={ground.Key} place={input.Place} where={input.Where.ToString().ToLowerInvariant()}{(input.BodyGround is { } body ? " body_ground=" + body.Key : string.Empty)} level={input.Level} tie={input.Tie.ToString().ToLowerInvariant()} lifestone_recall={(input.KnowsLifestoneRecall ? "yes" : "no")} route={decided.Route ?? "n/a"}; why: {decided.Reason}"));
+        return decided;
+    }
+
+    /// <summary>
+    /// M6 4 F1 (4-R1): the way home by portals when the travel rule says so (<see cref="AutopilotTravelRule.Home"/>: a read book without Lifestone Recall and a way home known), and the home is the travel file's start (where that way ends); else null
+    /// (the recall).
+    /// </summary>
+    private Leg? HomeByPortals(IGameSessionView session, TravelRequest request, uint homeLandblock)
+    {
+        if (Context is not { } context || context.Routes.PlaceOf(RungRoute.Hex(homeLandblock))?.Key != context.Routes.StartPlace)
+        {
+            return null;
+        }
+
+        var ground = _dungeon ?? context.Dungeon;
+        return Decide(session, ground, RungDirection.Home) is { Way: TravelWay.RungChange } decided ? RungChange(session, request, ground, RungDirection.Home, decided) : null;
+    }
+
+    /// <summary>The rung change as the leg (M6 4 F1, 4-R1): <see cref="RungChangeStation"/> in <paramref name="direction"/> over the context, its Dungeon <paramref name="ground"/>.</summary>
+    private Leg RungChange(IGameSessionView session, TravelRequest request, HuntingGround ground, RungDirection direction, TravelDecision decided)
+    {
+        var context = Context!.WithDungeon(ground);
+        _log.Info(LogCategory, $"journey travel: {request.Purpose} to '{request.Destination.Name}' by the rung change direction={(direction == RungDirection.Home ? "home" : "out")} (route {decided.Route ?? "n/a"}): check before: the player stands at {Where(session)}");
+        _rung = new RungChangeLeg(this, new RungChangeStation(direction).Start(context), direction == RungDirection.Home ? "home" : "out:" + ground.Key); // the station's own walks go through this travel too (GoTo), so Busy reads both
+        return _rung;
+    }
+
+    /// <summary>
+    /// M6 6 C2: the corpse trip's way to the travel place that holds a corpse lost on a leg (the island, Holtburg, the hub): the rung change out to <paramref name="ground"/> cut at <paramref name="placeKey"/>
+    /// (<see cref="RungChangeStation"/> with <c>stop_at=</c>, <see cref="RungRouteInput.StopAtPlace"/>), its verdict logged and its <c>fail=</c> the leg's failure (<c>travel:rung-change:&lt;fail&gt;</c>); the station checks after that the
+    /// player stands in the place. With no context (no travel file) the leg fails <c>travel:place:no-context</c>, named.
+    /// </summary>
+    /// <param name="session">The session.</param>
+    /// <param name="ground">The rung's ground (whose route the leg was on).</param>
+    /// <param name="placeKey">The travel place's key.</param>
+    /// <param name="now">The session clock.</param>
+    public ITravelLeg ToPlace(IGameSessionView session, HuntingGround ground, string placeKey, double now)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(ground);
+        ArgumentException.ThrowIfNullOrEmpty(placeKey);
+        if (Context is not { } context)
+        {
+            const string failure = "travel:place:no-context";
+            _log.Warn(LogCategory, $"journey travel: to the corpse's place {placeKey}: this travel has no journey context (no travel file to plan by): {failure}");
+            _current = new FixedLeg(TravelMeans.None, failure);
+            return _current;
+        }
+
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"journey travel: to the corpse's place {placeKey}: the rung change out to {ground.Key} cut at {placeKey} (stop_at={placeKey}) at {now:0.#} s; check before: the player stands at {Where(session)}"));
+        _rung = new RungChangeLeg(this, new RungChangeStation(RungDirection.Out, stopAt: placeKey).Start(context.WithDungeon(ground)), "out:" + ground.Key + " stop_at=" + placeKey);
+        _current = _rung;
+        return _rung;
+    }
+
+    private static string Where(IGameSessionView session) =>
+        session.State.Self.Position is { } at ? string.Create(CultureInfo.InvariantCulture, $"cell 0x{at.CellId:X8} ({at.Frame.Origin.X:0.#}, {at.Frame.Origin.Y:0.#})") : "an unknown place";
+
     private Leg ToDungeon(IGameSessionView session, TravelRequest request, HuntingGround dungeon)
     {
-        var tie = _facts.PortalTieOf(dungeon.Key);
+        var tie = _facts.TieOf(dungeon);
         if (tie == PortalTie.Untied)
         {
             return Untied(request, dungeon, "the way to its arrival");
@@ -306,7 +538,7 @@ public sealed partial class JourneyTravel : IJourneyTravel
             tie == PortalTie.Tied
                 ? $"journey travel: to {request.Destination.Name} by Primary Portal Recall (the {dungeon.Key} portal is tied)"
                 : $"journey travel: to {request.Destination.Name} by Primary Portal Recall TRIED (the {dungeon.Key} tie is not known: a build ties it, but no journey can read the link from the player description; ACE's 0x04A3 answer sets untied)");
-        return new RecallLeg(this, RecallHome.ForCharacter(session, _character, _log, dungeon.ArrivalLandblock(), dungeon.Portal?.RecallSpell ?? RecallHome.PrimaryPortalRecallSpell), home: false, ground: dungeon.Key);
+        return new RecallLeg(this, RecallFor(session, _character, _log, dungeon.ArrivalLandblock(), dungeon.Portal?.RecallSpell ?? RecallHome.PrimaryPortalRecallSpell), home: false, ground: dungeon.Key, target: dungeon);
     }
 
     /// <summary>The refusal of a way a character not tied to the ground's portal has none for: no place (D50), the first tie's walk is M6's.</summary>
@@ -480,7 +712,7 @@ public sealed partial class JourneyTravel : IJourneyTravel
         }
     }
 
-    private sealed class RecallLeg(JourneyTravel owner, RecallHome? recall, bool home, string? ground) : Leg
+    private sealed class RecallLeg(JourneyTravel owner, RecallHome? recall, bool home, string? ground, HuntingGround? target = null) : Leg
     {
         private bool _begun;
         private TravelStatus _end = TravelStatus.Running;
@@ -518,7 +750,7 @@ public sealed partial class JourneyTravel : IJourneyTravel
                     }
                     else if (ground is not null)
                     {
-                        owner._facts.SetPortalTie(ground, PortalTie.Tied);
+                        owner._facts.SetPrimaryPortalTie(ground); // M6 4 F1 (4-R2): the recall landed in the ground's arrival, so the one slot holds it
                     }
 
                     return End(TravelStatus.Arrived, null);
@@ -530,7 +762,15 @@ public sealed partial class JourneyTravel : IJourneyTravel
                     else if (recall.Refusal == 0x04A3 && ground is not null)
                     {
                         owner._facts.SetPortalTie(ground, PortalTie.Untied);
-                        owner._log.Warn(LogCategory, $"journey travel: the recall to {ground} was refused untied (WeenieError 0x04A3 YouMustLinkToPortalToRecall): the tie is untied; the way to the portal is the first tie's walk (TODO(m6-first-tie-walk))");
+                        owner._log.Warn(LogCategory, $"journey travel: the recall to {ground} was refused untied (WeenieError 0x04A3 YouMustLinkToPortalToRecall): the tie is untied; the next travel there is the travel rule's (the rung change for a routed ground, else the first tie's walk: TODO(m6-first-tie-walk))");
+                    }
+                    else if (target is not null && session.State.Self.Position is { } landed && JourneyFacts.SlotHolderAt(landed.CellId, target, owner.Context?.Grounds ?? GroundCatalog.All) is { } holder)
+                    {
+                        // M6 4 F1 (4-R2): no 0x04A3: ACE teleported to the portal the one slot holds, another known ground's arrival.
+                        owner._facts.SetPrimaryPortalTie(holder.Key);
+                        var slot = JourneyFacts.SlotHoldsFailure(holder);
+                        owner._log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"journey travel: the recall to {target.Key} landed in cell 0x{landed.CellId:X8}, {holder.Key}'s arrival: the primary tie's one slot holds {holder.Key}, so {target.Key} is untied: {slot}"));
+                        return End(TravelStatus.Failed, "travel:" + slot);
                     }
 
                     var step = recall.Failure is { } f && f.StartsWith("recall:", StringComparison.Ordinal) ? f["recall:".Length..] : recall.Failure ?? "unknown";
@@ -555,7 +795,45 @@ public sealed partial class JourneyTravel : IJourneyTravel
         }
     }
 
-    private sealed class RunLeg(JourneyTravel owner, ITravelLeg inner) : Leg
+    /// <summary>M6 4 F1 (4-R1): the rung change run as a travel leg: Arrived when the station ends Succeeded and ok, else Failed <c>travel:rung-change:&lt;fail&gt;</c> (the verdict's <c>fail=</c>); the verdict is logged on one line.</summary>
+    private sealed class RungChangeLeg(JourneyTravel owner, IStationRun run, string what) : Leg
+    {
+        private TravelStatus _end = TravelStatus.Running;
+
+        public override TravelMeans Means => TravelMeans.Run;
+
+        public override string Fields => run.VerdictFields();
+
+        public override TravelStatus Step(IGameSessionView session, double now)
+        {
+            if (_end != TravelStatus.Running)
+            {
+                return _end;
+            }
+
+            var status = run.Step(session, now);
+            if (status == ScenarioStatus.Running)
+            {
+                return TravelStatus.Running;
+            }
+
+            Done = true;
+            var fields = run.VerdictFields();
+            owner._log.Info(LogCategory, $"journey travel: the rung change ({what}) ended {status}: {fields}");
+            if (status == ScenarioStatus.Succeeded && run.Ok)
+            {
+                _end = TravelStatus.Arrived;
+                return _end;
+            }
+
+            var fail = fields.Split(' ').FirstOrDefault(f => f.StartsWith("fail=", StringComparison.Ordinal))?["fail=".Length..] is { Length: > 0 } f && f != "none" ? f : JourneyVerdict.Token(run.Failure ?? status.ToString());
+            Failure = "travel:rung-change:" + fail + (run.Failure is null ? string.Empty : ": " + run.Failure);
+            _end = TravelStatus.Failed;
+            return _end;
+        }
+    }
+
+    private sealed class RunLeg(JourneyTravel owner, ITravelLeg inner, Func<IGameSessionView, string?>? arrival = null) : Leg
     {
         public override TravelMeans Means => TravelMeans.Run;
 
@@ -566,10 +844,22 @@ public sealed partial class JourneyTravel : IJourneyTravel
         public override TravelStatus Step(IGameSessionView session, double now)
         {
             var status = inner.Step(session, now);
+            if (status == TravelStatus.Arrived && Failure is not null)
+            {
+                return TravelStatus.Failed; // the arrival check after the walk failed (a later step reads the same answer)
+            }
+
             if (status != TravelStatus.Running && !Done)
             {
                 Done = true;
                 Failure = inner.Failure ?? (status == TravelStatus.Failed ? "travel:run:failed" : null);
+                if (status == TravelStatus.Arrived && arrival?.Invoke(session) is { } off)
+                {
+                    Failure = off;
+                    status = TravelStatus.Failed;
+                    owner._log.Warn(LogCategory, "journey travel: " + off);
+                }
+
                 owner.NoteRun(inner.Fields, status == TravelStatus.Failed && inner.ArrivedWithoutSight);
             }
 

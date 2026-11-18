@@ -1,5 +1,5 @@
 {
   "note": "The test-count baseline: slice-check.ps1 reads it as the default -MinTests (an explicit -MinTests wins) and as the floor of the exhaustive stage; coverage never decreases (m4-plan.md D28): the count is a floor; the lead lowers it only for deletions it names, each with where its behaviour is proved. The lead writes it at each merge to the item branch and to master; a slice never lowers it.",
-  "default": 11698,
-  "exhaustive": 805
+  "default": 16799,
+  "exhaustive": 1326
 }

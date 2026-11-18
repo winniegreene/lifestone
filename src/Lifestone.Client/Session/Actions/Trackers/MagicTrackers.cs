@@ -93,6 +93,9 @@ internal sealed class CastTracker(ActionHandle handle, uint spellId, uint target
     /// <summary>What the tracker looked for (known after the send).</summary>
     internal Expectation Expected => _expect;
 
+    /// <summary>The spell the cast is of.</summary>
+    internal uint SpellId => spellId;
+
     /// <summary>The target the cast went out with (<see cref="SendTarget"/>), once sent.</summary>
     private uint _sentAt;
 
@@ -108,12 +111,20 @@ internal sealed class CastTracker(ActionHandle handle, uint spellId, uint target
     internal override bool ConsumesUseDone => true;
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// M6 14 recall unblock: the cast is settled (its projectile or its enchantment came, or ACE's fizzle or target-lost line) and ACE has not ended it yet: the server ran this cast, and ACE sends a cast's UseDone when its recoil
+    /// ends (<c>FinishCast</c>, <c>Player_Magic.cs</c> 935-990 @95ef426d), after any older action's: it refused (<c>VerifyBusy</c>, 375-383) or queued (117-122) this cast while busy.
+    /// </remarks>
+    internal override bool ClaimsUseDone(ActionApi api) => !_finished && Resolution is not null;
+
+    /// <inheritdoc/>
     internal override void Accepted(ActionApi api) => _targetSeen = target != 0 && api.State.Objects.TryGet(target, out _);
 
     /// <inheritdoc/>
-    /// <remarks>M5 7 D141's before-check: in the world; the target, seen when the cast was asked, still in the object table; and the mana the state holds against the spell's cost where the cost is certain (<see cref="ManaRefusal"/>).</remarks>
+    /// <remarks>M5 7 D141's before-check: in the world; the target, seen when the cast was asked, still in the object table; and the mana the state holds against the spell's cost where the cost is certain (<see cref="ManaRefusal"/>). M6 15: last, the player's rule (<see cref="PlayerRulesGate.CastRefusal"/>).</remarks>
     internal override string? Refusal(ActionApi api) =>
-        WorldTrackers.NotInWorld(api) ?? TargetGone(api, target, _targetSeen, "cast's target") ?? (ManaRefusal(api, spellId) is { } mana ? Refuse(ActionReason.NotEnoughMana, mana) : null);
+        WorldTrackers.NotInWorld(api) ?? TargetGone(api, target, _targetSeen, "cast's target") ?? (ManaRefusal(api, spellId) is { } mana ? Refuse(ActionReason.NotEnoughMana, mana) : null)
+        ?? api.PlayerRules.CastRefusal(spellId, Handle.Source); // M6 15: the automation's spell is on a spell bar, or the cast is refused by name
 
     /// <summary>
     /// M5 7 D141: why ACE would certainly refuse the cast for its mana (UseDone 0x0401), or null. ACE (<c>Player_Magic.cs</c> 566-585, <c>Creature_Magic.cs</c> 14-53 @95ef426d) charges the spell's base mana
@@ -190,6 +201,7 @@ internal sealed class CastTracker(ActionHandle handle, uint spellId, uint target
             return new ActionOutcome(ActionOutcomeKind.Refused, 0, StanceGuards.CastRefusal, ActionReason.NotInMagicStance);
         }
 
+        api.PlayerRules.CastSent(spellId, Handle.Source); // M6 15: the spellcasting panel shows the tab and selects the spell, as a person's cast does
         _self = api.State.Self.Guid;
         var info = api.FindSpell(spellId);
         _expect = Classify(info, target, _self);

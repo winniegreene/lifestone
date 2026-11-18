@@ -16,6 +16,7 @@ public sealed class GameState
     internal GameState()
     {
         Containers = new ContainerViews(Self.Inventory, Objects);
+        Appraisals.Keep = guid => Self.Inventory.Find(guid).Kind == InventoryPlaceKind.Equipped; // M6 14: a worn piece's appraisal is never the one the bound drops
     }
 
     /// <summary>The session's phase (the network session's phases; an offline session reports the phase of its stand-in data).</summary>
@@ -69,6 +70,28 @@ public sealed class GameState
 
     /// <summary>The vendor the player has open (the last GameEvent 0x0062 ApproachVendor), or null (M4 3.2 s1). Closed by the rule in <see cref="VendorClosed"/>.</summary>
     public VendorStock? Vendor { get; internal set; }
+
+    /// <summary>The house guardian the player has open (the last GameEvent 0x021D HouseProfile), or null (M6 villa). Closed by the vendor's rule (<see cref="GuardianClosed"/>).</summary>
+    public HouseGuardian? Guardian { get; internal set; }
+
+    /// <summary>What is known of the player's own house (M6 villa): unknown until a HouseData or a HouseStatus arrives this session.</summary>
+    public HouseOwnership HouseStatus { get; internal set; }
+
+    /// <summary>The house the player or the account owns (the last GameEvent 0x0225 HouseData), or null (M6 villa).</summary>
+    public OwnedHouse? House { get; internal set; }
+
+    /// <summary>Rises with every HouseData (0x0225) or HouseStatus (0x0226) applied: a house query's answer is a rise after its send (M6 villa).</summary>
+    public long HouseInfoRevision { get; internal set; }
+
+    /// <summary>The access list of each house object the server described (GameEvent 0x0248; M6 villa).</summary>
+    public IReadOnlyDictionary<uint, Lifestone.Net.Messages.HouseRestrictionsMsg> HouseRestrictions => _houseRestrictions;
+
+    internal Dictionary<uint, Lifestone.Net.Messages.HouseRestrictionsMsg> MutableHouseRestrictions => _houseRestrictions;
+
+    private readonly Dictionary<uint, Lifestone.Net.Messages.HouseRestrictionsMsg> _houseRestrictions = [];
+
+    /// <summary>The last AvailableHouses list (GameEvent 0x0271; <c>/house available</c>), or null (M6 villa).</summary>
+    public Lifestone.Net.Messages.AvailableHousesMsg? AvailableHouses { get; internal set; }
 
     private readonly Dictionary<uint, uint> _vendorMasks = [];
 

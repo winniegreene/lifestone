@@ -63,6 +63,39 @@ public sealed class IntentsBindingTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void A_scenarios_own_controller_bound_over_the_hosts_gives_the_movement_back_at_its_release_M6_14_motes()
+    {
+        // Live 2026-11-17 00:07:58: the Atlan wand's fight on a ground other than the journey's walked its own offline walker, bound over the play host's controller and unbound at the end; the next journey leg's HoldRun ended NotImplemented.
+        var h = new ActionHarness(offline: true);
+        var host = new IntentSpy();
+        var own = new IntentSpy();
+        h.Api.Move.Bind(host, true);
+
+        var lease = h.Api.Move.BindOver(own, false);
+        Assert.False(h.Api.Move.RunByDefault);
+        Assert.True(h.Api.Move.Release(lease));
+
+        Assert.True(h.Api.Move.IsBound);
+        Assert.True(h.Api.Move.RunByDefault); // the host's option with it
+        var run = h.Api.Move.HoldRun(true, ActionSource.Automation);
+        h.Tick(1);
+        Assert.Equal(ActionOutcomeKind.Local, run.Outcome!.Value.Kind); // live: NotImplemented, "no movement controller is bound"
+        Assert.Equal(["SetHoldRun True"], host.Calls);
+        Assert.Empty(own.Calls);
+        Assert.Contains(h.Log.Entries, e => e.Message == "movement intents: the controller bound before the scenario's own is bound again");
+
+        // A controller bound after the lease (a host's new rig after a login) is not the lease's to replace; a lease over nothing leaves nothing bound, as the old unbind did.
+        var second = h.Api.Move.BindOver(own, false);
+        var rebound = new IntentSpy();
+        h.Api.Move.Bind(rebound, false);
+        Assert.False(h.Api.Move.Release(second));
+        h.Api.Move.Unbind();
+        var bare = h.Api.Move.BindOver(own, false);
+        Assert.True(h.Api.Move.Release(bare));
+        Assert.False(h.Api.Move.IsBound);
+    }
+
+    [Fact]
     public void A_bound_intent_keeps_its_outcomes_Local_DryRun_Refused_and_Cancelled_by_the_kill_switch()
     {
         var h = new ActionHarness(offline: true);
@@ -208,6 +241,54 @@ public sealed class IntentsBindingTests(ITestOutputHelper output)
 
         Run(controller, 8.0);
         Assert.False(body.ServerDriving); // the MoveTo ended
+    }
+
+    [Fact]
+    public void EndServerMove_ends_the_servers_walk_of_the_player_as_a_key_does_and_says_so_to_the_server_M6_14()
+    {
+        // M6 14 (live 2026-11-12): a Use of a corpse 18 m off lets ACE walk the player there, and nothing ended that walk when the fight turned to an attacker. A person ends it with a movement key: the press takes control back
+        // (the body's MoveTo is cancelled with 0x36) and its MoveToState is what ends ACE's walk-to chain (GameActionMoveToState.cs:22-26 @95ef426d).
+        var (controller, sink, _) = FlatController(x: 30f, y: 30f);
+        var h = new ActionHarness(offline: true);
+        h.Api.Move.Bind(controller, controller.Options.RunByDefault);
+        Run(controller, 0.5);
+        Assert.False(h.Api.Move.ServerMoving); // under the server's control, but no MoveTo
+        Assert.NotNull(h.Api.Move.MotionText);
+
+        var physics = controller.Player;
+        var target = At(Block, physics.Position.Frame.Origin.X, physics.Position.Frame.Origin.Y + 18f, 0f);
+        var parameters = new MovementParameters { Flags = MovementParameterFlags.CanWalk | MovementParameterFlags.MoveTowards, DistanceToObject = 0.6f };
+        var moveTo = new WireMovement(WireMovementType.MoveToPosition, NonCombat, false, false, default, MoveTo: new WireMoveTo(0, target, parameters, 1f));
+        Assert.Equal(MovementUnpackResult.Applied, new PhysicsPlayerBody(physics).ApplyServerMovement(moveTo, [], autonomous: false, out _));
+        controller.LoseControlToServer();
+        Run(controller, 1.0);
+        Assert.True(h.Api.Move.ServerMoving); // check before: the server walks her
+        Assert.Null(h.Api.Move.LastServerMoveToEnd);
+        var heading = controller.Position.Frame.Orientation;
+        sink.Calls.Clear();
+
+        var (press, release) = h.Api.Move.EndServerMove(ActionSource.Automation);
+        h.Tick(0.02);
+
+        Assert.Equal(ActionOutcomeKind.Local, press.Outcome!.Value.Kind);
+        Assert.Equal(ActionOutcomeKind.Local, release.Outcome!.Value.Kind);
+        Assert.False(controller.ControlledByServer);
+        Assert.False(controller.IsMovingTo);
+        Assert.False(h.Api.Move.ServerMoving); // check after: she stands
+        Assert.Equal(WeenieError.ActionCancelled, physics.Movement!.MoveTo!.LastCancelReason);
+        Assert.Equal(0, h.Api.Move.AutomationHeld); // the key is not left down
+        var sent = sink.Calls.Where(c => c.Kind == RecordingMovementSink.Kind.MoveToState).ToList();
+        Assert.Equal(2, sent.Count); // the press and the release, each a MoveToState: what ACE ends its walk on
+        Assert.Equal(MoveIntents.EndServerMoveCommand, sent[0].Turn);
+        Assert.Equal(0u, sent[1].Turn);
+        Assert.Contains(sent[1].Forward, new[] { 0u, MotionCommands.Ready }); // no walk left in the state sent
+        Assert.Equal(heading, controller.Position.Frame.Orientation); // pressed and released in one tick: no physics step between, the heading stays
+
+        var at = controller.Position;
+        Run(controller, 1.0);
+        Assert.Equal("cancelled (0x0036 ActionCancelled)", h.Api.Move.LastServerMoveToEnd);
+        Assert.True(PositionFrames.Distance(at, controller.Position) < 0.05f, "she stands where the key stopped her");
+        output.WriteLine(h.Api.Move.MotionText);
     }
 
     [Fact]

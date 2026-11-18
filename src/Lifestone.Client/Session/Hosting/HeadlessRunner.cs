@@ -221,7 +221,7 @@ public sealed class HeadlessRunner : IDisposable
             HoltburgLapsScenario h => (h.Login.Character, h.Login.CreateCharacter),
             WayfindScenario w => (w.Login.Character, w.Login.CreateCharacter),
             Scenarios.Journey.HeadlessJourneyScenario j => ((string?)j.Character, (string?)null), // M4 P5b J4: the journey enters its plan's character, creates none
-            HeadlessAutopilotScenario p => ((string?)p.Character, (string?)null), // M5 4 h1: the autopilot enters the mage plan's character, creates none
+            HeadlessAutopilotScenario p => ((string?)p.Character, (string?)null), // M5 4 h1: the autopilot enters its plan's character (the mage's; the level up job's is the ladder's, M6 16 E0b), creates none
             LoginCheckScenario c => ((string?)c.Character, (string?)c.Character), // the check creates its character when it is missing
             _ => ((string?)null, (string?)null),
         };

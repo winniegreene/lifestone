@@ -369,7 +369,7 @@ public sealed class WarSpellPickerTests
         var unknown = Mage with { TargetMaxHealth = 0 };
         Assert.Null(picks.Pick(targets, in unknown));
         Assert.Null(picks.Pick(targets, in unknown));
-        Assert.Single(log.Lines, l => l.StartsWith("TODO(m5-war-pick-data)", StringComparison.Ordinal));
+        Assert.Single(log.Lines, l => l.StartsWith("TODO(f10-picker-data): the war pick has no target maximum health", StringComparison.Ordinal)); // M6 1 f: the health is the one unknown (m5-war-pick-data closed)
     }
 
     [Fact]
@@ -409,5 +409,25 @@ public sealed class WarSpellPickerTests
         public bool IsEnabled(LogSeverity severity) => true;
 
         public void Write(LogSeverity severity, string category, string message, ReadOnlySpan<LogField> fields) => Lines.Add(message);
+    }
+
+    [Fact]
+    public void Every_elements_bolt_line_I_to_VIII_has_the_flame_bolts_projectile_numbers_m5_war_pick_data()
+    {
+        var flame = WarSpellData.Rows.Where(r => r.Kind == WarKind.Bolt && r.Id is 27 or 81 or 82 or 83 or 84 or 85 or 2128 or 4439).OrderBy(r => r.Level).ToList();
+        Assert.Equal(8, flame.Count);
+        var bolts = WarSpellData.Rows.Where(r => r.Kind == WarKind.Bolt).ToList();
+        Assert.Equal(7 * 8, bolts.Count); // fire, frost, lightning, acid, Shock Wave, Whirling Blade, Force Bolt
+        Assert.Equal(bolts.Count, bolts.Select(r => r.Id).Distinct().Count());
+        foreach (var group in bolts.GroupBy(r => r.Level))
+        {
+            var f = flame[group.Key - 1];
+            Assert.All(group, r => Assert.Equal((f.BaseIntensity, f.Variance, f.Projectiles, f.SpeedMetresPerSecond), (r.BaseIntensity, r.Variance, r.Projectiles, r.SpeedMetresPerSecond)));
+        }
+
+        Assert.True(WarSpellData.TryGet(28, out var frostOne) && frostOne.Level == 1); // Frost Bolt I
+        Assert.True(WarSpellData.TryGet(2136, out var icy) && icy.Level == 7); // Icy Torment
+        Assert.Equal(83u, WarSpellData.HighestUnderCap([27, 81, 82, 83, 84], 4, _ => true, out var capped)!.Id);
+        Assert.True(capped);
     }
 }

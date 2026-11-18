@@ -44,8 +44,20 @@ internal sealed class ActionApi : IActionApi, IDisposable
     /// <summary>How long after an action ended without its UseDone a UseDone is still taken for that action's (session-clock seconds; M3 1.2 fix R1).</summary>
     internal const double OwedUseDoneWindowSeconds = 5;
 
+    /// <summary>
+    /// ACE's <c>WeenieError.YoureTooBusy</c> as a UseDone code. ACE sends it at once, as the refusal of the action it just received (<c>VerifyBusy</c>, <c>Player_Magic.cs</c> 375-383; <c>Player_Use.cs</c> 154-157 and 199-202
+    /// @95ef426d), so it is never an older action's late end and never pays an owed UseDone (M6 14 recall unblock).
+    /// </summary>
+    internal const uint BusyUseDoneCode = 0x001D;
+
     /// <summary>True for <c>--retail-cast-any-mode</c>: the cast guard is off for this session (<see cref="Trackers.StanceGuards"/>). Default false.</summary>
     internal bool RetailCastAnyMode { get; set; }
+
+    /// <summary>True for <c>--allow-climber-grant</c> (M6 0 F5, 0-R4): the session may grant or place the climber (<see cref="Contracts.PlayerTools"/> refuses it otherwise). Default false.</summary>
+    internal bool AllowClimberGrant { get; set; }
+
+    /// <summary>M6 15: the player's rules on the automation (every spell it casts is on a spell bar, every drink on the shortcut bar); <c>--autopilot-player-rules=off</c> turns <see cref="PlayerRulesGate.On"/> off.</summary>
+    internal PlayerRulesGate PlayerRules { get; }
 
     private readonly GameStateReducer _reducer;
     private readonly EventBus _bus;
@@ -66,8 +78,9 @@ internal sealed class ActionApi : IActionApi, IDisposable
     // Trackers whose action is complete but whose lane is still busy (a cast until its UseDone); see ActionTracker.HoldsLane.
     private readonly List<ActionTracker> _laneHolds = [];
 
-    // The session-clock times until which a UseDone still owed by an action that ended without one (a cast or use that timed out, a hold let go at its timeout) is dropped, not given to the next action (M3 1.2 fix R1).
-    private readonly List<double> _owedUseDones = [];
+    // The UseDones still owed by actions that ended without one (a cast or use that timed out, a hold let go at its timeout or bound): one arriving before Until is dropped, not given to the next action (M3 1.2 fix R1),
+    // unless an action sent after the debt began claims it (M6 14 recall unblock: ClaimsUseDone), or it is a busy refusal.
+    private readonly List<OwedUseDone> _owedUseDones = [];
     private readonly Action<ActionHandle, Exception> _onHandlerError;
     private readonly MovementChannel _movement;
     private readonly bool _serverIsLoopback;
@@ -116,6 +129,7 @@ internal sealed class ActionApi : IActionApi, IDisposable
         _movement = new MovementChannel(reducer.State, link is null ? null : () => link.Session, log, thread);
         Move = new MoveIntents(this);
         Tools = new PlayerTools(this);
+        PlayerRules = new PlayerRulesGate(this);
 
         // The subscriptions live as long as the session's bus: the Action API is the session's own.
         bus.Subscribe<SessionPhaseChanged>(OnPhase);
@@ -140,6 +154,7 @@ internal sealed class ActionApi : IActionApi, IDisposable
         bus.Subscribe<AttackChanged>(OnAttack);
         bus.Subscribe<ObjectSoundPlayed>(OnSound);
         bus.Subscribe<ShortcutsChanged>(_shortcutEvictions.OnChanged);
+        bus.Subscribe<ShortcutsChanged>(OnShortcutsForRules);
         reducer.ToolReplyRouted = OnToolReply;
     }
 
@@ -175,6 +190,62 @@ internal sealed class ActionApi : IActionApi, IDisposable
             }
 
             return TeleportWait();
+        }
+    }
+
+    /// <inheritdoc/>
+    public string PendingText
+    {
+        get
+        {
+            const int Most = 8;
+            var now = Clock.Now;
+            var text = new System.Text.StringBuilder();
+            var count = 0;
+            void Add(ActionTracker tracker, string state, double? since)
+            {
+                if (++count > Most)
+                {
+                    return;
+                }
+
+                text.Append(text.Length > 0 ? "; " : string.Empty).Append('#').Append(tracker.Handle.Id).Append(' ').Append(tracker.Handle.Kind).Append(' ').Append(state);
+                if (since is { } from)
+                {
+                    text.Append(' ').Append((now - from).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)).Append(" s");
+                }
+            }
+
+            foreach (var tracker in _inFlight)
+            {
+                if (tracker.State == TrackerState.InFlight)
+                {
+                    Add(tracker, "sent, unanswered", tracker.Handle.SentAt);
+                }
+            }
+
+            foreach (var hold in _laneHolds)
+            {
+                if (hold.HoldsLane)
+                {
+                    Add(hold, "holds the " + hold.Lane + " lane", null);
+                }
+            }
+
+            foreach (var tracker in _queued)
+            {
+                if (tracker.State == TrackerState.Queued && tracker.Lane != ActionLane.Move)
+                {
+                    Add(tracker, "not sent, waiting", tracker.Handle.QueuedAt);
+                }
+            }
+
+            if (count > Most)
+            {
+                text.Append("; and ").Append(count - Most).Append(" more");
+            }
+
+            return count == 0 ? "nothing" : text.ToString();
         }
     }
 
@@ -266,6 +337,13 @@ internal sealed class ActionApi : IActionApi, IDisposable
     /// for the cast's (<c>TODO(m3-cast-projectile-attribution)</c>). Null lookup: the Setup is not checked.
     /// </summary>
     internal Func<uint, uint?>? ProjectileSetupLookup { get; set; }
+
+    /// <summary>M6 8 L: the check both fights ask before a bolt is paid for, or null on a host with no physics (the wasted-cast count is then the only guard).</summary>
+    public Lifestone.Client.Session.Casting.IShotCheck? Shots { get; private set; }
+
+    /// <summary>M6 8 L: gives the fights their shot check (the host that owns the player's physics world).</summary>
+    /// <param name="shots">The check.</param>
+    public void UseShots(Lifestone.Client.Session.Casting.IShotCheck shots) => Shots = shots;
 
     /// <summary>The spell <paramref name="id"/> as the host's table holds it, or null (no table, or no such spell).</summary>
     internal Lifestone.Data.Magic.SpellInfo? FindSpell(uint id) =>
@@ -382,6 +460,7 @@ internal sealed class ActionApi : IActionApi, IDisposable
     public HealHandle Drink(uint item, ActionSource source = ActionSource.Host)
     {
         CheckThread("IActionApi.Drink");
+        item = PlayerRules.BeforeDrink(item, source); // M6 15: the automation drinks the item its kind's shortcut holds, after putting the kind on the bar
         var handle = new HealHandle(NextId(), ActionKind.Drink, source, "Drink item=" + ActionText.Hex(item), Clock.Now);
         return (HealHandle)Accept(new PotionTracker(handle, item), item == 0 ? Refused("no item to drink") : null);
     }
@@ -393,6 +472,15 @@ internal sealed class ActionApi : IActionApi, IDisposable
         var handle = NewHandle(ActionKind.UseManaStone, source, "UseManaStone stone=" + ActionText.Hex(stone) + " target=" + ActionText.Hex(target));
         var problem = stone == 0 ? "no stone to use" : target == 0 ? "no target to use the stone on" : null;
         return Accept(new ManaStoneTracker(handle, stone, target), problem is null ? null : Refused(problem));
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle UseRecipe(uint sourceItem, uint targetItem, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.UseRecipe");
+        var handle = NewHandle(ActionKind.UseRecipe, source, "UseRecipe source=" + ActionText.Hex(sourceItem) + " target=" + ActionText.Hex(targetItem));
+        var problem = sourceItem == 0 ? "no source item" : targetItem == 0 ? "no target item" : sourceItem == targetItem ? "the item cannot be used on itself" : null;
+        return Accept(new RecipeTracker(handle, sourceItem, targetItem), problem is null ? null : Refused(problem));
     }
 
     /// <inheritdoc/>
@@ -417,6 +505,15 @@ internal sealed class ActionApi : IActionApi, IDisposable
         var handle = NewHandle(ActionKind.Tell, source, "Tell chars=" + ActionText.Count(text?.Length ?? 0));
         var problem = string.IsNullOrWhiteSpace(target) ? "no one to tell" : string.IsNullOrEmpty(text) ? "nothing to tell" : null;
         return Accept(new TellTracker(handle, target ?? string.Empty, text ?? string.Empty), problem is null ? null : Refused(problem));
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle TalkDirect(uint target, string text, ActionSource source)
+    {
+        CheckThread("IActionApi.TalkDirect");
+        var handle = NewHandle(ActionKind.TalkDirect, source, "TalkDirect target=" + ActionText.Hex(target) + " chars=" + ActionText.Count(text?.Length ?? 0));
+        var problem = target == 0 ? "no one to tell" : string.IsNullOrEmpty(text) ? "nothing to tell" : null;
+        return Accept(new TalkDirectTracker(handle, target, text ?? string.Empty), problem is null ? null : Refused(problem));
     }
 
     /// <inheritdoc/>
@@ -475,6 +572,7 @@ internal sealed class ActionApi : IActionApi, IDisposable
     public ActionHandle Cast(uint spellId, ActionSource source = ActionSource.Host)
     {
         CheckThread("IActionApi.Cast");
+        PlayerRules.BeforeCast(spellId, source); // M6 15: the automation's spell goes on a spell bar before its cast
         var handle = NewHandle(ActionKind.CastSpell, source, "Cast spell=" + spellId);
         return Accept(new CastTracker(handle, spellId, 0), spellId == 0 ? Refused("no spell to cast") : null);
     }
@@ -483,8 +581,13 @@ internal sealed class ActionApi : IActionApi, IDisposable
     public ActionHandle Cast(uint spellId, uint target, ActionSource source = ActionSource.Host)
     {
         CheckThread("IActionApi.Cast");
-        var handle = NewHandle(ActionKind.CastSpell, source, "Cast spell=" + spellId + " target=" + ActionText.Hex(target));
         var problem = spellId == 0 ? "no spell to cast" : target == 0 ? "no target to cast at" : null;
+        if (problem is null)
+        {
+            PlayerRules.BeforeCast(spellId, source); // M6 15: the automation's spell goes on a spell bar before its cast
+        }
+
+        var handle = NewHandle(ActionKind.CastSpell, source, "Cast spell=" + spellId + " target=" + ActionText.Hex(target));
         NoteTarget(target);
         return Accept(new CastTracker(handle, spellId, target), problem is null ? null : Refused(problem));
     }
@@ -773,6 +876,38 @@ internal sealed class ActionApi : IActionApi, IDisposable
     }
 
     /// <inheritdoc/>
+    public ActionHandle BuyHouse(uint guardian, IReadOnlyList<uint> items, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.BuyHouse");
+        ArgumentNullException.ThrowIfNull(items);
+        uint[] placed = [.. items];
+        return Accept(new HousePaymentTracker(NewHandle(ActionKind.BuyHouse, source, "BuyHouse guardian=" + ActionText.Hex(guardian) + " items=" + string.Join(",", placed.Select(ActionText.Hex))), guardian, placed, buy: true));
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle PayRent(uint guardian, IReadOnlyList<uint> items, ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.PayRent");
+        ArgumentNullException.ThrowIfNull(items);
+        uint[] placed = [.. items];
+        return Accept(new HousePaymentTracker(NewHandle(ActionKind.PayRent, source, "PayRent guardian=" + ActionText.Hex(guardian) + " items=" + string.Join(",", placed.Select(ActionText.Hex))), guardian, placed, buy: false));
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle RecallHouse(ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.RecallHouse");
+        return Accept(new HouseRecallTracker(NewHandle(ActionKind.RecallHouse, source, "RecallHouse")));
+    }
+
+    /// <inheritdoc/>
+    public ActionHandle QueryHouse(ActionSource source = ActionSource.Host)
+    {
+        CheckThread("IActionApi.QueryHouse");
+        return Accept(new HouseQueryTracker(NewHandle(ActionKind.QueryHouse, source, "QueryHouse")));
+    }
+
+    /// <inheritdoc/>
     public ActionHandle RecallMarketplace(ActionSource source = ActionSource.Host)
     {
         CheckThread("IActionApi.RecallMarketplace");
@@ -834,6 +969,7 @@ internal sealed class ActionApi : IActionApi, IDisposable
             Tools.Update(); // the gear spawn's next merge, queued here so this tick's dispatch sends it
             _shortcutEvictions.Flush(this); // a row whose item left goes first: an add for its slot queued in the same update must find the slot already freed on the server (3.2-R2)
             Dispatch(now);
+            PlayerRules.Update(); // M6 15: the adds asked before this dispatch are out; the held drinks with no shortcut get one
             ResolveObserved();
             CompletePending();
             _shortcutEvictions.Flush(this);
@@ -842,6 +978,37 @@ internal sealed class ActionApi : IActionApi, IDisposable
         {
             _updating = false;
         }
+    }
+
+    /// <inheritdoc/>
+    public bool Withdraw(ActionHandle handle, string why)
+    {
+        CheckThread("IActionApi.Withdraw");
+        ArgumentNullException.ThrowIfNull(handle);
+        for (var i = 0; i < _queued.Count; i++)
+        {
+            var tracker = _queued[i];
+            if (tracker.Handle != handle || tracker.State != TrackerState.Queued)
+            {
+                continue;
+            }
+
+            var outcome = new ActionOutcome(ActionOutcomeKind.Cancelled, 0, "withdrawn before it was sent: " + why);
+            if (_updating)
+            {
+                tracker.State = TrackerState.Done;
+                _completing.Add((tracker, outcome)); // a continuation's withdraw completes in this update's last step
+            }
+            else
+            {
+                Complete(tracker, outcome);
+                Compact();
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -889,6 +1056,7 @@ internal sealed class ActionApi : IActionApi, IDisposable
         _killSwitchRequest = null;
         _movement.Reset();
         Tools.Reset();
+        PlayerRules.Reset();
     }
 
     /// <summary>
@@ -943,6 +1111,11 @@ internal sealed class ActionApi : IActionApi, IDisposable
         }
 
         var automation = handle.Source == ActionSource.Automation;
+        if (automation)
+        {
+            PlayerRules.AutomationSeen(); // M6 15: while the automation is at work its drinks are kept on the shortcut bar
+        }
+
         if (automation && _killSwitch)
         {
             return CompleteNow(tracker, Refused(KillSwitchRefusal));
@@ -1032,6 +1205,28 @@ internal sealed class ActionApi : IActionApi, IDisposable
         _reducer.Recorder?.Notice(Clock.Now, new RecordingNotice(ActionNotices.LogOffRequested, playerKillerDelay ? 1u : 0u, null));
         _bus.Publish(new LogOffRequested(FrameTime, playerKillerDelay));
     }
+
+    /// <summary>M6 15: true while a cast of <paramref name="spellId"/> waits for its turn (asked, not sent yet): the player's rule does not take that spell off its bar under it.</summary>
+    internal bool CastWaiting(uint spellId)
+    {
+        for (var i = 0; i < _queued.Count; i++)
+        {
+            if (_queued[i] is CastTracker { State: TrackerState.Queued } cast && cast.SpellId == spellId)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>M6 15: publishes <see cref="SpellBarCast"/>: the automation's cast went out from this bar and position (the spellcasting panel shows the tab and selects the spell).</summary>
+    internal void PublishSpellBarCast(uint spellId, int bar, int index) => _bus.Publish(new SpellBarCast(spellId, bar, index));
+
+    /// <summary>M6 15: publishes <see cref="ShortcutUsed"/>: the automation's drink went out as the use of this slot's item (the toolbar shows the slot busy until the action completes).</summary>
+    internal void PublishShortcutUsed(int slot, uint item, ActionHandle action) => _bus.Publish(new ShortcutUsed(slot, item, action));
+
+    private void OnShortcutsForRules(in ShortcutsChanged e) => PlayerRules.Touch();
 
     /// <summary>Publishes <see cref="ToolsUnavailable"/> for a reason the reducer does not see (a non-loopback server).</summary>
     internal void PublishToolsUnavailable(ToolAvailability availability, string reason) => _bus.Publish(new ToolsUnavailable(availability, reason));
@@ -1250,11 +1445,23 @@ internal sealed class ActionApi : IActionApi, IDisposable
         for (var i = _laneHolds.Count - 1; i >= 0; i--)
         {
             var hold = _laneHolds[i];
-            if (hold.Handle.SentAt is not { } heldSince || now - heldSince >= hold.TimeoutSeconds)
+            var timedOut = hold.Handle.SentAt is not { } heldSince || now - heldSince >= hold.TimeoutSeconds;
+            if (!hold.HoldsLane)
             {
-                if (hold.HoldsLane && hold.ConsumesUseDone) // an item move holds the lane but takes no UseDone, so none is owed for it (2.1-R9)
+                if (hold.AwaitsUseDone)
                 {
-                    OweUseDone(now);
+                    // M6 14 recall unblock: a hold its own rule ended before ACE's UseDone (an opened container whose view was closed): named; nothing is owed (ACE sent the open's UseDone right behind its 0196).
+                    Log.Info(SessionLog.Category, "the " + hold.Lane + " lane hold of #" + ActionText.Count(hold.Handle.Id) + " " + hold.Handle.Kind + " ended before ACE's UseDone came" +
+                        (hold.Handle.Kind == ActionKind.OpenContainer ? ": its container's view was closed" : string.Empty) + "; none is owed (m6-owed-usedone)");
+                }
+
+                _laneHolds.RemoveAt(i);
+            }
+            else if (timedOut || hold.HoldBoundPassed(now))
+            {
+                if (hold.ConsumesUseDone) // an item move holds the lane but takes no UseDone, so none is owed for it (2.1-R9)
+                {
+                    EndedWithoutUseDone(hold, now, timedOut ? "its hold was let go at its timeout" : "its hold was let go at its own bound");
                 }
 
                 _laneHolds.RemoveAt(i);
@@ -1267,7 +1474,7 @@ internal sealed class ActionApi : IActionApi, IDisposable
             {
                 if (tracker.ConsumesUseDone)
                 {
-                    OweUseDone(now);
+                    EndedWithoutUseDone(tracker, now, "it timed out");
                 }
 
                 tracker.State = TrackerState.Done;
@@ -1419,8 +1626,31 @@ internal sealed class ActionApi : IActionApi, IDisposable
         return false;
     }
 
-    /// <summary>Notes that ACE's UseDone for an action that ended without one may still come, and is to be dropped when it does.</summary>
-    private void OweUseDone(double now) => _owedUseDones.Add(now + OwedUseDoneWindowSeconds);
+    /// <summary>A UseDone an action that ended without one may still be sent: who owes it, since when, and until when one arriving is dropped for it.</summary>
+    private readonly record struct OwedUseDone(long ActionId, ActionKind Kind, double Since, double Until);
+
+    /// <summary>
+    /// An action that ends with ACE's UseDone ended without its outcome or its hold's end (<paramref name="how"/>). ACE's UseDone for it may still come: it is owed, and dropped within <see cref="OwedUseDoneWindowSeconds"/>
+    /// (M3 1.2 fix R1), unless the action took its UseDone already, or an owed UseDone was paid while it waited (the cascade guard): then none is owed (M6 14 recall unblock, m6-owed-usedone). Every case is one log line.
+    /// </summary>
+    private void EndedWithoutUseDone(ActionTracker tracker, double now, string how)
+    {
+        var who = "#" + ActionText.Count(tracker.Handle.Id) + " " + tracker.Handle.Kind;
+        if (!tracker.AwaitsUseDone)
+        {
+            Log.Info(SessionLog.Category, who + " ended (" + how + ") after it took its UseDone: none is owed (m6-owed-usedone)");
+            return;
+        }
+
+        if (tracker.UseDoneDebtPaid)
+        {
+            Log.Warn(SessionLog.Category, who + " ended (" + how + ") without its UseDone, but a UseDone that came while it waited paid an older action's debt and may have been this one's: none is owed, so the next action's UseDone is not dropped too (the cascade guard, m6-owed-usedone)");
+            return;
+        }
+
+        _owedUseDones.Add(new OwedUseDone(tracker.Handle.Id, tracker.Handle.Kind, now, now + OwedUseDoneWindowSeconds));
+        Log.Info(SessionLog.Category, string.Create(CultureInfo.InvariantCulture, $"{who} ended ({how}) without its UseDone: one is owed for {OwedUseDoneWindowSeconds:0} s (dropped if it comes, unless an action sent after it claims it; M3 1.2 fix R1, m6-owed-usedone)"));
+    }
 
     /// <summary>True when an action of a serialised lane (Session, Stats, Magic, Inventory) is in flight, or its lane is held (a cast not yet ended by the server).</summary>
     private bool LaneActionInFlight(ActionLane lane)
@@ -1546,7 +1776,7 @@ internal sealed class ActionApi : IActionApi, IDisposable
     {
         _queued.RemoveAll(static t => t.State != TrackerState.Queued);
         _inFlight.RemoveAll(static t => t.State != TrackerState.InFlight);
-        _laneHolds.RemoveAll(static t => !t.HoldsLane);
+        _laneHolds.RemoveAll(static t => !t.HoldsLane && !t.AwaitsUseDone); // M6 14: a hold that ended before its UseDone stays until ExpireTimeouts names it (every reader asks HoldsLane)
     }
 
     private void OnPhase(in SessionPhaseChanged e)
@@ -1648,24 +1878,23 @@ internal sealed class ActionApi : IActionApi, IDisposable
         var now = Clock.Now;
         for (var i = _owedUseDones.Count - 1; i >= 0; i--)
         {
-            if (_owedUseDones[i] <= now)
+            if (_owedUseDones[i].Until <= now)
             {
                 _owedUseDones.RemoveAt(i);
             }
         }
 
-        if (_owedUseDones.Count > 0)
+        if (_owedUseDones.Count > 0 && OwedUseDoneTakes(in e, now))
         {
-            _owedUseDones.RemoveAt(0);
-            Log.Info(SessionLog.Category, "a late UseDone 0x01C7 (code " + e.WeenieError + ") belongs to an action that already ended; dropped (M3 1.2 fix R1)");
             return;
         }
 
         // A cast whose lane is held (its outcome is in) takes the server's end of the cast before any action in flight does.
         for (var i = 0; i < _laneHolds.Count; i++)
         {
-            if (_laneHolds[i].OnUseDone(in e))
+            if (_laneHolds[i].HoldsLane && _laneHolds[i].OnUseDone(in e)) // M6 14: a hold that ended (a closed container's) takes no UseDone
             {
+                _laneHolds[i].UseDoneTaken = true;
                 return;
             }
         }
@@ -1677,9 +1906,101 @@ internal sealed class ActionApi : IActionApi, IDisposable
             // A cast that settled in this tick but has not been handed to the hold yet (its effect and ACE's UseDone arrived together) still takes the UseDone.
             if (tracker.State == TrackerState.InFlight && (tracker.Resolution is null || tracker.HoldsLane) && tracker.OnUseDone(in e))
             {
+                tracker.UseDoneTaken = true;
                 return;
             }
         }
+    }
+
+    /// <summary>
+    /// M6 14 recall unblock (live 2026-11-14 17:25:09 to 17:32:21 UTC: one wrong debt dropped the next action's UseDone, that action timed out and owed one in turn, and 42 UseDones were dropped in seven minutes while
+    /// every cast, drink and the recall waited behind the casualties, to her death). True when an owed UseDone takes this one (dropped, logged); false when it goes to the actions as ever:
+    /// <list type="bullet">
+    /// <item>a busy refusal (0x001D) is the answer to the action just sent, never a late end (<see cref="BusyUseDoneCode"/>);</item>
+    /// <item>an action sent after a debt began, which the server has visibly answered (<see cref="ActionTracker.ClaimsUseDone"/>), voids that debt: ACE answers a player's actions in order and refuses or queues a new cast or use
+    /// while busy, so the old action's UseDone, if ACE ever sent it, came before; the UseDone is the claimant's;</item>
+    /// <item>else the oldest debt is paid, and every action still waiting for its own UseDone is marked (<see cref="ActionTracker.UseDoneDebtPaid"/>): if it then ends without one it owes none (the cascade guard).</item>
+    /// </list>
+    /// </summary>
+    private bool OwedUseDoneTakes(in UseDone e, double now)
+    {
+        var oldest = _owedUseDones[0];
+        if (e.WeenieError == BusyUseDoneCode)
+        {
+            Log.Info(SessionLog.Category, "a UseDone 0x001D (You're too busy) is the refusal of the action just sent, never a late end: #" + ActionText.Count(oldest.ActionId) + " " + oldest.Kind + "'s owed UseDone does not take it (m6-owed-usedone)");
+            return false;
+        }
+
+        if (Claimant(oldest.Since) is { } claimant)
+        {
+            var voided = new System.Text.StringBuilder();
+            for (var i = _owedUseDones.Count - 1; i >= 0; i--)
+            {
+                if (_owedUseDones[i].Since <= claimant.Handle.SentAt)
+                {
+                    voided.Insert(0, (voided.Length > 0 ? "#" + ActionText.Count(_owedUseDones[i].ActionId) + " " + _owedUseDones[i].Kind + ", " : "#" + ActionText.Count(_owedUseDones[i].ActionId) + " " + _owedUseDones[i].Kind));
+                    _owedUseDones.RemoveAt(i);
+                }
+            }
+
+            Log.Info(SessionLog.Category, "a UseDone (code " + e.WeenieError + ") is #" + ActionText.Count(claimant.Handle.Id) + " " + claimant.Handle.Kind + "'s own: the server answered it since its send, after the debt of " + voided +
+                " began; ACE answers a player's actions in order, so that debt is void (m6-owed-usedone)");
+            return false;
+        }
+
+        _owedUseDones.RemoveAt(0);
+        var waiting = MarkDebtPaid();
+        Log.Info(SessionLog.Category, string.Create(CultureInfo.InvariantCulture, $"a late UseDone 0x01C7 (code {e.WeenieError}) belongs to an action that already ended; dropped (M3 1.2 fix R1): #{ActionText.Count(oldest.ActionId)} {oldest.Kind}'s, owed since {now - oldest.Since:0.0} s ago{(waiting.Length > 0 ? "; " + waiting + " waits for its own and, ending without one, owes none (the cascade guard)" : string.Empty)}"));
+        return true;
+    }
+
+    /// <summary>The action out that claims the UseDone arriving now and was sent at or after <paramref name="since"/> (a hold first, then the actions in flight), or null.</summary>
+    private ActionTracker? Claimant(double since)
+    {
+        for (var i = 0; i < _laneHolds.Count; i++)
+        {
+            var hold = _laneHolds[i];
+            if (hold.HoldsLane && hold.AwaitsUseDone && hold.Handle.SentAt >= since && hold.ClaimsUseDone(this))
+            {
+                return hold;
+            }
+        }
+
+        for (var i = 0; i < _inFlight.Count; i++)
+        {
+            var tracker = _inFlight[i];
+            if (tracker.State == TrackerState.InFlight && tracker.AwaitsUseDone && tracker.Handle.SentAt >= since && tracker.ClaimsUseDone(this))
+            {
+                return tracker;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Marks every action out that still waits for its own UseDone (<see cref="ActionTracker.UseDoneDebtPaid"/>); returns them for the log.</summary>
+    private string MarkDebtPaid()
+    {
+        var text = string.Empty;
+        foreach (var hold in _laneHolds)
+        {
+            if (hold.HoldsLane && hold.AwaitsUseDone)
+            {
+                hold.UseDoneDebtPaid = true;
+                text += (text.Length > 0 ? ", #" : "#") + ActionText.Count(hold.Handle.Id) + " " + hold.Handle.Kind;
+            }
+        }
+
+        foreach (var tracker in _inFlight)
+        {
+            if (tracker.State == TrackerState.InFlight && tracker.AwaitsUseDone)
+            {
+                tracker.UseDoneDebtPaid = true;
+                text += (text.Length > 0 ? ", #" : "#") + ActionText.Count(tracker.Handle.Id) + " " + tracker.Handle.Kind;
+            }
+        }
+
+        return text;
     }
 
     private void OnHealth(in HealthUpdated e)
@@ -1707,6 +2028,7 @@ internal sealed class ActionApi : IActionApi, IDisposable
 
     private void OnInventory(in InventoryChanged e)
     {
+        PlayerRules.Touch(); // M6 15: a drink that is now held gets its shortcut
         for (var i = 0; i < _inFlight.Count; i++)
         {
             if (_inFlight[i].State == TrackerState.InFlight)

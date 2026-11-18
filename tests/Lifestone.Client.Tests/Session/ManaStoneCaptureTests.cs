@@ -88,8 +88,11 @@ public sealed class ManaStoneCaptureTests
     private static GearCandidate Held(uint guid, string name, uint element, double bonus, double mc) => new(guid, name, SelfEquipJudge.CasterType, SelfEquipJudge.Held, 0, 50, Caster(guid, element, bonus, mc));
 
     [Fact]
-    public void The_pick_is_the_one_best_caster_held_and_the_rehearsals_Electric_Sceptre_never_wins_a_tie_off_element()
+    public void The_pick_is_the_one_best_caster_held_and_since_M6_14_a_mana_conversion_bonus_counts_off_element_too()
     {
+        // M6 14 (m6-caster; the owner, 2026-11-13: a caster with real Mana Conversion no longer ties with a bare wand): the pick is the caster score's (0.5 a percent of fire damage, 0.1 a percent of bolts a mana bar, here with no bolt
+        // the skill's percent: TODO(m6-caster-bolt-unread)). ACE reads a caster's Mana Conversion whatever its element (WorldObject_Weapon.cs:235-263), so the rehearsal's Electric Sceptre is a real gain over the plain Wand; the fire
+        // sceptre with the better mana conversion of the two still wins on its +3%.
         var judge = new SelfEquipJudge([], SelfEquipJudge.ElementOf("Flame Bolt"), _ => null);
         var wand = new WornPiece(0x80004907, "Wand", SelfEquipJudge.CasterType, SelfEquipJudge.Held, 0, Caster(0x80004907, 0, 1.0, 0));
         GearCandidate[] held =
@@ -106,11 +109,12 @@ public sealed class ManaStoneCaptureTests
         Assert.Equal(SelfEquipKind.Swap, choice.Kind);
         Assert.Equal(0x80003EB7u, choice.Guid);
         Assert.Equal(0x80004907u, choice.Replaces);
-        Assert.Equal("gear: caster pick: 'Fire Sceptre' 0x80003EB7, the best of 4 usable caster(s) held, over 'Wand' 0x80004907", why);
+        Assert.StartsWith("gear: caster pick: 'Fire Sceptre' 0x80003EB7 (1.9), the best of 4 usable caster(s) held, over 'Wand' 0x80004907 (0); field: ", why, StringComparison.Ordinal);
 
-        Assert.False(judge.Beats(held[0].Appraisal, wand.Appraisal)); // off the plan's element: no win on a tie, whatever its mana conversion
-        Assert.Null(judge.BestCaster([held[0], held[1]], [wand], new Mage(), out var none)); // neither is fire: the Wand is kept
-        Assert.StartsWith("gear: caster pick: keep 'Wand' 0x80004907", none, StringComparison.Ordinal);
+        Assert.True(judge.Beats(held[0].Appraisal, wand.Appraisal)); // off the plan's element its +1% counts 0, its 0.04 mana conversion counts
+        var frost = judge.BestCaster([held[0], held[1]], [wand], new Mage(), out var none); // neither is fire: the better mana conversion of the two goes on
+        Assert.Equal((SelfEquipKind.Swap, 0x80004CCEu), (frost!.Kind, frost.Guid));
+        Assert.StartsWith("gear: caster pick: 'Frost Sceptre' 0x80004CCE (0.5)", none, StringComparison.Ordinal);
 
         var electricHeld = new WornPiece(0x80000808, "Electric Sceptre", SelfEquipJudge.CasterType, SelfEquipJudge.Held, 0, held[0].Appraisal);
         Assert.Equal(0x80003EB7u, judge.BestCaster(held[1..], [electricHeld], new Mage(), out _)!.Guid); // from the rehearsal's end state, the next visit puts the fire sceptre in

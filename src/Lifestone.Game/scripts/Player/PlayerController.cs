@@ -64,6 +64,7 @@ public sealed partial class PlayerController : Node, IInputActionSink, IWorldPoi
     private long _frames;
     private long _slowFrames;
     private double _maxFrameMs;
+    private readonly Lifestone.Client.Diagnostics.FrameWallClock _frameClock = new();
     private double _lastOwnMs;
     private double _maxOwnMs;
     private readonly PipelineCompilationWatch _pipelines = new();
@@ -252,6 +253,7 @@ public sealed partial class PlayerController : Node, IInputActionSink, IWorldPoi
     /// <inheritdoc/>
     public override void _Process(double delta)
     {
+        using var framePhase = Lifestone.Game.Diagnostics.FramePhases.Player(); // M6 16 Eperf2: this call's share of a long frame
         var started = Stopwatch.GetTimestamp();
         var now = Clock();
         WatchFrame(delta);
@@ -447,10 +449,13 @@ public sealed partial class PlayerController : Node, IInputActionSink, IWorldPoi
     /// <inheritdoc/>
     void ICameraInputHost.SetAlternateKeys(bool on) => _input?.SetAlternateKeys(on);
 
-    /// <summary>Counts the frame and reports one over <see cref="SlowFrameMilliseconds"/> (the whole frame, not only the player's share).</summary>
+    /// <summary>
+    /// Counts the frame and reports one over <see cref="SlowFrameMilliseconds"/> (the whole frame, not only the player's share). The frame is the wall time since the previous frame (<see cref="Lifestone.Client.Diagnostics.FrameWallClock"/>, M6 14 hub plan): the engine's
+    /// delta does not show a long hold (live 2026-11-16 16:55:04 UTC: a frame the first Town Network plan held for seconds read 130.9 ms); the line's <c>delta_ms</c> is the engine's.
+    /// </summary>
     private void WatchFrame(double delta)
     {
-        var ms = delta * 1000.0;
+        var ms = _frameClock.Next((long)Engine.GetProcessFrames(), delta * 1000.0);
         _frames++;
         var compiled = _pipelines.Step();
         var gc = _gcWatch.Step();
@@ -468,13 +473,15 @@ public sealed partial class PlayerController : Node, IInputActionSink, IWorldPoi
         if (ms > SlowFrameMilliseconds && _frames > WarmupFrames)
         {
             _slowFrames++;
-            // process_ms is what Godot spent in every node's _Process in the previous frame; render_setup_cpu_ms the render server's CPU set-up; the rest of the frame is the draw and the wait.
+            // process_ms is Godot's process-time monitor: the longest process step of the last whole second, set once a second, so it is this frame's only by chance (M6 16 Eperf2: two slow-frame lines 0.66 s apart
+            // read the same 166.2 ms, live 2026-11-18 01:20:50 UTC; the long-frame line times the host's calls of the frame itself). render_setup_cpu_ms is the render server's CPU set-up; the rest is the draw and the wait.
             // pipelines_* are the pipeline compilations since the previous frame's process (a first-use shader compile: foreground ones stall the frame).
             Log.Warn(
                 "play",
                 "slow frame",
                 [
                     ("ms", ms),
+                    ("delta_ms", delta * 1000.0),
                     ("frame", _frames),
                     ("placing", Placing),
                     ("player_ms_in_previous_frame", _lastOwnMs),

@@ -243,6 +243,12 @@ public sealed class SoakSnapshot
 
     /// <summary>M5 7 P7d (D139 row f): orphaned objects dropped over the session (<see cref="Lifestone.Client.Session.State.ObjectCull.OrphansDropped"/>).</summary>
     public long? OrphansDropped { get; set; }
+
+    /// <summary>M6 16 Eperf: the frames of the interval (<see cref="SoakFrameWindow.Frames"/>): with the interval's seconds, the frames a second she ran at.</summary>
+    public long? Frames { get; set; }
+
+    /// <summary>M6 16 Eperf: the mean frame of the interval, milliseconds (<see cref="SoakFrameWindow.Mean"/>).</summary>
+    public double? FrameMeanMs { get; set; }
 }
 
 /// <summary>Formats a <see cref="SoakSnapshot"/> as the body of the <c>[soak]</c> line (the log adds the time, the level and the category).</summary>
@@ -268,6 +274,7 @@ public static class SoakLineFormat
         "free_components", "free_kit", "free_review", "self_equips", "stone_refills", "stone_captures", // M5 7 D121, D125: the side packs' free slots and the gear counters, read by name
         "turn_reversals", "turn_flips", "progress_backs", "swings", // M5 7 D134: the walkers' steering totals, read by name
         "tex_cache_n", "tex_cache_mb", "tex_idle_mb", "mesh_cache_n", "mesh_cache_mb", "cache_trims", "orphans_dropped", // M5 7 P7d (D139 rows e, f): the render caches and the orphans, read by name
+        "frames", "frame_mean_ms", // M6 16 Eperf: the interval's frame count and mean frame, last (every field before stays in place), read by name
     ];
 
     /// <summary>Why a tally reads n/a: no autopilot runs in this process (the source is <see cref="SoakTallies"/>).</summary>
@@ -370,6 +377,8 @@ public static class SoakLineFormat
         Real(sb, ci, "mesh_cache_mb", s.MeshCacheMb);
         Whole(sb, ci, "cache_trims", s.CacheTrims);
         Whole(sb, ci, "orphans_dropped", s.OrphansDropped);
+        Whole(sb, ci, "frames", s.Frames);
+        Real(sb, ci, "frame_mean_ms", s.FrameMeanMs);
     }
 
     private static void Real(StringBuilder sb, CultureInfo ci, string name, double? value, bool first = false)

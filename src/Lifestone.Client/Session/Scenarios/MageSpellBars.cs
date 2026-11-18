@@ -85,7 +85,7 @@ public sealed class MageSpellBars
     public static IReadOnlyList<uint> FightTab { get; } = [FireVulnerabilityOtherVii, FlameBoltVii, RevitalizeSelfVii, StaminaToManaSelfVii, HealSelfVii];
 
     /// <summary>
-    /// The changes that make tabs I and II exactly the owner's lists (spells <paramref name="book"/> lacks left off, logged by name): for each bar the longest prefix that already matches stays, every later spell
+    /// The changes that make tabs I and II exactly the lists set by owner ruling (spells <paramref name="book"/> lacks left off, logged by name): for each bar the longest prefix that already matches stays, every later spell
     /// on the bar is removed (last first), then the missing spells are added at their index in order. Nothing for a bar that already matches.
     /// </summary>
     /// <param name="book">The spellbook with its bars (from the PlayerDescription).</param>

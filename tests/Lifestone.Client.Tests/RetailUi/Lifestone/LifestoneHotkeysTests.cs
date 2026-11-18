@@ -137,7 +137,7 @@ public sealed class LifestoneHotkeysTests(DatSetFixture fixture) : IClassFixture
         scene.Input.KeyDown(DikScanCodes.Pause);
         scene.Input.KeyUp(DikScanCodes.Pause);
         Assert.Equal(1, hotkeys.AutoBuffPresses);
-        Assert.Contains(scene.Log.Entries, e => e.Message.Contains("TODO(m4-autobuff-key-unwired)", StringComparison.Ordinal));
+        Assert.Contains(scene.Log.Entries, e => e.Message.Contains("a host without the rebuff driver", StringComparison.Ordinal));
         var toggled = 0;
         hotkeys.ToggleAutoBuff = () => toggled++;
         scene.Input.KeyDown(DikScanCodes.Pause);

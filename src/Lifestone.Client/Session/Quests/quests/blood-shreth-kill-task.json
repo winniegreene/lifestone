@@ -1,0 +1,151 @@
+{
+  "key": "blood-shreth-kill-task",
+  "name": "The Blood Shreth Kill Task (San Ming at Shoushi: ten Blood Shreths, the Cave of Alabree)",
+  "giver": {
+    "wcid": 31641,
+    "name": "San Ming"
+  },
+  "start": {
+    "cell": "0xDA55001D",
+    "point": null,
+    "name": "Shoushi (San Ming's town, reached by the Town Network)"
+  },
+  "steps": [
+    {
+      "kind": "go",
+      "what": "to San Ming at Shoushi (another town: the Town Network's Shoushi portal)",
+      "place": {
+        "cell": "0xDA55001D",
+        "point": [
+          73.5787,
+          98.2255,
+          20.005
+        ],
+        "name": "San Ming at Shoushi"
+      },
+      "target": {
+        "wcid": 31641,
+        "name": "San Ming"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/5/facts.md): San Ming 31641 landblock_instance guid 0x7DA5504B, cell 0xDA55001D, origin (73.5787, 98.2255, 20.005) (facts.md section 3); Shoushi is a travel place (travel-routes.json, M6 5 q6b, Town Network portal 42840, D55); the station's Town Network trip takes the step's NPC at the step's place",
+      "todo": null
+    },
+    {
+      "kind": "talk",
+      "what": "ask San Ming for the task: the first talk arms the kill counter at 0",
+      "place": null,
+      "target": {
+        "wcid": 31641,
+        "name": "San Ming"
+      },
+      "item": null,
+      "expect": {
+        "reply": "So, you wish to prove your hunting prowess?",
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/5/facts.md): weenie_properties_emote object 31641, Use set 51753 (InqQuest KilltaskBloodShrethWait); with no Wait stamp and 0 solves the failure chain reaches QuestFailure set 51759 (quest KilltaskBloodShreth@1-9): Tell (action 0) 'So, you wish to prove your hunting prowess? Well then. Track down and slay 10 of the terrible Blood Shreth for me, and I will reward you appropriately.', then SetQuestCompletions KilltaskBloodShreth amount 0 (action 1: arms the counter; ACE EmoteManager.cs:1226-1233 @95ef426d); a second talk at 0 kills repeats the start text and sets 0 again",
+      "todo": null,
+      "armed_reply": "I see you haven't completed your task.",
+      "wait_reply": "Ah, friend, it is good to see you back again!"
+    },
+    {
+      "kind": "kill",
+      "what": "ten Blood Shreths in the Cave of Alabree",
+      "place": null,
+      "target": {
+        "wcid": 4110,
+        "name": "Blood Shreth"
+      },
+      "item": null,
+      "expect": {
+        "reply": "Your task is complete!",
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/5/facts.md): Blood Shreth 4110 (Level 8) is the only weenie with KillQuest (weenie_properties_string type 45) 'KilltaskBloodShreth'; quest row KilltaskBloodShreth (id 3502) min_Delta 0, max_Solves 10; ACE HandleKillTask QuestManager.cs:583-626 @95ef426d sends 'You have killed N Blood Shreths!' then ' Your task is complete!' at max solves (:622); every player with damage on the creature gets the credit (Creature_Death.cs:45-49, :209-282); the ground is the Cave of Alabree (D54: 17 placed, landblock 0x0162; the outskirts' generators never reach 4110, facts.md section 3)",
+      "todo": null,
+      "count": 10,
+      "ground": "cave-of-alabree"
+    },
+    {
+      "kind": "go",
+      "what": "back to San Ming at Shoushi",
+      "place": {
+        "cell": "0xDA55001D",
+        "point": [
+          73.5787,
+          98.2255,
+          20.005
+        ],
+        "name": "San Ming at Shoushi"
+      },
+      "target": {
+        "wcid": 31641,
+        "name": "San Ming"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/5/facts.md): as step 0; the way back from the Cave goes home, then the Town Network again (the station's go)",
+      "todo": null
+    },
+    {
+      "kind": "talk",
+      "what": "turn the task in: the reward, the plaque",
+      "place": null,
+      "target": {
+        "wcid": 31641,
+        "name": "San Ming"
+      },
+      "item": null,
+      "expect": {
+        "reply": "Excellent work, friend! You have slain many of the terrible beasts!",
+        "stamp": null,
+        "item": {
+          "wcid": 31617,
+          "name": "Blood Shreth Butcher Plaque"
+        }
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/5/facts.md): weenie_properties_emote object 31641, QuestSuccess set 51755 (KilltaskBloodShreth@10, solves 10 to int max): Tell (0) 'Excellent work, friend! You have slain many of the terrible beasts! Allow me to reward you!', StampQuest KilltaskBloodShrethWait (1), EraseQuest KilltaskBloodShreth (2), AwardLevelProportionalXP (3) min 0, max 120,000, percent 1.33, AddCharacterTitle 25 BloodShrethButcher (4), Give 31617 x1 (5), Tell at delay 1 (6) 'Congratulations! You are now truly a Blood Shreth Butcher!'",
+      "todo": null
+    }
+  ],
+  "done": {
+    "stamp": null,
+    "reply": "Congratulations! You are now truly a Blood Shreth Butcher!",
+    "item": {
+      "wcid": 31617,
+      "name": "Blood Shreth Butcher Plaque"
+    }
+  },
+  "timer_seconds": 72000,
+  "level": {
+    "min": 1,
+    "max": null
+  },
+  "experience": {
+    "amount": null,
+    "kind": "proportional",
+    "max": 120000,
+    "percent": 1.33,
+    "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/5/facts.md): weenie_properties_emote_action of emote 51755 order 3, type 49 AwardLevelProportionalXP: min_64 0, max_64 120000, percent 1.33; ACE GrantLevelProportionalXp Player_Xp.cs:441-455 @95ef426d (the next level's XP times 1.33, capped at 120,000, then EarnXP: the line 'You've earned N experience.', Player_Xp.cs:114)"
+  },
+  "sources": [
+    "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/5/facts.md): the task's rows: San Ming 31641 (Use set 51753 and the sets 51754-51759), quest rows KilltaskBloodShreth (3502: min_Delta 0, max_Solves 10) and KilltaskBloodShrethWait (3503: min_Delta 72000 s = 20 h, max_Solves -1); the plaque 31617 'Blood Shreth Butcher Plaque'",
+    "timer_seconds 72000: KilltaskBloodShrethWait min_Delta (quest id 3503); the turn-in's StampQuest sets it (emote 51755 action 1), and while it runs San Ming only says 'Ah, friend, it is good to see you back again!...' (set 51754: the done-recently branch, a talk then gives nothing)",
+    "level {min 1, max null}: San Ming's emote sets hold no level check (no emote of 31641 tests a level: the action types are 3, 5, 10, 12, 21, 22, 30, 31, 34, 49 and 70 only); the entry MaxLevel 20 (portal 4937, weenie_properties_int type 87) belongs to the Cave of Alabree's portal and is on the ground's profile, not the quest's; Blood Shreth is Level 8",
+    "experience: proportional, max 120,000, percent 1.33 (emote 51755 action 3, AwardLevelProportionalXP): the amount is the character's own next-level XP times 1.33 up to the cap, so the file holds no fixed amount",
+    "The kill step's count 10 is the quest row's max_Solves; a second run starts after the Wait stamp's 20 h (the timer) and the start talk",
+    "Item 5 D54 (cache/m6/5/notes.md): the kill-task shape is proven on this task; the climber's own call of a kill task is item 9's round; the walk from Holtburg to the Cave's entry is item 4's seam (TODO(m6-alabree-entry-walk), worked by slice W)"
+  ]
+}

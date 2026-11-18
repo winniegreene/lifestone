@@ -113,6 +113,25 @@ public sealed class FightF19Tests
         Assert.DoesNotContain(r.Caster.Answered, a => DrainPicker.Ids.Contains(a.Spell)); // nothing drained while the answer is awaited
     }
 
+    [Fact]
+    public void The_ladders_character_asks_no_health_first_a_creature_is_full_until_she_is_told_otherwise_M6_8()
+    {
+        // The owner, 2026-11-11: assume a tusker is full, track it as she fights, and correct the count only when told (a drain that returns less tells her). The same rig as the test above, with the ladder's name.
+        var r = new FightManaTests.Rig(mana: 400, stamina: 200, knowsDrain: true) { HitsToKill = 400 };
+        r.R.H.State.Self.Name = MageTemplate.ClimberName;
+        r.Caster.ManaRegenPerSecond = 20;
+        var tusker = r.AddTusker(40); // no health answer yet
+        r.R.H.State.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxHealth, out _, out var max);
+        r.Caster.SetHealth(max * 55 / 100);
+        var scenario = r.Scenario();
+
+        r.Run(scenario, 6, 0.1, () => r.Caster.Answered.Any(a => DrainPicker.Ids.Contains(a.Spell)));
+
+        Assert.DoesNotContain(r.Log.Lines, l => l.Contains("is asked of the server first", StringComparison.Ordinal));
+        Assert.Contains(r.Caster.Answered, a => DrainPicker.Ids.Contains(a.Spell)); // the drain went with no answer awaited: the untouched tusker is taken as full
+        Assert.Single(r.Log.Lines, l => l.Contains("(m6-assume-health)", StringComparison.Ordinal));
+    }
+
     [Theory]
     [InlineData(10u, 100u, 200u, 275u, 0u, true, 70u, 0, 1)] // the mana short, the stamina there: the transfer, never a wait
     [InlineData(10u, 100u, 40u, 275u, 0u, true, 70u, 3, 3)] // the stamina too low for any transfer, no Revitalize paid: a potion

@@ -84,6 +84,22 @@ public static class SkillRules
     public static bool TryCurrent(PlayerQualities q, uint skillId, in SkillTableFormula formula, uint minLevel, out uint value)
     {
         ArgumentNullException.ThrowIfNull(q);
+        return TryCurrentOver(q, skillId, in formula, minLevel, q.Enchantments, out value);
+    }
+
+    /// <summary>
+    /// M6 14 (<c>m6-lore-spend</c>): <see cref="TryCurrent"/> over <paramref name="enchantments"/> in place of the registry (the formula's attributes and the skill's own lines alike; the vitae
+    /// and the augmentations are the character's): the value a chosen set of her enchantments gives, as the Arcane Lore rule reads the lines that stand at a wield (<see cref="Mage.StandingLore"/>).
+    /// </summary>
+    /// <param name="q">The player's qualities.</param>
+    /// <param name="skillId">The skill id.</param>
+    /// <param name="formula">The skill's formula (the SkillTable's).</param>
+    /// <param name="minLevel">The skill's <c>_min_level</c>.</param>
+    /// <param name="enchantments">The enchantments counted.</param>
+    /// <param name="value">The current value over them.</param>
+    public static bool TryCurrentOver(PlayerQualities q, uint skillId, in SkillTableFormula formula, uint minLevel, ImmutableArray<EnchantmentDesc> enchantments, out uint value)
+    {
+        ArgumentNullException.ThrowIfNull(q);
         value = 0;
         if (!q.IsKnown)
         {
@@ -100,15 +116,15 @@ public static class SkillRules
                 return false;
             }
 
-            var a1 = formula.Attribute1 == 0 ? 0 : EnchantmentRules.EnchantAttribute(q.Enchantments, formula.Attribute1, raw1);
-            var a2 = formula.Attribute2 == 0 ? 0 : EnchantmentRules.EnchantAttribute(q.Enchantments, formula.Attribute2, raw2);
+            var a1 = formula.Attribute1 == 0 ? 0 : EnchantmentRules.EnchantAttribute(enchantments, formula.Attribute1, raw1);
+            var a2 = formula.Attribute2 == 0 ? 0 : EnchantmentRules.EnchantAttribute(enchantments, formula.Attribute2, raw2);
             if (!formula.TryCalculate(a1, a2, out part))
             {
                 return false;
             }
         }
 
-        Modifiers(q.Enchantments, skillId, out var product, out var additive);
+        Modifiers(enchantments, skillId, out var product, out var additive);
         var vitae = q.TryGetVitae(out var v) ? v.Enchantment.StatModValue : (double?)null;
         value = Compose(part, skill.Init + skill.Ranks + AugBonusBase(q, skillId, skill.AdvancementClass), product, vitae, additive + (int)AugBonusCurrent(q, skill.AdvancementClass));
         return true;

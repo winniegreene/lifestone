@@ -3,6 +3,7 @@ using System.Numerics;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Navigation;
 using Lifestone.Client.Session.Casting;
+using Lifestone.Client.Movement.Wayfinding;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
 using Lifestone.Client.Session.Grounds;
@@ -25,7 +26,7 @@ namespace Lifestone.Client.Session.Scenarios.Journey;
 /// <para><b>The facts</b> (contract 4): the server never says whether the character is tied. The bind sets <see cref="JourneyFacts.Bound"/> from ACE's text and the tie sets <see cref="JourneyFacts.LifestoneTied"/> from "You have successfully linked with
 /// the life stone."; the portal tie sets <see cref="JourneyFacts.PortalTieOf"/> (the ground's, M5 3 p1) from "...with the portal." or a Primary Portal Recall's arrival, and a 0x04A3 sets it untied; a recall adds to <see cref="JourneyFacts.Recalls"/>.</para>
 /// </summary>
-internal abstract class TravelLeg(string name, JourneyContext context) : ScriptLeg(name, text => context.Log.Info("journey", text))
+internal abstract partial class TravelLeg(string name, JourneyContext context) : ScriptLeg(name, text => context.Log.Info("journey", text)), IStationWait, IStationCommitted
 {
     /// <summary>Seconds a cast may take to end.</summary>
     protected const double CastSeconds = 15;
@@ -43,7 +44,10 @@ internal abstract class TravelLeg(string name, JourneyContext context) : ScriptL
     protected const double PresentSeconds = 45;
 
     /// <summary>Seconds a combat mode change may take.</summary>
-    protected const double ModeSeconds = 10;
+    protected internal const double ModeSeconds = 10;
+
+    /// <summary>M6 14: how many times <see cref="Mode"/> asks for a mode another action undid after the server's answer (the first ask and two more).</summary>
+    protected const int ModeAsks = 3;
 
     /// <summary>The fizzles one cast retries, logged and counted (a named cap, Lifestone's own, as <see cref="RecallHome.MaxFizzles"/>); the next fizzle fails the cast.</summary>
     protected const int MaxFizzles = 3;
@@ -63,6 +67,8 @@ internal abstract class TravelLeg(string name, JourneyContext context) : ScriptL
     private readonly List<SelfTravel> _travel = [];
     private IDisposable? _chatSubscription;
     private IDisposable? _travelSubscription;
+    private IDisposable? _diedSubscription;
+    private readonly List<PlayerDied> _died = [];
     private CastAttempt? _attempt;
 
     /// <summary>The journey's context.</summary>
@@ -79,6 +85,7 @@ internal abstract class TravelLeg(string name, JourneyContext context) : ScriptL
     {
         _chatSubscription = S.Events.Subscribe<ChatReceived>((in ChatReceived e) => _chat.Add((e.Line.Kind, e.Line.ChatType, e.Line.Text)));
         _travelSubscription = S.Events.Subscribe<SelfTravelChanged>((in SelfTravelChanged e) => _travel.Add(e.Travel));
+        _diedSubscription = S.Events.Subscribe<PlayerDied>((in PlayerDied e) => _died.Add(e)); // M6 4 F6: the death notice, read by the walking legs' check after (TravelLegSafety.cs)
         try
         {
             foreach (var h in Body())
@@ -92,6 +99,8 @@ internal abstract class TravelLeg(string name, JourneyContext context) : ScriptL
         {
             _chatSubscription.Dispose();
             _travelSubscription.Dispose();
+            _diedSubscription.Dispose();
+            DisposeSafety();
         }
     }
 
@@ -130,6 +139,12 @@ internal abstract class TravelLeg(string name, JourneyContext context) : ScriptL
 
         return 0;
     }
+
+    /// <summary>M6 4 F6: the number of death notices so far (a mark for <see cref="DiedSince"/>).</summary>
+    protected int DeathMark => _died.Count;
+
+    /// <summary>M6 4 F6: the first death notice since <paramref name="mark"/> (<see cref="PlayerDied"/>: ACE's 0x01AC or the 0x019E broadcast), or null.</summary>
+    protected PlayerDied? DiedSince(int mark) => mark < _died.Count ? _died[mark] : null;
 
     /// <summary>True when the player's travel changed since <paramref name="mark"/> (a teleport began).</summary>
     protected bool TeleportSince(int mark) => _travel.Count > mark;
@@ -188,6 +203,48 @@ internal abstract class TravelLeg(string name, JourneyContext context) : ScriptL
         }
     }
 
+    /// <summary>The seconds a travel cast waits for the mana its spell costs (M6 7 BC: the station's 20% need is under the cost of a 185-mana climber's 50-mana recall or tie).</summary>
+    public const double SpellManaSeconds = 120;
+
+    /// <summary>M6 7 BC: false when <see cref="RestForSpell"/> ended with the mana still under the spell's cost.</summary>
+    protected bool SpellManaMet { get; private set; } = true;
+
+    /// <inheritdoc />
+    /// <remarks>M6 7 BD: the rest in place for a travel cast's mana (<see cref="RestForSpell"/>).</remarks>
+    public string? Waiting { get; private set; }
+
+    /// <summary>
+    /// M6 7 BC (live, gate A climb 19: Lifestone Tie refused at 45 mana for a 50 cost, then the recall at 47): check before a travel cast, the mana held against the spell's cost (<see cref="GearCasts.ManaCeiling"/>, what ACE's
+    /// 0x0401 reads); short, the leg rests in place up to <see cref="SpellManaSeconds"/> (the mana comes back by itself), then checks again. <see cref="SpellManaMet"/> says which. A spell the table does not hold, or a mana the state does not know, is no wait.
+    /// </summary>
+    /// <param name="spell">The spell's id.</param>
+    /// <param name="seconds">The most seconds to wait.</param>
+    protected IEnumerable<ActionHandle?> RestForSpell(uint spell, double seconds = SpellManaSeconds)
+    {
+        SpellManaMet = true;
+        if (!Context.Spells.TryGetValue(spell, out var info))
+        {
+            yield break;
+        }
+
+        var need = GearCasts.ManaCeiling(info, S.State.Self.Inventory.Equipped.Count);
+        if (!S.State.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxMana, out var held, out var max) || held >= need)
+        {
+            yield break;
+        }
+
+        Log(string.Create(CultureInfo.InvariantCulture, $"mana {held} of {max} is under {info.Name}'s {need}: resting in place up to {seconds:0} s for the cast (check before)"));
+        Waiting = $"the rest in place for {info.Name}'s mana";
+        foreach (var h in Until(() => !S.State.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxMana, out var now, out _) || now >= need, seconds))
+        {
+            yield return h;
+        }
+
+        Waiting = null;
+        SpellManaMet = !S.State.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxMana, out var after, out _) || after >= need;
+        Log(string.Create(CultureInfo.InvariantCulture, $"mana for {info.Name}: {(S.State.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxMana, out var shown, out _) ? shown : 0)} against {need}: {(SpellManaMet ? "met" : "not met")} (check after)"));
+    }
+
     /// <summary>Waits until the combat mode is <paramref name="wanted"/>.</summary>
     protected IEnumerable<ActionHandle?> Mode(CombatMode wanted, int modeValue)
     {
@@ -197,9 +254,24 @@ internal abstract class TravelLeg(string name, JourneyContext context) : ScriptL
         }
 
         var mode = S.Actions.SetCombatMode(wanted, ActionSource.Automation);
-        foreach (var h in Until(() => mode.IsCompleted && S.State.Self.Qualities.CombatMode == modeValue, ModeSeconds))
+        var asks = 1;
+        for (; ;)
         {
-            yield return h;
+            // check after: the server's answer, or the mode left again after it (M6 14, live 2026-11-14 19:19:15 and 19:22:19, ladder15: the walk's peace landed, the vitals guard set the magic mode for a heal while the
+            // station was held, and the station waited out its seconds in the magic mode and gave the crossing up): a confirmed change that another action undid is asked again, at most ModeAsks times, each named
+            foreach (var h in Until(() => mode.IsCompleted && (S.State.Self.Qualities.CombatMode == modeValue || asks < ModeAsks), ModeSeconds))
+            {
+                yield return h;
+            }
+
+            if (S.State.Self.Qualities.CombatMode == modeValue || !mode.IsCompleted || asks >= ModeAsks)
+            {
+                break;
+            }
+
+            asks++;
+            Log(string.Create(CultureInfo.InvariantCulture, $"the {wanted} mode was left after the server's answer ({Describe(mode)}; the mode is {S.State.Self.Qualities.CombatMode} now): asked again ({asks} of {ModeAsks})"));
+            mode = S.Actions.SetCombatMode(wanted, ActionSource.Automation);
         }
 
         Require(S.State.Self.Qualities.CombatMode == modeValue, $"the {wanted} mode was not reached within {ModeSeconds:0} s: {Describe(mode)}");
@@ -219,14 +291,25 @@ internal abstract class TravelLeg(string name, JourneyContext context) : ScriptL
     /// A travel request through the journey's seam (never <c>Tools.Place</c>): stepped every frame until it ends. A failure ends the leg Failed with the seam's reason. For a place the seam's arrival only says the action was confirmed, so the
     /// teleport is waited out as <see cref="ScriptLeg.PlaceAndSettle"/> does (the teleport seen, present, the post-teleport LoginComplete, 3 s).
     /// </summary>
-    protected IEnumerable<ActionHandle?> Go(TravelRequest request, string what)
+    /// <param name="request">The travel request.</param>
+    /// <param name="what">The walk in words (logged).</param>
+    /// <param name="stopWhen">M6 4 F6: checked each step of the walk; true stops it (the travel leg is disposed, <see cref="WalkInterrupted"/> is set, nothing else is checked) so the caller can fight back an attacker and plan the walk again; null: never.</param>
+    protected IEnumerable<ActionHandle?> Go(TravelRequest request, string what, Func<string?>? stopWhen = null)
     {
         var total = S.ActionLog.Total;
+        WalkInterrupted = null;
         using var leg = context.Travel.GoTo(S, request, S.Clock.Now);
         Log($"travel {what}: {request.Purpose} to {request.Destination.Name}{(request.ObjectGuid == 0 ? string.Empty : $" (object {request.ObjectGuid:X8}, range {request.Range:0.#} m)")}");
         var status = TravelStatus.Running;
         while ((status = leg.Step(S, S.Clock.Now)) == TravelStatus.Running)
         {
+            if (stopWhen?.Invoke() is { } stop)
+            {
+                WalkInterrupted = stop;
+                Log($"travel {what}: the walk is stopped: {stop}");
+                yield break;
+            }
+
             yield return null;
         }
 
@@ -251,6 +334,101 @@ internal abstract class TravelLeg(string name, JourneyContext context) : ScriptL
             }
         }
     }
+
+    /// <summary>M6 4 F6: why the last <see cref="Go"/> walk was stopped by its <c>stopWhen</c> (the walk ended neither arrived nor failed), or null.</summary>
+    protected string? WalkInterrupted { get; private set; }
+
+    /// <summary>The seconds the leg's on-foot walks to a point took (<see cref="WalkToPoint"/>; report-only, the verdict's <c>walk_s=</c>).</summary>
+    protected double WalkedSeconds { get; private set; }
+
+    /// <summary>
+    /// A walk on foot to a point through the journey's travel seam (a point goal, M6 item 0 a6), check, act, check (M5 D141): before, the purpose (M5 D47) and where the player stands are logged and a player already within
+    /// <see cref="JourneyTravel.ToleranceMetres"/> of the point in its landblock walks nowhere; the act is the seam's request (<paramref name="purpose"/>, never a place or a recall); after, the player must stand in the point's landblock within
+    /// <see cref="JourneyTravel.ToleranceMetres"/> of it, else the leg fails, named (<paramref name="name"/>:arrival-off-point).
+    /// </summary>
+    /// <param name="name">The station's word for the walk (the failure's prefix).</param>
+    /// <param name="label">The destination's label.</param>
+    /// <param name="cell">The point's cell.</param>
+    /// <param name="at">The point (landblock-local).</param>
+    /// <param name="purpose">The travel purpose of the request (Cell for an arrival at a ground, Bind for the way to a lifestone).</param>
+    /// <param name="why">The purpose in words (logged).</param>
+    /// <param name="stopWhen">M6 4 F6: <see cref="Go"/>'s stop (an attacker to fight back); a stopped walk skips the check after and leaves <see cref="WalkInterrupted"/> set.</param>
+    /// <param name="keepOff">M6 7 AI: for a walk to a portal, the other portals it keeps clear of (<see cref="RungPortal.KeepOffTheOthers"/>), or null.</param>
+    /// <param name="way">M6 8 B1: the file's way to the point (<see cref="TravelRequest.Way"/>), or null: planned.</param>
+    /// <param name="use">The hub walk: the object the walk ends by Using (<see cref="TravelRequest.Use"/>), or null.</param>
+    protected IEnumerable<ActionHandle?> WalkToPoint(string name, string label, uint cell, Vector3 at, TravelPurpose purpose, string why, Func<string?>? stopWhen = null, PortalKeepOff? keepOff = null, IReadOnlyList<CellFrame>? way = null, NavUseTarget? use = null)
+    {
+        const float ArrivalSlackMetres = 0.5f; // the check after's slack over the walk's own tolerance: the body's stop, not a wider goal
+
+        WalkInterrupted = null; // M6 8 G: a walk that has nowhere to go (below) was not stopped; the last walk's stop must not stand for it
+        var (from, _) = WhereSheStands();
+        var fromText = from is { } f ? string.Create(CultureInfo.InvariantCulture, $"cell 0x{f.CellId:X8} ({f.Frame.Origin.X:0.#}, {f.Frame.Origin.Y:0.#})") : "an unknown place";
+        Log(string.Create(CultureInfo.InvariantCulture, $"{name}: walk check before: purpose: {why}; the player stands at {fromText}, the point is cell 0x{cell:X8} ({at.X:0.#}, {at.Y:0.#}, {at.Z:0.#})"));
+        if (from is { } here && (here.CellId >> 16) == (cell >> 16) && Planar(here.Frame.Origin, at) <= JourneyTravel.ToleranceMetres)
+        {
+            Log($"{name}: the player already stands within {JourneyTravel.ToleranceMetres:0.#} m of the point; no walk");
+            yield break;
+        }
+
+        var started = S.Clock.Now;
+        foreach (var h in Go(new TravelRequest(Destination(label, cell, at), purpose, KeepOff: keepOff, Way: way, Use: use), why, stopWhen))
+        {
+            yield return h;
+        }
+
+        WalkedSeconds += S.Clock.Now - started;
+        if (WalkInterrupted is { } stopped)
+        {
+            Log(string.Create(CultureInfo.InvariantCulture, $"{name}: walk stopped before the point ({stopped}); walk_s={S.Clock.Now - started:0.0}"));
+            yield break;
+        }
+
+        // M6 14 (live 2026-11-13 19:20:58 and 19:33:35 UTC: two walks ended Arrived at their points and failed this check 5.6 and 5.7 m off, reading the server's last position of her, a second of her buffed run behind): the check reads
+        // where she stands, her body (the one world picture), and names the server's last report beside it.
+        var (after, fromBody) = WhereSheStands();
+        var server = S.State.Self.Position;
+        var serverText = !fromBody ? "the server's last position (the host gives no body of its own)"
+            : server is { } sv ? string.Create(CultureInfo.InvariantCulture, $"her body; the server's last report of her is cell 0x{sv.CellId:X8} ({sv.Frame.Origin.X:0.#}, {sv.Frame.Origin.Y:0.#}){(after is { } b && sv.CellId >> 16 == b.CellId >> 16 ? $", {Planar(sv.Frame.Origin, b.Frame.Origin):0.0} m from her body" : string.Empty)}")
+            : "her body; the server has no position of her";
+
+        // M6 8 (live 2026-11-11 19:42 UTC): the walk to the Facility Hub's portal in the Town Network ended 5.03 m from its point and failed this check by 3 cm; the route fell back to the run from the Refuge, which failed three
+        // times of four and killed her once (20:12, a Jungle Reaver). The walk ends at the tolerance by the position it predicts; this check reads the position after the stop, so it allows the stop's slack.
+        var ok = after is { } there && (there.CellId >> 16) == (cell >> 16) && Planar(there.Frame.Origin, at) <= JourneyTravel.ToleranceMetres + ArrivalSlackMetres;
+        Require(ok, $"{name}: arrival-off-point: the walk to {label} ended at {(after is { } q ? string.Create(CultureInfo.InvariantCulture, $"cell 0x{q.CellId:X8} ({q.Frame.Origin.X:0.#}, {q.Frame.Origin.Y:0.#})") : "an unknown place")}, not within {JourneyTravel.ToleranceMetres:0.#} m of ({at.X:0.#}, {at.Y:0.#}) in cell 0x{cell:X8} (read from {serverText})");
+        Log(string.Create(CultureInfo.InvariantCulture, $"{name}: walk check after: at the point, {Planar(after!.Value.Frame.Origin, at):0.0} m from it (read from {serverText}); walk_s={S.Clock.Now - started:0.0}"));
+    }
+
+    /// <summary>
+    /// M6 14 (the one world picture, the owner's rule of 2026-11-12): where she stands for a walk's checks: her body, as the client draws it, when the host gives one (<see cref="IJourneyWalks.BodyPosition"/>, the Godot host's player and the
+    /// headless host's walker) and she is present; else the server's last position (<see cref="SelfState.Position"/>), which ACE sends at most once a second while she runs, so at a run it lags her by up to a second of her speed.
+    /// <c>Body</c> says which.
+    /// </summary>
+    protected (CellFrame? At, bool Body) WhereSheStands() =>
+        S.State.Self.Travel == SelfTravel.Present && (context.Runners as IJourneyWalks)?.BodyPosition(context) is { } body ? (body, true) : (S.State.Self.Position, false);
+
+    /// <summary>
+    /// M6 14 (live 2026-11-13 19:20:59 UTC: the route fallback's Lifestone Recall was cast 1 s into the portal space a hop's walk had ended in, and refused four times, 0x001D): the check before a recall or a gem: a body in portal space or still
+    /// arriving casts nothing; it waits for the arrival, at most <see cref="PresentSeconds"/>, one line before and one after (as the recall-home station does). A body still not present after it is the cast's own check's to name.
+    /// </summary>
+    /// <param name="what">The cast in words.</param>
+    protected IEnumerable<ActionHandle?> ArrivalBeforeCast(string what)
+    {
+        if (S.State.Self.Travel == SelfTravel.Present)
+        {
+            yield break;
+        }
+
+        var from = S.Clock.Now;
+        Log(string.Create(CultureInfo.InvariantCulture, $"{what}: check before: the character is in {S.State.Self.Travel} (portal space or arriving): waiting up to {PresentSeconds:0} s for the arrival before the cast"));
+        foreach (var h in Until(() => S.State.Self.Travel == SelfTravel.Present, PresentSeconds))
+        {
+            yield return h;
+        }
+
+        Log(string.Create(CultureInfo.InvariantCulture, $"{what}: check after the wait: travel {S.State.Self.Travel} after {S.Clock.Now - from:0.0} s, in cell {(S.State.Self.Position is { } p ? "0x" + p.CellId.ToString("X8", CultureInfo.InvariantCulture) : "none")}"));
+    }
+
+    private static double Planar(Vector3 a, Vector3 b) => Math.Sqrt(((a.X - b.X) * (a.X - b.X)) + ((a.Y - b.Y) * (a.Y - b.Y)));
 
     /// <summary>Waits for the player to be present in landblock <paramref name="landblock"/> (the high word of the cell id) after a teleport that began since <paramref name="travelMark"/>.</summary>
     protected IEnumerable<ActionHandle?> ArriveIn(uint landblock, int travelMark, string what)
@@ -417,7 +595,7 @@ internal abstract class TravelLeg(string name, JourneyContext context) : ScriptL
     }
 
     /// <summary>The last cast's handle and the marks before it.</summary>
-    protected sealed class CastResult
+    protected internal sealed class CastResult
     {
         /// <summary>The last attempt's handle.</summary>
         public ActionHandle? Handle { get; set; }
@@ -434,7 +612,7 @@ internal abstract class TravelLeg(string name, JourneyContext context) : ScriptL
 /// <c>bind</c> (M4 P5b J3b, W0 section 2): on foot to Holtburg's lifestone (<see cref="TravelPurpose.Bind"/>, the lifestone as an object goal in use range), <c>Use</c> it ("You have attuned your spirit to this Lifestone ...":
 /// <see cref="JourneyFacts.Bound"/>; ACE's Sanctuary, <c>Lifestone.cs</c>:60-66 at 95ef426d), then Lifestone Tie 2644 at it ("You have successfully linked with the life stone.": <see cref="JourneyFacts.LifestoneTied"/>; ACE's LinkedLifestone,
 /// <c>WorldObject_Magic.cs</c>:966-976, which Lifestone Recall reads). The fighters cast inside a <see cref="CasterSwap"/> (In, cast, Out); the mage goes to the magic mode with its wand and back to peace. Fields: <c>bound= tied= swap_s=</c>
-/// and the report-only <c>tie_fizzles=</c>.
+/// and the report-only <c>tie_fizzles=</c>. M6 6 R1F: a book that holds no Lifestone Recall 1635 (the climber below 16) makes no tie (<c>tied=skipped</c>, the station ok on the bind alone); a tie that is cast and does not link stays the named failure.
 /// </summary>
 public sealed class BindStation : IStation
 {
@@ -464,10 +642,11 @@ public sealed class BindStation : IStation
     {
         private bool _bound;
         private bool _tied;
+        private bool _tieSkipped;
         private double _swapSeconds;
 
         public override string VerdictFields() =>
-            string.Create(CultureInfo.InvariantCulture, $"bound={(_bound ? "yes" : "no")} tied={(_tied ? "yes" : "no")} swap_s={_swapSeconds:0.0} tie_fizzles={Fizzles}") + (Failure is null ? string.Empty : " why=" + Failure.Replace(' ', '_'));
+            string.Create(CultureInfo.InvariantCulture, $"bound={(_bound ? "yes" : "no")} tied={(_tied ? "yes" : _tieSkipped ? "skipped" : "no")} swap_s={_swapSeconds:0.0} tie_fizzles={Fizzles}") + (Failure is null ? string.Empty : " why=" + Failure.Replace(' ', '_'));
 
         protected override IEnumerable<ActionHandle?> Body()
         {
@@ -521,7 +700,38 @@ public sealed class BindStation : IStation
 
             _bound = TextSince(mark, "attuned your spirit");
             Context.Facts.Bound = Context.Facts.Bound || _bound;
+            if (_bound)
+            {
+                // M6 6 FXD1 (6-D5): where the bind took, for the respawn's classification (the lifestone the Use was sent to: its object position, else the point the walk went to)
+                Context.Facts.BoundAt = S.State.Objects.TryGet(lifestone, out var stone) && stone.Position is { } stoneAt ? stoneAt : new CellFrame(at.Item1, new Lifestone.Data.Animation.AcFrame(at.Item2, Quaternion.Identity));
+                Log($"bound at the lifestone {lifestone:X8} in cell 0x{Context.Facts.BoundAt.Value.CellId:X8} (the respawn point, ACE's Sanctuary)");
+            }
+
             Check(_bound, $"bind: the Use of the lifestone said nothing of attuning the spirit ({Describe(use)})");
+
+            // M6 6 R1F (live round 1: a level-13 climber's tie fizzled four times and failed the station): Lifestone Tie serves Lifestone Recall alone (ACE's LinkedLifestone is read only by it, WorldObject_Magic.cs:966-976 @95ef426d),
+            // so a book that is read and holds no Lifestone Recall 1635 makes no tie: check before, one line, the station ok on the bind alone (tied=skipped). A book that is not read yet casts the tie as before (the check cannot say).
+            var book = S.State.Self.Spellbook;
+            if ((book.IsKnown || book.Count > 0) && !book.Knows(RecallHome.LifestoneRecallSpell))
+            {
+                _tieSkipped = true;
+                Log($"tie skipped: the spellbook ({book.Count} spells) holds no Lifestone Recall {RecallHome.LifestoneRecallSpell}, the one spell Lifestone Tie {LifestoneTieSpell} serves; the station is ok on the bind alone (tied=skipped)");
+                yield break;
+            }
+
+            // M6 7 BC (live, gate A climb 19: 45 mana held, the tie costs 50, the station failed on a bind that had taken): the tie serves the recall alone, so it waits for its mana in place (check, rest, check) and a tie that
+            // cannot be cast or does not link leaves the bind standing (bound=yes is what the audit needs; tied=no never fails the station; the recall home refused with 0x049E binds again, M5 7 F14).
+            Stage = "tie-mana";
+            foreach (var h in RestForSpell(LifestoneTieSpell))
+            {
+                yield return h;
+            }
+
+            if (!SpellManaMet)
+            {
+                Context.Log.Warn("journey", $"[live {StationName}] tie: the mana did not come back for Lifestone Tie {LifestoneTieSpell} within {SpellManaSeconds:0} s: the bind stands, tied=no (TODO(m6-bind-tie-mana): the next trip's learn step or the recall's 0x049E ties again)");
+                yield break;
+            }
 
             Stage = "tie";
             CasterSwap? swap = null;
@@ -561,7 +771,7 @@ public sealed class BindStation : IStation
             else
             {
                 var refusal = Refusal(this, cast);
-                Check(false, $"bind: Lifestone Tie did not link ({(refusal != 0 ? Named(refusal) : Describe(cast.Handle!))})");
+                Context.Log.Warn("journey", $"[live {StationName}] tie: Lifestone Tie did not link ({(refusal != 0 ? Named(refusal) : Describe(cast.Handle!))}): the bind stands, tied=no (TODO(m6-bind-tie-mana))");
             }
 
             if (swap is not null)
@@ -667,6 +877,20 @@ public sealed class DenTravelStation : IStation
         protected override IEnumerable<ActionHandle?> Body()
         {
             var started = S.Clock.Now;
+            if (Context.Dungeon.Kind == GroundKind.Outdoor)
+            {
+                // M6 item 0 a6: an outdoor ground (the belt, the forest) has no portal and no place: its arrival is a walk from Holtburg to its first cell's point (a climber has no Portal Recall at level 5, which is a level 3 Item spell).
+                Stage = "outdoor-walk";
+                foreach (var h in WalkToFirstCell())
+                {
+                    yield return h;
+                }
+
+                _how = "walk";
+                _seconds = S.Clock.Now - started;
+                yield break;
+            }
+
             var viaPortal = Context.Facts.PortalTieOf(groundKey) == PortalTie.Untied;
             if (viaPortal)
             {
@@ -715,7 +939,7 @@ public sealed class DenTravelStation : IStation
                         yield return h;
                     }
 
-                    Context.Facts.SetPortalTie(groundKey, PortalTie.Tied);
+                    Context.Facts.SetPrimaryPortalTie(groundKey); // M6 4 R2 (F1): the recall landed in the ground, so the one slot holds it and every other ground's tie is untied
                     Context.Facts.Recalls++;
                     _recalls++;
                     _how = "recall";
@@ -731,6 +955,22 @@ public sealed class DenTravelStation : IStation
             }
 
             _seconds = S.Clock.Now - started;
+        }
+
+        private IEnumerable<ActionHandle?> WalkToFirstCell()
+        {
+            var ground = Context.Dungeon;
+            var first = WayHomeRule.FirstCell(ground);
+            Require(first is not null, $"den-travel: the outdoor ground '{groundKey}' lists no cell to arrive at (TODO(m6-ground-fields))");
+            Require(Context.Dats is not null, $"den-travel: the dats are not available, so the terrain height at the first cell of '{groundKey}' cannot be read");
+            var cell = WayHomeRule.HuntCellOf(first!);
+            var height = HuntGround.TerrainHeight(Context.Dats!, cell);
+            Require(height is not null, $"den-travel: the first cell 0x{first!.Cell:X8} of '{groundKey}' has no terrain height");
+            var at = HuntGround.StopPoint(cell, height!.Value);
+            foreach (var h in WalkToPoint("den-travel", "ground-first-cell", first.Cell, at, TravelPurpose.Cell, $"to the first cell of {ground.Name} on foot from {ground.Home.Town}: an outdoor ground has no portal and no place, and the climber has no recall to it"))
+            {
+                yield return h;
+            }
         }
 
         private IEnumerable<ActionHandle?> ViaPortal()
@@ -770,7 +1010,7 @@ public sealed class DenTravelStation : IStation
 
             var tied = TextSince(tie.Mark, "linked with the portal");
             Require(tied, $"den-travel: Primary Portal Tie did not link ({(Refusal(this, tie) is var r and not 0 ? Named(r) : Describe(tie.Handle!))})");
-            Context.Facts.SetPortalTie(groundKey, PortalTie.Tied);
+            Context.Facts.SetPrimaryPortalTie(groundKey); // M6 4 R2 (F1): ACE keeps one tie slot, so the link moves it here
 
             Stage = "portal";
             foreach (var h in PeaceNow())
@@ -828,6 +1068,9 @@ public sealed class RecallHomeStation : IStation
     /// <summary>The station's name.</summary>
     public const string StationName = "recall-home";
 
+    /// <summary>Seconds the recall waits for a body in portal space or arriving to be present (Lifestone's own: a portal space took 6.7 s live on 2026-11-12; the wait is four of those).</summary>
+    public const double ArrivalWaitSeconds = 30;
+
     /// <summary>
     /// A player this close to a lifestone object stands in it (Lifestone's own: the Holtburg lifestone's placement moves a human body 2.22 m from its centre,
     /// <c>LifestonePlacementTests</c>; the recall's arrival is 0 m).
@@ -837,8 +1080,11 @@ public sealed class RecallHomeStation : IStation
     /// <inheritdoc />
     public string Name => StationName;
 
+    /// <summary>The least mana share the station starts at.</summary>
+    public const double MinManaPercent = 20;
+
     /// <inheritdoc />
-    public StationNeeds Needs { get; } = new(MinManaPercent: 20);
+    public StationNeeds Needs { get; } = new(MinManaPercent: MinManaPercent);
 
     /// <inheritdoc />
     public IStationRun Start(JourneyContext context)
@@ -850,15 +1096,55 @@ public sealed class RecallHomeStation : IStation
     private sealed class Run(JourneyContext context) : TravelLeg(StationName, context)
     {
         private RecallHome? _recall;
+        private bool _walked;
 
         public override string VerdictFields() =>
-            (_recall?.Fields ?? "recalls=0 recall_s=0.0") + " stepped_off=" + (SteppedOff ? "yes" : "no") + (Failure is null ? string.Empty : " why=" + Failure.Replace(' ', '_'));
+            (_recall?.Fields ?? "recalls=0 recall_s=0.0") + " stepped_off=" + (SteppedOff ? "yes" : "no") + (_walked ? string.Create(CultureInfo.InvariantCulture, $" home=walk walk_s={WalkedSeconds:0.0}") : string.Empty) + (Failure is null ? string.Empty : " why=" + Failure.Replace(' ', '_'));
 
         protected override IEnumerable<ActionHandle?> Body()
         {
+            // M6 item 0 a6: a character whose spellbook is read and lacks Lifestone Recall (Winnie early in the climb) walks home from an outdoor ground the profile says is reachable on foot; any other case without the recall is a loud stop by name.
+            var way = WayHomeRule.Choose(Context.Dungeon, S.State.Self.Spellbook);
+            if (way.Kind != WayHomeKind.Recall)
+            {
+                Log($"way home: {way.Kind.ToString().ToLowerInvariant()}: {way.Why}");
+                Require(way.Kind == WayHomeKind.Walk, $"recall-home: no way home: {way.Why}");
+                Stage = "walk-home";
+                var (homeCell, homeAt) = HomeLifestone;
+                foreach (var h in WalkToPoint("recall-home", "home-lifestone-point", homeCell, homeAt, TravelPurpose.Bind, $"home to {Context.Dungeon.Home.Town}'s lifestone point on foot ({way.Why})"))
+                {
+                    yield return h;
+                }
+
+                _walked = true;
+                yield break;
+            }
+
+            // M6 item 14 (m6-recall-waits-arrival; live 2026-11-13: a portal took her on a walk, the recovery's recall began 40 ms into the portal space, ended recall:present three times within 7 s and the run stopped, one second before she
+            // arrived): check before: a body in portal space or arriving is waited for, bounded; then the recall's own check stands (still not present: recall:present, by name).
+            if (S.State.Self.Travel != SelfTravel.Present)
+            {
+                Stage = "recall-arrival";
+                var since = S.Clock.Now;
+                Log(string.Create(CultureInfo.InvariantCulture, $"recall-home: check before: the character is in {S.State.Self.Travel} (portal space or arriving): waiting up to {ArrivalWaitSeconds:0} s for the arrival before the recall"));
+                foreach (var h in Until(() => S.State.Self.Travel == SelfTravel.Present, ArrivalWaitSeconds))
+                {
+                    yield return h;
+                }
+
+                Log(string.Create(CultureInfo.InvariantCulture, $"recall-home: check after: travel {S.State.Self.Travel} after {S.Clock.Now - since:0.0} s{(S.State.Self.Travel == SelfTravel.Present ? string.Empty : ": still not present; the recall's own check names it")}"));
+            }
+
+            // M6 7 BC (live, gate A climb 19: the recall refused at 47 mana for a 50 cost, the station's need being 20% of 185): rest in place for the cast's mana first (check, rest, check); still short, the cast's own refusal names it.
+            Stage = "recall-mana";
+            foreach (var h in RestForSpell(RecallHome.LifestoneRecallSpell))
+            {
+                yield return h;
+            }
+
             Stage = "recall";
-            _recall = RecallHome.ForCharacter(S, Context.Character, Context.Log);
-            Require(_recall is not null, $"recall-home: {Context.Character} has no way home (only the Brawler, the Archer and BSD Mage cast Lifestone Recall)");
+            _recall = JourneyTravel.RecallFor(S, Context.Character, Context.Log); // M6 7 K: a character with the recall in its book, named or not
+            Require(_recall is not null, $"recall-home: {Context.Character} has no way home (its spellbook holds no Lifestone Recall)");
             try
             {
                 Require(_recall!.Begin(S.Clock.Now), "recall-home: a recall was already running");
@@ -877,6 +1163,13 @@ public sealed class RecallHomeStation : IStation
                     if (_recall.Detail?.Contains("0x049E", StringComparison.Ordinal) == true)
                     {
                         Context.Facts.LifestoneTied = false;
+                    }
+
+                    if (_recall.Detail?.Contains("0x0400", StringComparison.Ordinal) == true || _recall.Detail?.Contains("0x400)", StringComparison.Ordinal) == true)
+                    {
+                        // M6 7 AV: named, so the autopilot takes the way home without the recall for the rest of the run (the trip that follows buys the components).
+                        Context.Facts.LifestoneRecallUnavailable = true;
+                        Log("recall-unavailable:components: ACE refused Lifestone Recall for a missing component (0x0400): the recall counts as not available for the rest of this run");
                     }
 
                     Require(false, $"recall-home: {_recall.Failure}: {_recall.Detail}");

@@ -10,7 +10,7 @@ namespace Lifestone.Client.Tests.Session.Autopilot;
 
 /// <summary>
 /// M5 7: the start-up state audit (<see cref="StartupAudit"/>) over the scripted ACE of <see cref="AutopilotRig"/>: it runs at every start and after every reconnect, before the first fight; each check logs its finding and its fix, and one summary
-/// line ends it. Proved: a start with everything proven passes through to the buff pass and the fight with no extra station; an unproven bind binds at home; an untied portal stops by the named gap (known at the start, or refused by the den
+/// line ends it. Proved: a start with everything proven passes through to the buff pass and the fight with no extra station; an unproven bind binds at home; an untied portal of a ground no route reaches stops by the named gap (known at the start, or refused by the den
 /// travel's recall); short tapers make a trip first and a short carried line stops by the counters' name; a death still to recover runs the death station first; a reconnect audits again.
 /// </summary>
 public sealed class AutopilotAuditTests(ITestOutputHelper output)
@@ -78,8 +78,7 @@ public sealed class AutopilotAuditTests(ITestOutputHelper output)
     }
 
     [Theory]
-    [InlineData(Den)]
-    [InlineData(Temple)]
+    [InlineData(Den)] // M6 4 t3b: the den's route has no portal and no run, so the gap stays; the routed Temple goes by the rung change (AutopilotRungTravelTests)
     public void A_portal_known_untied_stops_the_run_by_the_named_gap_before_any_station(string key)
     {
         var w = new ApWorld(key, output) { Prime = c => { c.Facts.LifestoneTied = true; c.Facts.SetPortalTie(key, PortalTie.Untied); } };
@@ -94,8 +93,7 @@ public sealed class AutopilotAuditTests(ITestOutputHelper output)
     }
 
     [Theory]
-    [InlineData(Den)]
-    [InlineData(Temple)]
+    [InlineData(Den)] // M6 4 t3b: the den's route has no portal and no run, so the gap stays; the routed Temple goes by the rung change (AutopilotRungTravelTests)
     public void A_den_travel_refused_untied_stops_the_run_by_the_named_gap_not_by_recoveries(string key)
     {
         var w = new ApWorld(key, output);
@@ -219,7 +217,7 @@ public sealed class AutopilotAuditTests(ITestOutputHelper output)
         });
 
         Assert.Equal(1, autopilot.Audits);
-        Assert.Contains(w.Lines, l => l.StartsWith("gear: restore: appraising 3 held caster(s)", StringComparison.Ordinal));
+        Assert.Contains(w.Lines, l => l.StartsWith("gear: restore: appraising 2 held caster(s)", StringComparison.Ordinal)); // M6 6 MF: the caster check before the bind wielded one of the three, so two are in the packs
         Assert.True(waitFrames >= 20, $"the restore's appraisals spanned only {waitFrames} frames");
         foreach (var check in new[] { "corpse", "place", "bind", "portal_tie", "kit", "packs", "worn", "buffs" })
         {

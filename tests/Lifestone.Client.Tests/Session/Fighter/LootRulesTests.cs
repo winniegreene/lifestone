@@ -166,7 +166,7 @@ public sealed class LootRulesTests
     public void The_reasons_have_log_names()
     {
         Assert.Equal(
-            ["take", "not_resolved", "already_held", "value", "type", "burden"],
+            ["take", "not_resolved", "already_held", "value", "type", "burden", "replaced"],
             Enum.GetValues<LootDecision>().Select(LootRules.ReasonName));
     }
 

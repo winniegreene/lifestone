@@ -97,9 +97,23 @@ public static class CreatureAwareness
     /// <summary>The number of weenie classes pinned.</summary>
     public static int Count => ByWcid.Count;
 
+    /// <summary>M6 16 E1a (the bestiary's facade): the weenie classes pinned.</summary>
+    internal static IEnumerable<uint> Wcids => ByWcid.Keys;
+
     /// <summary>The awareness of weenie class <paramref name="wcid"/> in metres: its pinned value, else <see cref="DefaultMetres"/>, times <see cref="ServerScale"/>.</summary>
     /// <param name="wcid">The creature's weenie class id (<c>CreateObject</c>'s <c>WeenieClassId</c>).</param>
     public static float MetresOf(uint wcid) => (ByWcid.TryGetValue(wcid, out var metres) ? metres : DefaultMetres) * ServerScale;
+
+    /// <summary>
+    /// M6 16 E1f (docs/automation-engine.md E1; m6-plan.md D139): the awareness of weenie class <paramref name="wcid"/> by the kind's own range, in metres: <paramref name="tableVisualMetres"/> (the world database's
+    /// VisualAwarenessRange of the kind, ACE's 18 where the weenie states none, as the bestiary's record holds it) times <see cref="ServerScale"/>, the scale <see cref="MetresOf"/> applies to a pin. Null (a kind the bestiary's
+    /// tables do not hold: a weenie that is no creature of the world database) answers <see cref="MetresOf"/>: its pin, else ACE's default. The pins stay as the check on the table: all 74 pinned kinds are rows of it and state
+    /// the pinned range to the metre (<c>CreatureBehaviourTests</c>; M6 16 E1e took the Low B belt's three cattle, weenie classes 20, 181 and 182 of WeenieType.Cow, into the tables, which closed
+    /// <c>TODO(engine-bestiary-cattle)</c>).
+    /// </summary>
+    /// <param name="wcid">The creature's weenie class id.</param>
+    /// <param name="tableVisualMetres">The kind's own range by the world database, before the server's scale, or null when the tables do not hold the kind.</param>
+    public static float OwnMetresOf(uint wcid, double? tableVisualMetres) => tableVisualMetres is { } own ? (float)own * ServerScale : MetresOf(wcid);
 
     /// <summary>True when <paramref name="wcid"/>'s awareness is pinned (not the default).</summary>
     /// <param name="wcid">The weenie class id.</param>

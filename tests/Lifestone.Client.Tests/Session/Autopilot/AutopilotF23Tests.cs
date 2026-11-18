@@ -128,13 +128,46 @@ public sealed class AutopilotF23Tests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void M6_14_gate_lapse_a_keepers_fight_back_asks_its_fight_to_keep_the_buff_lines_and_never_stops_it_for_them()
+    {
+        // live, 2026-11-13 23:37:49 to 23:44:09 UTC: the trip's keeper met a Tusker Guard, the fight-back fought 379 s, and its fight was never asked to keep the lines: Bludgeon Bane VI ran out on her armour at 23:39:35
+        var w = new ApWorld(Den, output);
+        ArmourBuffLedger.For(w.Trip.View.State).MarkSeeded(); // every wanted line is under its margin in the scripted world
+        var fights = new List<RefreshingFight>();
+        w.Factory.WrapFight = f =>
+        {
+            var wrapped = new RefreshingFight(f);
+            fights.Add(wrapped);
+            return wrapped;
+        };
+        w.Factory.Script = spec => spec.Kind == StationKinds.Logistics ? new ScriptedRun(spec.Name, _ => ScenarioStatus.Succeeded, () => "sold=3 bought=2") : null;
+        var autopilot = w.Autopilot(new AutopilotOptions { TripAfterKills = 2 });
+        var arrows = new List<AutopilotTransition>();
+        autopilot.StateChanged = arrows.Add;
+        w.Run(autopilot, a => a.State == AutopilotState.Trip);
+        var before = fights.Count;
+        Hostile(w, Guard, 6);
+        w.Run(autopilot, a => a.State == AutopilotState.Fight);
+        var until = w.Now + 30;
+        w.Run(autopilot, _ => w.Now >= until);
+
+        Assert.Contains(arrows, a => a.From == AutopilotState.Trip && a.To == AutopilotState.Fight && a.Why.Contains("she fights back (D88)", StringComparison.Ordinal));
+        var back = Assert.Single(fights.Skip(before));
+        var asked = Assert.Single(back.Asked);
+        Assert.Contains("under the 300 s margin", asked.Detail, StringComparison.Ordinal);
+        Assert.Contains(w.Lines, l => l.StartsWith("autopilot fight: a buff line is due in the keeper's fight-back: ", StringComparison.Ordinal) && l.Contains("the fight-back is not stopped (M6 14 gate lapse)", StringComparison.Ordinal));
+        Assert.Null(back.StopReason); // a fight-back ends only when no hostile is in reach: never for a buff line
+        Assert.Equal(AutopilotState.Fight, autopilot.State);
+    }
+
+    [Fact]
     public void Item1_the_fight_refreshes_the_lines_between_kills_only_when_no_hostile_is_in_reach()
     {
         var rig = new FightManaTests.Rig(mana: 400, stamina: 200, fight: new FightOptions { Kills = 3 }) { HitsToKill = 2 };
         rig.Caster.ManaRegenPerSecond = 40;
         var near = rig.AddTusker(12); // within the 20 m reach
         rig.AddTusker(60); // the next target, out of the reach: the fight goes on after the first kill
-        FightF24Tests.Prime(rig, l => l.Name == "Quickness Self" ? 100 : 1500); // F24: a buffed mage with one line due (an unbuffed one would be recast at once, whatever is in reach); F25: 100 s is inside the lookahead's 150 s (the seed 90 + 60)
+        FightF24Tests.Prime(rig, l => l.Name == "Quickness Self" ? 50 : 1500); // F24: a buffed mage with one line due (an unbuffed one would be recast at once, whatever is in reach); F25 and M6 7 AZ: 50 s is inside the lookahead's 60 s (the margin alone)
         var scenario = rig.Scenario();
         scenario.RequestBuffRefresh(300, 20, "Quickness Self under the 300 s margin"); // asked with the tusker 12 m away
         rig.Run(scenario, 120, until: () => ((IStoppableFight)scenario).Kills >= 1);
@@ -251,7 +284,7 @@ public sealed class AutopilotF23Tests(ITestOutputHelper output)
         var autopilot = w.Autopilot(new AutopilotOptions());
         var arrows = new List<AutopilotTransition>();
         autopilot.StateChanged = arrows.Add;
-        w.Run(autopilot, a => a.State == AutopilotState.Upkeep);
+        w.Run(autopilot, a => a.State == AutopilotState.Upkeep && a.CurrentRun is not null); // M6 7 BD: the station is running: a hostile in the keeper's phases before it is the one rule's (AutopilotKeeperFightTests)
         var upkeepAt = w.Now;
         Hostile(w, Guard, 5); // a Tusker Guard walks up during the upkeep
         w.Run(autopilot, a => a.State == AutopilotState.Fight);

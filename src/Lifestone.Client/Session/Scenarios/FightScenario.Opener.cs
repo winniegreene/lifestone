@@ -15,7 +15,7 @@ namespace Lifestone.Client.Session.Scenarios;
 /// <remarks>
 /// <para><b>Why it pays.</b> ACE multiplies a war bolt's damage by the target's fire vulnerability (<c>SpellProjectile.cs</c> 526-557 through <c>GetResistanceMod</c>, <c>Creature_Properties.cs</c> 100-152, and the enchantment's StatModValue,
 /// <c>EnchantmentManager.cs</c> 925-939, all at 95ef426d): x2.5 at level VI, x2.85 at VII. The lead's arithmetic (<c>cache/m5/7/vuln-math.md</c>) puts a Slave's death at 10.1 s against 11.4 s at level 80 with the opener, a Guard's at a tie.</para>
-/// <para><b>The level</b> is the highest of the line that the ground's plan cap allows for the character's level (<see cref="PlanCap"/>, the bolt's own cap), the spellbook holds, whose cast chance from the current skill of its school reaches the
+/// <para><b>The level</b> is the highest of the line that the ground's plan cap allows for the character's level (<see cref="PlanCap(Grounds.HuntingGround, int, FightOptions, out string)"/>, the bolt's own cap; M6 14: the ladder's live cap when the options carry it), the spellbook holds, whose cast chance from the current skill of its school reaches the
 /// threshold, and whose components the pack holds (<see cref="LevelFloor"/>: the foci formula's scarab and tapers, so VI at level 80 with Pyreal Scarabs and VII once the pack carries Platinum ones).</para>
 /// <para><b>The tries.</b> A resisted or fizzled cast is pressed again like a bolt, at most <see cref="FightOptions.OpenerTries"/> casts a target (<c>--fight-opener-tries</c>, Lifestone's own number; 0 turns openers off); the cast policy proves a landing
 /// by ACE's own chat line (<see cref="CastChatProof"/>, WorldObject_Magic.cs 409-421 and the resist at 192). A target already under half its health (<see cref="OpenerMinHealthFraction"/>) skips the opener: it is not worth the mana.
@@ -163,7 +163,7 @@ public sealed partial class FightScenario
         }
 
         var name = target.Name ?? "creature";
-        if (ReadHealth(objects, guid, _lastClock, out var health, out var healthSource, out _) && health < OpenerMinHealthFraction) // M5 7 F20: the live model, not the table's last value
+        if (ReadHealth(objects, guid, _lastClock, out var health, out var healthSource, out _, Threat.HealthReader.FightOpener) && health < OpenerMinHealthFraction) // M5 7 F20: the live model, not the table's last value
         {
             SettleOpener(guid);
             _openersSkipped++;
@@ -175,14 +175,19 @@ public sealed partial class FightScenario
         {
             SettleOpener(guid);
             _openersSkipped++;
-            NoteOpener($"opener: the ground names '{lineName}' for {name}, which the profile does not hold (TODO(opener-unknown-line)); no opener");
+            // M6 1 f (opener-unknown-line closed): every ground profile's opener names a line ArenaProfile holds (FightDebuffsTests pins it over GroundCatalog.All), so this is a profile error, never an unknown.
+            if (_pickNoted.Add("opener line " + lineName))
+            {
+                _log.Warn(LogCategory, $"opener: the ground names '{lineName}' for {name}, which the profile does not hold (a ground-profile error: the catalog test pins every opener to an ArenaProfile line); no opener");
+            }
+
             return false;
         }
 
         var self = session.State.Self;
         var q = self.Qualities;
         var school = GearCasts.SkillOf(line.School);
-        var held = LevelFloor.HeldFor(session.State, line.School);
+        var held = LevelFloor.HeldForAccount(session.State, line.School, _buffOptions.AccountName); // M6 1 h1
         if (!GearCasts.TryCurrentSkill(q, school, out var skill, out var skillWhy))
         {
             SettleOpener(guid);
@@ -191,7 +196,7 @@ public sealed partial class FightScenario
             return false;
         }
 
-        var level = ChooseOpenerLevel(line, _spells, self.Spellbook, skill, _buffOptions.CastChance, LevelCapFor(q), held is null ? null : info => LevelFloor.ShortOf(held, info, out var need) ? need : null, out var why);
+        var level = ChooseOpenerLevel(line, _spells, self.Spellbook, skill, _buffOptions.CastChance, LevelCapFor(q), held is null ? null : info => LevelFloor.ShortOf(held, info, out var need, _buffOptions.AccountName) ? need : null, out var why);
         if (level < 0)
         {
             SettleOpener(guid);
@@ -226,6 +231,18 @@ public sealed partial class FightScenario
         return true;
     }
 
+    /// <summary>
+    /// M6 1 f (<c>f10-debuff-gesture</c>): a landed or resisted opener went out whole, so its seconds a cast (the report's over the casts sent) are a sample of a debuff cast at another, which the picker reads for every debuff
+    /// (<see cref="DebuffCastKey"/>).
+    /// </summary>
+    private void NoteDebuffSeconds(in CastReport report, int sent)
+    {
+        if (sent > 0 && report.Seconds > 0)
+        {
+            _heals.NoteSeconds(DebuffCastKey, report.Seconds / sent);
+        }
+    }
+
     private ScenarioStatus OpenerAnswer(IGameSessionView session, double clock)
     {
         var end = _openerCast!.Step(clock);
@@ -247,15 +264,21 @@ public sealed partial class FightScenario
             case CastEnd.Cancelled or CastEnd.DryRun:
                 return Fail(session, "fight: the opener was not carried out: " + (_openerCast.LastOutcome is { } stopped ? Describe(stopped) : end + ": " + report.Why));
             case CastEnd.Landed:
+                NoteDebuffSeconds(in report, sent);
                 SettleOpener(guid);
                 _openersLanded++;
                 NoteOpenerLanded(guid, spell, clock); // M5 7 F10: the picker's ledger of the debuffs we landed
                 _log.Info(LogCategory, $"opener: {spell} on {name} 0x{guid:X8}: landed");
                 break;
             case CastEnd.Resisted:
+                NoteDebuffSeconds(in report, sent);
                 SettleOpener(guid);
                 _openersResisted++;
                 _log.Info(LogCategory, $"opener: {spell} on {name} 0x{guid:X8}: resisted after {_openerTries}");
+                break;
+            case CastEnd.InTheAir:
+                // M6 14 airborne: held in the air past the bound: the moment's, not the opener's; not settled, so the pick may press it again (the tries bound it).
+                _log.Info(LogCategory, $"opener: {spell} on {name} 0x{guid:X8}: held in the air ({report.Why}); not settled");
                 break;
             case CastEnd.ManaShort when _openerTries < _options.OpenerTries:
                 // Nothing was cast: the mana order funds the next cast, then the pick brings the target back and the opener is pressed again (the tries bound it).

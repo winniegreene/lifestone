@@ -90,6 +90,19 @@ public interface IFightWalk : IDisposable
     uint LegGoalCell => 0;
 
     /// <summary>
+    /// M6 14 airborne: true while the leg under way is a jump in flight (<see cref="NavRunner.JumpInFlight"/>: from the take-off until the runner's landing check ran). The fight then holds every rule that would drop the leg and every
+    /// new decision until it is false (<c>FightScenario.Airborne.cs</c>). M6 14 pit-hold: the runner's walk reads <see cref="NavRunner.JumpCommitted"/>, the run for the brink with the jump key down as well, since a drop in that run
+    /// leaves the body held on the brink in the pit's floorless cell. The default is false (a walk without a runner never jumps).
+    /// </summary>
+    bool JumpInFlight => false;
+
+    /// <summary>
+    /// M6 item 0 a5 (<c>m6-walk-cancel-seconds</c>): the walking seconds of every leg of the walk so far, a cancelled leg's (<see cref="Abandon"/>) included, so the tally agrees with the autopilot's state-measured <c>walk_s</c>;
+    /// null for a walk that does not count them (the fight's verdict reads <c>walk_s=n/a</c>). The default is null.
+    /// </summary>
+    double? WalkSecondsTotal => null;
+
+    /// <summary>
     /// M5 7 P7b (D139 j): plans and starts a leg to <paramref name="goal"/> itself, not to a tour's waypoint (the loot step's walk back to where a corpse lost from view lay). The leg ends Arrived at the spot (within the walk's stop
     /// distance) or, when it fails, Arrived without recovery onto the tour (its failure is logged): the fight reads where the player stands. The default plans nothing: false, with <paramref name="description"/> naming why.
     /// </summary>
@@ -99,7 +112,7 @@ public interface IFightWalk : IDisposable
     /// <param name="description">What the leg is, for the log; or why none was planned.</param>
     bool BeginLegTo(IGameSessionView session, double now, in CellFrame goal, out string description)
     {
-        description = "TODO(m5-loot-walk-back-walk): this walk has no leg to a spot of its own";
+        description = FightWalkRefusals.Refuse(this, nameof(BeginLegTo));
         return false;
     }
 
@@ -112,7 +125,7 @@ public interface IFightWalk : IDisposable
     /// <param name="description">What was marked, for the log; or why nothing was.</param>
     bool AvoidSpot(in CellFrame at, double until, out string description)
     {
-        description = "TODO(m5-stuck-spot-patch): this walk has no planner to mark";
+        description = FightWalkRefusals.Refuse(this, nameof(AvoidSpot));
         return false;
     }
 
@@ -128,13 +141,94 @@ public interface IFightWalk : IDisposable
     {
         ArgumentNullException.ThrowIfNull(cells);
         cells.Clear();
+        FightWalkRefusals.Refuse(this, nameof(CellsOnLine));
         return LineTrace.NotTraced;
     }
 
     /// <summary>
     /// M5 7 P7s (D148, <c>m5-8-no-go-attacker</c>): the middle of each room the walk's planner may walk to (the ground's walkable cells), the candidate spots for a short step. The default is none (a walk without a planner).
     /// </summary>
-    IReadOnlyList<CellFrame> FloorSpots => [];
+    IReadOnlyList<CellFrame> FloorSpots
+    {
+        get
+        {
+            FightWalkRefusals.Refuse(this, "FloorSpots");
+            return [];
+        }
+    }
+}
+
+/// <summary>
+/// M6 6 B1 (<c>m5-loot-walk-back-walk</c>, <c>m5-loot-approach-trace</c>, <c>m5-defend-step-spots</c>): the named refusal of a walk that has no planner for a call of <see cref="IFightWalk"/> (<c>no-planner:&lt;walk type&gt;</c>), so no walk
+/// answers a silent "nothing". The interface's defaults return it; it is logged once per walk instance (to <see cref="Sink"/> when a host sets one, and kept in <see cref="Refused"/>, bounded by <see cref="MaxKept"/>).
+/// </summary>
+/// <remarks>
+/// M6 6 FXD3 (6-D8): <see cref="Sink"/> is process-wide static state, set once by a host at its install (never per walk, never by a test that other test classes run beside); the callers also log the returned
+/// <c>no-planner:</c> text themselves. <see cref="Refused"/> is a bounded record, not a log: the first <see cref="MaxKept"/> entries are kept and <see cref="Overflowed"/> counts the rest (kept over dropped so a
+/// long-lived process cannot grow it, and the first refusals are the ones that name a missing planner).
+/// </remarks>
+public static class FightWalkRefusals
+{
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<IFightWalk, HashSet<string>> Seen = new();
+
+    /// <summary>Where the first refusal of each call of each walk instance is logged, or null (a default interface method has no log of its own; the fight's host may set it).</summary>
+    public static ILogSink? Sink { get; set; }
+
+    /// <summary>The refusals made, as <c>no-planner:&lt;walk type&gt;/&lt;call&gt;</c>, in order (each once per walk instance).</summary>
+    public static IReadOnlyList<string> Refused
+    {
+        get
+        {
+            lock (Log)
+            {
+                return [.. Log];
+            }
+        }
+    }
+
+    private static readonly List<string> Log = [];
+
+    /// <summary>How many refusals <see cref="Refused"/> keeps (Lifestone's own bound: a handful of walk types times three calls; more is a leak).</summary>
+    public const int MaxKept = 64;
+
+    private static long overflowed;
+
+    /// <summary>The refusals made after <see cref="Refused"/> was full (counted, not kept).</summary>
+    public static long Overflowed => Interlocked.Read(ref overflowed);
+
+    /// <summary>The refusal text <c>no-planner:&lt;walk type&gt;</c> for <paramref name="walk"/>; logged on the first ask of <paramref name="call"/> by this instance.</summary>
+    /// <param name="walk">The walk that has no planner.</param>
+    /// <param name="call">The <see cref="IFightWalk"/> member asked.</param>
+    public static string Refuse(IFightWalk walk, string call)
+    {
+        ArgumentNullException.ThrowIfNull(walk);
+        var text = "no-planner:" + walk.GetType().Name;
+        var calls = Seen.GetOrCreateValue(walk);
+        bool first;
+        lock (calls)
+        {
+            first = calls.Add(call);
+        }
+
+        if (first)
+        {
+            lock (Log)
+            {
+                if (Log.Count < MaxKept)
+                {
+                    Log.Add(text + "/" + call);
+                }
+                else
+                {
+                    Interlocked.Increment(ref overflowed);
+                }
+            }
+
+            Sink?.Warn("fight", $"fight walk refusal: {call} -> {text} (this walk has no planner for it; the caller keeps its fallback)");
+        }
+
+        return text;
+    }
 }
 
 /// <summary>M5 7 P7s (D148): what <see cref="IFightWalk.CellsOnLine"/> could tell.</summary>
@@ -313,6 +407,9 @@ public sealed class RunnerLegs
     /// <summary>The cell the leg under way goes to, or 0 with no leg.</summary>
     public uint GoalCell => _active ? _goalCell : 0;
 
+    /// <summary>M6 14 airborne and pit-hold: the leg under way has a jump committed (<see cref="NavRunner.JumpCommitted"/>: the run for the brink with the jump key down, or the flight); false with no leg or in a hold.</summary>
+    public bool JumpInFlight => _active && !Holding && _runner is { JumpCommitted: true };
+
     /// <summary>M5 7 P7i: the radius of a stuck spot's costly patch, in metres (a den room's corner pocket and its doorway). Lifestone's own.</summary>
     public const float StuckSpotRadiusMetres = 3f;
 
@@ -394,6 +491,12 @@ public sealed class RunnerLegs
         _runner = runner;
         _spot = false;
         ExpirePatches(clock);
+        _rooms.JumpReachMetres = runner.BodyJumpReachMetres; // M6 14 pits: a waypoint past a jump the body cannot make now is skipped here by name, not walked to a no-path
+        if (OffTheFloor(runner, in from, now, clock, out description) is { } off)
+        {
+            return off; // M6 14 pit-hold: no hold and no tour leg begins in a cell no walk starts from
+        }
+
         var walk = _ground.Walk;
         for (var tries = 0; tries < _tour.Waypoints; tries++)
         {
@@ -412,9 +515,10 @@ public sealed class RunnerLegs
                 return true;
             }
 
-            if (_roomFrame(cellId) is not { } room || _rooms.Plan(from.CellId, from.Origin, cellId, room.Origin) is null)
+            if (GoalOutOfAvoid(cellId, from.Origin) is not { } room || _rooms.Plan(from.CellId, from.Origin, cellId, room.Origin) is null)
             {
                 _log.Warn(LogCategory, "no walk joins the player's cell and a waypoint", new LogField("from", $"0x{from.CellId:X8}"), new LogField("to", $"0x{cellId:X8}"));
+                _tour.LegFailed(cellId, clock); // M6 14 pit-hold: rested as a failed leg's cell, so the tour offers what a walk reaches instead of the same cell each second
                 continue;
             }
 
@@ -432,6 +536,126 @@ public sealed class RunnerLegs
 
         _active = false;
         Failure = $"no walk joins the player's cell 0x{from.CellId:X8} and any waypoint of the ground's tour (the player stands off the walkable cells or they are cut)";
+        return false;
+    }
+
+    /// <summary>The margin past a seeded avoid box's edge at which a moved leg goal stands, in metres (Lifestone's own: the body's 0.48 m radius and a stop tolerance of under half a metre stay out of the box).</summary>
+    public const float AvoidGoalMarginMetres = 1.0f;
+
+    /// <summary>
+    /// M6 14 next grounds (a plate's wall: <see cref="GoalOffPlate"/>, M6 14 holding plates): the goal of a tour leg into <paramref name="cellId"/>: the room's floor centre (<see cref="RoomGraph.RoomFrame"/>), unless a seeded avoid region holds it (the Tusker Holding's
+    /// Tusker's Friend plates stand on the centres of 0x5B48026B and 0x5B4802D3, so every round of the tour stepped on one); then the point <see cref="AvoidGoalMarginMetres"/> past the box's nearest side to the player, on the
+    /// same cell's floor and in no patch. Null when no such point exists: the leg is not begun (the caller names the cell as unwalkable).
+    /// </summary>
+    /// <param name="cellId">The waypoint's cell.</param>
+    /// <param name="from">Where the player stands.</param>
+    internal CellFrame? GoalOutOfAvoid(uint cellId, Vector3 from)
+    {
+        if (_roomFrame(cellId) is { } centre && _rooms.Plates is { } walls && walls.Holding(centre.Origin) is { } plate)
+        {
+            return GoalOffPlate(cellId, centre.Origin, from, walls, plate);
+        }
+
+        if (_roomFrame(cellId) is not { } room || !_rooms.Patches.TryBoxAt(room.Origin, out var min, out var max, out var name))
+        {
+            return _roomFrame(cellId);
+        }
+
+        var c = room.Origin;
+        var m = AvoidGoalMarginMetres;
+        Span<Vector3> candidates = [new(min.X - m, c.Y, c.Z), new(max.X + m, c.Y, c.Z), new(c.X, min.Y - m, c.Z), new(c.X, max.Y + m, c.Z)];
+        CellFrame? best = null;
+        var bestMetres = float.MaxValue;
+        foreach (var p in candidates)
+        {
+            if (_rooms.RoomFloorUnder(cellId, p) is not { } z || _rooms.Patches.Contains(p with { Z = z }) is not null)
+            {
+                continue;
+            }
+
+            var metres = Vector2.Distance(new Vector2(p.X, p.Y), new Vector2(from.X, from.Y));
+            if (metres < bestMetres)
+            {
+                (best, bestMetres) = (new CellFrame(cellId, new AcFrame(p with { Z = z }, Quaternion.Identity)), metres);
+            }
+        }
+
+        _log.Info(
+            LogCategory,
+            best is { } goal
+                ? string.Create(CultureInfo.InvariantCulture, $"walk: the floor centre of 0x{cellId:X8} [{c.X:0.#} {c.Y:0.#}] lies in the avoid region {name}: the leg's goal is [{goal.Origin.X:0.#} {goal.Origin.Y:0.#}], {m:0.#} m past its side (m6-holding-plates)")
+                : string.Create(CultureInfo.InvariantCulture, $"walk: the floor centre of 0x{cellId:X8} [{c.X:0.#} {c.Y:0.#}] lies in the avoid region {name} and no floor of the cell stands {m:0.#} m past its sides: no leg ends in it (m6-holding-plates)"));
+        return best;
+    }
+
+    /// <summary>
+    /// M6 14 holding plates: the goal of a tour leg whose room's floor centre stands inside a plate's wall (the Tusker Holding's plates stand on the floor centres of 0x5B48026B, 0x5B4802B2, 0x5B4802D3 and 0x5B480388 and in the narrow
+    /// cells' middles): the point <see cref="AvoidGoalMarginMetres"/> past the wall along an axis from the plate (the corridors run on the axes), on the cell's own floor and out of every wall and patch, the nearest to the player;
+    /// null when none stands so (the leg is not begun, and the caller names the cell).
+    /// </summary>
+    private CellFrame? GoalOffPlate(uint cellId, Vector3 centre, Vector3 from, PlateKeepOff walls, KeptPlate plate)
+    {
+        var p0 = plate.Point;
+        var off = walls.ReachOf(plate) + AvoidGoalMarginMetres;
+        Span<Vector3> candidates = [new(p0.X + off, p0.Y, centre.Z), new(p0.X - off, p0.Y, centre.Z), new(p0.X, p0.Y + off, centre.Z), new(p0.X, p0.Y - off, centre.Z)];
+        CellFrame? best = null;
+        var bestMetres = float.MaxValue;
+        foreach (var p in candidates)
+        {
+            if (_rooms.RoomFloorUnder(cellId, p + new Vector3(0f, 0f, 0.5f)) is not { } z || walls.Holding(p with { Z = z }) is not null || _rooms.Patches.Contains(p with { Z = z }) is not null)
+            {
+                continue;
+            }
+
+            var metres = Vector2.Distance(new Vector2(p.X, p.Y), new Vector2(from.X, from.Y));
+            if (metres < bestMetres)
+            {
+                (best, bestMetres) = (new CellFrame(cellId, new AcFrame(p with { Z = z }, Quaternion.Identity)), metres);
+            }
+        }
+
+        _log.Info(
+            LogCategory,
+            best is { } goal
+                ? string.Create(CultureInfo.InvariantCulture, $"walk: the floor centre of 0x{cellId:X8} [{centre.X:0.#} {centre.Y:0.#}] lies inside the wall of {plate.Name} ({walls.ReachOf(plate):0.00} m): the leg's goal is [{goal.Origin.X:0.#} {goal.Origin.Y:0.#}], {AvoidGoalMarginMetres:0.#} m past the wall (m6-holding-plates)")
+                : string.Create(CultureInfo.InvariantCulture, $"walk: the floor centre of 0x{cellId:X8} [{centre.X:0.#} {centre.Y:0.#}] lies inside the wall of {plate.Name} and no floor of the cell stands {AvoidGoalMarginMetres:0.#} m past the wall: no leg ends in it (m6-holding-plates)"));
+        return best;
+    }
+
+    /// <summary>
+    /// M6 14 pit-hold (live 2026-11-13 14:53:51 to 15:04:39 UTC, the Tusker Abode, <c>cache/m6/14/live/abode5</c>): the walk never holds, and never asks the tour, from a dungeon cell its room graph does not hold (a cell of no storey).
+    /// The climber stood on the pit's west lip in its floorless cell 0x5C4502A9 for eleven minutes: no plan could start there, so every waypoint the tour offered failed, the tour's last offer was held as "not offerable now",
+    /// and the hold was asked again each second. On a profile pit's lip (<see cref="RoomGraph.StandingRoom"/>) the walk steps back first, a spot leg onto the near room's floor at the side's landing point (its plan starts from that room);
+    /// anywhere else off the graph (a fall to the pit's floor) the walk fails by name, so the fight ends and the autopilot's recovery takes her home. Null when she stands on the graph: the tour's leg as before.
+    /// </summary>
+    private bool? OffTheFloor(NavRunner runner, in CellFrame from, double now, double clock, out string description)
+    {
+        description = string.Empty;
+        if (_ground.Kind != GroundKind.Dungeon || _rooms.Cells.GetCell(from.CellId) is not null)
+        {
+            return null;
+        }
+
+        var at = from.Origin;
+        if (_rooms.Planner.LipOf(from.CellId, at) is { } lip && _rooms.Cells.GetCell(lip.Side.Cell) is not null)
+        {
+            var back = new CellFrame(lip.Side.Cell, new AcFrame(lip.Side.Landing, Quaternion.Identity));
+            _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"walk: the player stands on the lip of {lip.Pit.Name}, in its floorless cell 0x{from.CellId:X8} at [{at.X:0.0#} {at.Y:0.0#} {at.Z:0.0#}] by the brink of 0x{lip.Side.Cell:X8}: no hold and no tour leg begins there; a step back onto 0x{lip.Side.Cell:X8}'s floor at [{lip.Side.Landing.X:0.#} {lip.Side.Landing.Y:0.#} {lip.Side.Landing.Z:0.#}] first (m6-pit-hold)"));
+            if (BeginTo(runner, in from, in back, now, clock, out var leg))
+            {
+                description = "the step back off the pit's lip: " + leg;
+                return true;
+            }
+
+            _active = false;
+            Failure = $"the player stands on the lip of {lip.Pit.Name} in its floorless cell 0x{from.CellId:X8} and the step back onto 0x{lip.Side.Cell:X8} could not be planned ({leg})";
+            return false;
+        }
+
+        _active = false;
+        Failure = string.Create(
+            CultureInfo.InvariantCulture,
+            $"the player stands in 0x{from.CellId:X8} at [{at.X:0.0#} {at.Y:0.0#} {at.Z:0.0#}], a cell of no storey of {_ground.Name} (a pit's floor or a floorless shaft, off the room graph): no walk starts there and no hold is kept there (m6-pit-hold); the way out is Lifestone Recall (TODO(m6-abode-pit-fall))");
         return false;
     }
 
@@ -492,7 +716,7 @@ public sealed class RunnerLegs
                 return FightWalkStatus.Failed;
         }
 
-        if (clock - _legStart > _ground.Walk.LegSeconds)
+        if (clock - _legStart > _ground.Walk.LegSeconds && !runner.JumpCommitted) // M6 14 airborne: the leg's clock waits for the jump's landing check (the runner bounds the run and the flight itself, NavRunner.JumpRunSeconds and JumpAirSeconds)
         {
             runner.Pause();
             return LegFailed(string.Create(CultureInfo.InvariantCulture, $"the leg did not finish within {_ground.Walk.LegSeconds:0.#} s"), position, now, clock);
@@ -501,9 +725,17 @@ public sealed class RunnerLegs
         return FightWalkStatus.Walking;
     }
 
-    /// <summary>Drops the leg and releases the runner's keys.</summary>
+    /// <summary>The walking seconds of every leg so far, a cancelled leg's included (<see cref="LegPacing.TotalWalkSeconds"/>, <c>m6-walk-cancel-seconds</c>).</summary>
+    public double WalkSecondsTotal => _pacing.TotalWalkSeconds;
+
+    /// <summary>Drops the leg and releases the runner's keys; a leg under way (not a hold) logs its walking seconds, which stay in <see cref="WalkSecondsTotal"/> (M6 item 0 a5, <c>m6-walk-cancel-seconds</c>).</summary>
     public void Abandon()
     {
+        if (_active && !Holding)
+        {
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"leg {Legs} to {(_spot ? "the spot in " : string.Empty)}0x{_goalCell:X8} cancelled after walk_s={_pacing.WalkSeconds:0.0} (counted in the walk's total {_pacing.TotalWalkSeconds:0.0} s: m6-walk-cancel-seconds)"));
+        }
+
         _active = false;
         _pacing.Stop();
         _runner?.Pause();
@@ -553,6 +785,9 @@ public sealed class LegPacing
     /// <summary>The runner's walking seconds of the leg begun last (the frames it was running; paused or yielding time left out).</summary>
     public double WalkSeconds { get; private set; }
 
+    /// <summary>M6 item 0 a5 (<c>m6-walk-cancel-seconds</c>): the walking seconds of every leg begun so far, counted frame by frame, so a leg cancelled before its arrival counts as an arrived one does.</summary>
+    public double TotalWalkSeconds { get; private set; }
+
     /// <summary>Starts a hold at session clock <paramref name="clock"/>: no leg for <see cref="RunnerLegs.HoldRecheckSeconds"/>. Returns the hold's description for the log: the purpose the tour names.</summary>
     /// <param name="tour">The tour that named no purpose (its note is logged).</param>
     /// <param name="fromCell">The cell the player stands in.</param>
@@ -582,6 +817,7 @@ public sealed class LegPacing
         if (running && !double.IsNaN(_lastStep) && now > _lastStep)
         {
             WalkSeconds += now - _lastStep;
+            TotalWalkSeconds += now - _lastStep;
         }
 
         _lastStep = now;
@@ -617,9 +853,11 @@ public sealed class GroundWalk : IFightWalk
     private readonly List<ObjectMotionChanged> _serverMotions = [];
     private WireMotionItem[] _actions = new WireMotionItem[16];
     private IDisposable? _movesSubscription;
+    private PlateSpellWitness? _plateWitness; // M6 14 holding plates: the check after a jump over plates
     private IDisposable? _motionSubscription;
     private OfflineWalker? _walker;
     private MoveIntents? _move;
+    private MoveLease? _lease;
     private PresenceGatedMovementSink? _gate;
     private SessionTargetWorld? _targets;
     private readonly RunnerLegs _legs;
@@ -646,6 +884,9 @@ public sealed class GroundWalk : IFightWalk
 
     /// <inheritdoc/>
     int? IFightWalk.LegsRecovered => _legs.Recovered;
+
+    /// <inheritdoc/>
+    double? IFightWalk.WalkSecondsTotal => _legs.WalkSecondsTotal;
 
     /// <summary>
     /// F3: the sweep <see cref="GameFightWalk.ClearLine"/> runs on the walker's physics world, so the headless fight skips a target behind rock as the game's does (it answered the interface's default <c>true</c> and shot tuskers on other storeys through the rock,
@@ -713,7 +954,7 @@ public sealed class GroundWalk : IFightWalk
         _world.SetTime(now);
         _walker = OfflineWalker.Create(_dats, _world, _log, weenie, _geometry, id: self.Guid, sink: _gate);
         _move = session.Actions.Move; // scripted movement goes through IActionApi.Move (the human's keys, R2)
-        _move.Bind(_walker.Controller, _walker.Controller.Options.RunByDefault);
+        _lease = _move.BindOver(_walker.Controller, _walker.Controller.Options.RunByDefault); // M6 14 motes: the play host's controller is bound again at the end
         _targets = new SessionTargetWorld(session.State, _dats, _geometry, () => _world.CurrentTime, _walker.Physics);
         _walker.Physics.TargetWorld = _targets;
         _confirmer = new RouteConfirmer(_world, _walker.Physics.Setup ?? throw new InvalidOperationException("the ground walker has no Setup"), _log);
@@ -723,12 +964,19 @@ public sealed class GroundWalk : IFightWalk
             new RoomPathSource(_planner),
             _confirmer,
             null,
-            new NavRunnerOptions { Name = "ground-walk" },
+            new NavRunnerOptions { Name = "ground-walk", PredictiveSteering = true, PredictiveOutdoors = true },
             _log,
             new HostileCreatureFeed(session.State.Objects, self.Guid, _log, HostileCreatureFeed.SetupRadii(_dats))) // the creature layer, with each creature's own radius
         {
             Doors = new SessionDoorFeed(session, _log, _setupExtent), // M5 5 d2: a closed door on a leg is opened (purpose=door), not walked into
+            BodyFeed = new NpcBodyFeed(session.State.Objects, self.Guid, _log, HostileCreatureFeed.SetupRadii(_dats)), // the NPCs' bodies on the plan (M6 4 W2; the fight walks since M6 4 w6a)
         };
+        if (_ground.Plates is { } plates)
+        {
+            _plateWitness = new PlateSpellWitness(session, plates, _log);
+            _runner.JumpWitness = _plateWitness;
+        }
+
         _movesSubscription = session.Events.Subscribe<ObjectMoved>((in ObjectMoved e) =>
         {
             if (e.IsSelf)
@@ -750,9 +998,10 @@ public sealed class GroundWalk : IFightWalk
     public bool BeginLeg(IGameSessionView session, double now, out string description)
     {
         description = string.Empty;
+        PlaceWhereSheStands(session);
         if (_walker is null || !_placed)
         {
-            Failure = "the ground walker is not placed: no teleport of the player reached it";
+            Failure = NotPlaced(session);
             return false;
         }
 
@@ -773,14 +1022,18 @@ public sealed class GroundWalk : IFightWalk
     public uint LegGoalCell => _legs.GoalCell;
 
     /// <inheritdoc/>
+    public bool JumpInFlight => _legs.JumpInFlight;
+
+    /// <inheritdoc/>
     public bool AvoidSpot(in CellFrame at, double until, out string description) => _legs.AvoidSpot(in at, until, out description);
 
     /// <inheritdoc/>
     public bool BeginLegTo(IGameSessionView session, double now, in CellFrame goal, out string description)
     {
+        PlaceWhereSheStands(session);
         if (_walker is null || !_placed)
         {
-            description = "the ground walker is not placed: no teleport of the player reached it";
+            description = NotPlaced(session);
             return false;
         }
 
@@ -797,6 +1050,7 @@ public sealed class GroundWalk : IFightWalk
         }
 
         DrainMoves(now);
+        PlaceWhereSheStands(session);
         ApplyServerMotions();
         if (_placed)
         {
@@ -842,14 +1096,51 @@ public sealed class GroundWalk : IFightWalk
         Abandon();
         _runner?.Dispose();
         _confirmer?.Dispose();
-        if (_move is not null && _walker is not null)
+        if (_move is not null && _lease is not null)
         {
-            _move.Unbind(_walker.Controller);
+            _move.Release(_lease); // M6 14 motes: the controller bound before the walk's own, bound again (none: unbound, as before)
         }
 
         _movesSubscription?.Dispose();
         _motionSubscription?.Dispose();
+        _plateWitness?.Dispose();
     }
+
+    /// <summary>
+    /// M6 14 motes (live 2026-11-17 01:12:50, ladder48: the Atlan wand's mote hunt began with the climber already in the Crater Caves, entered by the quest's own portal step before the fight was made; the fight's travel was a 0 m spot leg,
+    /// so no teleport reached the walker and its first walk failed "not placed"): a walker not yet placed while the player is in the world (<see cref="SelfTravel.Present"/>, not in portal space) on a landblock of the ground is placed at her
+    /// server position (<c>Self.Position</c>, the picture the screen draws: one world picture), logged once. The den's own teleport still places it as before (<see cref="DrainMoves"/>): before it she stands elsewhere, off the ground.
+    /// </summary>
+    private void PlaceWhereSheStands(IGameSessionView session)
+    {
+        if (_placed || _walker is null || session.State.Self.Travel != SelfTravel.Present || session.State.Self.Position is not { } here || !_world.IsAttached(LandblockCoord.FromId(here.CellId)))
+        {
+            return;
+        }
+
+        if (!_walker.Place(here))
+        {
+            if (!_standPlaceRefused)
+            {
+                _standPlaceRefused = true;
+                _log.Error(LogCategory, "no valid position for the walker where the player stands on the ground (no teleport came: she was here before the fight)", new LogField("cell", $"0x{here.CellId:X8}"));
+            }
+
+            return;
+        }
+
+        _placed = true;
+        _log.Info(LogCategory, "the ground walker is placed where the player stands: she was on the ground before the fight and no teleport came", new LogField("cell", $"0x{here.CellId:X8}"), new LogField("at", here.Frame.Origin));
+    }
+
+    private bool _standPlaceRefused;
+
+    /// <summary>Why the walker is not placed, from what the session shows.</summary>
+    private string NotPlaced(IGameSessionView session) => _walker is null
+        ? "the ground walker is not made: the walk was not prepared before its first leg"
+        : session.State.Self.Travel != SelfTravel.Present
+        ? $"the ground walker is not placed: the player is not in the world yet (travel {session.State.Self.Travel}) and no teleport of the player reached it"
+        : $"the ground walker is not placed: no teleport of the player reached it and she stands off the ground (cell 0x{session.State.Self.Position?.CellId ?? 0:X8})";
 
     /// <summary>Hands the player's position updates to the walker, in order, as <see cref="RoutePlay"/> does.</summary>
     private void DrainMoves(double now)

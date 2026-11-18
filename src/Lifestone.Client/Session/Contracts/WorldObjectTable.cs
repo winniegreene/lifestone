@@ -21,6 +21,23 @@ public sealed class WorldObjectTable
     public int Count => _objects.Count;
 
     /// <summary>
+    /// M6 16 Eperf: a number that moves whenever the table's objects change: one added, replaced or removed, the table cleared, or an object given a new description by the server (an update of its CreateObject, which
+    /// alone can change what kind of object it is). It does not move for a change inside an object (its position, its motion, its health, the inventory fields the reducer edits). A reader that keeps a list drawn from the
+    /// table (the threat board's creatures) draws it again when this moved, so the list is never one the table has left behind.
+    /// </summary>
+    public int Version { get; private set; }
+
+    /// <summary>The server described an object of the table anew (its CreateObject was replaced in place): <see cref="Version"/> moves.</summary>
+    internal void Described() => Version++;
+
+    /// <summary>
+    /// M6 16 E1f: which awareness range this session's walks keep off a hostile creature (<c>--walk-awareness</c>) and the shadow's ledger of what the other range would have changed
+    /// (<see cref="Movement.Wayfinding.WalkAwareness"/>). Not the server's state: the host's setting and a report, kept here because every creature feed (<see cref="Movement.Wayfinding.HostileCreatureFeed"/>) is built over this
+    /// table, so one a session reaches every runner without a host passing it. It stays across a reconnect.
+    /// </summary>
+    public Movement.Wayfinding.WalkAwareness WalkAwareness { get; } = new();
+
+    /// <summary>
     /// Every object, in no particular order. Its enumerator is a struct, so <c>foreach</c> allocates nothing; do not keep
     /// it across a tick.
     /// </summary>
@@ -103,8 +120,9 @@ public sealed class WorldObjectTable
     /// <param name="centre">Where to measure from.</param>
     /// <param name="exclude">An id to skip (the player), or 0.</param>
     /// <param name="guid">The nearest living creature's id, or 0.</param>
+    /// <param name="live">Where a creature stands now (<see cref="Where"/>), or null for the server's last report.</param>
     /// <returns>True when one was found.</returns>
-    public bool NearestLivingCreatureNamed(string name, in CellFrame centre, uint exclude, out uint guid)
+    public bool NearestLivingCreatureNamed(string name, in CellFrame centre, uint exclude, out uint guid, LivePositions? live = null)
     {
         ArgumentNullException.ThrowIfNull(name);
         var origin = centre.ToGlobal();
@@ -112,8 +130,8 @@ public sealed class WorldObjectTable
         guid = 0;
         foreach (var o in _objects.Values)
         {
-            if (o.Guid == exclude || o.Position is not { } p || !string.Equals(o.Name, name, StringComparison.Ordinal)
-                || (o.ItemType & CreatureItemType) == 0 || o.Health is <= 0f || o.Motion is { Forward: DeadMotionLowWord })
+            if (o.Guid == exclude || o.Position is null || !string.Equals(o.Name, name, StringComparison.Ordinal)
+                || (o.ItemType & CreatureItemType) == 0 || o.Health is <= 0f || o.Motion is { Forward: DeadMotionLowWord } || Where(o, live) is not { } p)
             {
                 continue;
             }
@@ -176,6 +194,9 @@ public sealed class WorldObjectTable
         return found;
     }
 
+    /// <summary>The ObjectDescriptionFlags bit of an object that may be attacked (<c>BF_ATTACKABLE</c>, 0x10; ACE <c>ObjectDescriptionFlag.Attackable</c>).</summary>
+    public const uint AttackableFlag = 0x10;
+
     /// <summary>The weenie description's ItemType bit for a creature (<c>ITEM_TYPE::TYPE_CREATURE</c>, 0x10), as <c>AvatarWire</c> reads it.</summary>
     private const uint CreatureItemType = 0x10;
 
@@ -211,8 +232,9 @@ public sealed class WorldObjectTable
     /// <param name="cellFilter">Takes an object's full cell id; null accepts every cell.</param>
     /// <param name="excluded">Ids never returned, or null. Scanned linearly: keep it short.</param>
     /// <param name="guid">The nearest creature's id, or 0.</param>
+    /// <param name="live">Where a creature stands now (<see cref="Where"/>; its distance and the cell <paramref name="cellFilter"/> sees), or null for the server's last report.</param>
     /// <returns>True when one was found.</returns>
-    public bool NearestCreature(IReadOnlyList<uint> wcids, in CellFrame centre, float maxMetres, Func<uint, bool>? cellFilter, IReadOnlyList<uint>? excluded, out uint guid)
+    public bool NearestCreature(IReadOnlyList<uint> wcids, in CellFrame centre, float maxMetres, Func<uint, bool>? cellFilter, IReadOnlyList<uint>? excluded, out uint guid, LivePositions? live = null)
     {
         ArgumentNullException.ThrowIfNull(wcids);
         guid = 0;
@@ -222,7 +244,7 @@ public sealed class WorldObjectTable
         var count = wcids.Count;
         foreach (var o in _objects.Values)
         {
-            if (o.Position is not { } p || (o.ItemType & CreatureItemType) == 0 || o.Health is <= 0f || o.Motion is { Forward: DeadMotionLowWord } || IsExcluded(excluded, o.Guid))
+            if (o.Position is null || (o.ItemType & CreatureItemType) == 0 || o.Health is <= 0f || o.Motion is { Forward: DeadMotionLowWord } || IsExcluded(excluded, o.Guid))
             {
                 continue;
             }
@@ -238,7 +260,7 @@ public sealed class WorldObjectTable
                 }
             }
 
-            if (!listed || (cellFilter is not null && !cellFilter(p.CellId)))
+            if (!listed || Where(o, live) is not { } p || (cellFilter is not null && !cellFilter(p.CellId)))
             {
                 continue;
             }
@@ -278,7 +300,28 @@ public sealed class WorldObjectTable
     /// <param name="levelOf">The level of a creature by id, or null when no band is asked.</param>
     /// <param name="guid">The nearest creature's id, or 0.</param>
     /// <returns>True when one was found.</returns>
-    public bool NearestCreature(in CellFrame centre, float maxMetres, uint exclude, IReadOnlyList<string>? names, int minLevel, int maxLevel, Func<uint, int?>? levelOf, out uint guid)
+    public bool NearestCreature(in CellFrame centre, float maxMetres, uint exclude, IReadOnlyList<string>? names, int minLevel, int maxLevel, Func<uint, int?>? levelOf, out uint guid) =>
+        NearestCreature(in centre, maxMetres, exclude, names, minLevel, maxLevel, levelOf, 0, out guid);
+
+    /// <summary>
+    /// M6 7 AO (live, stretch 4: "0x7A9B301B is within 24 m: she rests standing", the Scrivener of Item Magic, a town NPC): the nearest living creature that may be attacked (<see cref="AttackableFlag"/>): what can come at her. An NPC is a creature with the bit clear (ACE <c>PropertyBool.Attackable</c> false; world row: weenie 20214, bool 19 = 0). Allocates nothing.
+    /// </summary>
+    /// <param name="centre">Where to measure from.</param>
+    /// <param name="maxMetres">The largest distance accepted.</param>
+    /// <param name="exclude">An id to skip (the player), or 0.</param>
+    /// <param name="guid">The nearest such creature's id, or 0.</param>
+    /// <param name="live">Where a creature stands now (<see cref="Where"/>), or null for the server's last report.</param>
+    /// <returns>True when one was found.</returns>
+    public bool NearestAttackableCreature(in CellFrame centre, float maxMetres, uint exclude, out uint guid, LivePositions? live = null) =>
+        NearestCreature(in centre, maxMetres, exclude, null, 0, int.MaxValue, null, AttackableFlag, out guid, live);
+
+    /// <summary>
+    /// M6 item 14 (<c>m6-live-position</c>): where a creature query takes <paramref name="o"/> to stand: by <paramref name="live"/> when the caller passes the session's (<see cref="IGameSessionView.Live"/>: the body the
+    /// screen draws when it can be trusted, else the server's report), else the server's last report as before. A caller that passes none keeps its meaning.
+    /// </summary>
+    private static CellFrame? Where(WorldObject o, LivePositions? live) => live is null ? o.Position : live.At(o);
+
+    private bool NearestCreature(in CellFrame centre, float maxMetres, uint exclude, IReadOnlyList<string>? names, int minLevel, int maxLevel, Func<uint, int?>? levelOf, uint needFlags, out uint guid, LivePositions? live = null)
     {
         guid = 0;
         var origin = centre.ToGlobal();
@@ -287,8 +330,8 @@ public sealed class WorldObjectTable
         var banded = minLevel > 0 || maxLevel < int.MaxValue;
         foreach (var o in _objects.Values)
         {
-            if (o.Guid == exclude || o.IsSelf || o.Position is not { } p || (o.ItemType & CreatureItemType) == 0 || (o.DescriptionFlags & PlayerFlag) != 0
-                || o.Health is <= 0f || o.Motion is { Forward: DeadMotionLowWord } || !NameListed(names, o.Name))
+            if (o.Guid == exclude || o.IsSelf || o.Position is null || (o.ItemType & CreatureItemType) == 0 || (o.DescriptionFlags & PlayerFlag) != 0 || (o.DescriptionFlags & needFlags) != needFlags
+                || o.Health is <= 0f || o.Motion is { Forward: DeadMotionLowWord } || !NameListed(names, o.Name) || Where(o, live) is not { } p)
             {
                 continue;
             }
@@ -366,11 +409,28 @@ public sealed class WorldObjectTable
     }
 
     /// <summary>Adds or replaces an object.</summary>
-    internal void Set(WorldObject value) => _objects[value.Guid] = value;
+    internal void Set(WorldObject value)
+    {
+        _objects[value.Guid] = value;
+        Version++;
+    }
 
     /// <summary>Removes an object; false when it was not there.</summary>
-    internal bool Remove(uint guid) => _objects.Remove(guid);
+    internal bool Remove(uint guid)
+    {
+        if (!_objects.Remove(guid))
+        {
+            return false;
+        }
+
+        Version++;
+        return true;
+    }
 
     /// <summary>Removes every object.</summary>
-    internal void Clear() => _objects.Clear();
+    internal void Clear()
+    {
+        _objects.Clear();
+        Version++;
+    }
 }

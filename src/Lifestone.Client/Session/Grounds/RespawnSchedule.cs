@@ -187,7 +187,7 @@ public sealed class RespawnSchedule
     public int Count => _slots.Length;
 
     /// <summary>How many slots are hunted: a target's slot in a walkable cell (a target's slot in a no-go cell is left standing, as the walk never goes there).</summary>
-    public int HuntedCount { get; }
+    public int HuntedCount { get; private set; }
 
     /// <summary>The kills no slot took (named in the log, each once).</summary>
     public int Unpaired { get; private set; }
@@ -216,6 +216,19 @@ public sealed class RespawnSchedule
     /// <summary>True when slot <paramref name="index"/> is hunted (see <see cref="HuntedCount"/>). Allocates nothing.</summary>
     /// <param name="index">The slot's index.</param>
     public bool IsHunted(int index) => _hunted[index];
+
+    /// <summary>M6 7 AR: takes the slots in <paramref name="cells"/> out of the hunt (<see cref="GroundHunt.KeepOut"/>); <see cref="CellSet.Empty"/> gives them back.</summary>
+    /// <param name="cells">The cells kept out.</param>
+    public void KeepOut(CellSet cells)
+    {
+        ArgumentNullException.ThrowIfNull(cells);
+        for (var i = 0; i < _slots.Length; i++)
+        {
+            _hunted[i] = _ground.RoleOf(_slots[i].Wcid) == GroundRole.Target && _ground.IsWalkable(_slots[i].Cell) && !cells.Contains(_slots[i].Cell);
+        }
+
+        HuntedCount = _hunted.Count(h => h);
+    }
 
     /// <summary>True when slot <paramref name="index"/>'s creature stands (never killed, or seen again). Allocates nothing.</summary>
     /// <param name="index">The slot's index.</param>

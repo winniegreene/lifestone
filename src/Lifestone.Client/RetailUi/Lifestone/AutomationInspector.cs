@@ -43,7 +43,7 @@ public sealed class AutomationInspector : IUiElementListener, IUiGlobalListener,
     /// <summary>The kill switch and dry run line.</summary>
     public const uint StateId = 0x7F000205;
 
-    /// <summary>The autopilot's three lines (M5 4 h2): its state, its last decision and its next trigger.</summary>
+    /// <summary>The autopilot's four lines (M5 4 h2; M6 6 MC the fourth): its state, its last decision, its next trigger, and its job with the menu's open quests.</summary>
     public const uint AutopilotId = 0x7F000209;
 
     /// <summary>The longest decision or trigger the autopilot's lines show before they are cut with an ellipsis (the line is 528 px wide).</summary>
@@ -78,6 +78,7 @@ public sealed class AutomationInspector : IUiElementListener, IUiGlobalListener,
     private UiTextElement? _state;
     private UiTextElement? _autopilotLines;
     private IAutopilotStatusSource? _autopilot;
+    private IAutopilotJobSource? _jobs;
     private UiElement? _closeButton;
     private bool _dirty;
     private bool _backlog;
@@ -114,7 +115,7 @@ public sealed class AutomationInspector : IUiElementListener, IUiGlobalListener,
     /// <summary>The kill switch and dry run line now shown.</summary>
     public string StateText => _stateText;
 
-    /// <summary>The autopilot lines now shown (state, last decision, next trigger).</summary>
+    /// <summary>The autopilot lines now shown (state, last decision, next trigger, job).</summary>
     public string AutopilotText => _autopilotText;
 
     /// <summary>
@@ -137,6 +138,35 @@ public sealed class AutomationInspector : IUiElementListener, IUiGlobalListener,
             }
 
             _autopilot = value;
+            if (value is not null && !_disposed)
+            {
+                value.Changed += OnLogChanged;
+            }
+
+            _dirty = true;
+        }
+    }
+
+    /// <summary>
+    /// M6 6 MC: the job menu's source, for the fourth line's count of open quests (<c>menu: n quest(s) open</c>); the play host sets the same source as the menu's
+    /// (<see cref="AutomationMenu.Source"/>). Its <see cref="IAutopilotJobSource.Changed"/> refreshes the window on the next frame. Null (the default) shows <c>menu: n/a</c>.
+    /// </summary>
+    public IAutopilotJobSource? Jobs
+    {
+        get => _jobs;
+        set
+        {
+            if (ReferenceEquals(_jobs, value))
+            {
+                return;
+            }
+
+            if (_jobs is not null)
+            {
+                _jobs.Changed -= OnLogChanged;
+            }
+
+            _jobs = value;
             if (value is not null && !_disposed)
             {
                 value.Changed += OnLogChanged;
@@ -233,7 +263,7 @@ public sealed class AutomationInspector : IUiElementListener, IUiGlobalListener,
         Refreshes++;
         SetIfChanged(_counters, ref _countersText, FormatCounters(_log));
         SetIfChanged(_state, ref _stateText, FormatState(_session.Actions.KillSwitch, _session.Actions.DryRun));
-        SetIfChanged(_autopilotLines, ref _autopilotText, FormatAutopilot(_autopilot?.Status));
+        SetIfChanged(_autopilotLines, ref _autopilotText, FormatAutopilot(_autopilot?.Status, _jobs));
         UpdateRows();
     }
 
@@ -271,6 +301,11 @@ public sealed class AutomationInspector : IUiElementListener, IUiGlobalListener,
         if (_autopilot is not null)
         {
             _autopilot.Changed -= OnLogChanged;
+        }
+
+        if (_jobs is not null)
+        {
+            _jobs.Changed -= OnLogChanged;
         }
 
         if (_frameRegistered)
@@ -323,14 +358,16 @@ public sealed class AutomationInspector : IUiElementListener, IUiGlobalListener,
         $"Kill switch: {(killSwitch ? "ON" : "off")} | Dry run: {(dryRun ? "ON" : "off")} | read-only here";
 
     /// <summary>
-    /// The autopilot's three lines (M5 4 h2, DoD 9): <c>Autopilot: running | fight:den-fight | cycle 2 | interrupted 1, resumed 1</c>, <c>Last decision: ...</c> and <c>Next trigger: ...</c> (for example
-    /// <c>trip at 200 tapers: 412 held</c> or <c>stop at 30 min: 12 min left</c>). A null status is a host that wired no autopilot.
+    /// The autopilot's four lines (M5 4 h2, DoD 9; M6 6 MC the fourth): <c>Autopilot: running | fight:den-fight | cycle 2 | interrupted 1, resumed 1</c>, <c>Last decision: ...</c>,
+    /// <c>Next trigger: ...</c> (for example <c>trip at 200 tapers: 412 held</c> or <c>stop at 30 min: 12 min left</c>) and <c>Job: level up (rung r4) | menu: 3 quest(s) open</c>
+    /// (<see cref="AutopilotStatus.Job"/>, <c>-</c> when empty; the count is the job menu's open quest rows, <c>menu: n/a</c> without a <paramref name="jobs"/> source). A null status is a host that wired no autopilot.
     /// </summary>
-    public static string FormatAutopilot(AutopilotStatus? status)
+    public static string FormatAutopilot(AutopilotStatus? status, IAutopilotJobSource? jobs = null)
     {
+        var jobLine = "\n" + Clip("Job: " + (status is { Job.Length: > 0 } js ? js.Job : "-") + " | " + FormatMenuCount(jobs?.Jobs));
         if (status is not { } s)
         {
-            return "Autopilot: not available in this session\nLast decision: -\nNext trigger: -";
+            return "Autopilot: not available in this session\nLast decision: -\nNext trigger: -" + jobLine;
         }
 
         var mode = s.Mode switch
@@ -353,8 +390,12 @@ public sealed class AutomationInspector : IUiElementListener, IUiGlobalListener,
             head += string.Create(CultureInfo.InvariantCulture, $" | interrupted {s.Interrupted}, resumed {s.Resumed}");
         }
 
-        return Clip(head) + "\nLast decision: " + Clip(s.LastDecision.Length > 0 ? s.LastDecision : "-") + "\nNext trigger: " + Clip(s.NextTrigger.Length > 0 ? s.NextTrigger : "-");
+        return Clip(head) + "\nLast decision: " + Clip(s.LastDecision.Length > 0 ? s.LastDecision : "-") + "\nNext trigger: " + Clip(s.NextTrigger.Length > 0 ? s.NextTrigger : "-") + jobLine;
     }
+
+    /// <summary>The fourth line's menu part (M6 6 MC): <c>menu: 3 quest(s) open</c>, the job menu's open quest rows; <c>menu: n/a</c> without a list.</summary>
+    public static string FormatMenuCount(JobList? list) =>
+        list is null ? "menu: n/a" : string.Create(CultureInfo.InvariantCulture, $"menu: {list.Jobs.Count(e => e.Enabled && e.Task.Kind == AutopilotTaskKind.Quest)} quest(s) open");
 
     private static string Clip(string text) => text.Length <= AutopilotLineLimit ? text : text[..(AutopilotLineLimit - 3)] + "...";
 

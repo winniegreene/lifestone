@@ -164,7 +164,21 @@ internal sealed partial class StandInWorld
         }
 
         var data = SpellLearnData.Of(outcomes);
-        Later(sink => Say(sink, ToolsWire.Reply(ToolReply.Success(request.Id, ToolVerbs.Spell, data), data.Describe())));
+        Later(sink =>
+        {
+            // M6 15: ACE's LearnSpellWithNetworking sends GameEvent 0x02C1 MagicUpdateSpell for each spell it adds (Player_Spells.cs 48-83 @95ef426d; the mod's quiet form too: SpellVerb), so the client's spellbook learns it. The
+            // stand-in kept the spell to itself until now, which nothing read; the player's rule does (a spell goes on a spell bar only when the client's book holds it).
+            foreach (var learned in outcomes)
+            {
+                if (learned.Outcome == SpellOutcomes.Learned && learned.Id is > 0 and <= ushort.MaxValue)
+                {
+                    AnswerLog.Add("02C1");
+                    sink.OnMagicUpdateSpell(Context(sink), new GameEventHeader(guid, 0, 0x02C1), new MagicUpdateSpellEvent((ushort)learned.Id, 1));
+                }
+            }
+
+            Say(sink, ToolsWire.Reply(ToolReply.Success(request.Id, ToolVerbs.Spell, data), data.Describe()));
+        });
     }
 
     private void Item(ItemRequest request)

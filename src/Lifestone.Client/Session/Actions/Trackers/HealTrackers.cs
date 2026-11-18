@@ -55,6 +55,10 @@ internal abstract class HealLaneTracker : ActionTracker
     internal override bool ConsumesUseDone => true;
 
     /// <inheritdoc/>
+    /// <remarks>M6 14 recall unblock (live 2026-11-14 17:32:03 UTC: a Health Tonic's UseDone went to an older debt, the drink stayed in flight 20 s and no cast could go): the kit's Structure or the potion's stack fell since the send, so ACE ran this use and its UseDone is this one's.</remarks>
+    internal override bool ClaimsUseDone(ActionApi api) => !_useDoneSeen && _api is not null && Spent;
+
+    /// <inheritdoc/>
     /// <remarks>M5 7 D141's before-check: in the world, and the kit or the potion held by the player (ACE answers an item it cannot find with a bare UseDone and nothing else: "nothing happened").</remarks>
     internal override string? Refusal(ActionApi api) =>
         WorldTrackers.NotInWorld(api) ?? (api.State.Self.Inventory.Find(Item).Held ? null : Refuse(ActionReason.NotHeld, "the item " + ActionText.Hex(Item) + " to use is not held by the player"));
@@ -335,8 +339,13 @@ internal sealed class PotionTracker(HealHandle handle, uint item) : HealLaneTrac
     internal override string WouldSend => "GameAction 0x0036 Use (drink) " + ActionText.Hex(Item);
 
     /// <inheritdoc/>
+    /// <remarks>M6 15: after the lane's own check, the player's rule (<see cref="PlayerRulesGate.DrinkRefusal"/>): the automation's drink is on the shortcut bar, or it is refused by name.</remarks>
+    internal override string? Refusal(ActionApi api) => base.Refusal(api) ?? api.PlayerRules.DrinkRefusal(Item, Handle.Source);
+
+    /// <inheritdoc/>
     protected override void Begin(ActionApi api)
     {
+        api.PlayerRules.DrinkSent(Item, Handle); // M6 15: the toolbar shows the automation's drink on its slot, as a person's use shows
         _stack = HealResult.Unknown;
         _fell = _removed = false;
         _baseline = -1;

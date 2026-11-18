@@ -5,6 +5,7 @@ using Lifestone.Client.Options;
 using Lifestone.Client.Session.Autopilot;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Grounds;
+using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Session.Scenarios.Journey;
 using Lifestone.Client.Tests.Session.Journey;
@@ -107,7 +108,9 @@ public sealed class AutopilotResumeTests(ITestOutputHelper output)
         var status = w.Run(second);
 
         Assert.Equal(ScenarioStatus.Succeeded, status);
-        Assert.Equal(["bind", "buff", "den-travel", "den-fight", "recall-home"], Kinds(w, made)); // M5 7: the rebuilt run's start-up audit binds at home (a new journey context: not proven this session) // from home, not from the file's fight; the last is the recall home before the stop (M5 7 F18)
+        Assert.Equal(["buff", "den-travel", "den-fight", "recall-home"], Kinds(w, made)); // M6 item 14: the rebuilt run's audit does not bind again: the first run's bind is proven in the checkpoint by the character's guid (M5 7 bound at every start: a new journey context) // from home, not from the file's fight; the last is the recall home before the stop (M5 7 F18)
+        Assert.Contains(w.Lines, l => l.StartsWith("autopilot bind: proof carried from the checkpoint of character 0x", StringComparison.Ordinal));
+        Assert.Contains(w.Lines, l => l.StartsWith("autopilot audit bind: proven by the proof carried from the checkpoint of character 0x", StringComparison.Ordinal) && l.Contains("fix=none: no walk to the lifestone", StringComparison.Ordinal));
         Assert.Contains(w.Lines, l => l.Contains("checkpoint: read: resuming cycle 2 (1 ended)", StringComparison.Ordinal));
         Assert.Contains(w.Lines, l => l.Contains("known-state place=home", StringComparison.Ordinal));
         var stopped = second.Lines[^2];
@@ -119,6 +122,36 @@ public sealed class AutopilotResumeTests(ITestOutputHelper output)
         Assert.True(Int(stopped, "kills") >= saved.CycleTally.Kills + 2, stopped); // the saved kills of the cycle in progress plus the new fight's
         Assert.True(Stored(store).Completed);
         Assert.Equal("request:test", Stored(store).Stop);
+    }
+
+    [Fact]
+    public void A_hand_back_store_lets_the_tie_memory_read_the_file_and_still_reads_the_checkpoint_as_empty_once_M6_6()
+    {
+        // M6 6 live round 2: since M6 4 the tie memory is read before the checkpoint; through Read it used up the hand-back's empty read, so the checkpoint written at the /stop was added on top of the carry (interrupted=2, deaths and kills doubled)
+        var inner = new MemoryCheckpointStore { Json = "{}" };
+        var cold = new ColdReadOnceStore(inner);
+        Assert.Equal("{}", cold.ReadForTies());
+        Assert.Null(cold.Read());
+        Assert.Equal("{}", cold.Read());
+        Assert.Equal("{}", ((IAutopilotCheckpointStore)inner).ReadForTies()); // every other store: the tie read is Read
+    }
+
+    [Fact]
+    public void A_hand_back_scenario_over_the_interrupt_checkpoint_counts_nothing_from_the_file_M6_6()
+    {
+        var store = new MemoryCheckpointStore();
+        var w = new ApWorld(Den, output);
+        var first = w.Autopilot(new AutopilotOptions { TestDeath = true, Minutes = 10 }, store);
+        w.Run(first, a => a.Cycles == 1 && InFight(a, 3));
+        var mark = w.Now;
+        w.Run(first, _ => w.Now - mark >= AutopilotScenario.CheckpointRefreshSeconds + 5);
+        Assert.Equal(1, Stored(store).Totals.Deaths); // the file holds the ended cycle's death
+
+        var seen = w.Lines.Count();
+        var second = w.Autopilot(new AutopilotOptions { Minutes = 10 }, new ColdReadOnceStore(store)); // the hand-back's store (AutopilotHost's factory); the carry would bring the counts
+        w.Run(second, a => InFight(a, 1));
+        Assert.Equal(0, second.Totals.Deaths); // nothing counted from the file: the carry is the only source
+        Assert.DoesNotContain(w.Lines.Skip(seen), l => l.Contains("checkpoint: read: resuming", StringComparison.Ordinal));
     }
 
     [Theory]
@@ -196,6 +229,98 @@ public sealed class AutopilotResumeTests(ITestOutputHelper output)
         Assert.Empty(store.Aside);
         Assert.Equal(1, second.Cycle);
         Assert.False(Stored(store).Completed); // the new run's own file
+    }
+
+    [Fact]
+    public void A_scripted_run_sets_an_earlier_runs_file_aside_and_gets_its_whole_budget_with_both_cycles_but_a_plain_run_resumes_it_M6_7_D()
+    {
+        // M6 4 round 4 (m6-gate-autopilot-cycles): the gate's rerun kept the character, so round 3's failed file was resumed: 17.4 of the 30 minutes used, and the minutes ran out before the forced trip (cycles=1)
+        var options = new AutopilotOptions { TestDeath = true, TripAfterKills = 5, Minutes = 8 };
+        var store = new MemoryCheckpointStore();
+        var w = new ApWorld(Den, output);
+        var start = w.Now;
+        var abandoned = w.Autopilot(options, store);
+        w.Run(abandoned, _ => w.Now - start >= 7 * 60); // most of the budget, then the run is gone
+        var earlier = Stored(store);
+        Assert.False(earlier.Completed);
+        Assert.True(earlier.MinutesUsed > 6, "minutes used " + earlier.MinutesUsed);
+        var text = store.Json!;
+
+        // a plain run resumes it: the deliberate rule of a failed or killed run
+        var plain = w.Autopilot(new AutopilotOptions { Minutes = 8 }, store);
+        w.Run(plain, a => InFight(a, 1));
+        Assert.Contains(w.Lines, l => l.StartsWith("checkpoint: read: resuming cycle", StringComparison.Ordinal));
+        Assert.Empty(store.Aside);
+        plain.Dispose();
+        store.Json = text;
+
+        var seen = w.Lines.Count();
+        var restart = w.Now;
+        var scripted = w.Autopilot(options, store);
+        Assert.Equal(ScenarioStatus.Succeeded, w.Run(scripted));
+
+        Assert.Single(store.Aside);
+        Assert.Contains(w.Lines.Skip(seen), l => l.StartsWith("checkpoint: set aside: a scripted run (--autopilot-test-death) starts whole, and this file is an earlier run's (cycle ", StringComparison.Ordinal));
+        Assert.DoesNotContain(w.Lines.Skip(seen), l => l.Contains("checkpoint: read:", StringComparison.Ordinal));
+        Assert.Equal("minutes", scripted.StopName);
+        Assert.True(w.Now - restart >= (8 * 60) - 1, "the whole budget");
+        Assert.Equal(2, scripted.Cycles); // the scripted death's and the forced trip's
+        Assert.Equal((1, 1), (scripted.Totals.Deaths, scripted.Totals.Trips)); // and nothing of the earlier run's
+    }
+
+    [Fact]
+    public void The_checkpoint_round_trips_the_scrolls_bought_the_spells_learned_and_the_skills_trained_M6_1_fix_1_R11()
+    {
+        var tally = new AutopilotTally { Kills = 12, SpentXp = 4_000, ScrollsBought = 3, Learned = 2 };
+        var written = new AutopilotCheckpoint { Character = "Winnie", Ground = "holtburg-outskirts", State = "fight", Cycle = 4, Cycles = 3, Totals = CheckpointTally.From(tally), CycleTally = CheckpointTally.From(new AutopilotTally { ScrollsBought = 1 }), Trained = [MageTemplate.CreatureEnchantment, MageTemplate.ItemEnchantment] };
+
+        var read = AutopilotCheckpoint.Parse(written.ToJson(), "Winnie", out var why) ?? throw new InvalidOperationException("the checkpoint does not parse: " + why);
+
+        var back = read.Totals.ToTally();
+        Assert.Equal((12, 4_000L, 3, 2), (back.Kills, back.SpentXp, back.ScrollsBought, back.Learned));
+        Assert.Equal(1, read.CycleTally.ToTally().ScrollsBought);
+        Assert.Equal([MageTemplate.CreatureEnchantment, MageTemplate.ItemEnchantment], read.Trained);
+        Assert.Null(AutopilotCheckpoint.Parse(new AutopilotCheckpoint { Character = "Winnie" }.ToJson(), "Winnie", out _)!.Trained); // a file written before the field reads as none
+    }
+
+    [Fact]
+    public void The_checkpoint_round_trips_the_retreats_and_the_last_kill_corpses_and_an_old_file_loads_without_them_M6_6_F3()
+    {
+        var written = new AutopilotCheckpoint
+        {
+            Character = "Winnie",
+            Totals = CheckpointTally.From(new AutopilotTally { Kills = 3, Retreats = 2 }),
+            CycleTally = CheckpointTally.From(new AutopilotTally { Retreats = 1 }),
+            Corpses = [new CheckpointCorpse { Guid = 0x80001101, Name = "Tusker Slave" }],
+        };
+
+        var read = AutopilotCheckpoint.Parse(written.ToJson(), "Winnie", out var why) ?? throw new InvalidOperationException("the checkpoint does not parse: " + why);
+
+        Assert.Equal(2, read.Totals.ToTally().Retreats);
+        Assert.Equal(1, read.CycleTally.ToTally().Retreats);
+        var corpse = Assert.Single(read.Corpses!);
+        Assert.Equal((0x80001101u, "Tusker Slave"), (corpse.Guid, corpse.Name));
+        var old = AutopilotCheckpoint.Parse("{ \"schema\": 1, \"character\": \"Winnie\", \"totals\": { \"kills\": 4 } }", "Winnie", out _)!;
+        Assert.Null(old.Corpses);
+        Assert.Equal((4, 0), (old.Totals.ToTally().Kills, old.Totals.ToTally().Retreats));
+    }
+
+    [Fact]
+    public void A_resumed_run_carries_the_retreats_total_and_writes_it_back_M6_6_F3()
+    {
+        var store = new MemoryCheckpointStore
+        {
+            Json = new AutopilotCheckpoint { Character = "BSD Mage", Ground = Den, State = "fight", Cycle = 2, Cycles = 1, Totals = new CheckpointTally { Kills = 5, Retreats = 2 }, MinutesUsed = 1 }.ToJson(),
+        };
+        var w = new ApWorld(Den, output);
+        var autopilot = w.Autopilot(new AutopilotOptions { Minutes = 10 }, store);
+        w.Run(autopilot, a => InFight(a, 1));
+        autopilot.RequestStop("test");
+        w.Run(autopilot);
+
+        Assert.Equal(2, autopilot.Retreats);
+        Assert.Equal(2, Stored(store).Totals.Retreats);
+        Assert.Equal(2, Int(autopilot.Lines[^1], "retreats"));
     }
 
     [Fact]
@@ -395,6 +520,21 @@ public sealed class AutopilotResumeTests(ITestOutputHelper output)
     // ------------------------------------------------------------------------------------------------ the watchdogs
 
     [Fact]
+    public void A_climbers_buff_state_is_bound_past_the_passs_named_limit_so_the_watchdog_never_cuts_a_whole_pass()
+    {
+        // M6 7 AO: a climber's pass waits for mana up to 900 s and ends done (M6 7 AN); the state's 300 s would cut her first whole pass, about 650 mana on a pool of 165
+        var limit = LadderLoader.WarMage.Vitals.BuffPassWaitSeconds;
+        var dogs = new AutopilotWatchdogs(passBaseSeconds: AutopilotWatchdogs.ClimberPassSeconds(LadderLoader.WarMage.Vitals));
+        Assert.Equal(limit + AutopilotWatchdogs.BaseSeconds(AutopilotState.Buff), dogs.BoundSeconds(AutopilotState.Buff));
+        Assert.Equal(limit + AutopilotWatchdogs.BaseSeconds(AutopilotState.Buff), dogs.BoundSeconds(AutopilotState.Upkeep));
+        Assert.Equal(AutopilotWatchdogs.BaseSeconds(AutopilotState.Trip), dogs.BoundSeconds(AutopilotState.Trip));
+        dogs.Enter(AutopilotState.Buff, 0);
+        Assert.Null(dogs.Over(limit + 1));
+        Assert.Equal(AutopilotWatchdogs.BaseSeconds(AutopilotState.Buff), new AutopilotWatchdogs().BoundSeconds(AutopilotState.Buff)); // the den's job keeps its bound
+        Assert.Throws<ArgumentOutOfRangeException>(() => new AutopilotWatchdogs(passBaseSeconds: -1));
+    }
+
+    [Fact]
     public void The_watchdogs_scale_their_bounds_restart_on_progress_and_allow_a_bounded_number_of_recoveries()
     {
         var dogs = new AutopilotWatchdogs(scale: 0.5, maxRecoveries: 2);
@@ -463,7 +603,7 @@ public sealed class AutopilotResumeTests(ITestOutputHelper output)
 
         Assert.Equal(ScenarioStatus.Failed, status);
         Assert.Equal("watchdog:buff", autopilot.StopName);
-        Assert.Equal(["bind", "buff", "recall-home", "buff", "recall-home", "buff"], Kinds(w)); // M5 7: the start-up audit binds at home first // two recoveries, then the stop
+        Assert.Equal(key == Den ? ["bind", "buff", "buff", "buff"] : ["bind", "buff", "recall-home", "buff", "recall-home", "buff"], Kinds(w)); // M5 7: the start-up audit binds at home first // two recoveries, then the stop; M6 7 BC: at the travel file's home (the Den's Holtburg) a recovery runs no recall home, the known state classifies; the Temple's own home town is a place elsewhere for the rule
         Assert.Equal(3, w.Lines.Count(l => l.StartsWith("watchdog: buff over 15 s", StringComparison.Ordinal)));
         Assert.StartsWith("autopilot done ok=no cycles=0 stop=watchdog:buff ", autopilot.Lines[^1], StringComparison.Ordinal);
         Assert.Equal(("watchdog:buff", false), (Stored(store).Stop, Stored(store).Completed));
@@ -531,6 +671,46 @@ public sealed class AutopilotResumeTests(ITestOutputHelper output)
         Assert.Contains(older.Lines, l => l.StartsWith("checkpoint: read: resuming cycle 1", StringComparison.Ordinal));
     }
 
+    /// <summary>M6 6 ME (<c>m6-trip-mean-resume</c>): the trip's mean is in the seed (a hand-back) and in the checkpoint (a restart), and a file of an older build, with no mean, loads and leaves the seed length.</summary>
+    [Fact]
+    public void The_trips_mean_survives_a_hand_back_and_a_restart_and_an_older_file_without_it_loads()
+    {
+        var store = new MemoryCheckpointStore();
+        var w = new ApWorld(Den, output);
+        w.Factory.Script = spec => spec.Kind == StationKinds.Logistics ? new ScriptedRun(spec.Name, _ => ScenarioStatus.Succeeded, () => "sold=3 bought=2") : null;
+        var first = w.Autopilot(new AutopilotOptions { TripAfterKills = 2 }, store);
+        Assert.True(double.IsNaN(first.Seed.TripMeanSeconds)); // no trip folded yet: nothing to carry
+        w.Run(first, a => a.State == AutopilotState.Fight && w.Factory.Made.Any(s => s.Kind == StationKinds.Logistics));
+        var mean = first.TripMeanSeconds;
+        Assert.NotEqual(AutopilotScenario.TripSeedSeconds, mean);
+
+        // a hand-back: the seed carries it into the rebuilt scenario before its first step
+        var seed = first.Seed;
+        Assert.Equal((mean, 1), (seed.TripMeanSeconds, seed.TripMeanCount));
+        var handed = new ApWorld(Den, output).Autopilot(new AutopilotOptions(), seed: seed);
+        Assert.Equal(mean, handed.TripMeanSeconds);
+
+        // a restart: the checkpoint holds it, and the next run reads it back
+        var saved = Stored(store);
+        Assert.Equal(mean, saved.TripMeanSeconds);
+        Assert.Equal(1, saved.TripMeanCount);
+        var w2 = new ApWorld(Den, output);
+        var second = w2.Autopilot(new AutopilotOptions(), store);
+        w2.Run(second, a => InFight(a, 1));
+        Assert.Equal(mean, second.TripMeanSeconds);
+
+        // a file written before the fields: they read as null and 0, and the seed length stands
+        var root = System.Text.Json.Nodes.JsonNode.Parse(store.Json!)!.AsObject();
+        root.Remove("tripMeanSeconds");
+        root.Remove("tripMeanCount");
+        store.Json = root.ToJsonString();
+        var w3 = new ApWorld(Den, output);
+        var third = w3.Autopilot(new AutopilotOptions(), store);
+        w3.Run(third, a => InFight(a, 1));
+        Assert.Equal(AutopilotScenario.TripSeedSeconds, third.TripMeanSeconds);
+        Assert.Contains(w3.Lines, l => l.StartsWith("checkpoint: read: resuming", StringComparison.Ordinal));
+    }
+
     private static AutopilotCheckpoint Stored(MemoryCheckpointStore store, string runTag) =>
         AutopilotCheckpoint.Parse(store.Json!, "BSD Mage", out var why, runTag: runTag) ?? throw new InvalidOperationException("the stored checkpoint does not parse: " + why);
 
@@ -572,6 +752,39 @@ public sealed class AutopilotResumeTests(ITestOutputHelper output)
     [Theory]
     [InlineData(Den)]
     [InlineData(Temple)]
+    public void M6_7_AG_a_death_station_whose_body_moves_is_not_cut_and_one_that_stands_still_is(string key)
+    {
+        // gate m6-7-g: the 900 s bound ran from the state's start, cut the corpse trip 9.7 m from the corpse with the trip working. The death state reads the body as the trip state does (M6 4 F1): 10 m is progress.
+        var w = new ApWorld(key, output, atHome: false);
+        var (moving, frames, side) = (true, 0, 1f);
+        w.Factory.HangDeathAt = 2;
+        w.Factory.OnDeathStep = () =>
+        {
+            if (moving && ++frames % 40 == 0 && w.Trip.Vendor.State.Self.Position is { } at)
+            {
+                side = -side;
+                w.Trip.Vendor.StandAt(at.CellId, at.Origin + new Vector3(side * 11, 0, 0));
+            }
+        };
+        var autopilot = w.Autopilot(new AutopilotOptions { TestDeath = true, WatchdogScale = 0.05 }); // the bound: 45 s
+        w.Run(autopilot, a => a.State == AutopilotState.Death && a.CurrentRun is not null);
+        var start = w.Now;
+        w.Run(autopilot, _ => w.Now > start + 180);
+
+        Assert.Equal(AutopilotState.Death, autopilot.State);
+        Assert.Equal(0, autopilot.Cycles);
+        Assert.DoesNotContain(w.Lines, l => l.StartsWith("watchdog: death over ", StringComparison.Ordinal));
+
+        moving = false; // the trip stands still: the bound holds
+        w.Run(autopilot, a => a.Cycles == 1);
+        Assert.Contains(w.Lines, l => l.StartsWith("watchdog: death over ", StringComparison.Ordinal));
+        Assert.Equal(1, autopilot.Totals.Deaths); // one death, cut once: not two
+        Assert.Equal(2, Kinds(w).Count(n => n == "death"));
+    }
+
+    [Theory]
+    [InlineData(Den)]
+    [InlineData(Temple)]
     public void A_watchdog_trip_during_the_death_station_keeps_the_death_and_a_death_not_yet_made_is_scripted_again(string key)
     {
         // the death happened and the station hangs: the watchdog cuts it and the station is entered again from the known state, with no recall (a dead mage casts nothing)
@@ -597,6 +810,133 @@ public sealed class AutopilotResumeTests(ITestOutputHelper output)
         Assert.Contains("recall-home", Kinds(w2));
         Assert.Contains(w2.Lines, l => l.Contains("the scripted death is made again", StringComparison.Ordinal));
     }
+
+    /// <summary>The fields of a handler that answered for the corpse, on the death station's line.</summary>
+    private static string Answered(string corpse, string abort) => $"deaths=1 corpse_recovered={corpse} route=rung-change trip_abort={abort}";
+
+    [Theory]
+    [InlineData(DeathCorpse.NoneNeeded, "none-needed", true, false)] // r1f-climb's end: verdict ok=false (hits_taken=0 on a one-blow death), the handler's answer none-needed
+    [InlineData(DeathCorpse.Yes, "none", true, false)] // any recovered end
+    [InlineData(DeathCorpse.Rotted, "rotted", true, false)]
+    [InlineData(DeathCorpse.No, "corpse-off-route", true, false)] // the named end
+    [InlineData(DeathCorpse.NoneNeeded, "none-needed", false, true)] // a failure after none-needed: nothing is owed either
+    public void M6_7_U_a_station_that_answered_for_the_corpse_is_not_entered_again_and_the_climb_goes_on(string corpse, string abort, bool verdictFails, bool failed)
+    {
+        var w = new ApWorld(Den, output, atHome: false);
+        var made = 0;
+        w.Factory.Script = spec =>
+        {
+            if (spec.Kind != StationKinds.Death)
+            {
+                return null;
+            }
+
+            made++;
+            return new ScriptedRun(spec.Name, _ => failed ? ScenarioStatus.Failed : ScenarioStatus.Succeeded, () => Answered(corpse, abort)) { VerdictFails = verdictFails, Failure = failed ? "handler: wear: scripted" : null };
+        };
+        var autopilot = w.Autopilot(new AutopilotOptions { TestDeath = true });
+
+        w.Run(autopilot, a => a.Cycles == 1);
+        w.Run(autopilot, a => InFight(a, 1));
+
+        Assert.Equal(1, made); // no second corpse trip
+        Assert.Equal(1, autopilot.Totals.Deaths + autopilot.CycleTally.Deaths);
+        Assert.Equal(AutopilotState.Fight, autopilot.State);
+        Assert.Null(autopilot.StopName);
+        Assert.Contains(w.Lines, l => l.Contains($"the handler answered corpse_recovered={corpse} trip_abort={abort}: nothing is owed, no second trip", StringComparison.Ordinal));
+        Assert.DoesNotContain(w.Lines, l => l.Contains("the corpse is not recovered yet", StringComparison.Ordinal));
+        Assert.DoesNotContain(w.Lines, l => l.StartsWith("autopilot recovery", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void M6_7_U_a_cut_after_none_needed_counts_the_death_goes_to_the_known_state_and_never_walks_home()
+    {
+        var w = new ApWorld(Den, output, atHome: false);
+        var made = 0;
+        w.Factory.Script = spec =>
+        {
+            if (spec.Kind != StationKinds.Death)
+            {
+                return null;
+            }
+
+            made++;
+            return new ScriptedRun(spec.Name, step => step == 0 ? w.Factory.Died() : null, () => Answered(DeathCorpse.NoneNeeded, "none-needed")); // hangs in the items back
+        };
+        var autopilot = w.Autopilot(new AutopilotOptions { TestDeath = true, WatchdogScale = 0.05 });
+
+        w.Run(autopilot, a => a.State == AutopilotState.Death && a.CurrentRun is not null);
+        w.Run(autopilot, a => InFight(a, 2) || a.State == AutopilotState.Stopped);
+
+        Assert.Contains(w.Lines, l => l.StartsWith("watchdog: death over ", StringComparison.Ordinal));
+        Assert.Contains(w.Lines, l => l.Contains("the death station was cut after the handler answered corpse_recovered=none-needed trip_abort=none-needed: nothing is owed, it is not entered again", StringComparison.Ordinal));
+        Assert.DoesNotContain(w.Lines, l => l.Contains("the corpse is not recovered yet", StringComparison.Ordinal));
+        Assert.DoesNotContain("recall-home", Kinds(w));
+        Assert.True(autopilot.Totals.Deaths + autopilot.CycleTally.Deaths >= 1);
+        Assert.Null(autopilot.StopName);
+    }
+
+    [Theory]
+    [InlineData("handler: route=rung-change: travel:rung-change:exit:tusker-burrow:walk")]
+    [InlineData("handler: route=runner: the travel seam has no runner from the lifestone to Tusker Burrow's portal (the ground has no portal section): TODO(m6-first-tie-walk)")] // r1f-climb's three in a row
+    public void M6_7_U_three_identical_death_station_failures_name_the_corpse_lost_and_the_night_goes_on(string failure)
+    {
+        var w = new ApWorld(Den, output, atHome: false);
+        var made = 0;
+        w.Factory.FailWith = spec =>
+        {
+            if (spec.Kind != StationKinds.Death)
+            {
+                return null;
+            }
+
+            made++;
+            return failure;
+        };
+        var autopilot = w.Autopilot(new AutopilotOptions { TestDeath = true });
+
+        w.Run(autopilot, a => a.Cycles == 1 || a.State == AutopilotState.Stopped);
+        w.Run(autopilot, a => InFight(a, 1) || a.State == AutopilotState.Stopped);
+
+        Assert.Equal(3, made);
+        Assert.Null(autopilot.StopName);
+        Assert.Equal(AutopilotState.Fight, autopilot.State);
+        Assert.Equal(1, autopilot.Totals.Deaths + autopilot.CycleTally.Deaths); // one death, however many entries
+        Assert.Equal(1, autopilot.Totals.CorpsesLost + autopilot.CycleTally.CorpsesLost); // counted: the [ladder] line's corpses_lost=
+        Assert.Contains(w.Lines, l => l.StartsWith($"autopilot death: corpse_recovered=no trip_abort={AutopilotScenario.CorpseLostAbort}: the corpse trip is given up after failed:death:", StringComparison.Ordinal));
+        Assert.DoesNotContain(w.Lines, l => l.StartsWith("autopilot stop=", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void M6_7_U_the_third_death_in_one_handling_stays_the_owners_named_stop()
+    {
+        // M5 D92: the rule (e) moves a corpse trip's failures, not this stop
+        var w = new ApWorld(Den, output, atHome: false);
+        w.Factory.FailWith = spec => spec.Kind == StationKinds.Death ? DeathHandler.ThirdDeathStop + ": a third death in one handling, during the respawn" : null;
+        var autopilot = w.Autopilot(new AutopilotOptions { TestDeath = true });
+
+        Assert.Equal(ScenarioStatus.Failed, w.Run(autopilot, a => a.State == AutopilotState.Stopped));
+
+        Assert.StartsWith("failed:death:" + DeathHandler.ThirdDeathStop, autopilot.StopName, StringComparison.Ordinal);
+        Assert.Equal(0, autopilot.Totals.CorpsesLost);
+    }
+
+    [Theory]
+    [InlineData(null, DeathCorpse.NoneNeeded, "none-needed", true)] // a cut after the answer
+    [InlineData(DeathAnswer.VerdictOnly, DeathCorpse.NoneNeeded, "none-needed", true)]
+    [InlineData("handler: wear: scripted", DeathCorpse.NoneNeeded, "none-needed", true)]
+    [InlineData(DeathAnswer.VerdictOnly, DeathCorpse.Yes, "none", true)]
+    [InlineData(DeathAnswer.VerdictOnly, DeathCorpse.Partial, "none", true)]
+    [InlineData(DeathAnswer.VerdictOnly, DeathCorpse.Rotted, "rotted", true)]
+    [InlineData(DeathAnswer.VerdictOnly, DeathCorpse.NotFound, "corpse-not-found", true)]
+    [InlineData(DeathAnswer.VerdictOnly, DeathCorpse.No, "corpse-off-route", true)]
+    [InlineData(DeathAnswer.VerdictOnly, DeathCorpse.No, "none", false)] // a plain no: no name
+    [InlineData(DeathAnswer.VerdictOnly, "n/a", "none", false)]
+    [InlineData("handler: route=rung-change: travel:rung-change:walk", DeathCorpse.No, "none", false)] // the handler failed on the way: the trip is still owed
+    [InlineData("handler: wear: scripted", DeathCorpse.Yes, "none", false)] // the handler failed after the corpse: the station runs again, as before
+    [InlineData(null, DeathCorpse.Yes, "none", false)] // a cut: only none-needed owes nothing by itself
+    [InlineData(null, null, null, false)]
+    public void M6_7_U_the_handlers_answer_is_read_from_its_named_ends_only(string? why, string? corpse, string? abort, bool answered) => Assert.Equal(answered, DeathAnswer.Of(why, corpse, abort) is not null);
 
     [Theory]
     [InlineData(Den)]
@@ -743,8 +1083,8 @@ public sealed class AutopilotResumeTests(ITestOutputHelper output)
         var autopilot = w.Autopilot(new AutopilotOptions());
         Assert.Equal(ScenarioStatus.Failed, w.Run(autopilot));
         Assert.Equal("failed:buff:scripted:_no", autopilot.StopName);
-        Assert.Equal(["bind", "buff", "recall-home", "buff", "recall-home", "buff"], Kinds(w)); // M5 7: the start-up audit binds at home first // two recoveries (the budget), then the stop
-        Assert.Equal(2, w.Lines.Count(l => l.StartsWith("autopilot recovery after buff:", StringComparison.Ordinal)));
+        Assert.Equal(key == Den ? ["bind", "buff", "buff", "buff"] : ["bind", "buff", "recall-home", "buff", "recall-home", "buff"], Kinds(w)); // M5 7: the start-up audit binds at home first // two recoveries (the budget), then the stop; M6 7 BC: no recall home from home (the Den)
+        Assert.Equal(key == Den ? 1 : 2, w.Lines.Count(l => l.StartsWith("autopilot recovery after buff:", StringComparison.Ordinal))); // the Den's second recovery is the repeated failure's settle-step (RepeatedFailure), the same cell now
         Assert.StartsWith("autopilot done ok=no cycles=0 stop=failed:buff:scripted:_no ", autopilot.Lines[^1], StringComparison.Ordinal);
 
         // M5 7 G2 (edge audit 12h): a failure text that merely contains "kit" is recovered like any station failure (the budget, then the stop by name)
@@ -753,8 +1093,8 @@ public sealed class AutopilotResumeTests(ITestOutputHelper output)
         var kit = k.Autopilot(new AutopilotOptions());
         Assert.Equal(ScenarioStatus.Failed, k.Run(kit));
         Assert.StartsWith("failed:buff:kit:", kit.StopName, StringComparison.Ordinal);
-        Assert.Equal(["bind", "buff", "recall-home", "buff", "recall-home", "buff"], Kinds(k)); // M5 7: the start-up audit binds at home first
-        Assert.Equal(2, k.Lines.Count(l => l.StartsWith("autopilot recovery after buff:", StringComparison.Ordinal)));
+        Assert.Equal(key == Den ? ["bind", "buff", "buff", "buff"] : ["bind", "buff", "recall-home", "buff", "recall-home", "buff"], Kinds(k)); // M5 7: the start-up audit binds at home first; M6 7 BC: no recall home from home (the Den)
+        Assert.Equal(key == Den ? 1 : 2, k.Lines.Count(l => l.StartsWith("autopilot recovery after buff:", StringComparison.Ordinal)));
 
         // the counters' stop in a trip: no recovery either
         var c = new ApWorld(key, output, atHome: false);

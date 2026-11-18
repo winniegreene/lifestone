@@ -20,6 +20,9 @@ public enum VitalsLine
 
     /// <summary>Harm Self (I 8 ... VII 2071): never cast by the keeper; listed for lane C3's harm-heal station.</summary>
     HarmSelf,
+
+    /// <summary>M6 14 (<c>m6-life-through</c>): Harm Other (I 7 ... VII 2070 Heart Rend), cast at another and never by the keeper: the fight's answer to an attacker no bolt reaches (<see cref="VitalsMeans.HarmOther"/>).</summary>
+    HarmOther,
 }
 
 /// <summary>
@@ -42,12 +45,19 @@ public static class VitalsMeans
     /// <summary>Harm Self I to VII (for C3; the keeper never casts it).</summary>
     public static IReadOnlyList<uint> HarmSelf { get; } = [8, 1167, 1168, 1169, 1170, 1171, 2071];
 
+    /// <summary>
+    /// M6 14 (<c>m6-life-through</c>): Harm Other I to VII (VII is 2070, "Heart Rend"; the pinned world's <c>spell</c> table and the SpellTable hold them under these ids, <c>LifeThroughRuleTests</c>). The fight casts the line by id,
+    /// as it casts Heal Self; the numbers a landed cast takes are <see cref="HarmOtherRows.Rows"/>.
+    /// </summary>
+    public static IReadOnlyList<uint> HarmOther { get; } = [7, 1172, 1173, 1174, 1175, 1176, 2070];
+
     /// <summary>The ids of <paramref name="line"/>, I to VII.</summary>
     public static IReadOnlyList<uint> IdsOf(VitalsLine line) => line switch
     {
         VitalsLine.HealSelf => HealSelf,
         VitalsLine.RevitalizeSelf => RevitalizeSelf,
         VitalsLine.StaminaToManaSelf => StaminaToManaSelf,
+        VitalsLine.HarmOther => HarmOther,
         _ => HarmSelf,
     };
 
@@ -57,6 +67,7 @@ public static class VitalsMeans
         VitalsLine.HealSelf => "Heal Self",
         VitalsLine.RevitalizeSelf => "Revitalize Self",
         VitalsLine.StaminaToManaSelf => "Stamina to Mana Self",
+        VitalsLine.HarmOther => "Harm Other",
         _ => "Harm Self",
     };
 
@@ -70,7 +81,8 @@ public static class VitalsMeans
     /// <param name="line">The line.</param>
     /// <param name="chance">The chosen level's chance (NaN when none).</param>
     /// <param name="held">M5 4 G1: what the pack holds when the level floor applies (<see cref="LevelFloor.HeldFor"/>); a level whose foci-formula components it lacks is passed over. Null: no floor.</param>
-    public static SpellInfo? PickBestChance(PlayerQualities q, Spellbook book, IReadOnlyDictionary<uint, SpellInfo> spells, VitalsLine line, out double chance, IReadOnlyDictionary<uint, int>? held = null)
+    /// <param name="accountName">M6 1 h2: the account's name (<see cref="LevelFloor.HeldForAccount"/>): a school the pack holds no focus of is judged on the account's full formula (<see cref="AccountFormula"/>); null: the foci formula.</param>
+    public static SpellInfo? PickBestChance(PlayerQualities q, Spellbook book, IReadOnlyDictionary<uint, SpellInfo> spells, VitalsLine line, out double chance, IReadOnlyDictionary<uint, int>? held = null, string? accountName = null)
     {
         ArgumentNullException.ThrowIfNull(q);
         ArgumentNullException.ThrowIfNull(book);
@@ -85,7 +97,7 @@ public static class VitalsMeans
                 continue;
             }
 
-            if (held is not null && LevelFloor.ShortOf(held, info, out _))
+            if (held is not null && LevelFloor.ShortOf(held, info, out _, accountName))
             {
                 continue; // M5 4 G1: the level floor
             }
@@ -128,7 +140,8 @@ public static class VitalsMeans
     /// <param name="threshold">The least chance.</param>
     /// <param name="why">Why there is none (empty when one was found).</param>
     /// <param name="held">M5 4 G1: what the pack holds when the level floor applies (<see cref="LevelFloor.HeldFor"/>); a level whose foci-formula components it lacks is passed over. Null: no floor.</param>
-    public static SpellInfo? Pick(PlayerQualities q, Spellbook book, IReadOnlyDictionary<uint, SpellInfo> spells, VitalsLine line, double threshold, out string why, IReadOnlyDictionary<uint, int>? held = null)
+    /// <param name="accountName">M6 1 h2: the account's name (<see cref="LevelFloor.HeldForAccount"/>): a school the pack holds no focus of is judged on the account's full formula (<see cref="AccountFormula"/>); null: the foci formula.</param>
+    public static SpellInfo? Pick(PlayerQualities q, Spellbook book, IReadOnlyDictionary<uint, SpellInfo> spells, VitalsLine line, double threshold, out string why, IReadOnlyDictionary<uint, int>? held = null, string? accountName = null)
     {
         ArgumentNullException.ThrowIfNull(q);
         ArgumentNullException.ThrowIfNull(book);
@@ -163,7 +176,7 @@ public static class VitalsMeans
 
             if (GearCasts.Chance(skill, info.Power) >= threshold)
             {
-                if (held is not null && LevelFloor.ShortOf(held, info, out var need))
+                if (held is not null && LevelFloor.ShortOf(held, info, out var need, accountName))
                 {
                     why = NameOf(line) + ": no level the pack can pay for (" + info.Name + " needs " + need + ")";
                     continue;
@@ -210,12 +223,21 @@ public static class VitalsMeans
     /// <param name="count">The potions held.</param>
     public static bool FindPotions(GameState state, List<uint> scratch, out uint guid, out int count) => FindStacks(state, scratch, FighterKit.PotionWcid, out guid, out count);
 
-    /// <summary>The first held Mana Potion stack (the main pack or a side pack) and how many are held in all (M4 P5a C7).</summary>
+    /// <summary>The Health Draught (ACE weenie 2457, the loot's small health potion). The drinks that restore health and the pick among them are <see cref="HealthDrinks"/>'s (M6 14 T).</summary>
+    public const uint HealthDraughtWcid = 2457;
+
+    /// <summary>
+    /// The mana drink to take now and how many mana drinks are held of every kind (M4 P5a C7; M6 14 T: the one pick, <see cref="ManaDrinks.Find"/>): the biggest drink held that fits whole in the missing mana (a Mana Tincture, a Mana
+    /// Potion, a Mana Draught), else the smallest held. Every place that drinks for mana asks here, so none assumes a drink of 25.
+    /// </summary>
     /// <param name="state">The read model.</param>
     /// <param name="scratch">A reusable list.</param>
-    /// <param name="guid">The first stack.</param>
-    /// <param name="count">The potions held.</param>
-    public static bool FindManaPotions(GameState state, List<uint> scratch, out uint guid, out int count) => FindStacks(state, scratch, FighterKit.ManaPotionWcid, out guid, out count);
+    /// <param name="guid">The stack to drink from.</param>
+    /// <param name="count">The mana drinks held, of every kind.</param>
+    public static bool FindManaPotions(GameState state, List<uint> scratch, out uint guid, out int count) => ManaDrinks.Find(state, scratch, out guid, out _, out _, out count);
+
+    /// <summary>M6 7 AU (the owner's correction): the Mana Draught (ACE weenie 2460, the loot's small mana potion, unsellable at the scriveners): drunk by the mana rule when no Mana Potion is held, never dropped as a refused item.</summary>
+    public const uint ManaDraughtWcid = 2460;
 
     /// <summary>The first held Stamina Potion stack (the main pack or a side pack) and how many are held in all (M4 P5a C7).</summary>
     /// <param name="state">The read model.</param>

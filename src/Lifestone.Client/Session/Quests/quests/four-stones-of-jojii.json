@@ -1,0 +1,438 @@
+{
+  "key": "four-stones-of-jojii",
+  "name": "The Four Stones of Jojii (four stones from the Shreth Hive, handed to Oi-Tong Ye in the bar in Shoushi)",
+  "giver": {
+    "wcid": 5193,
+    "name": "Oi-Tong Ye "
+  },
+  "start": {
+    "cell": "0xA9B40019",
+    "point": [
+      84.0,
+      7.7,
+      94.0
+    ],
+    "name": "Holtburg's lifestone point"
+  },
+  "steps": [
+    {
+      "kind": "go",
+      "what": "to the Shreth Hive portal",
+      "place": {
+        "cell": "0xD8560100",
+        "point": [
+          36.151,
+          161.084,
+          24.805
+        ],
+        "name": "in front of Shreth Hive Portal"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 3): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z, angles_W, angles_Z FROM landblock_instance WHERE guid = 0x7D856000: weenie 4965, cell 0xD8560100, (36.1507, 164.084, 24.805); the point is the hop's front side of it (PortalHopLeg.FrontOf), walked in the dat tests (FetchQuestWalkDatTests): the go stops short of the portal so the touch is the use step's",
+      "todo": "TODO(m6-fetch-tower-stairs): the Hive portal stands in the building cell 0xD8560100, reached on foot from the street door by 0xD8560104, the stair 0xD8560103 (12 floor polygons), the floorless shaft 0xD8560102 and 0xD8560101: the room graph has no walkable portal through the shaft, so a go step plans nothing (no-doorway-lane-reaches-the-goal); a go step has no authored way (the hop's walk_in does)"
+    },
+    {
+      "kind": "use",
+      "what": "enter the Shreth Hive",
+      "place": {
+        "cell": "0x015302E8",
+        "point": [
+          45.7,
+          -43,
+          -18
+        ],
+        "name": "the arrival of Shreth Hive Portal"
+      },
+      "target": {
+        "wcid": 4965,
+        "name": "Shreth Hive Portal"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 3): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM weenie_properties_position WHERE object_Id = 4965 AND position_Type = 2: destination 0x015302E8 (45.7, -43, -18); levels MinLevel 1, MaxLevel 20 (weenie_properties_int types 86, 87), enforced (use_portal_max_level_requirement is on, the lead's read of the live database, D118)",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Stone of Compassion",
+      "place": {
+        "cell": "0x01530330",
+        "point": [
+          1.72869,
+          -28.0476,
+          0.082
+        ],
+        "name": "where the Stone of Compassion lies"
+      },
+      "target": {
+        "wcid": 5183,
+        "name": "Stone of Compassion"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 3): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x70153038: weenie 5183, cell 0x01530330; its pick-up quest ShoushiStoneCompassion (weenie_properties_string type 33; quest row min_Delta 72000, max_Solves -1)",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Stone of Compassion from the floor",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 5183,
+        "name": "Stone of Compassion"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 3): the item's own Quest string ShoushiStoneCompassion gates the pick-up for 20 h (ACE Player_Inventory.cs:1249-1262 @95ef426d); refused, the run stops pick-up:too-recent",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Stone of Humility",
+      "place": {
+        "cell": "0x015301AB",
+        "point": [
+          4.01376,
+          -29.4326,
+          -29.918
+        ],
+        "name": "where the Stone of Humility lies"
+      },
+      "target": {
+        "wcid": 5181,
+        "name": "Stone of Humility"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 3): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x70153037: weenie 5181, cell 0x015301AB; its pick-up quest ShoushiStoneHumility1204 (weenie_properties_string type 33; quest row min_Delta 72000, max_Solves -1)",
+      "todo": "TODO(m6-fetch-hive-drop): the Hive's levels are one-way drops the room graph refuses: from the arrival only Compassion and the arrival's own Surface portal plan; Humility, Discipline and the chest with the bottom Surface portal are each a component of their own (indoor-start-unreachable, TownNetworkWalkDatTests.Fetch)"
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Stone of Humility from the floor",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 5181,
+        "name": "Stone of Humility"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 3): the item's own Quest string ShoushiStoneHumility1204 gates the pick-up for 20 h (ACE Player_Inventory.cs:1249-1262 @95ef426d); refused, the run stops pick-up:too-recent",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Stone of Discipline",
+      "place": {
+        "cell": "0x01530171",
+        "point": [
+          12.7544,
+          -93.1133,
+          -41.918
+        ],
+        "name": "where the Stone of Discipline lies"
+      },
+      "target": {
+        "wcid": 5182,
+        "name": "Stone of Discipline"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 3): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x70153036: weenie 5182, cell 0x01530171; its pick-up quest ShoushiStoneDiscipline1204 (weenie_properties_string type 33; quest row min_Delta 72000, max_Solves -1)",
+      "todo": "TODO(m6-fetch-hive-drop): the Hive's levels are one-way drops the room graph refuses: from the arrival only Compassion and the arrival's own Surface portal plan; Humility, Discipline and the chest with the bottom Surface portal are each a component of their own (indoor-start-unreachable, TownNetworkWalkDatTests.Fetch)"
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Stone of Discipline from the floor",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 5182,
+        "name": "Stone of Discipline"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 3): the item's own Quest string ShoushiStoneDiscipline1204 gates the pick-up for 20 h (ACE Player_Inventory.cs:1249-1262 @95ef426d); refused, the run stops pick-up:too-recent",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Chest that holds the Stone of Detachment",
+      "place": {
+        "cell": "0x01530109",
+        "point": [
+          28.022,
+          -133.253,
+          -65.961
+        ],
+        "name": "beside the Chest"
+      },
+      "target": {
+        "wcid": 5192,
+        "name": "Chest"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 3): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x70153004: weenie 5192, cell 0x01530109, (26.7216, -133.253, -65.9611), no Locked row; the point is on the floor beside it, within the use reach (FetchQuestWalkDatTests)",
+      "todo": "TODO(m6-fetch-hive-drop): the Hive's levels are one-way drops the room graph refuses: from the arrival only Compassion and the arrival's own Surface portal plan; Humility, Discipline and the chest with the bottom Surface portal are each a component of their own (indoor-start-unreachable, TownNetworkWalkDatTests.Fetch)"
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Stone of Detachment from the Chest",
+      "place": null,
+      "target": {
+        "wcid": 5192,
+        "name": "Chest"
+      },
+      "item": {
+        "wcid": 5184,
+        "name": "Stone of Detachment"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 3): the chest's own generator row makes the item (corpus cache/m6/8/tools/corpus-extra.sqlite: weenie_properties_generator of 5192, Contain, delay 0; the pinned copy has no generator table, section 0), ItemUseable 48, unlocked; the item's Quest string ShoushiStoneDetachment gates it for 20 h",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Hive's Surface portal by the chest",
+      "place": {
+        "cell": "0x01530111",
+        "point": [
+          30.13,
+          -153.715,
+          -66
+        ],
+        "name": "in front of Surface"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 3): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z, angles_W, angles_Z FROM landblock_instance WHERE guid = 0x70153006: weenie 4966, cell 0x01530111, (30.0009, -156.712, -66); the point is the hop's front side of it (PortalHopLeg.FrontOf), walked in the dat tests (FetchQuestWalkDatTests): the go stops short of the portal so the touch is the use step's",
+      "todo": null
+    },
+    {
+      "kind": "use",
+      "what": "out of the Hive by its Surface portal",
+      "place": {
+        "cell": "0xD8560010",
+        "point": [
+          35.6,
+          189.2,
+          30
+        ],
+        "name": "the arrival of Surface"
+      },
+      "target": {
+        "wcid": 4966,
+        "name": "Surface"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 3): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM weenie_properties_position WHERE object_Id = 4966 AND position_Type = 2: destination 0xD8560010 (35.6, 189.2, 30); levels MinLevel None, MaxLevel None (weenie_properties_int types 86, 87), enforced (use_portal_max_level_requirement is on, the lead's read of the live database, D118)",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to Oi-Tong Ye",
+      "place": {
+        "cell": "0xDA550177",
+        "point": [
+          131.437,
+          102.901,
+          20.005
+        ],
+        "name": "Oi-Tong Ye's place"
+      },
+      "target": {
+        "wcid": 5193,
+        "name": "Oi-Tong Ye "
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 3): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x7DA5502A: weenie 5193, cell 0xDA550177",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "give Oi-Tong Ye the Stone of Discipline",
+      "place": null,
+      "target": {
+        "wcid": 5193,
+        "name": "Oi-Tong Ye "
+      },
+      "item": {
+        "wcid": 5182,
+        "name": "Stone of Discipline"
+      },
+      "expect": {
+        "reply": "The Stone of Discipline! This stone represents the discipline that a follower of Jojii must maintain - discipline over their fears and their desires.",
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 3): weenie_properties_emote id 44294 (object 5193, category 6 Give, weenie_Class_Id 5182): Tell, AwardNoShareXP (type 62) amount_64 9375; no quest test on the hand-in; AllowGive true (weenie_properties_bool type 8)",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "give Oi-Tong Ye the Stone of Detachment",
+      "place": null,
+      "target": {
+        "wcid": 5193,
+        "name": "Oi-Tong Ye "
+      },
+      "item": {
+        "wcid": 5184,
+        "name": "Stone of Detachment"
+      },
+      "expect": {
+        "reply": "The Stone of Detachment! This stone represents the detanchment that a follower of Jojii must maintain - detachment from the illusions and pitfalls of the material realm.",
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 3): weenie_properties_emote id 44295 (object 5193, category 6 Give, weenie_Class_Id 5184): Tell, AwardNoShareXP (type 62) amount_64 9375; no quest test on the hand-in; AllowGive true (weenie_properties_bool type 8)",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "give Oi-Tong Ye the Stone of Compassion",
+      "place": null,
+      "target": {
+        "wcid": 5193,
+        "name": "Oi-Tong Ye "
+      },
+      "item": {
+        "wcid": 5183,
+        "name": "Stone of Compassion"
+      },
+      "expect": {
+        "reply": "The Stone of Compassion! A follower of Jojii must temper their detachment with compassion. Compassion cuts through the illusion of the material realm as a ray of light through the gloom.",
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 3): weenie_properties_emote id 44296 (object 5193, category 6 Give, weenie_Class_Id 5183): Tell, AwardNoShareXP (type 62) amount_64 9375; no quest test on the hand-in; AllowGive true (weenie_properties_bool type 8)",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "give Oi-Tong Ye the Stone of Humility",
+      "place": null,
+      "target": {
+        "wcid": 5193,
+        "name": "Oi-Tong Ye "
+      },
+      "item": {
+        "wcid": 5181,
+        "name": "Stone of Humility"
+      },
+      "expect": {
+        "reply": "The Stone of Humility! A follower of Jojii must temper their discipline with humility. When you discipline your fears and desires, you bring yourself closer to the central principle of life - but no mere human can maintain that closeness indefinitely. You will make mistakes. When you no longer make mistakes, you will no longer be human.",
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 3): weenie_properties_emote id 44297 (object 5193, category 6 Give, weenie_Class_Id 5181): Tell, AwardNoShareXP (type 62) amount_64 9375; no quest test on the hand-in; AllowGive true (weenie_properties_bool type 8)",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "home to Holtburg",
+      "place": {
+        "cell": "0xA9B40019",
+        "point": [
+          84.0,
+          7.7,
+          94.0
+        ],
+        "name": "Holtburg's lifestone point"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 3): the travel file's start: Holtburg's lifestone point 0xA9B40019 (84, 7.7, 94), the home.lifestone_point of the Holtburg grounds; below level 16 she has no Lifestone Recall, so the quest ends here on foot or by the Network (D118)",
+      "todo": null
+    }
+  ],
+  "done": {
+    "stamp": null,
+    "reply": "The Stone of Humility! A follower of Jojii must temper their discipline with humility. When you discipline your fears and desires, you bring yourself closer to the central principle of life - but no mere human can maintain that closeness indefinitely. You will make mistakes. When you no longer make mistakes, you will no longer be human.",
+    "item": null
+  },
+  "timer_seconds": 72000,
+  "level": {
+    "min": 1,
+    "max": 20
+  },
+  "experience": {
+    "amount": 37500,
+    "kind": "fixed",
+    "max": null,
+    "percent": null,
+    "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 3): the sum of the Give emotes' AwardNoShareXP amount_64 (the give steps' sources); quest_xp_modifier and xp_modifier are 1 (the lead's read of the live database, D118)"
+  },
+  "sources": [
+    "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 3): Oi-Tong Ye 5193 gives and receives; each stone carries its own pick-up quest (min_Delta 72000 s, max_Solves -1)",
+    "timer_seconds 72000: the pick-up quests' gate; the hand-in has no timer (section 3); the ladder band runs it once (D118)",
+    "level: min 1 and max 20 are the entry portal 4965's MinLevel and MaxLevel (weenie_properties_int types 86 and 87), enforced on this server",
+    "ladder: the band 10 to 17 is the owner's D118 (cache/m6/8/brief-b2a.md); she must have it done before level 21",
+    "the order of the walk: Compassion above the arrival first, then down Humility and Discipline to the chest cell beside the second Surface portal (section 3)",
+    "not on the ladder (ladder removed; D118, cache/m6/8/brief-b2a.md: a quest that cannot walk does not go on it); the file stays for the offline checks",
+    "TODO(m6-fetch-hive-drop): the Hive's levels are one-way drops the room graph refuses: from the arrival only Compassion and the arrival's own Surface portal plan; Humility, Discipline and the chest with the bottom Surface portal are each a component of their own (indoor-start-unreachable, TownNetworkWalkDatTests.Fetch)",
+    "TODO(m6-fetch-tower-stairs): the Hive portal stands in the building cell 0xD8560100, reached on foot from the street door by 0xD8560104, the stair 0xD8560103 (12 floor polygons), the floorless shaft 0xD8560102 and 0xD8560101: the room graph has no walkable portal through the shaft, so a go step plans nothing (no-doorway-lane-reaches-the-goal); a go step has no authored way (the hop's walk_in does)"
+  ]
+}

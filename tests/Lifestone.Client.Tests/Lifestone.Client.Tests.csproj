@@ -30,4 +30,14 @@
     <Compile Include="..\Shared\Client\**\*.cs" LinkBase="Shared\Client" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!--
+      The bestiary's generator (tools/fight-sim, docs/fight-sim.md; M6 item 16 E1c): its column lists, picks, writer and
+      check are plain C# with no ACE type, compiled here too, so BestiaryGeneratorTests proves them with no database, no
+      dats and no ACE build. The tool's own project stays outside Lifestone.slnx (it needs the ACE build), and
+      BestiaryWorld.cs, its reads through ACE's models, is not compiled here.
+    -->
+    <Compile Include="..\..\tools\fight-sim\BestiaryModel.cs;..\..\tools\fight-sim\BestiaryTables.cs;..\..\tools\fight-sim\BestiaryRows.cs;..\..\tools\fight-sim\BestiaryWriter.cs;..\..\tools\fight-sim\BestiaryCheck.cs" LinkBase="Tools\FightSim" />
+  </ItemGroup>
+
 </Project>

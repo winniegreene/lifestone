@@ -1,0 +1,22 @@
+{
+  "key": "lever-doors",
+  "name": "the doors that open only by a linked lever: a Town Network trip never plans a walk through one (TODO(door-lever))",
+  "source": "the pinned world SQL v0.9.296: each door names its landblock_instance rows and its landblock_instance_link row; 'behind' lists the instances a walk from the town's Network drop reaches only through the door (the proof: TownNetworkTripDatTests)",
+  "doors": [
+    {
+      "key": "fort-tethana-gate",
+      "town": "Fort Tethana",
+      "door": { "guid": "0x72581042", "wcid": 2179, "cell": "0x25810000", "origin": { "x": 173.712, "y": 83.9432, "z": 220.005 } },
+      "lever": { "guid": "0x72581044", "wcid": 2609, "cell": "0x25810000", "origin": { "x": 175.031, "y": 79.4203, "z": 224.005 } },
+      "link": 298488,
+      "behind": [
+        { "guid": "0x72581033", "what": "Grand Master Scrivener of Creature Magic (20208) in 0x25810170" },
+        { "guid": "0x72581032", "what": "Grand Master Scrivener of Life Magic (20220) in 0x25810170" },
+        { "guid": "0x72581035", "what": "Grand Master Scrivener of War Magic (20224) in 0x25810175" },
+        { "guid": "0x72581036", "what": "Grand Master Scrivener of Item Magic (20212) in 0x2581016E" },
+        { "guid": "0x7258104B", "what": "Fort Tethana's Portal to Town Network (43065) in 0x2581002C, the town's way back by portals" }
+      ],
+      "source": "landblock_instance guid 0x72581042 (weenie_Class_Id 2179, obj_Cell_Id 0x25810000, origin 173.712/83.9432/220.005) and guid 0x72581044 (weenie_Class_Id 2609, obj_Cell_Id 0x25810000, origin 175.031/79.4203/224.005, is_Link_Child 1); landblock_instance_link id 298488 (parent_GUID 0x72581042, child_GUID 0x72581044); the behind rows: landblock_instance guids 0x72581033, 0x72581032, 0x72581035, 0x72581036 (M6 14 m6-banes: weenie_Class_Id 20212, obj_Cell_Id 0x2581016E, origin 110.157/82.434/220.005), 0x7258104B"
+    }
+  ]
+}

@@ -55,7 +55,7 @@ public sealed partial class HuntScenario
         guid = 0;
         name = string.Empty;
         metres = double.NaN;
-        return _attackWatch is { } watch && HostileReach.TryNearest(session.State, DefendReachMetres, watch.HeardWithin(DefendHeardSeconds), out guid, out name, out metres, _defendSkip);
+        return _attackWatch is { } watch && HostileReach.TryNearest(session, DefendReachMetres, watch.HeardWithin(DefendHeardSeconds), out guid, out name, out metres, _defendSkip);
     }
 
     /// <summary>How long ago <paramref name="name"/> was last heard attacking, for the log.</summary>
@@ -73,7 +73,7 @@ public sealed partial class HuntScenario
         }
 
         _onlyGuid = _target;
-        return HostileReach.TryNearest(session.State, DefendReachMetres, watch.HeardWithin(DefendHeardSeconds), out _, out _, out _, _notOnly);
+        return HostileReach.TryNearest(session, DefendReachMetres, watch.HeardWithin(DefendHeardSeconds), out _, out _, out _, _notOnly);
     }
 
     /// <summary>

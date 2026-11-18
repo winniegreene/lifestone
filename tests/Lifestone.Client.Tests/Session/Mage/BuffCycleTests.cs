@@ -1,9 +1,12 @@
+using System.Collections.Immutable;
 using System.Text.RegularExpressions;
 using Lifestone.Client.Options;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Data.Magic;
+using Lifestone.Net.Messages;
+using Lifestone.Net.Types;
 
 namespace Lifestone.Client.Tests.Session.Mage;
 
@@ -83,6 +86,75 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
 
     /// <summary>Today's ceiling order (<c>--cast-mana-tries 0</c>, M5 1 K5): the tests that pin the mana loop before the tries and the dance.</summary>
     private static readonly BuffOptions CeilingOrder = new() { Mana = Lifestone.Client.Session.Vitals.ManaOrderOptions.Ceiling };
+
+    /// <summary>
+    /// M6 15 (the player's rules, on by default): the buff cycle's casts pass the rule at the Action API with no change of the cycle. Every spell goes on a spell bar before its first cast (AddSpellFavorite ahead of the cast on the
+    /// wire), no spell is added twice, each is on the tab a tidy player keeps it on, and the upgrade pass's level VII takes the place of the level VI the first pass cast.
+    /// </summary>
+    [Fact]
+    public void M6_15_every_spell_the_cycle_casts_is_on_a_spell_bar_before_its_cast_once_on_its_tab_and_an_upgrade_takes_the_lower_levels_place()
+    {
+        var t = new Rig(options: CeilingOrder);
+        t.Caster.CeilingCost = true;
+        Assert.True(t.Cycle.Start(t.Now));
+        Assert.Equal(BuffStatus.Done, t.Run());
+
+        // The wire, played as the server keeps the bars: an add is never for a spell that is on a bar, and each cast's spell is on a bar when the cast goes out.
+        var onBar = new HashSet<uint>();
+        var castSpells = new List<uint>();
+        var adds = 0;
+        foreach (var send in t.R.H.Net.Sends)
+        {
+            if (send.Kind == FakeSendKind.AddSpellFavorite)
+            {
+                Assert.True(onBar.Add(send.Guid), $"spell {send.Guid} was added while it was on a bar");
+                adds++;
+            }
+            else if (send.Kind == FakeSendKind.RemoveSpellFavorite)
+            {
+                Assert.True(onBar.Remove(send.Guid), $"spell {send.Guid} was removed while it was on no bar");
+            }
+            else if (send.Kind is FakeSendKind.CastUntargetedSpell or FakeSendKind.CastTargetedSpell)
+            {
+                var spell = send.Kind == FakeSendKind.CastTargetedSpell ? (uint)send.Index : send.Guid;
+                Assert.Contains(spell, onBar);
+                castSpells.Add(spell);
+            }
+        }
+
+        Assert.NotEmpty(castSpells);
+        Assert.Equal(adds, t.R.Api.PlayerRules.SpellsAdded);
+
+        // The bars at the end are what the wire left: no spell twice, nothing that was not cast; the two level VIs of the first pass gave their place to the level VIIs of the upgrade pass.
+        var book = t.R.H.State.Self.Spellbook;
+        var onBars = book.SpellBars.SelectMany(b => b).ToList();
+        Assert.Equal(onBars.Count, onBars.Distinct().Count());
+        Assert.Equal(onBar.Order(), onBars.Order());
+        Assert.Empty(onBars.Except(castSpells));
+        var focus = ArenaProfile.LineNamed("Focus Self")!;
+        var willpower = ArenaProfile.LineNamed("Willpower Self")!;
+        Assert.Equal<uint>([focus.Spells[6].Id, willpower.Spells[6].Id], book.Bar(Lifestone.Client.Session.PlayerRules.SpellBarRule.CreatureTab).Take(2)); // in the places Focus VI and Willpower VI were added at
+        Assert.DoesNotContain(focus.Spells[5].Id, onBars);
+        Assert.DoesNotContain(willpower.Spells[5].Id, onBars);
+        var removed = t.R.H.Net.Of(FakeSendKind.RemoveSpellFavorite).Select(s => s.Guid).ToList();
+        Assert.Contains(focus.Spells[5].Id, removed);
+        Assert.Contains(willpower.Spells[5].Id, removed);
+
+        // Each on its tab: the creature buffs on tab I, the life buffs on tab IV, the item lines on tab V, the mana lines on tab III.
+        foreach (var line in ArenaProfile.Lines.Where(l => l.IsBuff || l.IsManaLine))
+        {
+            var tab = line.IsManaLine ? Lifestone.Client.Session.PlayerRules.SpellBarRule.VitalsTab
+                : line.Role == ProfileRole.CreatureBuff ? Lifestone.Client.Session.PlayerRules.SpellBarRule.CreatureTab
+                : line.Role == ProfileRole.LifeBuff ? Lifestone.Client.Session.PlayerRules.SpellBarRule.LifeTab
+                : Lifestone.Client.Session.PlayerRules.SpellBarRule.ItemTab;
+            foreach (var spell in line.Spells.Where(s => onBars.Contains(s.Id)))
+            {
+                Assert.Contains(spell.Id, book.Bar(tab));
+            }
+        }
+
+        Assert.DoesNotContain(t.R.H.Log.Entries, e => e.Category == Lifestone.Client.Session.Actions.PlayerRulesGate.LogCategory && e.Severity >= Lifestone.Client.Diagnostics.LogSeverity.Warning);
+    }
 
     [Fact]
     public void The_cycle_casts_the_owners_order_and_chooses_each_level_from_the_buffed_skill()
@@ -244,7 +316,7 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
     [Fact]
     public void A_fizzle_is_retried_at_the_same_level_twice_then_one_level_down_once_then_a_named_miss()
     {
-        // M5 1 K3 (D14, the owner's fizzle rule): was "retried once one level down and a second fizzle is a named miss". Now: VI fizzles three times (the first try and two more), V is tried once, and a fizzle there is the miss.
+        // M5 1 K3 (D14, the fizzle rule): was retried once one level down, and a second fizzle is a named miss. Now: VI fizzles three times (the first try and two more), V is tried once, and a fizzle there is the miss.
         var focus = ArenaProfile.LineNamed("Focus Self")!;
         var t = new Rig();
         t.Caster.FizzleNext(focus.Spells[5].Id, 1); // Focus Self VI fizzles once: VI is cast again, at the same level
@@ -282,6 +354,72 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
         Assert.Contains("misses=Focus:fizzled", missed.Fields, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// ACE gives a self-cast armour line only to worn Clothing and shields that are enchantable (<c>IsEnchantable</c>: ResistMagic under 9999, WorldObjects/WorldObject_Weapon.cs:532 @95ef426d). Live 2026-11-15 23:01:43 UTC:
+    /// the gear restore wore a Chevron Cloak (weenie 44849, ResistMagic 9999), ACE named every piece but it, the banes read "level 0 of 3" over it, every rung gate from the Holding down shut, and the ladder sent her to
+    /// Holtburg's outskirts. A worn piece whose appraisal names ResistMagic 9999 is not counted: no miss, and the line stands on the pieces ACE can enchant.
+    /// </summary>
+    [Fact]
+    public void A_worn_piece_ACE_cannot_enchant_is_not_counted_by_an_armour_line()
+    {
+        const uint boots = 0x80000204; // the scripted caster's fourth worn piece, Leather Boots, standing in for the cloak
+        var t = new Rig();
+        t.Caster.SilencePiece("Leather Boots");
+        t.R.H.State.Appraisals.Add(
+            new IdentifyResponseMsg(
+                boots, IdentifyResponseFlags.IntStatsTable, true, new Dictionary<uint, int> { [AppraisalIds.ResistMagic] = 9999 }.ToImmutableDictionary(), ImmutableDictionary<uint, long>.Empty,
+                ImmutableDictionary<uint, bool>.Empty, ImmutableDictionary<uint, double>.Empty, ImmutableDictionary<uint, string>.Empty, ImmutableDictionary<uint, uint>.Empty, [], null, null, null, null, null, null, null, null),
+            0);
+        Assert.True(t.Cycle.Start(t.Now));
+        Assert.Equal(BuffStatus.Done, t.Run());
+        var r = t.Cycle.Result!;
+        Assert.Empty(r.Misses);
+        Assert.Equal("VII", t.Levels()[ShortOf("Impenetrability")]);
+        Assert.Equal("VII", t.Levels()[ShortOf("Bludgeon Bane")]);
+    }
+
+    /// <summary>
+    /// M6 14 (live ladder42, 2026-11-16 19:51:19 UTC): the loot step appraised 257 other guids in the 41 minutes after the worn Chevron Cloak's appraisal (ResistMagic 9999); the bound of 256 dropped it, the armour lines counted the
+    /// cloak again, read it bare, and Impenetrability and Bludgeon Bane were logged EXPIRED 207 s before they ran out (cast 19:09:46, 2,700 s). A worn piece's appraisal is never the one the bound drops, and the fact that ACE
+    /// cannot enchant it is learned into the session's ledger, so it outlives the appraisal.
+    /// </summary>
+    [Fact]
+    public void A_worn_piece_ACE_cannot_enchant_stays_uncounted_after_257_other_appraisals()
+    {
+        const uint boots = 0x80000204; // the scripted caster's fourth worn piece, standing in for the cloak
+        var t = new Rig();
+        t.Caster.SilencePiece("Leather Boots");
+        t.R.H.State.Appraisals.Add(Appraised(boots, 9999), 0);
+        Assert.True(t.Cycle.Start(t.Now));
+        Assert.Equal(BuffStatus.Done, t.Run());
+        Assert.DoesNotContain("Impenetrability", t.Cycle.RebuffDue(t.Now, 300));
+        Assert.Contains(boots, t.Cycle.Ledger.NotEnchanted); // learned from the appraisal
+
+        // the loot's 257 appraisals of other guids: the worn piece's appraisal stays
+        for (uint i = 0; i < 257; i++)
+        {
+            t.R.H.State.Appraisals.Add(Appraised(0x80050000 + i, 0), 0);
+        }
+
+        Assert.True(t.R.H.State.Appraisals.TryGet(boots, out _));
+        Assert.DoesNotContain("Impenetrability", t.Cycle.RebuffDue(t.Now, 300));
+
+        // and with no keep rule at all (the appraisal gone), the ledger's fact still holds the line on the pieces ACE can enchant
+        t.R.H.State.Appraisals.Keep = null;
+        for (uint i = 0; i < 257; i++)
+        {
+            t.R.H.State.Appraisals.Add(Appraised(0x80060000 + i, 0), 0);
+        }
+
+        Assert.False(t.R.H.State.Appraisals.TryGet(boots, out _));
+        Assert.DoesNotContain("Impenetrability", t.Cycle.RebuffDue(t.Now, 300));
+        Assert.DoesNotContain("Bludgeon Bane", t.Cycle.RebuffDue(t.Now, 300));
+    }
+
+    private static IdentifyResponseMsg Appraised(uint guid, int resistMagic) => new(
+        guid, IdentifyResponseFlags.IntStatsTable, true, new Dictionary<uint, int> { [AppraisalIds.ResistMagic] = resistMagic }.ToImmutableDictionary(), ImmutableDictionary<uint, long>.Empty,
+        ImmutableDictionary<uint, bool>.Empty, ImmutableDictionary<uint, double>.Empty, ImmutableDictionary<uint, string>.Empty, ImmutableDictionary<uint, uint>.Empty, [], null, null, null, null, null, null, null, null);
+
     [Fact]
     public void An_armour_line_is_one_cast_at_the_caster_ended_by_its_UseDone_with_the_expiry_kept_per_piece()
     {
@@ -312,10 +450,15 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
         Assert.True(silent.Cycle.Start(silent.Now));
         Assert.Equal(BuffStatus.Done, silent.Run());
         var r = silent.Cycle.Result!;
-        Assert.Equal(["Impen:no-piece:Leather_Boots", "BludB:no-piece:Leather_Boots"], r.Misses);
-        Assert.Equal(22, r.Active);
-        Assert.Equal("-", silent.Levels()[ShortOf("Impenetrability")]);
+        Assert.Equal(["Impen:no-piece:Leather_Boots"], r.Misses); // the first silence is a named miss
+        Assert.Equal(24, r.Active); // once learned, both lines stand on the four pieces ACE named
         Assert.Contains("1 of 5 worn pieces", r.MissDetails[0], StringComparison.Ordinal);
+
+        // The second armour cast that passes over the same piece while it names the others teaches the cycle that ACE cannot enchant it (IsEnchantable, ResistMagic 9999: a cloak; live 2026-11-16 00:35): no miss,
+        // and both lines stand on the four pieces ACE named.
+        Assert.Equal("VII", silent.Levels()[ShortOf("Impenetrability")]);
+        Assert.Equal("VII", silent.Levels()[ShortOf("Bludgeon Bane")]);
+        Assert.Contains(silent.R.H.Log.Lines, l => l.Contains("passed over 'Leather Boots' 0x80000204 for the 2th cast: it is not enchantable", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -341,7 +484,7 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
         mixed.Caster.SilencePiece("Leather Boots");
         Assert.True(mixed.Cycle.Start(mixed.Now));
         Assert.Equal(BuffStatus.Done, mixed.Run());
-        Assert.Equal(["Impen:no-piece:Leather_Boots", "BludB:no-piece:Leather_Boots"], mixed.Cycle.Result!.Misses);
+        Assert.Equal(["Impen:no-piece:Leather_Boots"], mixed.Cycle.Result!.Misses); // the second silence learns the boots are not enchantable
         Assert.Equal(2, mixed.Cycle.Result.Surpassed);
     }
 
@@ -631,6 +774,7 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
     }
 
     [Fact]
+    [Trait("Tier", "Timing")] // m5-buffcycle-k5-flake: zero-byte allocation counts over K5's ceiling-order waits; load adds bytes (passes alone)
     public void The_cycle_allocates_nothing_while_a_cast_is_in_flight_and_while_the_mana_wait_runs()
     {
         // A cast in flight: the cycle sent it and reads the handle's outcome each step; nothing answers, so the steps only read.
@@ -1005,6 +1149,7 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
     }
 
     [Fact]
+    [Trait("Tier", "Timing")] // M6 6 (slice MH's check): a zero-byte allocation count; failed once under a Godot run's load, passes alone, as line 634's twin
     public void The_mana_orders_wait_allocates_nothing_across_its_looks_K5()
     {
         // No mana at all and no regeneration: no press can land, so the order waits (its own look each second); the wait reads, sends nothing and allocates nothing.
@@ -1111,6 +1256,69 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
             }
         }
     }
+    [Fact]
+    public void M6_14_the_climbers_caster_auras_once_learned_are_cast_on_her_and_kept_up()
+    {
+        // M6 14 (m6-caster): the learn trip's scrolls put Aura of Hermetic Link Self IV, Aura of Defender Self IV and Aura of Spirit Drinker Self IV in her book. Her pass wants the three (learned by play) and casts each on her own
+        // guid, untargeted (they land in her enchantments, WorldObject_Magic.cs:2180-2184 @95ef426d; ACE reads them as the wielded caster's), at the level the book holds; the rebuff keeps them up as the other auras.
+        var r = new WorldActionRig();
+        var known = new uint[] { 1478, 1603, 3256 };
+        var caster = new ScriptedCaster(r, 426, 275, known: known);
+        var options = new BuffOptions();
+        var cycle = new BuffCycle(r.Api, r.H.State, caster.Table, options, r.H.Log, profile: BuffProfiles.Climber);
+        Assert.True(cycle.Start(r.H.R.Clock.Now));
+        var end = r.H.R.Clock.Now + 300;
+        var status = BuffStatus.Running;
+        while (status == BuffStatus.Running && r.H.R.Clock.Now < end)
+        {
+            r.Tick(0.25);
+            caster.Pump();
+            r.Tick();
+            status = cycle.Step(r.H.R.Clock.Now);
+        }
+
+        Assert.Equal(BuffStatus.Done, status);
+        Assert.Equal(3, cycle.Wanted);
+        Assert.Equal(known.Order(), caster.Landed.Distinct().Order());
+        Assert.Empty(cycle.Result!.Misses);
+        var self = r.H.State.Self.Guid;
+        Assert.DoesNotContain(r.H.Net.Of(FakeSendKind.CastTargetedSpell), s => s.Guid != self); // at her own guid, never at the wand
+        Assert.Equal(known.Order(), r.H.Net.SelfCasts(self).Select(s => s.Guid).Where(known.Contains).Distinct().Order());
+        Assert.All(new[] { "Hermetic Link", "Defender", "Spirit Drinker" }, name => Assert.Contains(r.H.Log.Entries, e => e.Message.StartsWith(name + ": Aura of " + name + " Self IV", StringComparison.Ordinal) && e.Message.EndsWith("is in the spellbook now: the line is wanted and kept up as the other auras (D143)", StringComparison.Ordinal)));
+        Assert.Equal(["Hermetic Link", "Defender", "Spirit Drinker"], cycle.RebuffDue(r.H.R.Clock.Now + 1800 - (options.RebuffMarginSeconds / 2), options.RebuffMarginSeconds).Where(n => n is "Hermetic Link" or "Defender" or "Spirit Drinker"));
+    }
+
+    [Fact]
+    public void M6_7_the_climbers_book_casts_the_recovery_first_then_armor_then_the_protection_on_a_level_10_mana_pool()
+    {
+        // Winnie at level 10 after the trip: Armor Self II, Bludgeoning Protection Self II and Mana Renewal Self II in the book, about 139 mana (r2b's log): 30 + 30 + 30 mana at the ceiling.
+        var r = new WorldActionRig();
+        var known = new uint[] { 213, 1308, 1019 };
+        var caster = new ScriptedCaster(r, 139, 52, known: known);
+        var options = new BuffOptions();
+        var cycle = new BuffCycle(r.Api, r.H.State, caster.Table, options, r.H.Log, profile: BuffProfiles.Climber);
+        Assert.True(cycle.Start(r.H.R.Clock.Now));
+        var end = r.H.R.Clock.Now + 300;
+        var status = BuffStatus.Running;
+        while (status == BuffStatus.Running && r.H.R.Clock.Now < end)
+        {
+            r.Tick(0.25);
+            caster.Pump();
+            r.Tick();
+            status = cycle.Step(r.H.R.Clock.Now);
+        }
+
+        Assert.Equal(BuffStatus.Done, status);
+        Assert.Equal(known, caster.Answered.Where(a => !a.Fizzled).Select(a => a.Spell).Distinct());
+        Assert.Equal(3, cycle.Wanted);
+        Assert.Empty(cycle.Result!.Misses);
+
+        // The rebuff keeps them: a line's 1,800 s runs under the 300 s margin once the fight has held it 1,500 s and more.
+        var margin = options.RebuffMarginSeconds;
+        Assert.Empty(cycle.RebuffDue(r.H.R.Clock.Now, margin));
+        Assert.Equal(["Mana Renewal Self", "Armor Self", "Bludgeon Protection Self"], cycle.RebuffDue(r.H.R.Clock.Now + 1800 - (margin / 2), margin));
+    }
+
     [Fact]
     public void A_line_learned_by_play_is_skipped_while_the_spellbook_lacks_it_and_kept_up_once_it_holds_a_level_M5_7_P7j()
     {

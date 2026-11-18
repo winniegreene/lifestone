@@ -67,6 +67,12 @@ internal static class Program
     /// <summary>The default time limit of the mage build (seconds): about forty steps on loopback, the experience grant and the learns among them.</summary>
     internal const double MageBuildQuitAfterSeconds = 600;
 
+    /// <summary>M6 item 0 a3a: the climber's creation (a delete, a create, an entry, a purge loop and a log off) needs no more than the mage build's ten minutes.</summary>
+    internal const double ClimberCreateQuitAfterSeconds = 600;
+
+    /// <summary>The villa proof's time limit (M6 villa): its sixteen stages at 45 s each at most, plus the login.</summary>
+    internal const double VillaProofQuitAfterSeconds = 900;
+
     /// <summary>The default time limit of the fighter build (seconds): the mage build's steps plus the kit's grants, the wields and the place to Holtburg.</summary>
     internal const double FighterBuildQuitAfterSeconds = 600;
 
@@ -341,6 +347,8 @@ internal static class Program
             {
                 HeadlessScenario.AcademyExit => AcademyExitQuitAfterSeconds,
                 HeadlessScenario.MageBuild => MageBuildQuitAfterSeconds,
+                HeadlessScenario.ClimberCreate => ClimberCreateQuitAfterSeconds,
+                HeadlessScenario.VillaProof => VillaProofQuitAfterSeconds,
                 HeadlessScenario.FighterBuild => FighterBuildQuitAfterSeconds,
                 HeadlessScenario.Gear => GearQuitAfterSeconds,
                 HeadlessScenario.Buff => BuffQuitAfterSeconds,
@@ -395,6 +403,12 @@ internal static class Program
 
                     // M5 3 w1 (D46): the build grants the --fight-ground's kit (the vendor robe and wand, the four foci, the stock, the purse), as the journey's build-verify does: one factory for both hosts.
                     scenario = BuildVerifyStation.MageBuildOf(XpTableData.Load(dats), HeadlessCharacter.RetailSkillClasses(dats), log, options.Fight.GroundProfile, SpellTableData.Load(dats).Spells, LoginName(runtime, runOptions.Session.Account), freshCharacter: options.FreshCharacter, level: options.MageLevel);
+                }
+                else if (options.Scenario == HeadlessScenario.ClimberCreate)
+                {
+                    // M6 D7: the climber's creation; the character is always Winnie (the options refuse --character and --create-character), and the credits are read from the dats.
+                    // M6 item 14 S3: the credits are planned in the order of the buff bot's option (--autopilot-buff-bot, on by default), the order the level up job then trains by.
+                    scenario = new ClimberCreateScenario(HeadlessCharacter.RetailSkillClasses(dats), ClimberCreateScenario.PlanFromDats(dats, options.Autopilot.BuffBot), log, climber: string.Equals(options.Session.Account, TestAccounts.Qwinnie, StringComparison.Ordinal) ? Lifestone.Client.Session.Mage.MageTemplate.ModelClimberName : null, orderLine: Lifestone.Client.Session.Mage.MageTemplate.ClimberOrderLine(options.Autopilot.BuffBot));
                 }
                 else if (options.Scenario == HeadlessScenario.FighterBuild)
                 {
@@ -521,7 +535,18 @@ internal static class Program
                     // 4-R11: never an absolute path in a log line: the file relative to the output folder (it is resolved under it), else its file name.
                     var checkpointRelative = Path.GetRelativePath(root, checkpoint.Path);
                     log.Info("headless", "autopilot checkpoint: " + (Path.IsPathRooted(checkpointRelative) || checkpointRelative.StartsWith("..", StringComparison.Ordinal) ? checkpoint.Describe : checkpointRelative.Replace('\\', '/')));
-                    scenario = new HeadlessAutopilotScenario(autopilotPlan, options.Autopilot, options.Arguments, dats, SpellTableData.Load(dats).Spells, log, LoginName(runtime, runOptions.Session.Account), new HeadlessJourneyRunnerHost(dats, log), checkpoint);
+                    // M6 5 Q2: the quest timers' file is quests/<file> beside the checkpoint folder (the folder's parent), one file a character.
+                    var questStore = new AutopilotFileCheckpointStore(Path.Combine(Path.GetDirectoryName(checkpointFolder) ?? root, Lifestone.Client.Session.Quests.QuestTimers.FileName(autopilotPlan.Character)));
+                    scenario = new HeadlessAutopilotScenario(autopilotPlan, options.Autopilot, options.Arguments, dats, SpellTableData.Load(dats).Spells, log, LoginName(runtime, runOptions.Session.Account), new HeadlessJourneyRunnerHost(dats, log), checkpoint, questStore);
+                }
+                else if (options.Scenario == HeadlessScenario.VillaProof)
+                {
+                    // M6 villa: log in (creating Lifestone Throwaway when it is missing), then the proof in the world.
+                    scenario = new LoginScenario(
+                        Lifestone.Client.Session.Scenarios.VillaProofScenario.CharacterName,
+                        Lifestone.Client.Session.Scenarios.VillaProofScenario.CharacterName,
+                        HeadlessCharacter.RetailSkillClasses(dats),
+                        play: new Lifestone.Client.Session.Scenarios.VillaProofScenario(XpTableData.Load(dats).CharacterLevelXpList, log));
                 }
                 else if (options.CreateCharacter is { } create)
                 {

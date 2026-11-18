@@ -85,7 +85,9 @@ public sealed class SelfEquipTests
         Assert.Equal(SelfEquipKind.Swap, choice.Kind);
         Assert.Equal(SelfEquipJudge.Held, choice.Location);
         Assert.Equal(0x80000005u, choice.Replaces);
-        Assert.Contains("war damage x1.03 against x1 on the plan's element 0x10", choice.Why, StringComparison.Ordinal);
+        Assert.Contains("'Fire Sceptre' 0x90000001 score 1.5 (war +3%", choice.Why, StringComparison.Ordinal); // M6 14 (m6-caster): the caster score, 0.5 a percent of damage on the plan's element
+        Assert.Contains("against 'Wand' 0x80000005 score 0 (war +0%", choice.Why, StringComparison.Ordinal);
+        Assert.Contains("on the plan's element 0x10", choice.Why, StringComparison.Ordinal);
         Assert.Contains("wield: skill 34 current 300 >= 250, activation: Arcane Lore 250 >= 200", choice.Why, StringComparison.Ordinal);
         Assert.StartsWith("gear: swap in 'Fire Sceptre' 0x90000001: better:", choice.ToString(), StringComparison.Ordinal);
     }
@@ -96,18 +98,26 @@ public sealed class SelfEquipTests
         var choice = Judge.Judge(Sceptre(0x90000002, "Acid Sceptre", Acid, 1.03), Database(), new Mage());
 
         Assert.Equal(SelfEquipKind.None, choice.Kind); // ACE applies ElementalDamageMod only when the caster's DamageType is the spell's (WorldObject_Weapon.cs:382-401); the keep-aside rule keeps it in the review pack for its +3%
-        Assert.Contains("not better: war damage x1 against x1", choice.Why, StringComparison.Ordinal);
+        Assert.Contains("not better: 'Acid Sceptre' 0x90000002 score 0 (war +0%", choice.Why, StringComparison.Ordinal);
     }
 
-    [Theory]
-    [InlineData(400, 200, "better but wield: skill 34 current 300 < 400")]
-    [InlineData(250, 300, "better but activation: Arcane Lore 250 < 300 (its spells would stay off; retail: \"Your Arcane Lore is too low to use that item's magic.\")")]
-    public void A_better_caster_whose_requirement_the_mage_does_not_meet_is_kept_for_review(int warReq, int lore, string why)
+    [Fact]
+    public void A_better_caster_short_of_a_wield_requirement_is_kept_for_review()
     {
-        var choice = Judge.Judge(Sceptre(0x90000003, "Fire Sceptre", Fire, 1.05, warReq, lore), Database(), new Mage());
+        var choice = Judge.Judge(Sceptre(0x90000003, "Fire Sceptre", Fire, 1.05, 400, 200), Database(), new Mage());
 
         Assert.Equal(SelfEquipKind.Review, choice.Kind);
-        Assert.StartsWith(why, choice.Why, StringComparison.Ordinal);
+        Assert.StartsWith("better but wield: skill 34 current 300 < 400", choice.Why, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void M6_14_a_better_caster_short_of_an_activation_requirement_goes_on_with_its_spells_off()
+    {
+        // M6 14 (m6-caster): ACE wields it and refuses only its spells (TryActivateSpells, Player_Inventory.cs:313-335 @95ef426d), so its own bonuses count: a swap, named.
+        var choice = Judge.Judge(Sceptre(0x90000003, "Fire Sceptre", Fire, 1.05, 250, 300), Database(), new Mage());
+
+        Assert.Equal(SelfEquipKind.Swap, choice.Kind);
+        Assert.EndsWith("its spells stay off (activation: Arcane Lore 250 < 300 (its spells would stay off; retail: \"Your Arcane Lore is too low to use that item's magic.\")), its own bonuses count", choice.Why, StringComparison.Ordinal);
     }
 
     [Fact]

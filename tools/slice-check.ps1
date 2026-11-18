@@ -135,11 +135,14 @@ else {
 }
 # M5 6 v1 (D9, D34; m5-plan.md section 5 item 5): the full offline smoke is the item-end check and runs the shell frames and the play-checks at all three window sizes.
 if ($Smoke -and -not $AllSizes) { $AllSizes = [switch]::new($true) }
+# M6 0 a6: a backend step named in -Steps (login-check, login) is reported SKIP in the steps stage, never a throw: slice-check never starts the backend, and the rest of the run goes on.
+$backendSteps = @()
 foreach ($name in @($Steps | ForEach-Object { if ($stepAliases.ContainsKey($_)) { $stepAliases[$_] } else { $_ } })) {
     if ($name -in @('build', 'test')) { throw "'$name' is a stage, not a step: use -Stages." }
-    if ($name -in @('login-check', 'login')) { throw "'$name' needs the backend, which slice-check never starts." }
+    if ($name -in @('login-check', 'login')) { $backendSteps += $name }
 }
-if ($Stages -contains 'steps' -and $Steps.Count -eq 0 -and -not $Changed) { throw "The steps stage needs -Steps <names> (or -Changed)." }
+$Steps = @($Steps | Where-Object { $name = if ($stepAliases.ContainsKey($_)) { $stepAliases[$_] } else { $_ }; $name -notin @('login-check', 'login') })
+if ($Stages -contains 'steps' -and $Steps.Count -eq 0 -and -not $Changed -and $backendSteps.Count -eq 0) { throw "The steps stage needs -Steps <names> (or -Changed)." }
 
 Import-Module (Join-Path $PSScriptRoot 'lib\Toolchain.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'lib\TestTimes.psm1') -Force
@@ -404,7 +407,8 @@ function Test-GodotErrors($row) {
 }
 
 function Invoke-StepsStage([string[]] $stepList) {
-    if ($stepList.Count -eq 0) { Write-Stage 'steps' 'SKIP' 'no backend-free step is touched by the diff' 0; return }
+    foreach ($backend in $backendSteps) { Write-Stage 'steps' 'SKIP' "backend step ${backend}: slice-check never starts the backend" 0 }
+    if ($stepList.Count -eq 0) { if ($backendSteps.Count -eq 0) { Write-Stage 'steps' 'SKIP' 'no backend-free step is touched by the diff' 0 }; return }
     $timer = [Diagnostics.Stopwatch]::StartNew()
     # ONE smoke process for all the steps (one start-up, one scan, one stray-output listing); the rerun is one more for the failures.
     $run = Invoke-Smoke @('-Only', ($stepList -join ',')) 'steps'

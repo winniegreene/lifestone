@@ -106,7 +106,7 @@ public sealed partial class FightScenario
 
         GearCasts.TryCurrentSkill(session.State.Self.Qualities, MageTemplate.WarMagic, out var war, out _);
         var from = here.ToGlobal();
-        var reach = option.Row.Kind == WarKind.Ring ? option.ReachMetres : session.State.Objects.TryGet(target, out var t) && t.Position is { } at ? at.ToGlobal().DistanceTo(from) : option.ReachMetres;
+        var reach = option.Row.Kind == WarKind.Ring ? option.ReachMetres : session.State.Objects.TryGet(target, out var t) && StandsAt(session, t) is { } at ? at.ToGlobal().DistanceTo(from) : option.ReachMetres;
         var slot = _inFlight[0];
         foreach (var cast in _inFlight)
         {
@@ -154,6 +154,71 @@ public sealed partial class FightScenario
         // A hit no cast in flight claims: kept a moment, for a cast whose projectile and hit came in the same update, before the fight entered it (NoteInFlight claims it).
         _unclaimed[_unclaimedNext] = (guid, text, _lastClock);
         _unclaimedNext = (_unclaimedNext + 1) % _unclaimed.Length;
+    }
+
+    /// <summary>
+    /// M6 7 AA: "<paramref name="victim"/> resists your spell": the oldest cast still expecting a hit on a creature of that name loses one (a resisted projectile is in flight no more: left in, the pick would hold for a kill that cannot come, and the finishing bolt would count it).
+    /// The line names no guid: the cast's own target is the one meant, as two tuskers share a name. When the current target has every projectile of its cast answered, the hit wait has its answer (<c>ResistEndsWait</c>).
+    /// </summary>
+    private void NoteInFlightResist(IGameSessionView session, string victim)
+    {
+        var objects = session.State.Objects;
+        InFlightCast? oldest = null;
+        foreach (var cast in _inFlight)
+        {
+            if (cast.Active && (oldest is null || cast.Until < oldest.Until) && cast.Seen(cast.Target) < ProjectilesAt(cast) && objects.TryGet(cast.Target, out var t) && t.Name == victim)
+            {
+                oldest = cast;
+            }
+        }
+
+        if (oldest is null)
+        {
+            if (objects.TryGet(_target, out var target) && target.Name == victim)
+            {
+                _boltResists++; // its projectile and its resist came before the fight entered it
+            }
+
+            return;
+        }
+
+        oldest.NoteHit(oldest.Target);
+        if (oldest.Target == _target && oldest.Seen(_target) >= ProjectilesAt(oldest))
+        {
+            _boltResists++;
+        }
+    }
+
+    /// <summary>The projectiles of <paramref name="cast"/> aimed at its target, at least one.</summary>
+    private double ProjectilesAt(InFlightCast cast) => Math.Max(1.0, InFlightPicker.RawHits(cast.Option, 0, castTarget: true));
+
+    /// <summary>
+    /// M6 7 AA: true when the projectiles in flight are expected to kill <paramref name="guid"/> (the sum <see cref="ExcludeDoomed"/> reads: its live health; a target with no maximum health never); <paramref name="seconds"/> is what is left of the last one's flight on it.
+    /// </summary>
+    private bool InFlightFinishes(IGameSessionView session, uint guid, double clock, out double seconds)
+    {
+        seconds = 0;
+        if (!session.State.Objects.TryGet(guid, out var o) || StandsAt(session, o) is not { } at)
+        {
+            return false;
+        }
+
+        var max = TargetStatsOf(o.Weenie.WeenieClassId).MaxHealth;
+        var expected = max > 0 ? InFlightDamageOn(guid, at.ToGlobal(), clock) : 0;
+        if (expected <= 0 || expected < LiveHealthOrFull(o) * max)
+        {
+            return false;
+        }
+
+        foreach (var cast in _inFlight)
+        {
+            if (cast.Active && cast.Target == guid)
+            {
+                seconds = Math.Max(seconds, cast.Until - InFlightMarginSeconds - clock);
+            }
+        }
+
+        return true;
     }
 
     private readonly (uint Guid, string? Text, double At)[] _unclaimed = new (uint, string?, double)[4];
@@ -219,7 +284,7 @@ public sealed partial class FightScenario
 
         foreach (var o in session.State.Objects.All)
         {
-            if ((o.ItemType & WarCreatureItemType) == 0 || o.Position is not { } p || o.Health is <= 0f || _killed.Contains(o.Guid))
+            if ((o.ItemType & WarCreatureItemType) == 0 || StandsAt(session, o) is not { } p || o.Health is <= 0f || _killed.Contains(o.Guid))
             {
                 continue;
             }

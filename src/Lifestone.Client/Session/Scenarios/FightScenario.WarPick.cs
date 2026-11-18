@@ -20,7 +20,7 @@ public sealed partial class FightScenario
 
     private readonly WarTarget[] _warTargets = new WarTarget[WarTargetCap];
     private WarPicks? _warPicks;
-    private (int Level, uint Skill, int Cap, uint ManaConversion, ulong Floors) _warBuiltFor = (-1, 0, 0, 0, 0);
+    private (int Level, uint Skill, int Cap, uint ManaConversion, ulong Floors, int Dropped, ulong Town) _warBuiltFor = (-1, 0, 0, 0, 0, 0, 0);
     private bool _warActive;
     private RingCasts? _ringCasts;
     private RingCasts? _volleyCasts;
@@ -42,6 +42,14 @@ public sealed partial class FightScenario
     private ulong _floorMask;
     private double _floorReadAt = double.NegativeInfinity;
 
+    /// <summary>M6 item 14 (m6-goldscarab): the most of one component a cast needs in the pack (the foci formula's four Prismatic Tapers, <see cref="GearKit.FociFormulaCounts"/>): the count of a town stock component is read up to this, so the options are built again only when a cast's worth comes or goes.</summary>
+    internal const int TownCastWorth = 4;
+
+    private readonly List<uint> _townScratch = [];
+    private ulong _townHeld; // M6 item 14 (m6-goldscarab): what the pack holds of each town stock line that is a spell component, four bits a line, capped at TownCastWorth
+    private double _townReadAt = double.NegativeInfinity;
+    private bool _townKnown; // true once the pack was read for the town stock: until then no count is claimed
+
     /// <summary>A creature the ring will hit, for the choice of its anchor (<see cref="ChooseRingAnchor"/>).</summary>
     /// <param name="Guid">The creature.</param>
     /// <param name="Health">Its remaining health share, 0 to 1 (the live health model's).</param>
@@ -56,7 +64,7 @@ public sealed partial class FightScenario
     /// <param name="current">The guid picked as the cast target before the ring was chosen.</param>
     internal static int ChooseRingAnchor(ReadOnlySpan<RingCandidate> candidates, uint current)
     {
-        var best = -1;
+        var pick = new Threat.FullestPick(Threat.FullestRule.RingAnchor, current); // M6 16 E2d: the one comparison, by this pick's rule (the most, the picked target among equals)
         for (var i = 0; i < candidates.Length; i++)
         {
             if (!candidates[i].Clear)
@@ -64,31 +72,25 @@ public sealed partial class FightScenario
                 continue;
             }
 
-            if (best < 0 || candidates[i].Health > candidates[best].Health || (candidates[i].Health == candidates[best].Health && candidates[i].Guid == current))
-            {
-                best = i;
-            }
+            pick.Offer(i, candidates[i].Guid, candidates[i].Health);
         }
 
-        return best;
+        return pick.Index;
     }
 
     /// <summary>M5 7 P7s (D148): the names of the war options built last (option 0 the bolt), for a test. Allocates.</summary>
     internal IReadOnlyList<string> WarOptionNames => _warPicks is { } picks ? [.. picks.Options.Select(o => o.Name)] : [];
 
     /// <summary>M5 7 P7s (D148): the floor-only carried lines of the ground (<see cref="ComponentFloor.FloorOnly"/>) and the counters that read them; none in the arena.</summary>
-    private void InitFloors()
+    /// <param name="accountName">M6 item 1 h1: the account's name (<see cref="BuffOptions.AccountName"/>): a spell of a school whose focus the character does not hold is read on the account's full formula; null: the foci formula (today's rule).</param>
+    private void InitFloors(string? accountName)
     {
         if (_options.ArenaHere)
         {
             return;
         }
 
-        _floorOnlyLines = ComponentFloor.FloorOnly(_ground, _spells);
-        if (_floorOnlyLines.Count > 0)
-        {
-            _floorCounters = new LogisticsCounters(_ground, _floorOnlyLines.Keys);
-        }
+        _floorOnlyLines = ComponentFloor.FloorOnly(_ground, _spells, accountName, _holdsFocusAtStart ??= HoldsFocusAtStart); // M6 16 E5d: the counters that read them are the session's (ReadFloors)
     }
 
     /// <summary>
@@ -97,10 +99,12 @@ public sealed partial class FightScenario
     /// </summary>
     private void ReadFloors(GameState state, double clock)
     {
-        if (_floorCounters is not { } counters || clock - _floorReadAt < FloorCheckSeconds)
+        if (_floorOnlyLines.Count == 0 || clock - _floorReadAt < FloorCheckSeconds)
         {
             return;
         }
+
+        var counters = _floorCounters ??= Quartermaster.TripDesk.For(state).Reading(_ground, _floorOnlyLines.Keys, m => _log.Info(LogCategory, m)); // M6 16 E5d: the session's reading twin, asked once a fight: the floor read moves nothing the trip trigger reads
 
         _floorReadAt = clock;
         if (counters.Check(state).Kind == LogisticsKind.Unread)
@@ -132,14 +136,95 @@ public sealed partial class FightScenario
         _floorMask = mask;
     }
 
+    /// <summary>
+    /// M6 item 14 (m6-goldscarab; live 2026-11-12: level IV of everything for want of a Gold Scarab no vendor of Holtburg sells): every <see cref="FloorCheckSeconds"/>, the pack's count of each town stock line that is a spell component (the
+    /// profile's <c>town_stock</c>: the Gold and the Pyreal Scarab bought at Uziz on the way out) is read, up to <see cref="TownCastWorth"/>. The counts go into the war options' key, so the options are built again when a cast's worth comes or
+    /// goes, and a line that ran out or came back is logged once each way. Nothing stops: with none held the picks fall to the level the pack pays for (<see cref="LevelFloor"/>, <see cref="WarKitCarries"/>). A pack not read keeps the last answer.
+    /// </summary>
+    private void ReadTownStock(GameState state, double clock)
+    {
+        var lines = _ground.TownStock;
+        if (_options.ArenaHere || lines.Count == 0 || clock - _townReadAt < FloorCheckSeconds)
+        {
+            return;
+        }
+
+        _townReadAt = clock;
+        var inventory = state.Self.Inventory;
+        if (!inventory.IsKnown || !inventory.ListsComplete)
+        {
+            return;
+        }
+
+        _townKnown = true;
+        var held = 0UL;
+        for (var i = 0; i < lines.Count && i < 16; i++)
+        {
+            if (ComponentWeenies.TryGetByWcid(lines[i].Wcid, out _))
+            {
+                held |= (ulong)Math.Min(TownCastWorth, GearInventory.CountOf(state, _townScratch, lines[i].Wcid)) << (4 * i);
+            }
+        }
+
+        if (held == _townHeld)
+        {
+            return;
+        }
+
+        for (var i = 0; i < lines.Count && i < 16; i++)
+        {
+            var (was, now) = ((int)((_townHeld >> (4 * i)) & 0xF), (int)((held >> (4 * i)) & 0xF));
+            if ((was == 0) == (now == 0))
+            {
+                continue;
+            }
+
+            _log.Info(LogCategory, now == 0
+                ? string.Create(CultureInfo.InvariantCulture, $"components: {lines[i].Name} {lines[i].Wcid} (town stock, bought at {lines[i].Vendor.Name} in {lines[i].Town}): none left in the pack: the spells that burn it fall to the level the pack pays for until the next stop buys more; nothing stops (m6-goldscarab)")
+                : string.Create(CultureInfo.InvariantCulture, $"components: {lines[i].Name} {lines[i].Wcid} (town stock, bought at {lines[i].Vendor.Name} in {lines[i].Town}): the pack holds {(now >= TownCastWorth ? TownCastWorth + " or more" : now.ToString(CultureInfo.InvariantCulture))}: the spells that burn it are castable (m6-goldscarab)"));
+        }
+
+        _townHeld = held;
+    }
+
+    /// <summary>M6 item 14 (m6-goldscarab): the pack's count of the town stock component <paramref name="wcid"/> as <see cref="ReadTownStock"/> last read it (up to <see cref="TownCastWorth"/>), with its line; false when the ground buys no such ware in a town.</summary>
+    private bool TownHeld(uint wcid, out int held, out Grounds.TownStockLine line)
+    {
+        var lines = _ground.TownStock;
+        for (var i = 0; i < lines.Count && i < 16; i++)
+        {
+            if (lines[i].Wcid == wcid)
+            {
+                (held, line) = ((int)((_townHeld >> (4 * i)) & 0xF), lines[i]);
+                return true;
+            }
+        }
+
+        (held, line) = (0, null!);
+        return false;
+    }
+
+    private Func<DatReaderWriter.Enums.MagicSchool, bool>? _holdsFocusAtStart; // made once: the floor check runs per pick
+
+    /// <summary>
+    /// M6 item 1 h1: whether the character holds the focus of <paramref name="school"/>, as far as the ground's plan can tell before the pack is read (the floors are planned once): the kit brings the foci it lists (BSD Mage's four), and War and
+    /// Life are held whatever the kit (the starter foci of the climber, whose bare kit lists none; the autopilot's audit stops the run when one is missing, <c>m6-foci-missing</c>). Creature and Item Enchantment are held only when the kit lists them.
+    /// </summary>
+    /// <param name="school">The spell's school.</param>
+    private bool HoldsFocusAtStart(DatReaderWriter.Enums.MagicSchool school) =>
+        school is DatReaderWriter.Enums.MagicSchool.WarMagic or DatReaderWriter.Enums.MagicSchool.LifeMagic || _kit.ItemOf(LevelFloor.FocusOf(school)) is not null;
+
     /// <summary>M5 7 P7s (D148): true (with the line's name) when a component of <paramref name="info"/>'s foci formula is a floor-only line at its floor.</summary>
     private bool WarAtFloor(SpellInfo info, out string line)
     {
         line = string.Empty;
-        return _floorCounters is { } counters && _floorMask != 0 && ComponentFloor.NeedsLineAtFloor(info, counters, out line);
+        return _floorCounters is { } counters && _floorMask != 0 && ComponentFloor.NeedsLineAtFloor(info, counters, out line, _buffOptions.AccountName, _holdsFocusAtStart ??= HoldsFocusAtStart);
     }
 
-    /// <summary>The kit carries the foci formula's components of <paramref name="info"/> (a stock line of the ground each, holding at least one cast's worth); the name of the first it lacks otherwise.</summary>
+    /// <summary>
+    /// The kit carries the foci formula's components of <paramref name="info"/> (a stock line of the ground each, holding at least one cast's worth); the name of the first it lacks otherwise. M6 item 14 (m6-goldscarab): a component the ground
+    /// buys in another town (a line of the profile's <c>town_stock</c>: no stock line, no stop line) passes while the pack holds a cast's worth of it (<see cref="ReadTownStock"/>), and is named with the count held when it does not.
+    /// </summary>
     private bool WarKitCarries(SpellInfo info, out string missing)
     {
         foreach (var (component, n) in GearKit.FociFormulaCounts(info.Formula))
@@ -148,6 +233,17 @@ public sealed partial class FightScenario
             {
                 missing = $"component {component} (not in the component map)";
                 return false;
+            }
+
+            if (_ground.Supplies.StockOf(weenie.Wcid) is null && TownHeld(weenie.Wcid, out var held, out var town))
+            {
+                if (held < n)
+                {
+                    missing = string.Create(CultureInfo.InvariantCulture, $"{weenie.Name} (wcid {weenie.Wcid}) x{n} a cast is bought at {town.Vendor.Name} in {town.Town} (the town stock of {_ground.Name}) and {(_townKnown ? $"the pack holds {held}" : "the pack is not read yet")}");
+                    return false;
+                }
+
+                continue;
             }
 
             if (_ground.Supplies.StockOf(weenie.Wcid) is not { } stock || stock.StopUnder < n)
@@ -171,8 +267,9 @@ public sealed partial class FightScenario
     private void WarBuildOptions(PlayerQualities q, Spellbook? book, uint warSkill, GameState state, double clock)
     {
         ReadFloors(state, clock); // M5 7 P7s (D148)
+        ReadTownStock(state, clock); // M6 item 14 (m6-goldscarab)
         var cap = _options.ArenaHere ? Math.Clamp(_options.MaxLevel, 1, Levels) : LevelCapFor(q);
-        var key = (_level, warSkill, cap, _manaConversion, _floorMask);
+        var key = (_level, warSkill, cap, _manaConversion, _floorMask, _droppedSpells.Count, _townHeld); // M6 7 K: a spell dropped for the fight builds the options again; M6 item 14: so does a town stock component's cast's worth coming or going
         if (_warPicks is not null && key == _warBuiltFor)
         {
             return;
@@ -183,14 +280,30 @@ public sealed partial class FightScenario
         _ringCasts ??= new RingCasts(_warPicks.Picker.RingFactor, _log, LogCategory);
         _volleyCasts ??= new RingCasts(_warPicks.Picker.VolleyFactor, _log, LogCategory, "volley"); // M5 7 F24: the volley hits are measured as the ring ones are
         var options = new List<WarOption>();
-        if (_level < 0 || !_spells.TryGetValue(_levelIds[_level], out var bolt) || !WarSpellData.TryGet(bolt.Id, out var boltRow) || WarOptionOf(bolt, ArenaProfile.WarLineName, boltRow) is not { } boltOption)
+        if (_level < 0 || !_spells.TryGetValue(_levelIds[_level], out var bolt))
         {
             _warPicks.SetOptions(options);
-            _warPicks.NoteOnce("TODO(m5-war-pick-data): the bolt in hand has no projectile row; the bolt stays");
+            _warPicks.NoteOnce("war pick: no bolt level is chosen yet; no war option is built (the picker fills the bolt from the SpellTable when one is)");
+            return;
+        }
+
+        if (!WarSpellData.TryGet(bolt.Id, out var boltRow) || WarOptionOf(bolt, _boltLineName, boltRow) is not { } boltOption)
+        {
+            // M6 1 f (m5-war-pick-data closed by data): every element's bolt line I to VIII has its projectile row (WarSpellData), so only a spell outside them lands here, named by id.
+            _warPicks.SetOptions(options);
+            _warPicks.NoteOnce(string.Create(CultureInfo.InvariantCulture, $"TODO(m5-war-pick-data): {bolt.Name} (spell {bolt.Id}) has no projectile row in WarSpellData; no war option, the bolt scored from the SpellTable without its damage"));
             return;
         }
 
         options.Add(boltOption);
+        if (_boltElement != "fire")
+        {
+            // M6 14 the element line: the profile's war options (the streak, the volley, the blast, the ring) are fire's shapes; with another line in hand the bolt is the one option
+            _warPicks.NoteOnce($"war pick: the bolt in hand is {_boltLineName}: the fire line's other shapes are not offered (they are fire)");
+            _warPicks.SetOptions(options);
+            return;
+        }
+
         foreach (var line in ArenaProfile.Lines.Concat(ArenaProfile.Extras))
         {
             if (line.Role != ProfileRole.WarOption)
@@ -201,7 +314,7 @@ public sealed partial class FightScenario
             var bestRow = WarSpellData.HighestUnderCap(
                 line.Spells.Select(spell => spell.Id),
                 cap,
-                id => _spells.TryGetValue(id, out var info) && (book is not { IsKnown: true } || book.Knows(id)) && GearCasts.Chance(warSkill, info.Power) >= _buffOptions.CastChance,
+                id => _spells.TryGetValue(id, out var info) && !_droppedSpells.Contains(id) && (book is not { IsKnown: true } || book.Knows(id)) && GearCasts.Chance(warSkill, info.Power) >= _buffOptions.CastChance,
                 out var capped);
             var best = bestRow is not null && _spells.TryGetValue(bestRow.Id, out var bestInfo) ? bestInfo : null;
             var short_ = line.Name.EndsWith("Ring of Fire", StringComparison.Ordinal) ? "ring" : line.Name;
@@ -255,7 +368,9 @@ public sealed partial class FightScenario
             _live.Seed(o.Guid, held);
         }
 
-        return _live.TryGet(o.Guid, max, out var fraction, out _) ? fraction : 1.0f;
+        var known = _live.TryGet(o.Guid, max, out var fraction, out var source);
+        ShadowHealth(Threat.HealthReader.FightWar, o.Guid, known, fraction, max, source, _live.AgeOf(o.Guid, _lastClock), _lastClock); // M6 16 E2d: the one picture is asked the same beside it (report-only)
+        return known ? fraction : 1.0f;
     }
 
     /// <summary>
@@ -282,7 +397,7 @@ public sealed partial class FightScenario
             }
 
             var isCurrent = o.Guid == _target;
-            if (o.Position is not { } p || (o.ItemType & WarCreatureItemType) == 0 || o.Health is <= 0f || o.Motion is { Forward: WorldObjectTable.DeadMotionLowWord } || _killed.Contains(o.Guid) || !(isCurrent || IsTargetWcid(o.Weenie.WeenieClassId)))
+            if (StandsAt(session, o) is not { } p || (o.ItemType & WarCreatureItemType) == 0 || o.Health is <= 0f || o.Motion is { Forward: WorldObjectTable.DeadMotionLowWord } || _killed.Contains(o.Guid) || !(isCurrent || IsTargetWcid(o.Weenie.WeenieClassId)))
             {
                 continue;
             }
@@ -328,7 +443,7 @@ public sealed partial class FightScenario
         var objects = session.State.Objects;
         var origin = here.ToGlobal();
         var count = 0;
-        if (!objects.TryGet(_target, out var cast) || cast.Position is not { } castAt)
+        if (!objects.TryGet(_target, out var cast) || StandsAt(session, cast) is not { } castAt)
         {
             return 0;
         }
@@ -341,7 +456,7 @@ public sealed partial class FightScenario
                 break;
             }
 
-            if (o.Guid == _target || o.Position is not { } p || (o.ItemType & WarCreatureItemType) == 0 || o.Health is <= 0f || o.Motion is { Forward: WorldObjectTable.DeadMotionLowWord } || _killed.Contains(o.Guid))
+            if (o.Guid == _target || StandsAt(session, o) is not { } p || (o.ItemType & WarCreatureItemType) == 0 || o.Health is <= 0f || o.Motion is { Forward: WorldObjectTable.DeadMotionLowWord } || _killed.Contains(o.Guid))
             {
                 continue;
             }

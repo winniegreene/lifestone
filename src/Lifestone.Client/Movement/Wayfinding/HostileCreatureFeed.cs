@@ -2,6 +2,7 @@ using System.Numerics;
 using DatReaderWriter.DBObjs;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Client.Session.Creatures;
 using Lifestone.Data.Dat;
 using Lifestone.Data.Models;
 
@@ -17,7 +18,9 @@ namespace Lifestone.Client.Movement.Wayfinding;
 /// description's ObjScale), as the physics object's own radius is (<c>PhysicsObj.Radius</c>; ACE @95ef426d measures the awareness between the two
 /// cylinders, PhysicsObj.cs:2519); <see cref="NavCreatures.UnknownCreatureRadiusMetres"/> when the Setup cannot be read (logged once). ACE alerts only an idle creature without a
 /// move-exclude tolerance (<c>AlertMonster</c>, Creature_Combat.cs:1121-1151 @95ef426d); the client sees neither, so every hostile creature counts.
-/// Allocates nothing once the list has grown.
+/// M6 16 E1f: the awareness is the pinned range (the default, as before) or, under <c>--walk-awareness=own</c>, the kind's own range by the world database (<see cref="Bestiary.OwnAwarenessMetres"/>); the session's
+/// <see cref="WalkAwareness"/> on the object table says which and, in both modes, reports what the other would have changed (<c>awareness-shadow:</c>). <see cref="Fill"/>'s <c>from</c> is the body's place: the shadow measures
+/// each creature from it. Allocates nothing once the list has grown.
 /// </summary>
 /// <param name="objects">The session's object table.</param>
 /// <param name="self">The player's id (never on the layer).</param>
@@ -69,7 +72,15 @@ public sealed class HostileCreatureFeed(WorldObjectTable objects, uint self, ILo
                 continue;
             }
 
-            into.Add(new NavCreature(o.Guid, centre, NavCreatures.AggroRadius(CreatureAwareness.MetresOf(o.Weenie.WeenieClassId), RadiusOf(o)), o.Position!.Value.Origin.Z)); // its height too, for a room route's storey band (M5 2 fix F2)
+            // M6 16 E1f: the range the walk keeps is the session's choice (--walk-awareness: the pinned range by default, as before, or the kind's own); the shadow names a kind whose two ranges differ and a leg's passes between the two discs
+            var wcid = o.Weenie.WeenieClassId;
+            var body = RadiusOf(o);
+            var pinned = Bestiary.AwarenessMetres(wcid);
+            var own = Bestiary.OwnAwarenessMetres(wcid);
+            var walk = _objects.WalkAwareness;
+            var kept = walk.Kept(wcid, o.Name, pinned, own, log);
+            walk.Seen(o.Guid, wcid, o.Name, Vector2.Distance(centre, from), NavCreatures.AggroRadius(pinned, body), NavCreatures.AggroRadius(own, body));
+            into.Add(new NavCreature(o.Guid, centre, NavCreatures.AggroRadius(kept, body), o.Position!.Value.Origin.Z)); // its height too, for a room route's storey band (M5 2 fix F2)
         }
     }
 
@@ -81,17 +92,7 @@ public sealed class HostileCreatureFeed(WorldObjectTable objects, uint self, ILo
     public static Func<uint, float?> SetupRadii(DatSet dats)
     {
         ArgumentNullException.ThrowIfNull(dats);
-        var cache = new Dictionary<uint, float?>();
-        return id =>
-        {
-            if (!cache.TryGetValue(id, out var radius))
-            {
-                radius = dats.TryGetPortal<Setup>(id, out var setup) ? ModelAssembly.FromSetup(id, setup).Radius : null;
-                cache[id] = radius;
-            }
-
-            return radius;
-        };
+        return new SetupShapes(dats).Radius; // the same numbers as before; the lookup's owner also reads a Setup's collision shape for the NPC bodies (SetupShapes.Of)
     }
 
     /// <summary>The creature's own radius: its Setup's radius times its scale, or <see cref="NavCreatures.UnknownCreatureRadiusMetres"/> (logged once) when it cannot be read.</summary>
@@ -117,5 +118,79 @@ public sealed class HostileCreatureFeed(WorldObjectTable objects, uint self, ILo
         }
 
         return NavCreatures.UnknownCreatureRadiusMetres;
+    }
+}
+
+/// <summary>
+/// A Setup's two sizes by its id, over the dats, cached per id (a warm lookup allocates nothing; game thread only): its radius (retail <c>CSetup::radius</c>, the model's bounds, which the aggro discs and a creature's own
+/// radius read) and the radius of its collision shape at walking height (<see cref="ShapeRadius"/>: what the physics makes a walker stop at). <see cref="HostileCreatureFeed.SetupRadii"/> hands out <see cref="Radius"/>;
+/// <see cref="NpcBodyFeed"/> finds the shape through the same lookup (<see cref="Of"/>), so no host passes a second one.
+/// </summary>
+/// <param name="dats">The dats.</param>
+public sealed class SetupShapes(DatSet dats)
+{
+    /// <summary>The height a walker's body reaches, in metres: a shape wholly above it (a sign over a door, a lamp on a pole) blocks no one on the ground. The human Setup's height is 1.84 at scale 1; Lifestone's own round figure.</summary>
+    public const float WalkingHeightMetres = 2f;
+
+    private readonly DatSet _dats = dats ?? throw new ArgumentNullException(nameof(dats));
+    private readonly Dictionary<uint, (float? Radius, float? Shape)> _cache = [];
+
+    /// <summary>The Setup's radius (<c>CSetup::radius</c>), or null for a Setup not in the dats.</summary>
+    /// <param name="id">The Setup id.</param>
+    public float? Radius(uint id) => Read(id).Radius;
+
+    /// <summary>
+    /// The radius of the Setup's collision shape at walking height, unscaled: the farthest any of its cylinders or spheres that stands between the ground and <see cref="WalkingHeightMetres"/> reaches from the Setup's own
+    /// axis (the shapes retail's <c>CPartArray</c> collides a moving body with: <c>CSetup::cylsphere</c> and <c>CSetup::sphere</c>). Null when the Setup is not in the dats or has no such shape (its parts' own geometry is its
+    /// collision, which this lookup does not measure).
+    /// </summary>
+    /// <param name="id">The Setup id.</param>
+    public float? ShapeRadius(uint id) => Read(id).Shape;
+
+    /// <summary>The shapes behind a radius lookup that <see cref="HostileCreatureFeed.SetupRadii"/> made, or null for any other lookup (a test's lambda, no lookup).</summary>
+    /// <param name="setupRadius">The lookup.</param>
+    public static SetupShapes? Of(Func<uint, float?>? setupRadius) => setupRadius?.Target as SetupShapes;
+
+    private (float? Radius, float? Shape) Read(uint id)
+    {
+        if (_cache.TryGetValue(id, out var read))
+        {
+            return read;
+        }
+
+        if (!_dats.TryGetPortal<Setup>(id, out var setup))
+        {
+            return _cache[id] = (null, null);
+        }
+
+        var model = ModelAssembly.FromSetup(id, setup);
+        return _cache[id] = (model.Radius, ShapeRadiusOf(model.CylSpheres, model.Spheres));
+    }
+
+    /// <summary>The farthest reach from the axis of the cylinders and spheres that stand in the walking height, or null when none does.</summary>
+    /// <param name="cylinders">The Setup's cylinder-spheres.</param>
+    /// <param name="spheres">The Setup's spheres.</param>
+    public static float? ShapeRadiusOf(IReadOnlyList<ModelCylSphere> cylinders, IReadOnlyList<ModelSphere> spheres)
+    {
+        ArgumentNullException.ThrowIfNull(cylinders);
+        ArgumentNullException.ThrowIfNull(spheres);
+        float? reach = null;
+        foreach (var c in cylinders)
+        {
+            if (c.Radius > 0f && c.LowPoint.Z < WalkingHeightMetres && c.LowPoint.Z + c.Height > 0f)
+            {
+                reach = MathF.Max(reach ?? 0f, new Vector2(c.LowPoint.X, c.LowPoint.Y).Length() + c.Radius);
+            }
+        }
+
+        foreach (var s in spheres)
+        {
+            if (s.Radius > 0f && s.Center.Z - s.Radius < WalkingHeightMetres && s.Center.Z + s.Radius > 0f)
+            {
+                reach = MathF.Max(reach ?? 0f, new Vector2(s.Center.X, s.Center.Y).Length() + s.Radius);
+            }
+        }
+
+        return reach;
     }
 }

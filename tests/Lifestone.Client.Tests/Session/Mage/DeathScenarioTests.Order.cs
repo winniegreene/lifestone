@@ -339,8 +339,8 @@ public sealed partial class DeathScenarioTests
         var fields = scenario.VerdictFields();
         Assert.Contains(" trip_abort=none stage_rebuffed=yes den_kills=4 pretrip_heals=", fields, StringComparison.Ordinal);
         EachJudgedKeyOnce(scenario.VerdictFields());
-        Assert.Equal("deaths=1 corpse_recovered=yes route=recall items_back=3 vitae_grants=0 rebuffed=yes rebuffed_pretrip=yes relines=0 rearm=none", scenario.HandlerFields);
-        Assert.EndsWith(" bound=" + (scenario.Bound ? "yes" : "no") + " deaths=1 corpse_recovered=yes route=recall items_back=3 vitae_grants=0 rebuffed=yes rebuffed_pretrip=yes relines=0 rearm=none", scenario.VerdictFields(), StringComparison.Ordinal); // M5 3 d2: the death line carries the handler fields at its end
+        Assert.Equal("deaths=1 corpse_recovered=yes route=recall items_back=3 vitae_grants=0 rebuffed=yes rebuffed_pretrip=yes relines=0 rearm=none rewear=none replace=none", scenario.HandlerFields);
+        Assert.EndsWith(" bound=" + (scenario.Bound ? "yes" : "no") + " deaths=1 corpse_recovered=yes route=recall items_back=3 vitae_grants=0 rebuffed=yes rebuffed_pretrip=yes relines=0 rearm=none rewear=none replace=none", scenario.VerdictFields(), StringComparison.Ordinal); // M5 3 d2: the death line carries the handler fields at its end
         Assert.Equal(HoltburgCell, rig.R.H.State.Self.Position?.CellId);
         Assert.Equal(2, rig.Places.Count); // the bind and the den before the death; none after it (D51: no place)
         Assert.Empty(rig.XpAsked); // no vitae grant

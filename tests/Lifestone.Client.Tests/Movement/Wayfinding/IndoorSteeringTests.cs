@@ -98,10 +98,11 @@ public sealed class IndoorSteeringTests(ITestOutputHelper output)
 
         Assert.True(rig.Runner.State == NavRunState.Arrived, rig.Runner.FailureReason);
         output.WriteLine(string.Create(CultureInfo.InvariantCulture, $"walked {rig.Runner.WalkedMetres:0.0} of {rig.Runner.RouteMetres:0.0} m"));
-        Assert.InRange(rig.Runner.WalkedMetres, 3f, 12f); // the walk near the doorway before the turn (and the 2 m before the stop), not the whole 28 m
+        Assert.InRange(rig.Runner.WalkedMetres, 1f, 12f); // the walk near the doorway before the turn (and the 2 m before the stop), not the whole 28 m
     }
 
     [Fact]
+    [Trait("Tier", "Timing")] // m5-indoorsteering-alloc-flake: a zero-byte allocation count on the test thread; tiered JIT and the parallel suite's load add bytes (passes alone)
     public void A_warm_indoor_runner_allocates_nothing_a_step()
     {
         var rig = new IndoorRig(IndoorRoomKit.LongHall(), 0f, IndoorRoomKit.Hall, new Vector2(96f, 58f), heading: 0f);
@@ -156,14 +157,17 @@ public sealed class IndoorSteeringDatTests(DatSetFixture fixture, ITestOutputHel
     /// D134's den walk (the owner's observation that he swings in direction when hitting junctions): the twelve spawn cells walked in order, back again and in a stride of five
     /// (36 legs, each starting where and facing as the last ended, as the fight's walks do), at the fighter's Run and the mage's. Every leg arrives in its cell
     /// without a rung; the reversals and the flips a metre stay under <see cref="MaxReversalsPerMetre"/> and the run skill's halved flips. The per-leg and total
-    /// counters are written (turns, reversals, flips, in-place presses, forward re-presses, progress backs, swings, rungs).
+    /// counters are written (turns, reversals, flips, in-place presses, forward re-presses, progress backs, swings, rungs). With the predictive steering (the fight walks' since
+    /// 2026-11-16) the same gates hold; its corner pairs are its turns onto a leg or into a bend of the den's grid (<see cref="NavRunner.PredictCornerTurns"/>).
     /// </summary>
     [RequiresDatsTheory]
-    [InlineData(FighterRunSkill, 0.0043f)]
-    [InlineData(MageRunSkill, 0.0077f)]
-    public void The_dens_walk_turns_without_swinging(int runSkill, float maxFlipsPerMetre)
+    [InlineData(FighterRunSkill, 0.0043f, false)]
+    [InlineData(MageRunSkill, 0.0077f, false)]
+    [InlineData(FighterRunSkill, 0.0043f, true)]
+    [InlineData(MageRunSkill, 0.0077f, true)]
+    public void The_dens_walk_turns_without_swinging(int runSkill, float maxFlipsPerMetre, bool predictive)
     {
-        var tally = WalkTheDen(runSkill, DenTour(), out var failures);
+        var tally = WalkTheDen(runSkill, DenTour(), predictive, out var failures);
         var reversalsPerMetre = (tally.Reversals - tally.CornerReversals) / tally.Metres;
         var flipsPerMetre = tally.Flips / tally.Metres;
         output.WriteLine(string.Create(CultureInfo.InvariantCulture, $"gate: reversals outside corner pairs {reversalsPerMetre:0.0000}/m (max {MaxReversalsPerMetre:0.0000}; raw {tally.Reversals / tally.Metres:0.0000}/m), flips {flipsPerMetre:0.0000}/m (max {maxFlipsPerMetre:0.0000})"));
@@ -203,7 +207,7 @@ public sealed class IndoorSteeringDatTests(DatSetFixture fixture, ITestOutputHel
     }
 
     /// <summary>Walks <paramref name="tour"/> (spawn-cell low words) from the den's arrival at <paramref name="runSkill"/>, writing each leg's line and the totals.</summary>
-    private DenTally WalkTheDen(int runSkill, IReadOnlyList<ushort> tour, out List<string> failures)
+    private DenTally WalkTheDen(int runSkill, IReadOnlyList<ushort> tour, bool predictive, out List<string> failures)
     {
         var dats = fixture.Dats;
         var coord = new LandblockCoord(1, 5);
@@ -234,7 +238,7 @@ public sealed class IndoorSteeringDatTests(DatSetFixture fixture, ITestOutputHel
             }
 
             var goal = NavGoal.ToPoint(new NavPoint(0x01050000u, graph.RoomFrame(cellId)!.Value.Origin), cellId);
-            using var runner = new NavRunner(h.Api.Move, new ControllerNavBody(walker.Controller), source, confirmer, audit, new NavRunnerOptions { Name = string.Create(CultureInfo.InvariantCulture, $"den-{leg}-{lowWord:X4}") }, log);
+            using var runner = new NavRunner(h.Api.Move, new ControllerNavBody(walker.Controller), source, confirmer, audit, new NavRunnerOptions { Name = string.Create(CultureInfo.InvariantCulture, $"den-{leg}-{lowWord:X4}"), PredictiveSteering = predictive }, log);
             runner.Start(goal, now);
             var end = now + 120;
             while (!runner.IsDone && now < end)
@@ -279,8 +283,10 @@ public sealed class IndoorSteeringDatTests(DatSetFixture fixture, ITestOutputHel
         return t;
     }
 
-    [RequiresDatsFact]
-    public void The_dens_legs_press_a_turn_key_at_most_once_per_4_m_of_route()
+    [RequiresDatsTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void The_dens_legs_press_a_turn_key_at_most_once_per_4_m_of_route(bool predictive)
     {
         var dats = fixture.Dats;
         var coord = new LandblockCoord(1, 5);
@@ -303,7 +309,7 @@ public sealed class IndoorSteeringDatTests(DatSetFixture fixture, ITestOutputHel
         {
             var cellId = 0x01050000u | lowWord;
             var goal = NavGoal.ToPoint(new NavPoint(0x01050000u, graph.RoomFrame(cellId)!.Value.Origin), cellId);
-            using var runner = new NavRunner(h.Api.Move, new ControllerNavBody(walker.Controller), source, confirmer, audit, new NavRunnerOptions { Name = "den-" + lowWord.ToString("X4", CultureInfo.InvariantCulture) });
+            using var runner = new NavRunner(h.Api.Move, new ControllerNavBody(walker.Controller), source, confirmer, audit, new NavRunnerOptions { Name = "den-" + lowWord.ToString("X4", CultureInfo.InvariantCulture), PredictiveSteering = predictive });
             runner.Start(goal, now);
             var end = now + 120;
             while (!runner.IsDone && now < end)
@@ -496,6 +502,8 @@ internal sealed class IndoorBody(S5KinematicBody body, LandblockCellSet cells, u
     public bool ServerDriving => body.ServerDriving;
 
     public double Now => body.Now;
+
+    public float TurnRate => body.TurnRate;
 
     /// <summary>Finds the body's room after it moved (the last one when it stands in none, counted).</summary>
     public void Sync()

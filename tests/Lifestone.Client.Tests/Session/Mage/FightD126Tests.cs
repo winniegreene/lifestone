@@ -58,22 +58,22 @@ public sealed class FightD126Tests(ITestOutputHelper output)
     [Fact]
     public void At_the_lull_a_batch_is_renewed_whole_past_the_horizon_and_a_line_apart_from_it_is_not()
     {
-        // The horizon is 180 s (the seed 120 + 60): Quickness (100 s) and Strength (150 s) are inside it; Endurance (200 s) and Coordination (250 s) follow them 50 s apart, the same batch; Willpower (400 s) is 150 s past the batch.
-        var left = new Dictionary<string, double>(StringComparer.Ordinal) { ["Quickness Self"] = 100, ["Strength Self"] = 150, ["Endurance Self"] = 200, ["Coordination Self"] = 250, ["Willpower Self"] = 400 };
+        // The horizon is 60 s (M6 7 AZ: the margin alone): Quickness (40 s) is inside it; Strength (90 s), Endurance (140 s) and Coordination (190 s) follow it 50 s apart, the same batch; Willpower (400 s) is 210 s past the batch.
+        var left = new Dictionary<string, double>(StringComparer.Ordinal) { ["Quickness Self"] = 40, ["Strength Self"] = 90, ["Endurance Self"] = 140, ["Coordination Self"] = 190, ["Willpower Self"] = 400 };
         var r = Rig(l => left.GetValueOrDefault(l.Name, 1500), new BuffOptions { FightSeedSeconds = 120 }, 60);
         var scenario = Armed(r); // no hit: the lull is now
         r.Run(scenario, 60, 0.1, () => left.Keys.Take(4).All(BuffCasts(r).Contains));
         r.Run(scenario, 10, 0.1);
         Dump(r);
         Assert.Equal(["Coordination Self", "Endurance Self", "Quickness Self", "Strength Self"], BuffCasts(r).Distinct().Order(StringComparer.Ordinal).ToList());
-        Assert.Contains(r.Log.Lines, l => l.Contains("buff refresh: lookahead: ", StringComparison.Ordinal) && l.Contains("(batch: the lines under 250 s go together)", StringComparison.Ordinal));
+        Assert.Contains(r.Log.Lines, l => l.Contains("buff refresh: lookahead: ", StringComparison.Ordinal) && l.Contains("(batch: the lines under 190 s go together)", StringComparison.Ordinal));
         Assert.DoesNotContain(r.Log.Lines, l => l.Contains("lookahead: Willpower Self", StringComparison.Ordinal));
     }
 
     [Fact]
     public void Under_fire_a_batch_starts_early_enough_for_its_last_line_and_none_lapses()
     {
-        // Ten lines with 31 to 40 s left, a tusker in reach and hitting: one at a time at the 30 s floor, the last would be reached after it ran out; as a batch the k-th line is due under 30 + 1.5 k s, so the batch starts at once.
+        // Ten lines with 31 to 40 s left, a tusker in reach and hitting: one at a time at the 30 s floor, the last would be reached after it ran out; as a batch the k-th line is due under 30 + 2.0 k s, so the batch starts at once.
         string[] batch = ["Strength Self", "Endurance Self", "Coordination Self", "Quickness Self", "Focus Self", "Willpower Self", "Creature Enchantment Mastery Self", "War Magic Mastery Self", "Item Enchantment Mastery Self", "Life Magic Mastery Self"];
         var r = Rig(l => Array.IndexOf(batch, l.Name) is var i and >= 0 ? 31 + i : 1500, new BuffOptions { FightSeedSeconds = 120 }, 12);
         var scenario = Armed(r);
@@ -146,5 +146,35 @@ public sealed class FightD126Tests(ITestOutputHelper output)
         Assert.NotEqual(ScenarioStatus.Running, status);
         Assert.Empty(BuffCasts(r));
         Assert.Equal(1, scenario.LeaveRefreshes);
+    }
+
+    [Fact]
+    public void The_leave_refresh_bound_is_the_larger_of_the_floor_and_the_batchs_own_plan_M6_1_fix_1_R6()
+    {
+        Assert.Equal(FightScenario.LeaveRefreshBoundSeconds, FightScenario.LeaveBoundFor(3, 0)); // a small batch: the long run's floor
+        Assert.Equal(FightScenario.LeaveRefreshBoundSeconds, FightScenario.LeaveBoundFor(0, 30));
+        Assert.Equal((25 * FightScenario.BatchLineSeconds) + 60, FightScenario.LeaveBoundFor(25, 60)); // a full same-age batch of 25 lines: 50 s of passes plus the margin, never the flat 45
+        Assert.True(FightScenario.LeaveBoundFor(25, BuffOptions.DefaultLookaheadMarginSeconds) > 25 * FightScenario.BatchLineSeconds);
+    }
+
+    [Fact]
+    public void A_stop_for_a_trip_with_a_full_same_age_batch_is_not_cut_at_45_seconds_M6_1_fix_1_R6()
+    {
+        var count = Math.Min(25, ArenaProfile.Lines.Count(l => l.IsBuff));
+        var r = Rig(_ => 100, new BuffOptions { FightSeedSeconds = 120 }, 12, new FightOptions { Kills = FightOptions.UnlimitedKills, Seconds = 3600 });
+        r.Caster.CastSeconds = 2.0; // the long run's median pass is 1.94 s a line: 25 lines take more than 45 s
+        var scenario = r.Scenario();
+        r.Run(scenario, 30, 0.1, () => scenario.Stage == "fight");
+        scenario.RequestLeaveRefresh(180, 20, "logistics-trip: the whole batch is the same age");
+        ((IStoppableFight)scenario).RequestStop(FightStopReason.LogisticsTrip);
+        Hit(r);
+        var status = r.Run(scenario, 300, 0.1);
+        Dump(r);
+
+        Assert.NotEqual(ScenarioStatus.Running, status);
+        Assert.Equal(1, scenario.LeaveRefreshes);
+        Assert.DoesNotContain(r.Log.Lines, l => l.Contains("passed with", StringComparison.Ordinal) && l.Contains("TODO(m5-leave-refresh-bound)", StringComparison.Ordinal)); // not cut
+        Assert.Contains(r.Log.Lines, l => l.Contains($"buff refresh: leave: {count} line(s) in the batch: the bound is ", StringComparison.Ordinal));
+        Assert.Equal(count, BuffCasts(r).Distinct().Count()); // every line of the batch was recast
     }
 }

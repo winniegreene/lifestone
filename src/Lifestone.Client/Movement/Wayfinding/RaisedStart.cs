@@ -91,16 +91,18 @@ public sealed class RaisedStart
 
     /// <summary>
     /// The floor's height under a raised start: the height of <paramref name="plan"/>'s first later point in <paramref name="start"/>'s room when the start stands more than <see cref="RaisedMetres"/> above it, else null
-    /// (an outdoor start, a failed plan, a start on the floor).
+    /// (an outdoor start, a failed plan, a start on the floor). M6 8 M (live, round 2 of item 8, the Cathedral portal's house): a flight of stairs named in one room is a plan whose next point lies 5 m lower in the same room name, and a body on the door hall's own floor is not on a
+    /// counter: the step-off ran it down the stair into the portal's room, which the room graph does not join, and the leg's plan from there failed <c>indoor-start-unreachable</c>. So <paramref name="roomFloor"/>, the room's own floor under the body, decides first: a body within <see cref="RaisedMetres"/> of it stands on the floor.
     /// </summary>
     /// <param name="plan">The plan from <paramref name="start"/>.</param>
     /// <param name="start">Where the body stands.</param>
     /// <param name="next">The plan's point whose height it is.</param>
-    public static float? FloorBelow(NavPath plan, in CellFrame start, out Vector3 next)
+    /// <param name="roomFloor">The height of the room's own floor under the body (<see cref="RoomGraph.RoomFloorUnder"/>), or null when no polygon of the room lies under it: the plan's next point alone decides.</param>
+    public static float? FloorBelow(NavPath plan, in CellFrame start, out Vector3 next, float? roomFloor = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
         next = default;
-        if (plan.Status != NavPathStatus.Found || LandDefs.IsOutdoorCell(start.CellId))
+        if (plan.Status != NavPathStatus.Found || LandDefs.IsOutdoorCell(start.CellId) || start.Origin.Z - roomFloor <= RaisedMetres)
         {
             return null;
         }

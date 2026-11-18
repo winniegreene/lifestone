@@ -1,0 +1,115 @@
+{
+  "key": "academy-skip",
+  "name": "The Training Academy, the tutorial's own skip (Jonathan's Exit Token, exit to Holtburg)",
+  "giver": null,
+  "start": {
+    "cell": "0x860201AD",
+    "point": null,
+    "name": "the Training Academy's start (CharGen start area 0)"
+  },
+  "steps": [
+    {
+      "kind": "give",
+      "what": "hand the Calling Stone to the Society Greeter",
+      "place": null,
+      "target": {
+        "wcid": 30991,
+        "name": "Society Greeter"
+      },
+      "item": {
+        "wcid": 5084,
+        "name": "Calling Stone"
+      },
+      "expect": {
+        "reply": "Why don't you go talk to the Agent in the next room?",
+        "stamp": "CallingStoneGiven",
+        "item": null
+      },
+      "source": "W0 SELECT, m6-plan.md section 8: cache/m6/0/sel-academy.tsv: academygreeter 30991, Give (category 6) of 5084: Tell, StampQuest CallingStoneGiven; W0 SELECT, m6-plan.md section 8: cache/m6/0/sel-academy-8602.tsv (every object placed in 0x8602): the Society Greeter 30991 in the start cell 0x860201AD at (9.84, -31.73, 0); the Calling Stone is in a new character's pack (ladder note section 7); the same step as the full route's first (quests/academy.json); the greeter's Give emote set also broadcasts 'If you wish to skip this tutorial, go talk to Jonathan in the next room' (type 68), W0 SELECT, m6-plan.md section 8 / D37",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to Jonathan",
+      "place": {
+        "cell": "0x860201B0",
+        "point": [
+          22.11,
+          -19.14,
+          0.0
+        ],
+        "name": "Jonathan's room"
+      },
+      "target": {
+        "wcid": 29324,
+        "name": "Jonathan"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "W0 SELECT, m6-plan.md section 8 / D37: cache/m6/0/sel-academy-8602.tsv (every object placed in 0x8602): Jonathan 29324 in 0x860201B0 at (22.11, -19.14, 0), beside the Leather Gauntlets 13240 at (18.36, -21.10, 0)",
+      "todo": null
+    },
+    {
+      "kind": "talk",
+      "what": "ask Jonathan for the Exit Token",
+      "place": null,
+      "target": {
+        "wcid": 29324,
+        "name": "Jonathan"
+      },
+      "item": null,
+      "expect": {
+        "reply": "If you want to skip your training and leave the Academy early",
+        "stamp": "AcademeyExitTokenGiven",
+        "item": {
+          "wcid": 29335,
+          "name": "Exit Token"
+        }
+      },
+      "source": "W0 SELECT, m6-plan.md section 8 / D37: Jonathan 29324, Use (category 7): InqQuest AcademeyExitTokenGiven (the server's spelling); on failure (the first time) Tell 'If you want to skip your training and leave the Academy early, give this token back to me.', StampQuest AcademeyExitTokenGiven, Give the Exit Token 29335 (tokentrainingexit), Tell 'But beware, once you leave the Training Academy, you cannot come back!'; asked again he says 'I already gave you an Exit Token.' and gives nothing",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "give the Exit Token back to Jonathan: the server teleports the player to Holtburg",
+      "place": {
+        "cell": "0xA9B40019",
+        "point": null,
+        "name": "Holtburg (the Exit Token's destination)"
+      },
+      "target": {
+        "wcid": 29324,
+        "name": "Jonathan"
+      },
+      "item": {
+        "wcid": 29335,
+        "name": "Exit Token"
+      },
+      "expect": {
+        "reply": "Make sure you talk to Alcott",
+        "stamp": null,
+        "item": null
+      },
+      "source": "W0 SELECT, m6-plan.md section 8 / D37: Jonathan 29324, Give (category 6) of 29335: Give 12711 twice, GotoSet pick_coat_color (one coat of 13210-13219), then finalize_exit: InqQuest RecallsDisabled's set (category 22) gives 49563, teleports the player to Holtburg 0xA9B40019 (84.0, 7.1) (emote type 63, the server's own teleport, not a tool verb), EraseQuest AcademeyExitTokenGiven (31), Tell 'Make sure you talk to Alcott to continue your journey.', AwardLevelProportionalXP (type 62) amount 11,000 (the level reached is reported, never assumed)",
+      "todo": null
+    }
+  ],
+  "done": {
+    "stamp": null,
+    "reply": "Make sure you talk to Alcott",
+    "item": null
+  },
+  "timer_seconds": null,
+  "sources": [
+    "W0 SELECT, m6-plan.md section 8 / D37: the tutorial's skip, the lead's read-only SELECT of this server's ace_world: the Society Greeter 30991 (Give 5084: 'Why don't you go talk to the Agent in the next room?', then the broadcast 'If you wish to skip this tutorial, go talk to Jonathan in the next room', StampQuest CallingStoneGiven), Jonathan 29324 (Use: InqQuest AcademeyExitTokenGiven, gives the Exit Token 29335; Give 29335: the exit set, the server's teleport to Holtburg 0xA9B40019, 'Make sure you talk to Alcott to continue your journey.', an award of 11,000 level-proportional XP)",
+    "W0 SELECT, m6-plan.md section 8 / D37: cache/m6/0/sel-academy-8602.tsv, every object placed in landblock 0x8602 (the names, cells and positions of the steps); the layout is instanced in other landblocks with the same cell low words, so the station matches a cell by its low word in the landblock it starts in",
+    "m6-plan.md D37: the climber takes the skip (about level 5 by the award; the level reached is the character's own property, reported by the station, never assumed); the full route is quests/academy.json, whose Sentry and hive ramps are item 4's seam",
+    "The skip keeps no done stamp: finalize_exit erases AcademeyExitTokenGiven, so the done condition is the reply (and the arrival in Holtburg's landblock 0xA9B4, which the station checks); a later quest of the ladder's rung that keeps a stamp (the Pathwarden's) proves it for a fresh process (AutopilotScenario.EarlierQuestDoneByLater)",
+    "The Calling Stone 5084 is in a new character's pack (the ladder note section 7, cache/m6/level-ladder-note.md)",
+    "Item 0 live round 8: the three leather pickups left the skip: the walk to the Leather Cap was refused by the route confirmer's ground probe at the player's own raised floor (z 0.73 in 0x860201B6), TODO(m6-probe-start-surface), item 4's wayfinder; the Pathwarden chest dresses the mage, and the full route (academy.json) keeps the pickups"
+  ]
+}

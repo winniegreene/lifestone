@@ -38,6 +38,15 @@ public sealed class PathPlanner
     /// <summary>The slope ramp's weight: a node at the ramp's top (SlopeCost 255) costs this much extra per metre. Not retail: Lifestone's own.</summary>
     public const float SlopeWeight = 2f;
 
+    /// <summary>The extra cost per metre on a node at the top of the slope ramp (SlopeCost 255: beside too-steep land, or at the walkable limit). Measured by the world walk's long walks: 14% fewer recovery moves, walks no longer (docs/milestones/world-walk.md, the land seams). Not retail: Lifestone's own.</summary>
+    public const float SteepEdgeWeight = 18f;
+
+    /// <summary>
+    /// The extra cost per metre on a node whose square overlaps too-steep land (<see cref="NavFlags.SteepEdge"/>): the body wedges where a steep sliver cuts into its line,
+    /// so a node path goes a node round one where it can. Not retail: Lifestone's own.
+    /// </summary>
+    public const float SteepTouchWeight = 40f;
+
     /// <summary>Clearance (in nodes) below which a node costs extra. Not retail: Lifestone's own (design 3.1).</summary>
     public const int ClearanceSoftNodes = 5;
 
@@ -58,6 +67,19 @@ public sealed class PathPlanner
 
     /// <summary>The clearance in nodes the pulled route's samples keep (1: not blocked). Not retail: Lifestone's own (design 3.1).</summary>
     public const int PullMinClearance = 1;
+
+    /// <summary>How many landblocks of the world route past the attached tiles a plan names for the streamer.</summary>
+    private const int WorldRouteAheadBlocks = 4;
+
+    /// <summary>The world's land as a whole, when the host has it: a far goal then follows the land's real way round instead of the attached edge nearest the straight line, and a goal in view with no way inside the attached tiles is walked to by that way (null: as before).</summary>
+    public WorldRouteSearch? WorldRoutes { get; set; }
+
+    /// <summary>The plans that used the world route.</summary>
+    public int WorldRoutePlans { get; private set; }
+
+    private const float WorldRoundByMinMetres = 8f;
+
+    private string? _worldNote;
 
     /// <summary>The runner replans a horizon route within this many metres of its end once the next tiles are attached. Not retail: Lifestone's own (design 3.1).</summary>
     public const float HorizonReplanMetres = 60f;
@@ -121,6 +143,7 @@ public sealed class PathPlanner
     private int[] _path = new int[1024];
     private int[] _waterPrefix = new int[1024];
     private int[] _slopePrefix = new int[1024];
+    private int[] _steepPrefix = new int[1024];
     private int _pathCount;
     private Vector2[] _vxy = new Vector2[64];
     private float[] _vz = new float[64];
@@ -143,6 +166,14 @@ public sealed class PathPlanner
     private int _goalGx;
     private int _goalGy;
     private bool _objectGoal;
+
+    // M6 14 (m6-14-yinar): a point goal on the attached tiles is judged against the scars by its own point, not by its node's centre (ScarBlocks, Visible).
+    private bool _exactGoal;
+    private Vector2 _goalPoint;
+
+    // M6 14 (m6-14-plaza2): the start's node and point: a step from the start node is judged from the start's own point (ScarBlocks).
+    private int _startNode = -1;
+    private Vector2 _startPoint;
     private Vector2 _target;
     private float _range;
     private int _reached;
@@ -198,14 +229,18 @@ public sealed class PathPlanner
             snapped = true;
         }
 
+        _startNode = start;
+        _startPoint = startG;
         var goalG = goal.Point.Global;
         bool horizon = false;
         _objectGoal = false;
+        _exactGoal = false;
+        IReadOnlyList<uint> ahead = [];
         if (!_map.TryNode(goalG, out _goalNode))
         {
-            if (!TryHorizon(start, startG, goalG, out _goalNode))
+            if (!TryWorldHorizon(start, goal, out _goalNode, out ahead) && !TryHorizon(start, startG, goalG, out _goalNode))
             {
-                return Fail(NavStatus.NoPath, "no-horizon", goal, t0);
+                return Fail(NavStatus.NoPath, "no-horizon", goal, t0) with { WorldRouteNote = _worldNote };
             }
 
             horizon = true;
@@ -228,10 +263,13 @@ public sealed class PathPlanner
                 return Fail(NavStatus.GoalBlocked, "goal-blocked", goal, t0);
             }
 
-            if (ScarredNode(_goalNode))
+            if (ScarredPoint(goalG))
             {
                 return Fail(NavStatus.GoalBlocked, "goal-scarred", goal, t0);
             }
+
+            _exactGoal = true;
+            _goalPoint = goalG;
         }
 
         _goalGx = _map.NodeGx(_goalNode);
@@ -260,6 +298,19 @@ public sealed class PathPlanner
             found = Fine(start, bounded: false, ref expanded, ref touched);
         }
 
+        if (!found && !horizon && TryWorldRoundBy(start, goal, out var roundBy, out ahead))
+        {
+            // The goal is in view and the way to it is not: the land's own way round needs tiles that are not attached yet.
+            _goalNode = roundBy;
+            horizon = true;
+            _objectGoal = false;
+            _exactGoal = false;
+            _goalGx = _map.NodeGx(_goalNode);
+            _goalGy = _map.NodeGy(_goalNode);
+            corridor = Coarse(start, _goalNode);
+            found = Fine(start, bounded: false, ref expanded, ref touched);
+        }
+
         if (!found)
         {
             return new NavPlanResult
@@ -267,6 +318,7 @@ public sealed class PathPlanner
                 Status = NavStatus.NoPath,
                 Goal = goal,
                 Reason = "no-path",
+                WorldRouteNote = _worldNote,
                 NodesExpanded = expanded,
                 NodesTouched = touched,
                 CorridorRegions = corridor,
@@ -294,6 +346,7 @@ public sealed class PathPlanner
             StartSnapped = snapped,
             Goal = goal,
             HorizonPoint = horizon ? route.End : null,
+            Corridor = ahead,
             NodesExpanded = expanded,
             NodesTouched = touched,
             CorridorRegions = corridor,
@@ -398,27 +451,58 @@ public sealed class PathPlanner
         return false;
     }
 
-    /// <summary>A step into a scar is blocked, except outward inside the scar the start stands in.</summary>
+    /// <summary>
+    /// M6 14 (m6-14-yinar): whether a scar the start is not in covers the point itself. A point goal is judged by this, not by its node's centre (<see cref="ScarredNode"/>): the 1 m lattice puts a node's centre up to 0.71 m from a point in it,
+    /// so a goal a scar's edge leaves free can sit in a node whose centre the scar covers (live ladder61, 2026-11-17 14:14:16 UTC: the Yinar Portal's front, 3.00 m from the portal, outside its own reach of 2.84 m, in the node whose centre stands 2.63 m
+    /// from it: <c>goal-scarred</c>, and the hop failed).
+    /// </summary>
+    private bool ScarredPoint(Vector2 point)
+    {
+        for (int k = 0; k < _scarCount; k++)
+        {
+            if (!_scarStart[k] && Vector2.DistanceSquared(point, _scars[k].Centre) <= _scars[k].Radius * _scars[k].Radius)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// A step into a scar is blocked, except outward inside the scar the start stands in. M6 14 (m6-14-plaza2; live ladder63, 2026-11-17 18:06:38 UTC: a plan's leg passed within the Maythen Geroyu Villas Portal's clearance, which the runner's
+    /// exact check of the whole line refused, <c>portal-keep-off</c>): a step is judged by its whole straight line, from the point it leaves (the start's own point from the start's node) to the point it reaches (an exact point goal's own point in
+    /// its node, M6 14 m6-14-yinar; else the node's centre), against each scar's exact disc, as the runner judges a plan (<see cref="PortalKeepOff.FirstMeeting(Vector2, float, Vector2, float)"/>); not by the node's centre alone, which let a line
+    /// between two centres outside a disc dip into it.
+    /// </summary>
     private bool ScarBlocks(int from, int to)
     {
-        var ct = _map.NodeCentre(to);
+        var ct = _exactGoal && to == _goalNode ? _goalPoint : _map.NodeCentre(to);
+        var cf = from == _startNode ? _startPoint : _map.NodeCentre(from);
         for (int k = 0; k < _scarCount; k++)
         {
             var s = _scars[k];
             float r2 = s.Radius * s.Radius;
-            float dt = Vector2.DistanceSquared(ct, s.Centre);
-            if (dt > r2)
-            {
-                continue;
-            }
-
             if (_scarStart[k])
             {
-                float df = Vector2.DistanceSquared(_map.NodeCentre(from), s.Centre);
+                float dt = Vector2.DistanceSquared(ct, s.Centre);
+                if (dt > r2)
+                {
+                    continue;
+                }
+
+                float df = Vector2.DistanceSquared(cf, s.Centre);
                 if (df <= r2 && dt >= df - 1e-4f)
                 {
                     continue;
                 }
+
+                return true;
+            }
+
+            if (SegmentDistance2(s.Centre, cf, ct) > r2)
+            {
+                continue;
             }
 
             return true;
@@ -551,6 +635,240 @@ public sealed class PathPlanner
         }
 
         return goalNode >= 0;
+    }
+
+    /// <summary>
+    /// The horizon goal by the world route: the first step of the land's route that leaves the attached tiles, and of the open nodes on that side of the last attached landblock, in the route's own ground and reachable on the coarse graph,
+    /// the one nearest the ground it steps to. False with no world routes, no route, or a route wholly inside the attached tiles.
+    /// </summary>
+    private bool TryWorldHorizon(int start, NavGoal goal, out int horizon, out IReadOnlyList<uint> ahead)
+    {
+        horizon = -1;
+        ahead = [];
+        if (WorldRouteTo(start, goal) is not { } route)
+        {
+            return false;
+        }
+
+        var routes = WorldRoutes!.Routes;
+        int i = 1;
+        while (i < route.Count && SlotOf(routes.LandblockOf(route[i])) >= 0)
+        {
+            i++;
+        }
+
+        if (i >= route.Count)
+        {
+            _worldNote = FormattableString.Invariant($"the route is inside the attached tiles, {route.Count} steps");
+            return false;
+        }
+
+        var (last, next) = (route[i - 1], route[i]);
+        var (lastBlock, nextBlock) = (routes.LandblockOf(last), routes.LandblockOf(next));
+        int slot = SlotOf(lastBlock);
+        int dx = (int)(nextBlock >> 24) - (int)(lastBlock >> 24);
+        int dy = (int)((nextBlock >> 16) & 0xFF) - (int)((lastBlock >> 16) & 0xFF);
+        var (ox, oy) = _map.SlotOrigin(slot);
+        var aim = routes.CentreOf(next);
+        CoarseReach(_map.RegionOfNode(start));
+        float best = float.MaxValue;
+        for (int side = 0; side < 4; side++)
+        {
+            if (NavMap.Dx[side] * dx <= 0 && NavMap.Dy[side] * dy <= 0)
+            {
+                continue;
+            }
+
+            for (int k = 0; k < NavTile.Size; k++)
+            {
+                int x = side switch { 0 => NavTile.Size - 1, 2 => 0, _ => k };
+                int y = side switch { 1 => NavTile.Size - 1, 3 => 0, _ => k };
+                int node = (slot * NavMap.NodesPerTile) + NavTile.Index(x, y);
+                if (!_map.Walkable(node) || _map.Clearance(node) < PullMinClearance || ScarredNode(node) || ComponentOfNode(node) != last)
+                {
+                    continue;
+                }
+
+                int region = _map.RegionOfNode(node);
+                if (region < 0 || _cseen[region] != _cgen)
+                {
+                    continue;
+                }
+
+                float score = Vector2.Distance(new Vector2(ox + x + 0.5f, oy + y + 0.5f), aim);
+                if (score < best)
+                {
+                    best = score;
+                    horizon = node;
+                }
+            }
+        }
+
+        if (horizon < 0)
+        {
+            _worldNote = FormattableString.Invariant($"no open edge node of component {last} in 0x{lastBlock >> 16:X4} toward 0x{nextBlock >> 16:X4}, {i} of {route.Count} steps");
+            return false;
+        }
+
+        ahead = [.. route.Skip(i).Take(WorldRouteAheadBlocks).Select(routes.LandblockOf)];
+        WorldRoutePlans++;
+        return true;
+    }
+
+    /// <summary>
+    /// The goal is in view, the fine search just failed to reach it, and its closed nodes are exactly the ground the body can reach on the attached tiles. The land's route says which way on: the furthest step of the route
+    /// with such ground on the edge facing the next step. The usual case is a route over a landblock's corner, where the ground it needs is in a side landblock the attached tiles do not hold yet: the body walks to the corner and they attach.
+    /// False with no world routes, no route, or no reached edge far enough from the body to be progress.
+    /// </summary>
+    private bool TryWorldRoundBy(int start, NavGoal goal, out int horizon, out IReadOnlyList<uint> ahead)
+    {
+        horizon = -1;
+        ahead = [];
+        if (WorldRouteTo(start, goal) is not { } route)
+        {
+            return false;
+        }
+
+        var routes = WorldRoutes!.Routes;
+        var body = new Vector2(_map.NodeGx(start), _map.NodeGy(start));
+        for (int i = route.Count - 2; i >= 0; i--)
+        {
+            int node = ReachedEdgeNode(route[i], route[i + 1]);
+            if (node < 0)
+            {
+                continue;
+            }
+
+            if (Vector2.Distance(new Vector2(_map.NodeGx(node), _map.NodeGy(node)), body) < WorldRoundByMinMetres)
+            {
+                _worldNote = FormattableString.Invariant($"the furthest reached edge is at the body, step {i} of {route.Count}");
+                return false;
+            }
+
+            horizon = node;
+            ahead = [.. route.Skip(i + 1).Take(WorldRouteAheadBlocks).Select(routes.LandblockOf)];
+            WorldRoutePlans++;
+            return true;
+        }
+
+        _worldNote = FormattableString.Invariant($"no reached edge on the route's {route.Count} steps");
+        return false;
+    }
+
+    /// <summary>Of the nodes the failed fine search closed, on the edge of <paramref name="component"/>'s landblock facing <paramref name="next"/> and in that component, the one nearest the ground it steps to; -1 for none.</summary>
+    private int ReachedEdgeNode(int component, int next)
+    {
+        var routes = WorldRoutes!.Routes;
+        var (block, nextBlock) = (routes.LandblockOf(component), routes.LandblockOf(next));
+        int slot = SlotOf(block);
+        if (slot < 0)
+        {
+            return -1;
+        }
+
+        int dx = (int)(nextBlock >> 24) - (int)(block >> 24);
+        int dy = (int)((nextBlock >> 16) & 0xFF) - (int)((block >> 16) & 0xFF);
+        var (ox, oy) = _map.SlotOrigin(slot);
+        var aim = routes.CentreOf(next);
+        int found = -1;
+        float best = float.MaxValue;
+        for (int side = 0; side < 4; side++)
+        {
+            if (NavMap.Dx[side] * dx <= 0 && NavMap.Dy[side] * dy <= 0)
+            {
+                continue;
+            }
+
+            for (int k = 0; k < NavTile.Size; k++)
+            {
+                int x = side switch { 0 => NavTile.Size - 1, 2 => 0, _ => k };
+                int y = side switch { 1 => NavTile.Size - 1, 3 => 0, _ => k };
+                int node = (slot * NavMap.NodesPerTile) + NavTile.Index(x, y);
+                if (_state[node].Closed != _gen || _map.Clearance(node) < PullMinClearance || ScarredNode(node) || ComponentOfNode(node) != component)
+                {
+                    continue;
+                }
+
+                float score = Vector2.Distance(new Vector2(ox + x + 0.5f, oy + y + 0.5f), aim);
+                if (score < best)
+                {
+                    best = score;
+                    found = node;
+                }
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>The world route from the body to the goal, or null with the reason in <see cref="_worldNote"/> (no world routes leaves it null).</summary>
+    private IReadOnlyList<int>? WorldRouteTo(int start, NavGoal goal)
+    {
+        _worldNote = null;
+        if (WorldRoutes is not { } search)
+        {
+            return null;
+        }
+
+        int from = ComponentOfNode(start);
+        int to = GoalComponent(goal.Point);
+        if (from < 0 || to < 0)
+        {
+            _worldNote = FormattableString.Invariant($"no component: start {from}, goal {to}");
+            return null;
+        }
+
+        var route = search.Route(from, to);
+        if (route is null)
+        {
+            _worldNote = FormattableString.Invariant($"the land does not join component {from} to {to}");
+        }
+
+        return route;
+    }
+
+    private int SlotOf(uint landblockId) => _map.SlotOfBlock((int)(landblockId >> 24), (int)((landblockId >> 16) & 0xFF));
+
+    /// <summary>The world component of an attached node: by its region when the tile has the regions the file has, else by its land cell (a tile built before its neighbours can differ slightly).</summary>
+    private int ComponentOfNode(int node)
+    {
+        var routes = WorldRoutes!.Routes;
+        int slot = node / NavMap.NodesPerTile;
+        var landblock = _map.TileOfSlot(slot).LandblockId;
+        int index = node - (slot * NavMap.NodesPerTile);
+        int x = index % NavTile.Size;
+        int y = index / NavTile.Size;
+        if (routes.RegionCount(landblock) == _map.RegionCountOfSlot(slot))
+        {
+            return routes.ComponentOfRegion(landblock, _map.RegionAt(landblock, x, y));
+        }
+
+        return routes.ComponentAtCell(landblock, ((y / NavMap.LandCellNodes) * NavMap.LandCellsPerSide) + (x / NavMap.LandCellNodes));
+    }
+
+    /// <summary>The world component of a goal, from the land cell it stands in, or one beside that when its own holds no ground (a goal on a building's footprint).</summary>
+    private int GoalComponent(NavPoint point)
+    {
+        var routes = WorldRoutes!.Routes;
+        var p = point.Normalized();
+        int cx = Math.Clamp((int)(p.Local.X / NavMap.LandCellNodes), 0, NavMap.LandCellsPerSide - 1);
+        int cy = Math.Clamp((int)(p.Local.Y / NavMap.LandCellNodes), 0, NavMap.LandCellsPerSide - 1);
+        for (int r = 0; r <= 1; r++)
+        {
+            for (int y = Math.Max(cy - r, 0); y <= Math.Min(cy + r, NavMap.LandCellsPerSide - 1); y++)
+            {
+                for (int x = Math.Max(cx - r, 0); x <= Math.Min(cx + r, NavMap.LandCellsPerSide - 1); x++)
+                {
+                    int component = routes.ComponentAtCell(p.LandblockId, (y * NavMap.LandCellsPerSide) + x);
+                    if (component >= 0)
+                    {
+                        return component;
+                    }
+                }
+            }
+        }
+
+        return -1;
     }
 
     /// <summary>
@@ -945,6 +1263,15 @@ public sealed class PathPlanner
         if ((flags & NavFlags.Slope) != 0)
         {
             c += SlopeWeight * tile.SlopeCost[i] / 255f;
+            if (tile.SlopeCost[i] == 255)
+            {
+                c += SteepEdgeWeight;
+            }
+        }
+
+        if ((flags & NavFlags.SteepEdge) != 0)
+        {
+            c += SteepTouchWeight;
         }
 
         int clearance = tile.Clearance[i];
@@ -997,6 +1324,7 @@ public sealed class PathPlanner
         {
             _waterPrefix = new int[_path.Length];
             _slopePrefix = new int[_path.Length];
+            _steepPrefix = new int[_path.Length];
         }
 
         if (_creaturePrefix.Length < _pathCount)
@@ -1006,12 +1334,14 @@ public sealed class PathPlanner
 
         int water = 0;
         int slope = 0;
+        int steep = 0;
         float exposure = 0f;
         for (int k = 0; k < _pathCount; k++)
         {
             var flags = _map.Flags(_path[k]);
             water += (flags & NavFlags.Water) != 0 ? 1 : 0;
             slope += (flags & NavFlags.Slope) != 0 ? 1 : 0;
+            steep += (flags & NavFlags.SteepEdge) != 0 ? 1 : 0;
             if (k > 0 && _creatureCount > 0)
             {
                 bool diagonal = _map.NodeGx(_path[k]) != _map.NodeGx(_path[k - 1]) && _map.NodeGy(_path[k]) != _map.NodeGy(_path[k - 1]);
@@ -1020,6 +1350,7 @@ public sealed class PathPlanner
 
             _waterPrefix[k] = water;
             _slopePrefix[k] = slope;
+            _steepPrefix[k] = steep;
             _creaturePrefix[k] = exposure;
         }
     }
@@ -1134,7 +1465,7 @@ public sealed class PathPlanner
 
     private bool Visible(int i, int j, Vector2 startG, Vector2 goalG, bool exactGoal, int minClearance = PullMinClearance)
     {
-        // The pull may cross water or slope only where the node path between the two points did.
+        // The pull may cross water, slope or a steep edge only where the node path between the two points did.
         var avoid = NavFlags.None;
         if (_waterPrefix[j] - (i > 0 ? _waterPrefix[i - 1] : 0) == 0)
         {
@@ -1144,6 +1475,11 @@ public sealed class PathPlanner
         if (_slopePrefix[j] - (i > 0 ? _slopePrefix[i - 1] : 0) == 0)
         {
             avoid |= NavFlags.Slope;
+        }
+
+        if (_steepPrefix[j] - (i > 0 ? _steepPrefix[i - 1] : 0) == 0)
+        {
+            avoid |= NavFlags.SteepEdge;
         }
 
         var a = PathPoint(i, startG, goalG, exactGoal);

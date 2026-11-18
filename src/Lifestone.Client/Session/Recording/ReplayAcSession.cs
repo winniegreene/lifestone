@@ -314,6 +314,18 @@ internal sealed class ReplayAcSession : IAcSession
     public OutboundTicket SendTeleToMarketPlace() => Sent(MessageOpcodes.GameAction, GameActionTypes.TeleToMarketPlace);
 
     /// <inheritdoc/>
+    public OutboundTicket SendBuyHouse(uint guardian, IReadOnlyList<uint> items) => Sent(MessageOpcodes.GameAction, GameActionTypes.BuyHouse);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendRentHouse(uint guardian, IReadOnlyList<uint> items) => Sent(MessageOpcodes.GameAction, GameActionTypes.RentHouse);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendHouseQuery() => Sent(MessageOpcodes.GameAction, GameActionTypes.HouseQuery);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendTeleToHouse() => Sent(MessageOpcodes.GameAction, GameActionTypes.TeleToHouse);
+
+    /// <inheritdoc/>
     public OutboundTicket SendEmote(ReadOnlySpan<char> text) => Sent(MessageOpcodes.GameAction, GameActionTypes.Emote);
 
     public OutboundTicket SendSetInscription(uint item, ReadOnlySpan<char> inscription) => Sent(MessageOpcodes.GameAction, GameActionTypes.SetInscription);
@@ -338,6 +350,9 @@ internal sealed class ReplayAcSession : IAcSession
 
     /// <inheritdoc/>
     public OutboundTicket SendTell(ReadOnlySpan<char> target, ReadOnlySpan<char> text) => Sent(MessageOpcodes.GameAction, GameActionTypes.Tell);
+
+    /// <inheritdoc/>
+    public OutboundTicket SendTalkDirect(uint target, ReadOnlySpan<char> text) => Sent(MessageOpcodes.GameAction, GameActionTypes.TalkDirect);
 
     /// <inheritdoc/>
     public void LogOff() => Sent(MessageOpcodes.CharacterLogOff, 0);

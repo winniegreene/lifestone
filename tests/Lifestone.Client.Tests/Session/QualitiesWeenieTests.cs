@@ -196,6 +196,33 @@ public sealed class QualitiesWeenieTests(DatSetFixture fixture) : IClassFixture<
         Assert.False(weenie.TryGetRunRate(out _));
     }
 
+    /// <summary>
+    /// M6 14 pits: the run rate and the jump read the buffs, as retail's <c>InqSkill</c> with <c>raw</c> false does (Sprint Self and Quickness Self raise the run, Jumping Mastery Self and Strength Self the jump; the load's
+    /// Strength too); the base stays the bare rule. Stand-in buffs: Quickness +30 (an attribute's additive 0x9001) and Run +40 and Jump +20 (a skill's additive 0x9010).
+    /// </summary>
+    [Fact]
+    public void The_buffs_raise_the_run_and_the_jump_and_the_base_stays_bare()
+    {
+        var q = Known();
+        var weenie = Weenie(q);
+        Assert.True(weenie.TryGetRunRate(out var bareRate));
+        Assert.True(weenie.TryGetJumpVelocity(1f, out var bareJump));
+        Assert.Equal((62, 62), (weenie.RunSkill, weenie.RunSkillBase));
+        Assert.Equal((45, 45), (weenie.JumpSkill, weenie.JumpSkillBase)); // (50 + 40) / 2, no ranks
+
+        q.Enchantments = [Buff(1, 0x9001, Quickness, 30f), Buff(2, 0x9010, QualitiesWeenie.RunSkillId, 40f), Buff(3, 0x9010, QualitiesWeenie.JumpSkillId, 20f)];
+        Assert.Equal(62, weenie.RunSkillBase);
+        Assert.Equal(112, weenie.RunSkill); // (60 + 120) / 3 + 12, + 40
+        Assert.Equal(65, weenie.JumpSkill);
+        Assert.True(weenie.TryGetRunRate(out var rate));
+        Assert.True(weenie.TryGetJumpVelocity(1f, out var jump));
+        Assert.Equal((float)MovementSystem.GetRunRate(0f, 112, 1f), rate, 4);
+        Assert.True(rate > bareRate && jump > bareJump, $"{rate} {jump} vs {bareRate} {bareJump}");
+    }
+
+    private static EnchantmentDesc Buff(ushort spell, uint type, uint key, float value) =>
+        new(spell, 1, spell, 0, 300, 0.0, 3600.0, 0x50000001, 0f, 0f, 0.0, type, key, value, 0, EnchantmentBucket.Additive);
+
     [Fact]
     public void The_unread_qualities_are_logged_once_as_named_TODOs()
     {
@@ -205,7 +232,8 @@ public sealed class QualitiesWeenieTests(DatSetFixture fixture) : IClassFixture<
         Assert.True(weenie.TryGetRunRate(out _));
         Assert.True(weenie.TryGetJumpVelocity(1f, out _));
         var line = Assert.Single(log.Lines);
-        Assert.All(["state-enchantments", "state-enlightenment", "state-carry-augmentation", "state-pk-status"], todo => Assert.Contains($"TODO({todo})", line));
+        Assert.All(["state-carry-augmentation", "state-pk-status"], todo => Assert.Contains($"TODO({todo})", line));
+        Assert.All(["state-enchantments", "state-enlightenment"], todo => Assert.DoesNotContain($"TODO({todo})", line)); // M6 14 pits: the buffs and Enlightenment count (SkillRules.TryCurrent)
     }
 
     [Fact]

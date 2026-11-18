@@ -179,11 +179,21 @@ public static class SessionBootstrap
                     header),
                 time,
                 log);
+            session.AllowClimberGrant = options.AllowClimberGrant;
+            session.PlayerRules = options.PlayerRules; // M6 15: --autopilot-player-rules (on by default)
+            session.State.Objects.WalkAwareness.Mode = options.WalkAwareness; // M6 16 E1f: --walk-awareness (own by default since M6 16 Q3)
             log.Info(
                 SessionLog.Category,
                 "live session created: idle, no socket until the login",
                 new LogField("retailNet", options.RetailNet),
+                new LogField("allowClimberGrant", options.AllowClimberGrant),
+                new LogField("playerRules", options.PlayerRules),
                 new LogField("budgetMs", options.BudgetMs));
+            if (options.WalkAwareness != Movement.Wayfinding.WalkAwarenessMode.Own)
+            {
+                log.Info(SessionLog.Category, "walk awareness: the walks keep each creature kind's pinned awareness range off it (--walk-awareness=pinned; the default is each kind's own range)");
+            }
+
             return session;
         }
         catch

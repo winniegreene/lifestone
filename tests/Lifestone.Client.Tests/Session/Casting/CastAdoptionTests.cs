@@ -338,11 +338,11 @@ namespace Lifestone.Client.Tests.Session.Casting
             var ctx = t.Context();
             var (run, _) = t.RunStation(new BindStation(), ctx);
 
-            Assert.False(run.Ok);
+            Assert.True(run.Ok, run.Failure); // M6 7 BC: a tie that does not land leaves the bind standing (tied=no), named in the log
             Assert.Null(ctx.Facts.LifestoneTied);
             Assert.EndsWith("tie_fizzles=4", run.VerdictFields(), StringComparison.Ordinal);
             Assert.Equal(4, t.Events.Count(e => e.StartsWith("cast:2644@", StringComparison.Ordinal)));
-            Assert.Contains(((ScriptLeg)run).Problems, p => p.Contains("YourSpellFizzled 0x0402", StringComparison.Ordinal));
+            Assert.Contains(t.R.H.Log.Entries, e => e.Message.Contains("YourSpellFizzled 0x0402", StringComparison.Ordinal) && e.Message.Contains("the bind stands", StringComparison.Ordinal));
             Assert.Contains(t.R.H.Log.Lines, l => l.Contains("journey cast: fizzled after 4 tries", StringComparison.Ordinal));
         }
     }

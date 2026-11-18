@@ -82,6 +82,50 @@ public static class EffectRules
     }
 
     /// <summary>
+    /// M6 14 S2b: the enchantment in effect for one spell category at <paramref name="nowSeconds"/>, by the duel of <see cref="InEffect"/> (the multiplicative list, then the additive; the higher power level holds, the later
+    /// start at the same power), over the entries that have time left: an entry past its end that no removal has taken yet is left out, as it no longer stands. Allocates nothing.
+    /// </summary>
+    /// <param name="qualities">The player's qualities.</param>
+    /// <param name="category">The spell category (the stacking family; 0 is none).</param>
+    /// <param name="nowSeconds">The session clock.</param>
+    /// <param name="inEffect">The entry in effect.</param>
+    /// <returns>False when no entry of the category has time left.</returns>
+    public static bool TryInEffectOf(PlayerQualities qualities, uint category, double nowSeconds, out ActiveEnchantment inEffect)
+    {
+        ArgumentNullException.ThrowIfNull(qualities);
+        inEffect = default;
+        var found = false;
+        var active = qualities.ActiveEnchantments;
+        if (category == 0 || active.IsDefaultOrEmpty)
+        {
+            return false;
+        }
+
+        for (var pass = 0; pass < 2; pass++)
+        {
+            var bucket = pass == 0 ? EnchantmentBucket.Multiplicative : EnchantmentBucket.Additive;
+            for (var i = 0; i < active.Length; i++)
+            {
+                var e = active[i].Enchantment;
+                if (e.Bucket != bucket || e.SpellCategory != category || active[i].RemainingSeconds(nowSeconds) <= 0)
+                {
+                    continue;
+                }
+
+                if (found && (inEffect.Enchantment.PowerLevel > e.PowerLevel || (inEffect.Enchantment.PowerLevel == e.PowerLevel && active[i].StartSeconds < inEffect.StartSeconds)))
+                {
+                    continue; // Enchantment::Duel: the entry holds its place
+                }
+
+                inEffect = active[i];
+                found = true;
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>
     /// <c>CACQualities::IsEnchanted</c> (<c>CEnchantmentRegistry::IsEnchanted</c>; 11.6096 0x0058FD40 for the qualities): the vitae answers for the spell 666, any other spell by the cooldown, multiplicative and additive lists.
     /// </summary>
     /// <param name="qualities">The player's qualities.</param>

@@ -45,7 +45,9 @@ public sealed partial class DeathScenarioTests
         var scenario = rig.Scenario(new FakeWalk(), DeathStages.Death | DeathStages.Corpse, new DeathOptions { StartAt = DeathStages.Corpse, LeaveOnFailure = false });
 
         Assert.Equal(ScenarioStatus.Failed, rig.Run(scenario, 10));
-        Assert.Contains("TODO(m4-death-start-at)", scenario.Failure, StringComparison.Ordinal);
+        Assert.Contains("start_at: corpse is not a stage a run can begin at", scenario.Failure, StringComparison.Ordinal);
+        Assert.Contains("not startable, by design; a death handled elsewhere enters at the respawn through JourneyFacts.ObservedDeath", scenario.Failure, StringComparison.Ordinal); // M6 6 C1: m4-death-start-at closed, reworded
+        Assert.DoesNotContain("TODO(m4-death-start-at)", scenario.Failure, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -392,6 +392,7 @@ public sealed class DynamicLightsTests
     // ----- no allocation -----
 
     [Fact]
+    [Trait("Tier", "Timing")] // dynamic-lights-alloc-flake: a zero-byte allocation count (4,584 bytes under load; tiered JIT on the test thread)
     public void A_thousand_ticks_allocate_nothing()
     {
         var list = new DynamicLightList();
@@ -430,6 +431,7 @@ public sealed class DynamicLightsTests
     }
 
     [Fact]
+    [Trait("Tier", "Timing")] // dynamic-lights-alloc-flake: the same zero-byte allocation count with a bolt in flight (1,560 bytes once)
     public void A_thousand_avatar_set_advances_with_a_bolt_in_flight_allocate_nothing_for_the_lights()
     {
         var set = NewSet();

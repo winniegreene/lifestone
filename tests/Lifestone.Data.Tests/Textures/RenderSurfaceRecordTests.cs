@@ -70,7 +70,7 @@ public sealed class RenderSurfaceRecordTests(DatSetFixture fixture, ITestOutputH
 
         // C2 (q5): parallel over the id list. TextureLoader is thread-safe by construction (every dat read goes through
         // DatSet's lock, the caches are ConcurrentDictionary/locked LRU; its class remarks), so one loader is shared
-        // (TODO(q5-loader-thread-safety) resolved: no per-worker loader needed). Failures are keyed by the id's index
+        // (q5-loader-thread-safety (closed) resolved: no per-worker loader needed). Failures are keyed by the id's index
         // so the report is the same lowest-index ids as the sequential run, each with its id in the message.
         var failures = new System.Collections.Concurrent.ConcurrentBag<(int Index, string Message)>();
         var timer = Stopwatch.StartNew();

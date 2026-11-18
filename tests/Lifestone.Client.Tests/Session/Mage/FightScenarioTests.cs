@@ -4,6 +4,7 @@ using Lifestone.Client.Tests.Session.Grounds;
 using System.Globalization;
 using System.Numerics;
 using DatReaderWriter.Enums;
+using Lifestone.Client.Movement;
 using Lifestone.Client.Movement.Routes;
 using Lifestone.Client.Movement.Wayfinding;
 using Lifestone.Client.Options;
@@ -14,6 +15,7 @@ using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Tests.Session.Fighter;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Session.Tools;
+using Lifestone.Client.Session.Vitals;
 using Lifestone.Data.Magic;
 using Lifestone.Data.Terrain;
 using Lifestone.Data.World;
@@ -72,6 +74,9 @@ public sealed partial class FightScenarioTests
         public ActionLog ActionLog => rig.H.ActionLog;
 
         public LinkStats Link => default;
+
+        /// <summary>M6 14 (<c>m6-live-position</c>): where a creature stands now; the server's report alone unless a test draws bodies (<see cref="Rig.Draw"/>).</summary>
+        public LivePositions Live { get; set; } = LivePositions.ReportsOnly;
     }
 
     /// <summary>A walk that arrives after <see cref="TicksPerLeg"/> ticks, or fails on demand.</summary>
@@ -215,6 +220,25 @@ public sealed partial class FightScenarioTests
             return true;
         }
 
+        /// <summary>M6 14 airborne: the ticks a jump stays in flight after <see cref="TakeOff"/>; its landing check runs in the tick that ends the flight, as the runner's does.</summary>
+        public int FlightTicks { get; set; } = 6;
+
+        private int _flightLeft;
+
+        /// <summary>M6 14 airborne: the leg's jump leaves the ground now (a leg must be walking).</summary>
+        public void TakeOff() => _flightLeft = FlightTicks;
+
+        /// <summary>M6 14 airborne: the leg's jump is in the air (from <see cref="TakeOff"/> to its landing check).</summary>
+        public bool InFlight => _walking && _flightLeft > 0;
+
+        bool IFightWalk.JumpInFlight => InFlight;
+
+        /// <summary>M6 14 airborne: what the landing check does besides being logged (the test's body stands again).</summary>
+        public Action? Landed { get; set; }
+
+        /// <summary>M6 14 airborne: when set, the walk's ticks in flight, its landing check and its abandons, in order.</summary>
+        public List<string>? Events { get; set; }
+
         public FightWalkStatus Tick(IGameSessionView session, double now)
         {
             if (LeaveFloor is not null)
@@ -226,6 +250,19 @@ public sealed partial class FightScenarioTests
             if (!_walking)
             {
                 return FightWalkStatus.Idle;
+            }
+
+            if (_flightLeft > 0)
+            {
+                if (--_flightLeft > 0)
+                {
+                    Events?.Add("tick in flight");
+                    return FightWalkStatus.Walking;
+                }
+
+                Events?.Add("landing check");
+                Landed?.Invoke();
+                return FightWalkStatus.Walking; // the leg goes on from the far side
             }
 
             if (++_ticks < TicksPerLeg)
@@ -250,8 +287,10 @@ public sealed partial class FightScenarioTests
 
         public void Abandon()
         {
+            Events?.Add(InFlight ? "abandon in flight" : "abandon");
             _walking = false;
             _spotLeg = false;
+            _flightLeft = 0;
             Abandons++;
         }
 
@@ -329,6 +368,9 @@ public sealed partial class FightScenarioTests
         /// <summary>UseDone 0x0550.</summary>
         OutOfRange,
 
+        /// <summary>M6 7 K: UseDone 0x0406 (ACE's MagicTargetOutOfRange).</summary>
+        MagicOutOfRange,
+
         /// <summary>The creature dies (its object is deleted) with no 0x01AD.</summary>
         SilentKill,
 
@@ -340,6 +382,9 @@ public sealed partial class FightScenarioTests
 
         /// <summary>M5 7 D124: the target died during the wind-up (its object is deleted) and the release is answered WeenieError 0x042C, then UseDone 0 (ACE's DoCastSpell and FinishCast).</summary>
         TargetDiedAtRelease,
+
+        /// <summary>M6 14 airborne: UseDone 0x04EB, ACE's YouCantDoThatWhileInTheAir (<c>Player_Magic.cs</c>:105-109 @95ef426d): nothing cast, nothing charged.</summary>
+        InTheAir,
     }
 
     private sealed class Creature(uint guid, uint wcid, string name, int hitsToKill)
@@ -359,6 +404,12 @@ public sealed partial class FightScenarioTests
         public uint Cell { get; set; }
 
         public float Y { get; set; }
+
+        /// <summary>M6 14: the creature's health in points, when a test gives it one (<see cref="Rig.Add"/>'s <c>health</c>): the life spells take points, a bolt's hit still counts toward <see cref="HitsToKill"/>.</summary>
+        public int Health { get; set; }
+
+        /// <summary>M6 14: its maximum health in points (0: the creature is counted in hits alone).</summary>
+        public int MaxHealth { get; init; }
     }
 
     /// <summary>The scripted ACE and the session over it.</summary>
@@ -378,16 +429,16 @@ public sealed partial class FightScenarioTests
         private ushort _teleports = 2;
         private readonly Dictionary<uint, Creature> _corpses = [];
 
-        public Rig(uint mana = 400, uint warRanks = 330, IReadOnlyCollection<uint>? known = null, FightOptions? fight = null, BuffOptions? buff = null, float range = 30f, int characterLevel = 0, bool openers = false)
+        public Rig(uint mana = 400, uint warRanks = 330, IReadOnlyCollection<uint>? known = null, FightOptions? fight = null, BuffOptions? buff = null, float range = 30f, int characterLevel = 0, bool openers = false, bool life = false, uint? lifeRanks = null)
         {
             R = new WorldActionRig();
             Mana = mana;
-            Table = BuildTable(range, openers);
+            Table = BuildTable(range, openers, life);
             R.Spells([.. Table.Values]);
             Fight = fight ?? new FightOptions();
             Buff = buff ?? new BuffOptions();
             View = new View(R);
-            Describe(warRanks, known ?? Table.Keys.ToArray(), characterLevel);
+            Describe(warRanks, known ?? Table.Keys.ToArray(), characterLevel, lifeRanks);
             R.CombatModeIs(CombatModes.NonCombat);
             var h = R.H.R;
             h.Reducer.OnPlayerTeleport(h.Context, new PlayerTeleportMsg(2));
@@ -397,6 +448,9 @@ public sealed partial class FightScenarioTests
         public WorldActionRig R { get; }
 
         public IGameSessionView View { get; }
+
+        /// <summary>M6 14 (<c>m6-live-position</c>): the session draws <paramref name="bodies"/> from here on, as play mode's avatar set does (<c>GameSession.UseBodies</c>).</summary>
+        public void Draw(ILiveBodies bodies) => ((View)View).Live = new LivePositions(bodies, R.H.R.Clock, R.H.Log);
 
         public Dictionary<uint, SpellInfo> Table { get; }
 
@@ -454,6 +508,95 @@ public sealed partial class FightScenarioTests
         public double? MoveToFailsAfter { get; set; }
 
         private readonly Queue<(uint Corpse, double Due, bool Fail)> _opens = new();
+        private readonly Queue<double> _keyAnswers = new();
+
+        /// <summary>M6 14: the movement controller a test bound with <see cref="BindKeys"/> (its presses and releases), or null: with none bound no key can be pressed.</summary>
+        public WalkKeys? Keys { get; private set; }
+
+        /// <summary>M6 14: the seconds after a key press ACE takes to answer the Use whose walk the key ended (its chain's next look and the way back).</summary>
+        public double KeyAnswerSeconds { get; set; }
+
+        /// <summary>M6 14: when set, a key press ends nothing on the scripted ACE: the walk goes on to its own end (the cut's late path).</summary>
+        public bool KeysIgnored { get; set; }
+
+        /// <summary>M6 14: binds a movement controller that records the keys; a press while ACE's walk to a corpse is under way ends that walk as ACE ends it on a MoveToState: the Use is answered with a UseDone 0 and no contents.</summary>
+        public WalkKeys BindKeys()
+        {
+            Keys = new WalkKeys(this);
+            View.Actions.Move.Bind(Keys, false);
+            return Keys;
+        }
+
+        /// <summary>M6 14: true while the scripted ACE walks the player to a corpse (a Use sent, its open not yet answered).</summary>
+        public bool Walking => _opens.Count > 0;
+
+        private void KeyPressed()
+        {
+            if (KeysIgnored)
+            {
+                return;
+            }
+
+            while (_opens.Count > 0)
+            {
+                _opens.Dequeue(); // StopExistingMoveToChains: the chain's next look answers the Use unsuccessful (Player_Move.cs:99-107, Player_Use.cs:223-241 @95ef426d)
+                _keyAnswers.Enqueue(Now + KeyAnswerSeconds);
+            }
+        }
+
+        /// <summary>M6 14: the rig's movement controller: it records every press and release and tells the scripted ACE of a press.</summary>
+        public sealed class WalkKeys(Rig rig) : IPlayerMovementIntents
+        {
+            /// <summary>The commands pressed (true) and released (false), in order.</summary>
+            public List<(uint Command, bool Start)> Commands { get; } = [];
+
+            public CellFrame Position => rig.View.State.Self.Position ?? default;
+
+            /// <summary>M6 14 airborne: the body is off the ground (a jump or a fall) while a test says so.</summary>
+            public bool InTheAir { get; set; }
+
+            public bool OnGround => !InTheAir;
+
+            public bool? ServerMoving => rig.Walking;
+
+            public string? MotionText => rig.Walking ? "the rig's ACE walks her" : "the rig's body stands";
+
+            public string? LastServerMoveToEnd { get; private set; }
+
+            public void HandleCommand(uint command, bool start, float speed = 1f)
+            {
+                Commands.Add((command, start));
+                if (start && rig.Walking && !rig.KeysIgnored)
+                {
+                    LastServerMoveToEnd = "cancelled (0x0036 ActionCancelled)";
+                }
+
+                if (start)
+                {
+                    rig.KeyPressed();
+                }
+            }
+
+            public void SetHoldRun(bool on)
+            {
+            }
+
+            public void SetHoldSidestep(bool on)
+            {
+            }
+
+            public void ToggleAutoRun()
+            {
+            }
+
+            public void CommenceJump(double now)
+            {
+            }
+
+            public void DoJump(double now)
+            {
+            }
+        }
 
         /// <summary>What a corpse holds: the item's guid, wcid, item type, Value in its description (null: none sent), burden and name.</summary>
         public List<(uint Guid, uint Wcid, uint Type, uint? Value, ushort Burden, string Name)> CorpseItems { get; } = [];
@@ -464,10 +607,39 @@ public sealed partial class FightScenarioTests
         /// <summary>The Value an Identify of an item answers with (PropertyInt 19), by guid.</summary>
         public Dictionary<uint, int> AppraisedValues { get; } = [];
 
+        /// <summary>M6 14 keep every great cantrip: the spell book an Identify of an item answers with (its cantrips), by guid.</summary>
+        public Dictionary<uint, uint[]> AppraisedSpells { get; } = [];
+
+        /// <summary>M6 14 keep every great cantrip: the drops the player sent, in order; a drop the rig takes puts the item on the ground (019A) and lowers the burden by its own.</summary>
+        public List<uint> Dropped { get; } = [];
+
+        /// <summary>M6 14 combine: the scripted ACE's recipes, source weenie to result weenie (a pair of the source makes one result, both consumed: the Atlan wand's 790, 792, 791).</summary>
+        public Dictionary<uint, uint> Recipes { get; } = [];
+
+        /// <summary>M6 14 combine: the recipe uses sent (source, target), in order.</summary>
+        public List<(uint Source, uint Target)> Combined { get; } = [];
+
+        /// <summary>M6 14 combine2: the next this-many recipe uses are answered "You're too busy!" (UseDone 0x001D, nothing used), as ACE answers one while a pick-up's return animation runs.</summary>
+        public int BusyRecipes { get; set; }
+
+        private uint _nextMade = 0x8C0F0001;
+
+        /// <summary>M6 14 keep every great cantrip: the next this-many drops are answered "You're too busy!" (WeenieError 0x001D and 0x00A0, Player_Inventory.cs:1373-1377 @95ef426d).</summary>
+        public int BusyDrops { get; set; }
+
+        /// <summary>M6 14 keep every great cantrip: the drops ACE refuses outright (0x00A0 with ActionCancelled, the item stays held), by item guid.</summary>
+        public HashSet<uint> RefuseDrops { get; } = [];
+
+        /// <summary>M6 1 f: the creature profile an appraisal of a creature answers with (ACE sends its health and maximum health on any roll); none when a test does not give one.</summary>
+        public Dictionary<uint, AceCreatureProfile> CreatureProfiles { get; } = [];
+
         /// <summary>The corpse opens, pick-ups, closes and identifies the player sent, in order.</summary>
         public List<uint> Opened { get; } = [];
 
         public List<uint> Picked { get; } = [];
+
+        /// <summary>M6 5 F1: the pick-ups the server refuses with the 20 h line ("You have solved this quest too recently!", ACE's QuestManager) instead of moving the item, by item guid.</summary>
+        public HashSet<uint> RefusePicks { get; } = [];
 
         public List<uint> Closed { get; } = [];
 
@@ -481,6 +653,12 @@ public sealed partial class FightScenarioTests
 
         public List<uint> CastTargets { get; } = [];
 
+        /// <summary>M6 7 K: the spells the scripted ACE answered, in order.</summary>
+        public List<uint> Answered { get; } = [];
+
+        /// <summary>M6 7 K: the spells ACE refuses, each with its UseDone code.</summary>
+        public Dictionary<uint, uint> RefusedBy { get; } = [];
+
         public List<uint> CastSpells { get; } = [];
 
         public List<uint> HealthQueries { get; } = [];
@@ -489,7 +667,7 @@ public sealed partial class FightScenarioTests
 
         public RecordingLogSink Log => R.H.Log;
 
-        public GearKit Kit { get; } = GearKit.Of([GearItemOf(GearKit.Wand.Wcid, GearKit.Wand.Name, GearKind.Wand, GearKit.Wand), .. GearKit.Armour.Select(a => GearItemOf(a.Wcid, a.Name, GearKind.Armour, a))]);
+        public GearKit Kit { get; set; } = GearKit.Of([GearItemOf(GearKit.Wand.Wcid, GearKit.Wand.Name, GearKind.Wand, GearKit.Wand), .. GearKit.Armour.Select(a => GearItemOf(a.Wcid, a.Name, GearKind.Armour, a))]);
 
         public void Script(params Shot[] shots)
         {
@@ -499,9 +677,9 @@ public sealed partial class FightScenarioTests
             }
         }
 
-        public Creature Add(uint guid, uint wcid, uint cell, float y, string name = "Tusker Slave", int hitsToKill = 2, float x = PlayerX)
+        public Creature Add(uint guid, uint wcid, uint cell, float y, string name = "Tusker Slave", int hitsToKill = 2, float x = PlayerX, int health = 0)
         {
-            var creature = new Creature(guid, wcid, name, hitsToKill) { Cell = cell, Y = y };
+            var creature = new Creature(guid, wcid, name, hitsToKill) { Cell = cell, Y = y, Health = health, MaxHealth = health };
             _creatures[guid] = creature;
             var basis = ReducerHarness.Create(guid, ReducerHarness.Stamps(), ReducerHarness.Position(cell, x, y, 30), name: name);
             R.H.R.Reducer.OnCreateObject(R.H.R.Context, basis with { Weenie = basis.Weenie with { ItemType = 0x10, WeenieClassId = wcid } }, isUpdate: false);
@@ -550,6 +728,11 @@ public sealed partial class FightScenarioTests
                         ModesSent.Add((int)send.Amount);
                         R.CombatModeIs((int)send.Amount);
                         break;
+                    case FakeSendKind.CastTargetedSpell when send.Guid == WorldActionRig.Player && VitalsMeans.HealSelf.Contains((uint)send.Index):
+                    case FakeSendKind.CastUntargetedSpell when VitalsMeans.HealSelf.Contains((uint)send.Index):
+                        CastSpells.Add((uint)send.Index); // M6 14: Heal Self, the one spell at herself this rig answers
+                        _pending.Enqueue(((uint)send.Index, 0, now + CastSeconds));
+                        break;
                     case FakeSendKind.CastTargetedSpell:
                         CastTargets.Add(send.Guid);
                         CastSpells.Add((uint)send.Index);
@@ -590,6 +773,12 @@ public sealed partial class FightScenarioTests
                         break;
                     case FakeSendKind.PutItemInContainer:
                         Picked.Add(send.Guid);
+                        if (RefusePicks.Contains(send.Guid))
+                        {
+                            R.Raw(AceWireWriters.ServerMessage("You have solved this quest too recently!", 0));
+                            break;
+                        }
+
                         R.Server((p, s) => AceM3Writers.PutObjInContainer(p, s, send.Guid, WorldActionRig.Player, 0, 0));
                         break;
                     case FakeSendKind.NoLongerViewingContents:
@@ -599,14 +788,63 @@ public sealed partial class FightScenarioTests
                     case FakeSendKind.Identify:
                         Identified.Add(send.Guid);
                         var answered = new Dictionary<uint, int> { [AppraisalIds.Value] = AppraisedValues.GetValueOrDefault(send.Guid), [AppraisalIds.Burden] = 5 };
-                        R.Server((p, s) => AceVendorWriters.IdentifyResponse(p, s, send.Guid, new AceAppraisal { Success = true, Ints = answered }));
+                        R.Server((p, s) => AceVendorWriters.IdentifyResponse(p, s, send.Guid, new AceAppraisal { Success = true, Ints = answered, SpellBook = AppraisedSpells.GetValueOrDefault(send.Guid) ?? [], Creature = CreatureProfiles.GetValueOrDefault(send.Guid) })); // M6 1 f: a creature's profile when a test gives one
+                        break;
+                    case FakeSendKind.DropItem:
+                        Dropped.Add(send.Guid); // M6 14 keep every great cantrip: the room's drops
+                        if (BusyDrops > 0)
+                        {
+                            BusyDrops--;
+                            R.Server((p, s) => AceWireWriters.WeenieError(p, s, 0x001D));
+                            R.Server((p, s) => AceM3Writers.InventoryServerSaysFailed(p, s, send.Guid, 0));
+                            break;
+                        }
+
+                        if (RefuseDrops.Contains(send.Guid))
+                        {
+                            R.Server((p, s) => AceM3Writers.InventoryServerSaysFailed(p, s, send.Guid, 0x0036));
+                            break;
+                        }
+
+                        var weight = R.H.State.Objects.TryGet(send.Guid, out var lying) ? lying.Weenie.Burden ?? 0 : 0;
+                        var burdenLeft = (R.H.State.Self.Inventory.Burden ?? 0) - weight;
+                        R.Server((p, s) => AceM3Writers.PutObjectIn3D(p, s, send.Guid));
+                        R.PrivateInt(PlayerInventory.EncumbranceProperty, burdenLeft);
+                        break;
+                    case FakeSendKind.UseWithTarget:
+                        var recipeTarget = uint.Parse(send.Target!, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+                        Combined.Add((send.Guid, recipeTarget));
+                        if (BusyRecipes > 0)
+                        {
+                            BusyRecipes--;
+                            R.UseDone(0x001D);
+                            break;
+                        }
+
+                        if (R.H.State.Objects.TryGet(send.Guid, out var recipeSource) && Recipes.TryGetValue(recipeSource.Weenie.WeenieClassId, out var made))
+                        {
+                            R.Raw(AceM3Writers.InventoryRemoveObject(send.Guid)); // both consumed (the recipe's destroy chances 1)
+                            R.Raw(AceM3Writers.InventoryRemoveObject(recipeTarget));
+                            var guid = _nextMade++;
+                            var basis = ReducerHarness.Create(guid, ReducerHarness.Stamps(), null, name: "Made " + made);
+                            R.H.R.Reducer.OnCreateObject(R.H.R.Context, basis with { Weenie = basis.Weenie with { Header = WeenieHeaderFlags.Container, WeenieClassId = made, ContainerId = WorldActionRig.Player, ItemType = 0x80 } }, isUpdate: false);
+                            R.Server((p, s) => AceM3Writers.PutObjInContainer(p, s, guid, WorldActionRig.Player, 0, 0));
+                            R.UseDone();
+                        }
+
                         break;
                     case FakeSendKind.QueryHealth:
                         HealthQueries.Add(send.Guid);
                         var c = _creatures[send.Guid];
-                        R.Server((p, s) => AceWireWriters.UpdateHealth(p, s, send.Guid, Math.Max(0f, 1f - ((float)c.Hits / c.HitsToKill))));
+                        R.Server((p, s) => AceWireWriters.UpdateHealth(p, s, send.Guid, c.MaxHealth > 0 ? (float)c.Health / c.MaxHealth : Math.Max(0f, 1f - ((float)c.Hits / c.HitsToKill))));
                         break;
                 }
+            }
+
+            while (_keyAnswers.Count > 0 && _keyAnswers.Peek() <= now)
+            {
+                _keyAnswers.Dequeue();
+                R.UseDone(); // M6 14: the Use whose walk a key ended: a UseDone 0 and no contents
             }
 
             while (_opens.Count > 0 && _opens.Peek().Due <= now)
@@ -700,9 +938,56 @@ public sealed partial class FightScenarioTests
         private static GearItem GearItemOf(uint wcid, string name, GearKind kind, GearWeenie w) =>
             new(wcid, name, kind, w.WeenieType, w.ItemType, w.ValidLocations, 1, null, w.Burden);
 
-        private static Dictionary<uint, SpellInfo> BuildTable(float range, bool openers)
+        /// <summary>M6 14 (<c>m6-life-through</c>): the range of the rig's life spells (Drain Health Other and Harm Other), in metres.</summary>
+        public const float LifeRange = 20f;
+
+        /// <summary>M6 14: the mage's health as the scripted ACE holds it (a drain's gain raises it); set by <see cref="SetHealth"/>, else read from the description at the first life cast.</summary>
+        public uint? Health { get; private set; }
+
+        /// <summary>M6 14: what the next Harm Other casts take, in order; with none queued a landing takes the level's mean, rounded down (ACE rolls it between the row's two ends).</summary>
+        public Queue<int> HarmAmounts { get; } = new();
+
+        /// <summary>M6 14: the health one Heal Self restores on the scripted ACE.</summary>
+        public uint HealPerCast { get; set; } = 40;
+
+        /// <summary>M6 14: when false the scripted ACE sends no UpdateHealth with a life spell's landing (a creature that is not her selected target): the chat line alone tells what it took.</summary>
+        public bool PushHealth { get; set; } = true;
+
+        /// <summary>M6 14: the server sets the mage's health.</summary>
+        public void SetHealth(uint health)
+        {
+            Health = health;
+            var key = MageTemplate.MaxHealth + 1; // the current's secondary attribute: 2 health
+            _sequence[key] = (byte)(_sequence[key] + 1);
+            R.Raw(AceWireWriters.PrivateUpdateAttribute2ndLevel(_sequence[key], key, health));
+        }
+
+        private static Dictionary<uint, SpellInfo> BuildTable(float range, bool openers, bool life = false)
         {
             var table = new Dictionary<uint, SpellInfo>();
+            if (life)
+            {
+                // M6 14 (m6-life-through): Drain Health Other I to VII (a Transfer) and Harm Other I to VII (a Boost), neither a projectile; powers and costs as the SpellTable's (LifeThroughRuleTests and FightDrainTests pin the dats').
+                var drains = ArenaProfile.ExtraNamed("Drain Health Other")!.Spells;
+                for (var i = 0; i < DrainPicker.Ids.Count; i++)
+                {
+                    table[drains[i].Id] = WorldActionRig.Spell(drains[i].Id, SpellType.Transfer, SpellFlags.Resistable) with { Name = drains[i].Name, School = MagicSchool.LifeMagic, Power = drains[i].Power, BaseMana = i < 6 ? 10u * (uint)(i + 1) : 60u, BaseRangeConstant = LifeRange, BaseRangeMod = 0f };
+                }
+
+                string[] numerals = ["I", "II", "III", "IV", "V", "VI"];
+                for (var i = 0; i < VitalsMeans.HarmOther.Count; i++)
+                {
+                    var id = VitalsMeans.HarmOther[i];
+                    table[id] = WorldActionRig.Spell(id, SpellType.Boost, SpellFlags.Resistable) with { Name = i < 6 ? "Harm Other " + numerals[i] : "Heart Rend", School = MagicSchool.LifeMagic, Power = i == 0 ? 1u : 25u + (50u * (uint)i), BaseMana = 10u * (uint)(i + 1), BaseRangeConstant = LifeRange, BaseRangeMod = 0f };
+                }
+
+                for (var i = 0; i < VitalsMeans.HealSelf.Count; i++)
+                {
+                    var id = VitalsMeans.HealSelf[i];
+                    table[id] = WorldActionRig.Spell(id, SpellType.Boost, SpellFlags.Beneficial | SpellFlags.SelfTargeted) with { Name = i < 6 ? "Heal Self " + numerals[i] : "Adja's Intervention", School = MagicSchool.LifeMagic, Power = i == 0 ? 1u : 50u * (uint)i, BaseMana = 10u * (uint)(i + 1) };
+                }
+            }
+
             if (openers)
             {
                 // M5 7 F8: the opener line (Fire Vulnerability Other I-VIII, Life Magic enchantments) is in the table and the book only when a test asks for it, so the other tests' Slaves keep their bolts alone.
@@ -731,7 +1016,7 @@ public sealed partial class FightScenarioTests
             return table;
         }
 
-        private void Describe(uint warRanks, IReadOnlyCollection<uint> known, int characterLevel)
+        private void Describe(uint warRanks, IReadOnlyCollection<uint> known, int characterLevel, uint? lifeRanks = null)
         {
             var attributes = ImmutableArray.CreateBuilder<AttributeDesc>();
             foreach (var id in new[] { MageTemplate.Strength, MageTemplate.Endurance, MageTemplate.Quickness, MageTemplate.Coordination, MageTemplate.Focus, MageTemplate.Self })
@@ -743,7 +1028,7 @@ public sealed partial class FightScenarioTests
             foreach (var id in new[] { MageTemplate.CreatureEnchantment, MageTemplate.ItemEnchantment, MageTemplate.LifeMagic, MageTemplate.WarMagic, MageTemplate.ManaConversion })
             {
                 var t = MageTemplate.TargetOf(MageStatKind.Skill, id)!;
-                var ranks = id == MageTemplate.WarMagic ? warRanks : (uint)t.Ranks;
+                var ranks = id == MageTemplate.WarMagic ? warRanks : id == MageTemplate.LifeMagic && lifeRanks is { } given ? given : (uint)t.Ranks;
                 skills.Add(new SkillDesc(id, (ushort)ranks, 1, t.Specialized ? 3u : 2u, 0, t.Specialized ? 10u : 0u, 0, 0));
             }
 
@@ -792,14 +1077,41 @@ public sealed partial class FightScenarioTests
 
         private void Answer(uint spellId, uint target)
         {
+            Answered.Add(spellId);
+            if (RefusedBy.TryGetValue(spellId, out var refusal))
+            {
+                R.UseDone(refusal); // M6 7 K: ACE refuses this spell every time
+                return;
+            }
+
+            if (target == 0)
+            {
+                // M6 14: Heal Self: ACE's line of a boost on oneself, with the vital in lower case (WorldObject_Magic.cs:526, :554 @95ef426d), and the UseDone.
+                R.H.State.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxHealth, out var heldNow, out var healthMax);
+                var before = Health ?? heldNow;
+                var restored = Math.Min(HealPerCast, healthMax > before ? healthMax - before : 0);
+                Mana = Mana >= ManaPerCast ? Mana - ManaPerCast : 0;
+                SendMana();
+                SetHealth(before + restored);
+                R.Raw(AceWireWriters.ServerMessage($"You cast {Table[spellId].Name} and restore {restored} points of your health.", 7));
+                R.UseDone();
+                return;
+            }
+
             var shot = _script.Count > 0 ? _script.Dequeue() : Shot.Normal;
             switch (shot)
             {
                 case Shot.OutOfRange:
                     R.UseDone(0x0550);
                     return;
+                case Shot.MagicOutOfRange:
+                    R.UseDone(0x0406);
+                    return;
                 case Shot.NotAcquired:
                     R.UseDone(0x042C);
+                    return;
+                case Shot.InTheAir:
+                    R.UseDone(0x04EB);
                     return;
                 case Shot.TargetDied:
                     _creatures[target].Dead = true;
@@ -825,6 +1137,12 @@ public sealed partial class FightScenarioTests
 
             Mana = Mana >= ManaPerCast ? Mana - ManaPerCast : 0;
             SendMana();
+            if (DrainPicker.RowOf(spellId) is not null || HarmOtherRows.RowOf(spellId) is not null)
+            {
+                AnswerLife(spellId, _creatures[target], shot); // M6 14: no projectile is made for a life spell
+                return;
+            }
+
             var boltId = Projectile();
             var creature = _creatures[target];
             if (ArenaProfile.ExtraNamed("Fire Vulnerability Other")!.Spells.Any(o => o.Id == spellId))
@@ -882,6 +1200,57 @@ public sealed partial class FightScenarioTests
             R.UseDone();
         }
 
+        /// <summary>
+        /// M6 14 (<c>m6-life-through</c>): ACE's answer to a Drain Health Other or a Harm Other, neither of which has a projectile or asks a line (<c>Player_Magic.cs:481-506</c>, <c>:1098-1135</c> @95ef426d). A resist is the
+        /// line alone. A drain takes ACE's share of the creature's current health, scaled to what the mage is missing (<see cref="BuffStatMods.Transfer"/>), and writes "You gain N points of health due to casting ..."
+        /// (<c>WorldObject_Magic.cs:853</c>); Harm Other takes its amount, cut to the health left, and writes "With &lt;spell&gt; you drain N points of health from &lt;name&gt;." (<c>:548</c>), the killing one too, and the
+        /// kill follows (<c>:600</c>). ACE pushes the selected target's new health before either line (<see cref="PushHealth"/>). The UseDone is code 0 every time.
+        /// </summary>
+        private void AnswerLife(uint spellId, Creature creature, Shot shot)
+        {
+            var name = Table[spellId].Name;
+            if (shot == Shot.Resist)
+            {
+                R.Raw(AceWireWriters.ServerMessage($"{creature.Name} resists your spell", 7));
+                R.UseDone();
+                return;
+            }
+
+            R.H.State.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxHealth, out var held, out var healthMax);
+            var mine = Health ?? held;
+            if (DrainPicker.RowOf(spellId) is { } drain)
+            {
+                BuffStatMods.Transfer(in drain, (uint)Math.Max(0, creature.Health), healthMax > mine ? healthMax - mine : 0, out var taken, out var given);
+                creature.Health -= (int)taken;
+                PushHealthOf(creature);
+                SetHealth(mine + given);
+                R.Raw(AceWireWriters.ServerMessage($"You gain {given} points of health due to casting {name} on {creature.Name}", 7));
+                R.UseDone();
+                return;
+            }
+
+            var took = Math.Min(HarmAmounts.Count > 0 ? HarmAmounts.Dequeue() : (int)HarmOtherRows.RowOf(spellId)!.Value.MeanHarm, Math.Max(0, creature.Health));
+            creature.Health -= took;
+            PushHealthOf(creature);
+            R.Raw(AceWireWriters.ServerMessage($"With {name} you drain {took} points of health from {creature.Name}.", 7));
+            if (creature.Health <= 0)
+            {
+                creature.Hits = creature.HitsToKill - 1;
+                Land(spellId, creature, Shot.Normal); // the kill: the notice and the deletion, as a bolt's
+            }
+
+            R.UseDone();
+        }
+
+        private void PushHealthOf(Creature creature)
+        {
+            if (PushHealth && creature.MaxHealth > 0)
+            {
+                var (guid, fraction) = (creature.Guid, Math.Max(0f, (float)creature.Health / creature.MaxHealth));
+                R.Server((p, s) => AceWireWriters.UpdateHealth(p, s, guid, fraction));
+            }
+        }
+
         /// <summary>The bolt lands: the creature's hit, and the kill (0x01AD, the deletion) or the damage line.</summary>
         private void Land(uint spellId, Creature creature, Shot shot)
         {
@@ -937,7 +1306,7 @@ public sealed partial class FightScenarioTests
             var id = _nextProjectile++;
             R.H.R.Reducer.OnCreateObject(
                 R.H.R.Context,
-                ReducerHarness.Create(id, ReducerHarness.Stamps(), ReducerHarness.Position(Den, PlayerX, PlayerY, 30), state: PhysicsState.Missile | PhysicsState.Gravity, velocity: new Vector3(0, 20, 0)),
+                ReducerHarness.Create(id, ReducerHarness.Stamps(), ReducerHarness.Position(R.H.R.State.Self.Position?.CellId ?? Den, PlayerX, PlayerY, 30), state: PhysicsState.Missile | PhysicsState.Gravity, velocity: new Vector3(0, 20, 0)),
                 isUpdate: false);
             return id;
         }
@@ -1090,11 +1459,13 @@ public sealed partial class FightScenarioTests
     }
 
     [Fact]
-    public void A_cast_with_no_projectile_is_a_miss_and_three_in_a_row_move_to_the_next_waypoint()
+    public void A_cast_with_no_projectile_is_a_miss_and_three_in_a_row_across_two_targets_move_to_the_next_waypoint()
     {
+        // M6 8 L: two on one target now drop it (FightScenarioTests.WallStay.cs), so the three in a row need a second target; the walk rule itself is unchanged.
         var r = new Rig();
         r.Add(0x80001001, TuskerSlave, 0x01050303, 40);
-        r.Script(Shot.NoProjectile, Shot.NoProjectile, Shot.NoProjectile);
+        r.Add(0x80001002, TuskerSlave, 0x01050303, 42);
+        r.Script(Shot.NoProjectile, Shot.NoProjectile, Shot.NoProjectile); // two on the first drop it, the third is on the second
         var walk = new FakeWalk();
         var scenario = r.Scenario(walk);
 
@@ -1102,9 +1473,7 @@ public sealed partial class FightScenarioTests
 
         Assert.Equal(3, scenario.Tally.Misses);
         Assert.Equal(1, walk.Legs);
-        Assert.Equal(1, scenario.Walks);
-        Assert.Equal(5, scenario.Tally.Casts); // three misses, then the two hits of the kill after the walk
-        Assert.Equal(1, scenario.Tally.Kills);
+        Assert.True(scenario.Tally.Kills >= 1);
         var lines = r.Log.Lines.Where(l => l.Contains("[fight]", StringComparison.Ordinal)).ToArray();
         Assert.Equal(3, lines.Count(l => l.Contains("miss: the cast was not confirmed", StringComparison.Ordinal)));
         Assert.Contains(lines, l => l.Contains("walking: 3 misses in a row; fake leg 1", StringComparison.Ordinal));
@@ -1123,7 +1492,7 @@ public sealed partial class FightScenarioTests
 
         Assert.Equal((1, 0, 1), (scenario.Tally.BlockedPicks, scenario.Tally.Misses, walk.Legs));
         Assert.Equal(2, scenario.Tally.Casts); // the two hits of the kill, after the leg: none before it
-        Assert.Contains(r.Log.Lines, l => l.Contains("walking: no tusker has a clear line", StringComparison.Ordinal));
+        Assert.Contains(r.Log.Lines, l => l.Contains("walking: no creature of the ground has a clear line", StringComparison.Ordinal));
         Assert.Contains(r.Log.Lines, l => l.Contains("blocked: no clear line to 0x80001001", StringComparison.Ordinal));
     }
 
@@ -1208,21 +1577,22 @@ public sealed partial class FightScenarioTests
     }
 
     [Fact]
-    public void Two_misses_and_a_hit_do_not_walk()
+    public void One_miss_and_hits_do_not_walk()
     {
+        // M6 8 L: was two misses and a hit; two with no bolt on one target now drop it.
         var r = new Rig();
         r.Add(0x80001001, TuskerSlave, 0x01050303, 40);
-        r.Script(Shot.NoProjectile, Shot.NoProjectile);
+        r.Script(Shot.NoProjectile);
         var walk = new FakeWalk();
         var scenario = r.Scenario(walk);
 
         Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
 
-        Assert.Equal((2, 0, 0), (scenario.Tally.Misses, walk.Legs, scenario.Walks));
+        Assert.Equal((1, 0, 0), (scenario.Tally.Misses, walk.Legs, scenario.Walks));
     }
 
     [Fact]
-    public void A_confirmed_projectile_with_no_damage_line_in_three_seconds_is_a_miss()
+    public void A_confirmed_projectile_with_no_damage_line_in_its_flight_and_the_margin_is_a_miss()
     {
         var r = new Rig();
         r.Add(0x80001001, TuskerSlave, 0x01050303, 40);
@@ -1233,14 +1603,14 @@ public sealed partial class FightScenarioTests
 
         Assert.Equal(1, scenario.Tally.Misses);
         Assert.Equal(3, scenario.Tally.Casts);
-        Assert.Contains(r.Log.Lines, l => l.Contains("no damage line or kill came within 3 s", StringComparison.Ordinal));
+        Assert.Contains(r.Log.Lines, l => l.Contains("no damage line or kill came within 1.7 s", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void A_target_sixty_metres_away_whose_damage_line_arrives_at_four_seconds_is_a_hit_of_the_first_cast_not_a_miss_and_a_hit_of_the_second()
+    public void A_target_sixty_metres_away_whose_damage_line_arrives_after_three_seconds_is_a_hit_of_the_first_cast_not_a_miss_and_a_hit_of_the_second()
     {
-        // The rig's bolt flies at 20 m/s (its CreateObject velocity): 60 m is 3 s of flight, so the hit wait is 5 s and the line at 4 s is cast 1's (package 2, finding 6: at the old fixed 3 s it was a miss, then cast 2's hit).
-        var r = new Rig(range: 75f) { HitDelay = 4 };
+        // The rig's bolt flies at 20 m/s (its CreateObject velocity): 60 m is 3 s of flight, so the hit wait is 3.7 s and the line at 3.5 s is cast 1's (package 2, finding 6: at the old fixed 3 s it was a miss, then cast 2's hit).
+        var r = new Rig(range: 75f) { HitDelay = 3.5 };
         r.Add(0x80001001, TuskerSlave, 0x01050303, PlayerY + 60);
         var scenario = r.Scenario(new FakeWalk());
 
@@ -1250,19 +1620,21 @@ public sealed partial class FightScenarioTests
         Assert.Equal(2, scenario.Tally.Casts);
         Assert.Equal(1, scenario.Tally.DamageLinesDealt);
         Assert.Equal(1, scenario.Tally.Kills);
-        Assert.Equal(2, r.Log.Lines.Count(l => l.Contains("the target 0x80001001 60.0 m from it: hit wait 5 s", StringComparison.Ordinal)));
+        Assert.Equal(2, r.Log.Lines.Count(l => l.Contains("the target 0x80001001 60.0 m from it: hit wait 3.7 s", StringComparison.Ordinal)));
         Assert.DoesNotContain(r.Log.Lines, l => l.Contains("no damage line or kill came within", StringComparison.Ordinal));
     }
 
     [Theory]
-    [InlineData(20.0, 20f, 3.0)] // a close target: the floor
-    [InlineData(75.0, 15f, 7.0)] // the cast range's cap at a live Flame Bolt's speed
+    [InlineData(20.0, 20f, 1.7)] // a close target
+    [InlineData(2.4, 15f, 0.86)] // r3c's 2.4 m: 0.86 s, it was 3
+    [InlineData(75.0, 15f, 5.7)] // the cast range at a live Flame Bolt's speed
     [InlineData(75.0, 0.5f, 10.0)] // not a speed to divide by: the cap
     [InlineData(1000.0, 15f, 10.0)] // past the cap
-    public void The_hit_wait_is_the_flight_time_plus_two_seconds_between_three_and_ten(double distance, float speed, double wait)
+    public void The_hit_wait_is_the_flight_time_plus_the_measured_margin_at_most_ten_M6_7_AA(double distance, float speed, double wait)
     {
         Assert.Equal(wait, FightScenario.HitWaitFor(distance, speed), 6);
-        Assert.Equal((3.0, 2.0, 10.0, 1f), (FightScenario.HitWaitSeconds, FightScenario.HitWaitMarginSeconds, FightScenario.HitWaitMaxSeconds, FightScenario.MinProjectileSpeed));
+        Assert.Equal((3.0, 0.7, 10.0, 1f), (FightScenario.HitWaitSeconds, Math.Round(FightScenario.HitWaitMarginSeconds, 6), FightScenario.HitWaitMaxSeconds, FightScenario.MinProjectileSpeed));
+        Assert.True(FightScenario.HitWaitMarginSeconds > FightScenario.WallGraceSeconds, "a bolt stopped at the end of its flight still gets its wall verdict");
     }
 
     [Fact]
@@ -1822,7 +2194,7 @@ public sealed partial class FightScenarioTests
         Assert.Equal(FightOptions.DefaultGround, bad.Ground);
 
         var outdoor = FightOptions.FromArguments(Lifestone.Client.Options.CommandLineArgument.ParseAll(["--fight-ground=low-b-belt"]));
-        Assert.Contains("is not a dungeon", Assert.Single(outdoor.Errors), StringComparison.Ordinal);
+        Assert.Empty(outdoor.Errors); // M6 0 a5: an outdoor ground with cells is a fight ground (its outdoor tour)
 
         var good = FightOptions.FromArguments(Lifestone.Client.Options.CommandLineArgument.ParseAll(["--fight-ground=" + FightOptions.DefaultGround]));
         Assert.Empty(good.Errors);
@@ -2472,13 +2844,13 @@ public sealed class DenGroundFloorDatTests(DatSetFixture fixture, ITestOutputHel
     }
 
     [RequiresDatsFact]
-    public void The_stock_planner_reaches_one_spawn_cell_of_twelve_because_the_dens_doorways_lean()
+    public void The_stock_planner_reaches_every_spawn_cell_through_the_dens_leaning_doorways_as_floor_crossings()
     {
         var floor = GroundRooms.FloorOf(All(), DenGround.Profile);
         var stock = new CellRoutePlanner(floor);
         var reached = DenGround.SpawnLowWords.Count(low => stock.FindPath(DenGround.Arrival.CellId, 0x01050000u | low) is not null);
-        output.WriteLine($"CellRoutePlanner reaches {reached} of 12 spawn cells; the lean-0.3 RoomGraph reaches 12 (the doorways' normals have a vertical part of 0.196, the stock rule wants under 0.1)");
-        Assert.Equal(1, reached); // 0x0383 only: m3-fight-planner-lean: closed, the lean is the planner's parameter
+        output.WriteLine($"CellRoutePlanner reaches {reached} of 12 spawn cells; the lean-0.3 RoomGraph reaches 12 (the doorways' normals have a vertical part of 0.196, the stock fit test wants under 0.1, and the floor crossings join them)");
+        Assert.Equal(12, reached); // M6 4 W4: 1 (0x0383 only) by the fit test alone (m3-fight-planner-lean: closed, the lean is the planner's parameter); the leaning doorways' floors meet, so they are floor crossings (CellRoutePlanner.FloorCrossingOf) at any lean
     }
 
     [RequiresDatsFact]

@@ -270,10 +270,12 @@ The M4 hero video (the hero step after M4 4.2; D32: at most 30 s, the camera onl
 takes of the three hero journeys (`--journey=hero-archer|hero-brawler|hero-mage`, `docs/session.md` §41). The journeys' frame bursts
 (`--journey-shots`) cannot give motion at 1920x1080: saving one frame stalls the game about 0.5 s. So each take runs as M3's did: the
 game in an on-screen borderless window at a known place (not `-Offscreen`, which moves it off the screen), muted with
-`--audio-driver Dummy`, captured by ffmpeg ddagrab at 60 fps after a clock flash; `--journey-film` gives the hero camera (each station's
+`--audio-driver Dummy`, captured at 60 fps (the first round by a screen-region ddagrab after a clock flash; since 2026-11-16 only by
+window capture, below); `--journey-film` gives the hero camera (each station's
 turn and zoom through retail's chase camera) and saves no frame, and the log's `showpiece '<event>'` lines place the moments in the
-take. The take scripts live under `cache/m4/hero` (ignored by git): `capture.ps1` films one journey, `calibrate.ps1` finds the flash,
-`run-takes.ps1` runs the backend and the takes, `events.ps1` lists a take's events at their video times.
+take. The take scripts live under `cache/m4/hero` (ignored by git): `capture2.ps1` films one journey (the screen-region `capture.ps1`
+is retired and refuses to run), `calibrate.ps1` finds the flash, `run-takes.ps1` runs the backend and the takes, `events.ps1` lists a
+take's events at their video times.
 
 A **clip shot** (`"scene": "clip"`) records nothing: `source` names a take under `cache/` and `from` the second it starts at, and the
 composer encodes its `duration` at the list's fps and size into the same near-lossless segment a recorded shot gets, so captions,
@@ -283,5 +285,19 @@ and spell shots). The M4 list is `cache/video/m4-hero/m4-hero-shotlist.json`; th
 **Window capture (the second round).** A screen-region capture films whatever covers the game window; a long take (the mage's death and
 re-buff, 12 minutes) caught other windows. `cache/m4/hero/capture2.ps1` records the game window itself with ffmpeg's `gfxcapture`
 (Windows Graphics Capture, the window's handle once it has been stable for 5 s), so a window on top does not reach the take; the game's
-`--video-sync-marker` (one white frame, logged with its unix time) aligns the take with the log. `run-takes.ps1 -Window` uses it. The
-M4 list's stats shot is an edit crop (1.67x) of a take made with ffmpeg before the composer, so the attribute numbers read at 720p.
+`--video-sync-marker` (one white frame, logged with its unix time) aligns the take with the log. `run-takes.ps1` always uses it.
+
+**Every recording is a window capture** (the owner's ruling, 2026-11-16: all video recording works that way, especially the hero
+camera). A take, a soak's `-Record` and any one-off recording read the game window itself through `tools/WindowCapture.psm1`
+(`Find-LifestoneGameWindow`: the Godot "Engine" window, matched by a text of its command line and stable for 5 s;
+`Get-WindowCaptureInput`: ffmpeg's `gfxcapture` input at a constant frame rate, no cursor, no border). Never gdigrab or ddagrab: they
+film whatever covers the window. It needs ffmpeg 8 or later on PATH; a minimised window gives no new frames.
+
+**The climb records too** (2026-11-17): `tools/climb.ps1 -Record [-RecordDir <dir>] [-RecordSegmentSeconds 3600]` records step 3, the level
+up run, the way `soak.ps1 -Record` does: the shared recording functions in `tools/WindowCapture.psm1` (`Test-WindowCaptureFfmpeg`,
+`Start-WindowRecording`, `Stop-WindowRecording`, `Get-WindowRecordingFiles`), segmented MPEG-TS `rec-NNN.ts` plus `segments.csv`,
+`record.txt` and `ffmpeg.log`, and `--video-sync-marker` in the game arguments. Steps 1 and 2 are headless and are not recorded. The
+folder is a launch argument only (default `<OutDir>ecord`). Without ffmpeg 8 or later the script refuses before anything starts;
+`-PlanOnly` prints the recording plan with a placeholder for the window handle.
+
+The M4 list's stats shot is an edit crop (1.67x) of a take made with ffmpeg before the composer, so the attribute numbers read at 720p.

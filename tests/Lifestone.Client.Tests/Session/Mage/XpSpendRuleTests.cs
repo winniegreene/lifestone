@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Data.CharacterCreation;
@@ -18,10 +19,9 @@ namespace Lifestone.Client.Tests.Session.Mage;
 public sealed class XpSpendRuleTests
 {
     private static readonly XpTableData Table = ScriptedMage.SyntheticTable();
-    private static byte _sequence = 50;
 
-    /// <summary>A session view over an action harness (what a station holds).</summary>
-    private sealed class View(ActionHarness h) : IGameSessionView
+    /// <summary>A session view over an action harness (what a station holds). Internal: <c>XpSpendAccountTests</c> runs the same rig.</summary>
+    internal sealed class View(ActionHarness h) : IGameSessionView
     {
         public GameState State => h.State;
 
@@ -39,30 +39,36 @@ public sealed class XpSpendRuleTests
     }
 
     /// <summary>The scripted ACE: it holds the stats' ranks and spent experience, answers each raise the Action API sent as ACE does (the available experience first, then the stat's private update), or stays silent or refuses.</summary>
-    private sealed class Server
+    /// <remarks>M6 item 14: internal and over any table (<c>XpSpendAccountTests</c> replays a measured allocation on the retail XpTable): <c>table</c>, <c>classOf</c> (a skill's class, when the D19 plan's is not the character's) and <c>attributeStart</c> are optional and default to the rig of before.</remarks>
+    internal sealed class Server
     {
         private readonly ActionHarness _h;
+        private readonly XpTableData _table;
+        private readonly Func<uint, uint> _attributeStart;
         private readonly Dictionary<(MageStatKind Kind, uint Id), (uint Ranks, uint Spent, uint Class)> _stats = [];
         private int _seen;
 
-        public Server(ActionHarness h, ulong total, long available, Func<StatTarget, (int Ranks, bool Untrained)>? start = null)
+        public Server(ActionHarness h, ulong total, long available, Func<StatTarget, (int Ranks, bool Untrained)>? start = null, uint strengthStart = 100, IReadOnlyDictionary<uint, int>? ints = null, XpTableData? table = null, Func<StatTarget, uint?>? classOf = null, Func<uint, uint>? attributeStart = null, IReadOnlyList<uint>? untrainedSkills = null)
         {
             _h = h;
+            _table = table ?? Table;
+            _attributeStart = attributeStart ?? (id => id == MageTemplate.Strength ? strengthStart : 100);
             Available = available;
-            Plan = MageSpendingPlanner.Compute(Table, total);
+            Credits = ints?.GetValueOrDefault(PlayerQualities.AvailableSkillCreditsProperty) ?? 0;
+            Plan = MageSpendingPlanner.Compute(_table, total);
             var attributes = new List<AttributeDesc>();
             var vitals = new List<VitalDesc>();
             var skills = new List<SkillDesc>();
             foreach (var t in Plan.Targets)
             {
                 var (ranks, untrained) = start?.Invoke(t) ?? (0, false);
-                var spent = ranks == 0 ? 0u : t.XpList(Table)[ranks];
-                var cls = t.Kind != MageStatKind.Skill ? 0u : untrained ? 1u : t.Specialized ? 3u : 2u;
+                var cls = t.Kind != MageStatKind.Skill ? 0u : classOf?.Invoke(t) ?? (untrained ? 1u : t.Specialized ? 3u : 2u);
+                var spent = ranks == 0 ? 0u : ListOf(t.Kind, cls)[ranks];
                 _stats[(t.Kind, t.Id)] = ((uint)ranks, spent, cls);
                 switch (t.Kind)
                 {
                     case MageStatKind.Attribute:
-                        attributes.Add(new AttributeDesc(t.Id, (uint)ranks, 100, spent));
+                        attributes.Add(new AttributeDesc(t.Id, (uint)ranks, _attributeStart(t.Id), spent));
                         break;
                     case MageStatKind.Vital:
                         vitals.Add(new VitalDesc(t.Id, (uint)ranks, 0, spent, 100));
@@ -76,11 +82,20 @@ public sealed class XpSpendRuleTests
             // A skill the plan does not raise, trained: Healing (20). It must never be raised.
             skills.Add(new SkillDesc(Healing, 0, 1, 2, 0, 0, 0, 0.0));
             _stats[(MageStatKind.Skill, Healing)] = (0, 0, 2);
+
+            // M6 14: skills the plan does not raise, held untrained (Alchemy: the climber's last credit line).
+            foreach (var id in untrainedSkills ?? [])
+            {
+                skills.Add(new SkillDesc(id, 0, 1, 1, 0, 0, 0, 0.0));
+                _stats[(MageStatKind.Skill, id)] = (0, 0, 1);
+            }
+
             h.R.Reducer.OnPlayerDescription(
                 h.R.Context,
                 new GameEventHeader(ActionHarness.Amy, 1, GameEventTypes.PlayerDescription),
                 new PlayerDescriptionMsg
                 {
+                    IntProperties = (ints ?? new Dictionary<uint, int>()).ToImmutableDictionary(),
                     Int64Properties = System.Collections.Immutable.ImmutableDictionary<uint, long>.Empty
                         .Add(PlayerQualities.TotalExperienceProperty, (long)total)
                         .Add(PlayerQualities.AvailableExperienceProperty, available),
@@ -94,6 +109,21 @@ public sealed class XpSpendRuleTests
         public const uint Healing = 20;
 
         public SpendingPlan Plan { get; }
+
+        /// <summary>M6 1 b: the skill credits ACE holds (PropertyInt 24).</summary>
+        public int Credits { get; private set; }
+
+        /// <summary>M6 1 b: every train ACE took: the skill and the credits sent.</summary>
+        public List<(uint Skill, int Credits)> TrainedSkills { get; } = [];
+
+        /// <summary>M6 1 b: ACE answers a train with "Failed to train X!" instead.</summary>
+        public bool RefuseTrain { get; set; }
+
+        /// <summary>M6 1 b: ACE trains the skill but its credits' update reads this many more than the cost took (an after-check that does not hold).</summary>
+        public int CreditsDrift { get; set; }
+
+        /// <summary>M6 1 b: the stat's class now (1 untrained, 2 trained, 3 specialised; 0 for an attribute or a vital).</summary>
+        public uint ClassOf(MageStatKind kind, uint id) => _stats[(kind, id)].Class;
 
         public long Available { get; private set; }
 
@@ -114,6 +144,12 @@ public sealed class XpSpendRuleTests
             while (_seen < sends.Count)
             {
                 var send = sends[_seen++];
+                if (send.Kind == FakeSendKind.TrainSkill && !Silent)
+                {
+                    Train((uint)send.Guid, send.Index);
+                    continue;
+                }
+
                 var kind = send.Kind switch
                 {
                     FakeSendKind.RaiseAttribute => MageStatKind.Attribute,
@@ -151,7 +187,7 @@ public sealed class XpSpendRuleTests
                 switch (kind)
                 {
                     case MageStatKind.Attribute:
-                        Update(PrivateUpdateKind.Attribute, id, attribute: new AttributeDesc(id, ranks, 100, spent));
+                        Update(PrivateUpdateKind.Attribute, id, attribute: new AttributeDesc(id, ranks, _attributeStart(id), spent));
                         break;
                     case MageStatKind.Vital:
                         Update(PrivateUpdateKind.Vital, id, vital: new VitalDesc(id, ranks, 0, spent, 100));
@@ -163,15 +199,47 @@ public sealed class XpSpendRuleTests
             }
         }
 
-        private static IReadOnlyList<uint> ListOf(MageStatKind kind, uint cls) => kind switch
+        /// <summary>ACE's <c>HandleActionTrainSkill</c> as the tests need it: the cost must be the SkillTable's (<see cref="ScriptedMage.AceTrainedCost"/>) and held, else dropped without a word; a refusal is told; a train is the skill's update, then the credits'.</summary>
+        private void Train(uint skill, int credits)
         {
-            MageStatKind.Attribute => Table.AttributeXpList,
-            MageStatKind.Vital => Table.VitalXpList,
-            _ => cls >= 3 ? Table.SpecializedSkillXpList : Table.TrainedSkillXpList,
+            var name = MageTemplate.SkillName(skill);
+            if (RefuseTrain)
+            {
+                _h.ServerMessage($"Failed to train {name}! You now have {Credits} credits available.");
+                return;
+            }
+
+            if (!ScriptedMage.AceTrainedCost.TryGetValue(skill, out var cost) || cost != credits || credits > Credits || !_stats.TryGetValue((MageStatKind.Skill, skill), out var stat) || stat.Class >= 2)
+            {
+                return; // dropped without a word
+            }
+
+            TrainedSkills.Add((skill, credits));
+            _stats[(MageStatKind.Skill, skill)] = (stat.Ranks, stat.Spent, 2);
+            Credits -= credits;
+            Update(PrivateUpdateKind.Skill, skill, skill: new SkillDesc(skill, (ushort)stat.Ranks, 1, 2, stat.Spent, 0, 0, 0.0));
+            Update(PrivateUpdateKind.PropertyInt, PlayerQualities.AvailableSkillCreditsProperty, Credits + CreditsDrift);
+            _h.ServerMessage($"{name} trained.");
+        }
+
+        private IReadOnlyList<uint> ListOf(MageStatKind kind, uint cls) => kind switch
+        {
+            MageStatKind.Attribute => _table.AttributeXpList,
+            MageStatKind.Vital => _table.VitalXpList,
+            _ => cls >= 3 ? _table.SpecializedSkillXpList : _table.TrainedSkillXpList,
         };
 
-        private void Update(PrivateUpdateKind kind, uint key, long value = 0, AttributeDesc attribute = default, VitalDesc vital = default, SkillDesc skill = default) =>
-            _h.R.Reducer.OnPrivateUpdate(_h.R.Context, new PrivateUpdateMsg(kind, ++_sequence, key, value, attribute, vital, skill));
+        /// <summary>The experience ACE holds as spent on a stat.</summary>
+        public uint SpentOn(MageStatKind kind, uint id) => _stats[(kind, id)].Spent;
+
+        private void Update(PrivateUpdateKind kind, uint key, long value = 0, AttributeDesc attribute = default, VitalDesc vital = default, SkillDesc skill = default)
+        {
+            // M6 item 14: one sequence a property, as ACE keeps them: a counter shared by every rig would let test classes running side by side, or a long run on other stats, put a stat's next update more than half a byte's turn ahead, which reads as older and is dropped.
+            var sequence = _sequences[(kind, key)] = (byte)(_sequences.GetValueOrDefault((kind, key), (byte)50) + 1);
+            _h.R.Reducer.OnPrivateUpdate(_h.R.Context, new PrivateUpdateMsg(kind, sequence, key, value, attribute, vital, skill));
+        }
+
+        private readonly Dictionary<(PrivateUpdateKind Kind, uint Key), byte> _sequences = [];
     }
 
     private sealed class Rig
@@ -489,6 +557,352 @@ public sealed class XpSpendRuleTests
         Assert.True(rig.Rule.Tick());
         Assert.Equal(XpSpendEnd.PoolCoversNothing, rig.Rule.End);
     }
+
+    // ------------------------------------------------------------------------------------------------ M6 item 1 b: the Strength floor, the train step and the level-up spend
+
+    /// <summary>The climber at level 10 as item 0 left her: War Magic specialised, Life Magic trained (the synthetic plan's class), Creature Enchantment, Item Enchantment, Mana Conversion and Melee Defense untrained, Strength 10,
+    /// 13 credits, the burden of the given value (PropertyInt 5).</summary>
+    internal static Server Climber(ActionHarness h, long available, int burden, int credits = 13, int level = 10, ulong? total = null) => new(
+        h,
+        total: total ?? (ulong)available,
+        available: available,
+        start: t => (0, t.Kind == MageStatKind.Skill && t.Id is MageTemplate.CreatureEnchantment or MageTemplate.ItemEnchantment or MageTemplate.ManaConversion or MageTemplate.MeleeDefense),
+        strengthStart: 10,
+        ints: new Dictionary<uint, int> { [PlayerQualities.LevelProperty] = level, [PlayerQualities.AvailableSkillCreditsProperty] = credits, [PlayerInventory.EncumbranceProperty] = burden });
+
+    internal static void Frames(ActionHarness h, Server server, Func<bool> tick, int frames = 20_000)
+    {
+        for (var i = 0; i < frames && !tick(); i++)
+        {
+            h.Tick(0.1);
+            server.Pump();
+            h.Tick();
+        }
+    }
+
+    [Fact]
+    public void The_Strength_floor_is_the_smallest_base_Strength_whose_capacity_carries_the_burden_under_the_line_and_the_planner_buys_it_first()
+    {
+        Assert.Equal(100, StrengthFloor.LinePercent(150)); // the outskirts' trip line is over 100%: the floor carries the burden under 100%
+        Assert.Equal(90, StrengthFloor.LinePercent(90)); // the den's: the burden sits under the trip line, room to loot to it
+        Assert.Equal(12, StrengthFloor.Want(1_700, 0, 100)); // item 0's climber: 1,700 at Strength 10 (1,500) is 113%; 12 carries 1,800
+        Assert.Equal(13, StrengthFloor.Want(1_700, 0, 90)); // 1,700 under 90%: 13 x 150 x 0.9 = 1,755
+        Assert.Equal(10, StrengthFloor.Want(1_500, 0, 100)); // exactly 100%: the load modifier is still 1
+        Assert.Equal(10, StrengthFloor.Want(1_800, 1, 100)); // a carrying augmentation: 10 x 150 + 10 x 30 = 1,800
+        Assert.Equal(1, StrengthFloor.Want(0, 0, 100));
+        Assert.Equal(2, StrengthFloor.Ranks(12, 10));
+        Assert.Equal(0, StrengthFloor.Ranks(12, 100));
+
+        var plain = MageSpendingPlanner.Compute(Table, 6_000);
+        var floored = MageSpendingPlanner.Compute(Table, 6_000, strengthFloorRanks: 2);
+        Assert.Equal(MageSpendingPlanner.Compute(Table, 6_000, strengthFloorRanks: 0).Targets, plain.Targets); // no floor: the plan of before
+        var first = floored.Targets[0];
+        Assert.Equal((MageStatKind.Attribute, MageTemplate.Strength, 2, true), (first.Kind, first.Id, first.Ranks, first.Floor));
+        Assert.Equal(6_000UL, floored.TotalXp);
+        Assert.Equal(floored.TotalXp, floored.Spent + floored.Remainder);
+        var poolStrength = floored.Targets.Skip(1).Single(t => t.Kind == MageStatKind.Attribute && t.Id == MageTemplate.Strength);
+        Assert.True(poolStrength.Ranks >= 2, "Strength's own share buys on from the floor's rank");
+        Assert.True(floored.Targets.Single(t => t.Kind == MageStatKind.Skill && t.Id == MageTemplate.WarMagic).Ranks <= plain.Targets.Single(t => t.Kind == MageStatKind.Skill && t.Id == MageTemplate.WarMagic).Ranks);
+
+        var poor = MageSpendingPlanner.Compute(Table, 150, strengthFloorRanks: 5); // 150 pays one rank (110): the floor as far as the total goes
+        Assert.Equal(1, poor.Targets[0].Ranks);
+    }
+
+    [Fact]
+    public void The_Strength_floor_leaves_out_the_sell_loot_she_carries_so_the_hours_load_buys_no_Strength()
+    {
+        // M6 14 hour load (m6-hour-load): the trip's spend runs before the sale (live ladder37 03:17:02 UTC); 1,700 carried of which 300 is sell loot leaves 1,400, under the capacity 1,500 of Strength 10: no floor rank
+        var h = new ActionHarness();
+        h.Present();
+        var server = Climber(h, available: 6_000, burden: 1_700);
+        var rule = new XpSpendRule(Table, h.R.Log, followLevel: true, burdenTripPercent: 150, sellLootBurden: _ => 300);
+        rule.Begin(new View(h));
+        Frames(h, server, rule.Tick);
+
+        Assert.Null(rule.Failure);
+        Assert.Equal("strength: burden=1700 sell_loot=300 counted=1400 capacity=1500 want=10 (base Strength 10, 113% now; the line 100% is the ground's burden_trip_percent 150, at most 100): carried, no floor rank to buy", rule.StrengthNote);
+        Assert.NotEqual((MageStatKind.Attribute, MageTemplate.Strength), server.Raised.Select(r => (r.Kind, r.Id)).FirstOrDefault()); // no floor rank first
+    }
+
+    [Fact]
+    public void Over_the_scripted_ACE_the_spend_raises_Strength_to_the_floor_first_and_logs_the_strength_line()
+    {
+        var h = new ActionHarness();
+        h.Present();
+        var server = Climber(h, available: 6_000, burden: 1_700);
+        var rule = new XpSpendRule(Table, h.R.Log, followLevel: true, burdenTripPercent: 150);
+        rule.Begin(new View(h));
+        Frames(h, server, rule.Tick);
+
+        Assert.Null(rule.Failure);
+        Assert.Equal("strength: burden=1700 capacity=1500 want=12 (base Strength 10, 113% now; the line 100% is the ground's burden_trip_percent 150, at most 100): the floor raises Strength 10 -> 12 (2 ranks over the start) before the shares", rule.StrengthNote);
+        Assert.Contains(h.Log.Lines, l => l.Contains("xp: strength: burden=1700 capacity=1500 want=12", StringComparison.Ordinal));
+        Assert.Equal([(MageStatKind.Attribute, MageTemplate.Strength), (MageStatKind.Attribute, MageTemplate.Strength)], server.Raised.Take(2).Select(r => (r.Kind, r.Id)));
+        Assert.True(server.RanksOf(MageStatKind.Attribute, MageTemplate.Strength) >= 2);
+        Assert.DoesNotContain(server.Raised, r => r.Kind == MageStatKind.Skill && r.Id is MageTemplate.CreatureEnchantment or MageTemplate.ItemEnchantment or MageTemplate.ManaConversion); // untrained: never raised
+
+        // A pool that cannot pay the floor's next rank waits for it: no share is raised before the floor.
+        var h2 = new ActionHarness();
+        h2.Present();
+        var poor = Climber(h2, available: 100, burden: 1_700, total: 6_000); // 6,000 earned, 100 left unassigned
+        var waiting = new XpSpendRule(Table, h2.R.Log, followLevel: true, burdenTripPercent: 150);
+        waiting.Begin(new View(h2));
+        Frames(h2, poor, waiting.Tick);
+        Assert.Equal(XpSpendEnd.PoolCoversNothing, waiting.End);
+        Assert.Empty(poor.Raised); // War Magic's 23 would fit, but the floor comes first
+        Assert.Equal("xp_pool=100 next_rank_xp=110 (Strength 0 -> 1)", waiting.PoolNote);
+
+        // Burden carried: no floor rank, the plan of before; burden unread: a loud line, no floor.
+        var h3 = new ActionHarness();
+        h3.Present();
+        _ = Climber(h3, available: 6_000, burden: 1_000);
+        var carried = new XpSpendRule(Table, h3.R.Log, followLevel: true, burdenTripPercent: 90);
+        carried.Begin(new View(h3));
+        Assert.EndsWith(": carried, no floor rank to buy", carried.StrengthNote, StringComparison.Ordinal);
+        Assert.DoesNotContain(carried.Plan!.Targets, t => t.Floor);
+        var h4 = new ActionHarness();
+        h4.Present();
+        _ = new Server(h4, 6_000, 6_000);
+        var unread = new XpSpendRule(Table, h4.R.Log, burdenTripPercent: 90);
+        unread.Begin(new View(h4));
+        Assert.StartsWith("strength: TODO(m6-strength-burden-unread)", unread.StrengthNote, StringComparison.Ordinal);
+        Assert.Contains(h4.Log.Lines, l => l.Contains("TODO(m6-strength-burden-unread)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void The_train_step_checks_before_trains_and_checks_after_and_names_a_refusal_once_without_retrying()
+    {
+        var h = new ActionHarness();
+        h.Present();
+        var server = Climber(h, available: 0, burden: 0);
+        var step = new SkillTrainStep(h.R.Log);
+        step.Begin(new View(h), MageTemplate.CreatureEnchantment, 8);
+        Frames(h, server, step.Tick);
+        Assert.Equal(SkillTrainEnd.Trained, step.End);
+        Assert.Null(step.Failure);
+        Assert.Equal([(MageTemplate.CreatureEnchantment, 8)], server.TrainedSkills);
+        Assert.Equal(5, h.State.Self.Qualities.AvailableSkillCredits);
+        Assert.Contains(h.Log.Lines, l => l.Contains("credits: train Creature Enchantment: check after: trained, credits 13 -> 5", StringComparison.Ordinal));
+
+        // Before: already trained, or the credits short: nothing is sent.
+        step.Begin(new View(h), MageTemplate.CreatureEnchantment, 8);
+        Assert.Equal(SkillTrainEnd.NotDue, step.End);
+        Assert.Contains("already trained", step.Failure, StringComparison.Ordinal);
+        step.Begin(new View(h), MageTemplate.ManaConversion, 6);
+        Assert.Equal(SkillTrainEnd.NotDue, step.End);
+        Assert.Contains("5 credits do not cover its cost of 6", step.Failure, StringComparison.Ordinal);
+        Assert.Single(h.Net.Of(FakeSendKind.TrainSkill));
+
+        // ACE's refusal line: named, sent once, never again.
+        var h2 = new ActionHarness();
+        h2.Present();
+        var refusing = Climber(h2, available: 0, burden: 0);
+        refusing.RefuseTrain = true;
+        var refused = new SkillTrainStep(h2.R.Log);
+        refused.Begin(new View(h2), MageTemplate.CreatureEnchantment, 8);
+        Frames(h2, refusing, refused.Tick);
+        Assert.Equal(SkillTrainEnd.Refused, refused.End);
+        Assert.StartsWith("train Creature Enchantment for 8 credits ended ServerError", refused.Failure, StringComparison.Ordinal);
+        Assert.Single(h2.Net.Of(FakeSendKind.TrainSkill));
+
+        // A cost ACE does not take is dropped without a word: the action times out, named.
+        var h3 = new ActionHarness();
+        h3.Present();
+        var silent = Climber(h3, available: 0, burden: 0);
+        var timeout = new SkillTrainStep(h3.R.Log);
+        timeout.Begin(new View(h3), MageTemplate.CreatureEnchantment, 7);
+        Frames(h3, silent, timeout.Tick);
+        Assert.Equal(SkillTrainEnd.Refused, timeout.End);
+        Assert.Contains("ended TimedOut", timeout.Failure, StringComparison.Ordinal);
+        Assert.Single(h3.Net.Of(FakeSendKind.TrainSkill));
+
+        // The action confirmed but the credits read wrong: the after-check names it within its bound.
+        var h4 = new ActionHarness();
+        h4.Present();
+        var drifting = Climber(h4, available: 0, burden: 0);
+        drifting.CreditsDrift = 1;
+        var unconfirmed = new SkillTrainStep(h4.R.Log);
+        unconfirmed.Begin(new View(h4), MageTemplate.CreatureEnchantment, 8);
+        Frames(h4, drifting, unconfirmed.Tick);
+        Assert.Equal(SkillTrainEnd.Unconfirmed, unconfirmed.End);
+        Assert.Contains("the credits 6 (wanted trained and 5)", unconfirmed.Failure, StringComparison.Ordinal);
+    }
+
+    // ------------------------------------------------------------------------------------------------ M6 7 R: the climber's health floor
+
+    [Fact]
+    public void The_health_floor_is_raised_before_the_shares_and_its_line_names_what_it_read()
+    {
+        var h = new ActionHarness();
+        h.Present();
+        var server = Climber(h, available: 100_000, burden: 0, level: 16); // M6 7 AC, AK, AY: the pack's want; M6 14 (D135): level 16 is the Lodge's, its entry trio of Male Tuskers, 144
+        var rule = new XpSpendRule(Table, h.R.Log, followLevel: true, healthLadder: Lifestone.Client.Session.Grounds.LadderLoader.WarMage);
+        rule.Begin(new View(h));
+        Frames(h, server, rule.Tick);
+
+        Assert.Equal((MageStatKind.Vital, MageTemplate.MaxHealth), (server.Raised[0].Kind, server.Raised[0].Id));
+        var note = rule.HealthNote!;
+        Assert.StartsWith("health: now=50 want=144 reach=141 short=3 why=4x36(Male-Tusker,pack=3) rung=lodge ", note, StringComparison.Ordinal); // the pool buys the floor as far as it goes // the harness's Endurance is 100, so 50 health before any rank
+        Assert.Contains(h.Log.Lines, l => l.Contains("xp: " + note, StringComparison.Ordinal));
+        Assert.Contains(h.Log.Lines, l => l.Contains("xp: raise Max Health 0 -> 1 for 73", StringComparison.Ordinal) && l.Contains("(the health floor, before the shares)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_pool_that_does_not_cover_the_health_floor_waits_for_it_and_a_character_the_ladder_does_not_bind_has_no_floor()
+    {
+        var h = new ActionHarness();
+        h.Present();
+        var server = Climber(h, available: 50, burden: 0, total: 100_000, level: 15); // M6 7 AC: the Lodge's floor (level 15), as above
+        var rule = new XpSpendRule(Table, h.R.Log, followLevel: true, healthLadder: Lifestone.Client.Session.Grounds.LadderLoader.WarMage);
+        rule.Begin(new View(h));
+        Frames(h, server, rule.Tick);
+        Assert.Equal(XpSpendEnd.PoolCoversNothing, rule.End);
+        Assert.Contains("next_rank_xp=73 (Max Health 0 -> 1)", rule.PoolNote, StringComparison.Ordinal); // the 23 of a specialised skill's rank is covered by no one's 50? it is, but the floor comes first: no later stat is raised
+        Assert.Empty(server.Raised);
+
+        var other = new ActionHarness();
+        other.Present();
+        var otherServer = Climber(other, available: 6_000, burden: 0);
+        var plain = new XpSpendRule(Table, other.R.Log, followLevel: true); // the harness's character is not the ladder's
+        plain.Begin(new View(other));
+        Frames(other, otherServer, plain.Tick);
+        Assert.Null(plain.HealthNote);
+        Assert.DoesNotContain(plain.Plan!.Targets, t => t.Floor);
+    }
+
+    [Fact]
+    public void At_level_10_the_level_up_spend_trains_Creature_Enchantment_then_spends_with_Strength_first()
+    {
+        var h = new ActionHarness();
+        h.Present();
+        var server = Climber(h, available: 6_000, burden: 1_700);
+        var order = SkillCreditPlan.OrderOf(MageTemplate.PlanClimberCreation(52, id => ScriptedMage.AceTrainedCost.GetValueOrDefault(id, 14), id => id == MageTemplate.LifeMagic ? 20 : 28));
+        Assert.Equal([MageTemplate.CreatureEnchantment, MageTemplate.ItemEnchantment, MageTemplate.ManaConversion], order.Select(l => l.Skill)); // M6 D43; M6 14 D136: Alchemy only on a need
+        var spend = new LevelUpSpend(Table, order, burdenTripPercent: 150, h.R.Log);
+        spend.Begin(new View(h));
+        Frames(h, server, spend.Tick);
+
+        Assert.True(spend.Done);
+        Assert.Null(spend.Failure);
+        Assert.Equal([MageTemplate.CreatureEnchantment], spend.Trained); // 13 -> 5; Item Enchantment's 8 waits for three more credits (D43)
+        Assert.Equal([(MageTemplate.CreatureEnchantment, 8)], server.TrainedSkills);
+        Assert.Equal((CreditStepKind.Wait, (uint?)MageTemplate.ItemEnchantment, 3), (spend.LastStep!.Kind, spend.LastStep.Skill, spend.LastStep.Short));
+        Assert.True(spend.SpentXp > 0);
+        Assert.Equal(server.Raised.Sum(r => (long)r.Xp), spend.SpentXp);
+        Assert.Equal((MageStatKind.Attribute, MageTemplate.Strength), (server.Raised[0].Kind, server.Raised[0].Id)); // the train first, then the floor before the shares
+        Assert.DoesNotContain(server.Raised, r => r.Kind == MageStatKind.Skill && r.Id is MageTemplate.ManaConversion or MageTemplate.ItemEnchantment); // still untrained: never raised
+        Assert.Equal(2u, server.ClassOf(MageStatKind.Skill, MageTemplate.CreatureEnchantment));
+        Assert.StartsWith("trained=CreatureEnchantment spent_xp=", spend.Fields, StringComparison.Ordinal);
+        Assert.Contains(h.Log.Lines, l => l.Contains("level-up spend: done: trained=CreatureEnchantment", StringComparison.Ordinal));
+        Assert.Contains(h.Log.Lines, l => l.Contains("xp: level-up call 1: ended ", StringComparison.Ordinal));
+        Assert.Equal(1, h.Log.Lines.Count(l => l.Contains("credits: train Creature Enchantment: check before", StringComparison.Ordinal)));
+    }
+
+    [Theory]
+    [InlineData(6, false, false)] // level 60 on the dats' credits, no job needs Alchemy: the 6 bank (D136)
+    [InlineData(5, true, false)] // a need at level 55: 5 of Alchemy's 6: it waits, the credits kept
+    [InlineData(6, true, true)] // a need at level 60: trained
+    public void M6_14_with_the_order_trained_the_level_up_spend_banks_the_credits_and_trains_Alchemy_only_on_a_need_and_raises_none_of_it(int credits, bool needed, bool trains)
+    {
+        // The owner, 2026-11-13 (D136, amending D132): the credits bank once the creation's order is trained; Alchemy is trained from them only when a job needs it.
+        var h = new ActionHarness();
+        h.Present();
+        var server = new Server(
+            h,
+            total: 6_000,
+            available: 6_000,
+            start: t => (0, t.Kind == MageStatKind.Skill && t.Id == MageTemplate.MeleeDefense), // Creature, Item and Mana Conversion trained: the order's lines before Alchemy are done
+            strengthStart: 10,
+            ints: new Dictionary<uint, int> { [PlayerQualities.LevelProperty] = 60, [PlayerQualities.AvailableSkillCreditsProperty] = credits, [PlayerInventory.EncumbranceProperty] = 0 },
+            untrainedSkills: [MageTemplate.Alchemy]);
+        var order = SkillCreditPlan.OrderOf(MageTemplate.PlanClimberCreation(52, id => ScriptedMage.AceTrainedCost.GetValueOrDefault(id, 14), id => id == MageTemplate.LifeMagic ? 20 : 28, buffBot: true), needed ? id => id == MageTemplate.Alchemy : null);
+        Assert.Equal(needed ? new CreditLine(MageTemplate.Alchemy, 6) : new CreditLine(MageTemplate.CreatureEnchantment, 8), order[^1]);
+        var spend = new LevelUpSpend(Table, order, burdenTripPercent: null, h.R.Log);
+        spend.Begin(new View(h));
+        Frames(h, server, spend.Tick);
+
+        Assert.True(spend.Done);
+        Assert.Null(spend.Failure);
+        if (trains)
+        {
+            Assert.Equal([MageTemplate.Alchemy], spend.Trained);
+            Assert.Equal([(MageTemplate.Alchemy, 6)], server.TrainedSkills);
+            Assert.Equal(2u, server.ClassOf(MageStatKind.Skill, MageTemplate.Alchemy));
+            Assert.Contains(h.Log.Lines, l => l.Contains("credits: train Alchemy: check before", StringComparison.Ordinal));
+        }
+        else
+        {
+            Assert.Empty(spend.Trained);
+            Assert.Equal(needed ? (CreditStepKind.Wait, (uint?)MageTemplate.Alchemy, 1) : (CreditStepKind.Done, (uint?)null, 0), (spend.LastStep!.Kind, spend.LastStep.Skill, spend.LastStep.Short));
+            Assert.Equal(1u, server.ClassOf(MageStatKind.Skill, MageTemplate.Alchemy));
+            Assert.Empty(server.TrainedSkills); // the credits bank
+        }
+
+        Assert.DoesNotContain(server.Raised, r => r.Kind == MageStatKind.Skill && r.Id == MageTemplate.Alchemy); // no experience goes to it (M6 14: the raises are the wand chain's)
+    }
+
+    [Fact]
+    public void A_refused_train_ends_the_level_up_spend_by_name_with_nothing_spent_and_no_second_send()
+    {
+        var h = new ActionHarness();
+        h.Present();
+        var server = Climber(h, available: 6_000, burden: 0);
+        server.RefuseTrain = true;
+        var spend = new LevelUpSpend(Table, [new CreditLine(MageTemplate.CreatureEnchantment, 8)], burdenTripPercent: null, h.R.Log);
+        spend.Begin(new View(h));
+        Frames(h, server, spend.Tick);
+
+        Assert.True(spend.Done);
+        Assert.Equal(MageTemplate.CreatureEnchantment, spend.FailedSkill);
+        Assert.StartsWith("train Creature Enchantment for 8 credits ended ServerError", spend.Failure, StringComparison.Ordinal);
+        Assert.Empty(spend.Trained);
+        Assert.Equal(0, spend.SpentXp);
+        Assert.Empty(server.Raised);
+        Assert.Single(h.Net.Of(FakeSendKind.TrainSkill));
+        Assert.Contains(h.Log.Lines, l => l.Contains("level-up spend: stopped: train Creature Enchantment", StringComparison.Ordinal));
+        Assert.Equal("failed:rung-train:CreatureEnchantment", Lifestone.Client.Session.Autopilot.AutopilotScenario.TrainStop(MageTemplate.CreatureEnchantment));
+    }
+
+    // ------------------------------------------------------------------------------------------------ M6 item 14: the armour set's burden and the Strength that stands beside the ranks
+
+    /// <summary>The first spend after the chest with the plate set on: the robe form measured 2,344 (2026-11-11); the set in place of the robe: 2,344 - 200 + 6,540.</summary>
+    private const int ArmouredBurden = 2_344 - 200 + 6_540;
+
+    [Fact]
+    public void With_the_bots_Strength_line_counted_the_floor_of_the_armoured_climber_buys_eight_ranks_and_says_what_stands()
+    {
+        var h = new ActionHarness();
+        h.Present();
+        var server = Climber(h, available: 60_000, burden: ArmouredBurden);
+        var rule = new XpSpendRule(Table, h.R.Log, followLevel: true, burdenTripPercent: 150, standingBot: () => true);
+        rule.Begin(new View(h));
+        Frames(h, server, rule.Tick);
+
+        Assert.Null(rule.Failure);
+        Assert.Equal(
+            "strength: burden=8684 capacity=7500 want=18 (base Strength 10, standing +40 (the worn pieces' own lasting Strength line +0, the buff bot's line +40), 116% now; the line 100% is the ground's burden_trip_percent 150, at most 100): the floor raises Strength 10 -> 18 (8 ranks over the start) before the shares",
+            rule.StrengthNote);
+        Assert.All(server.Raised.Take(8), r => Assert.Equal((MageStatKind.Attribute, MageTemplate.Strength), (r.Kind, r.Id)));
+
+        // The stop at the bot not applying (the option off, or a home that is not the bot's town): nothing stands in the rig (no worn piece's lasting line), so the floor is the whole 48 ranks, by name.
+        var h2 = new ActionHarness();
+        h2.Present();
+        var server2 = Climber(h2, available: 100, burden: ArmouredBurden);
+        var off = new XpSpendRule(Table, h2.R.Log, followLevel: true, burdenTripPercent: 150, standingBot: () => false);
+        off.Begin(new View(h2));
+        Frames(h2, server2, off.Tick);
+        Assert.Contains("want=58 (base Strength 10, standing +0 (the worn pieces' own lasting Strength line +0, the buff bot's line not counted: the stop at the bot does not apply), 579% now", off.StrengthNote, StringComparison.Ordinal);
+        Assert.Contains("the floor raises Strength 10 -> 58 (48 ranks over the start)", off.StrengthNote, StringComparison.Ordinal);
+
+        // No standing read given (every caller before this item): the note of before, word for word.
+        var h3 = new ActionHarness();
+        h3.Present();
+        var server3 = Climber(h3, available: 100, burden: 1_700);
+        var plain = new XpSpendRule(Table, h3.R.Log, followLevel: true, burdenTripPercent: 150);
+        plain.Begin(new View(h3));
+        Frames(h3, server3, plain.Tick);
+        Assert.StartsWith("strength: burden=1700 capacity=1500 want=12 (base Strength 10, 113% now;", plain.StrengthNote, StringComparison.Ordinal);
+    }
 }
 
 /// <summary>
@@ -533,5 +947,63 @@ public sealed class XpSpendRuleDatTests(DatSetFixture fixture, ITestOutputHelper
         Assert.Equal("Melee Defense", cheapestName);
         Assert.Equal(2_306_880UL, cheapest);
         Assert.Equal(45, killsNeeded); // about 45 kills at 30,000 before one planned rank is covered: the autopilot lane's 30 minutes, not the gate's three kills
+    }
+
+    /// <summary>The fresh climber's burden before the Pathwarden chest (holtburg-outskirts.json, M6 0 lead live probe 3: 2,460 BU), the heaviest item 0 measured.</summary>
+    /// <summary>M6 item 14: the first spend after the chest with the plate set on: the robe form measured 2,344 (2026-11-11); the set in place of the robe: 2,344 - 200 + 6,540.</summary>
+    private const int ArmouredBurden = 2_344 - 200 + 6_540;
+
+    [RequiresDatsFact]
+    public void The_armour_sets_Strength_floor_is_priced_from_the_dats_with_the_bots_line_and_without()
+    {
+        var table = XpTableData.Load(fixture.Dats);
+        var total = StrengthFloor.Want(ArmouredBurden, 0, 100);
+        var withBot = StrengthFloor.Ranks(total - StandingStrength.BotPoints, MageTemplate.LowAttribute);
+        var ownLine = StrengthFloor.Ranks(total - 15, MageTemplate.LowAttribute); // the hauberk's Strength Self II alone
+        var bare = StrengthFloor.Ranks(total, MageTemplate.LowAttribute);
+        Assert.Equal((8, 33, 48), (withBot, ownLine, bare));
+        output.WriteLine($"armour set, burden {ArmouredBurden}: with the bot's line {withBot} ranks = {table.AttributeXpList[withBot]:N0} xp; with the hauberk's own line {ownLine} ranks = {table.AttributeXpList[ownLine]:N0} xp; on the base Strength {bare} ranks = {table.AttributeXpList[bare]:N0} xp; the robe form's 6 ranks = {table.AttributeXpList[6]:N0} xp; level 6 = {table.XpForLevel(6):N0}, level 10 = {table.XpForLevel(10):N0}, level 13 = {table.XpForLevel(13):N0}, level 15 = {table.XpForLevel(15):N0}, level 20 = {table.XpForLevel(20):N0}");
+        // Read 2026-11-11 from the dats: 8 ranks 2,511 (the robe form's 6 ranks 1,527: the set costs her 984 more with the bot's line), 33 ranks 40,434, 48 ranks 103,775; level 6 is 17,031 and level 10 is 83,511.
+        Assert.Equal((2_511.0, 40_434.0, 103_775.0, 1_527.0), ((double)table.AttributeXpList[withBot], (double)table.AttributeXpList[ownLine], (double)table.AttributeXpList[bare], (double)table.AttributeXpList[6]));
+        Assert.True((double)table.AttributeXpList[ownLine] > 2.0 * table.XpForLevel(6), "without the bot the set's floor is more than twice the experience she holds at level 6, about half of all of it to level 10: TODO(m6-armour-bot-off)");
+    }
+
+    private const int FreshBurden = 2_460;
+
+    [RequiresDatsFact]
+    public void The_Strength_floor_of_the_fresh_climbers_burden_moves_no_rungs_planned_spell_level()
+    {
+        // M6 1 b: SpellPlan's projection (D41) plans no Strength floor (the burden is a live read; M6 7 R: it does plan the health floor, the ladder's data). The heaviest burden item 0 measured needs base Strength 17 under 100% (7 ranks over the creation's 10); planned with that floor
+        // first, the climber's base War Magic at each rung's band edges still gives the rung's plan level at 0.95 (war-mage.json unchanged), so the floor's cost does not move the ladder's spell plan.
+        var table = XpTableData.Load(fixture.Dats);
+        var want = StrengthFloor.Want(FreshBurden, 0, StrengthFloor.LinePercent(150));
+        var ranks = StrengthFloor.Ranks(want, MageTemplate.LowAttribute);
+        Assert.Equal((17, 7), (want, ranks));
+        var ladder = Lifestone.Client.Session.Grounds.LadderLoader.WarMage;
+
+        uint War(int level, int floor)
+        {
+            var plan = MageSpendingPlanner.Compute(table, table.XpForLevel(level), [], MageTemplate.SharesFor(level, climber: true), MageBuild.Traditional, floor, ClimberHealthRule.ProjectedBuy(table, ladder, level), cap: ladder.StatCap); // M6 7 R: the health floor is in the projection
+            uint Ranks(MageStatKind kind, uint id) => (uint)(plan.Targets.First(t => t.Kind == kind && t.Id == id && !t.Floor).Ranks);
+            var sum = MageTemplate.HighAttribute + Ranks(MageStatKind.Attribute, MageTemplate.Focus) + MageTemplate.HighAttribute + Ranks(MageStatKind.Attribute, MageTemplate.Self);
+            return (uint)Math.Round(sum / (double)MageTemplate.MagicSkillDivisor, MidpointRounding.AwayFromZero) + SpellPlan.SpecializedInitLevel + Ranks(MageStatKind.Skill, MageTemplate.WarMagic);
+        }
+
+        foreach (var level in new[] { 1, 10, 126 })
+        {
+            Assert.Equal(SpellPlan.ProjectedWarBase(table, level), War(level, 0)); // the copy is SpellPlan's projection
+        }
+
+        foreach (var rung in ladder.Rungs)
+        {
+            foreach (var (level, planned) in new[] { (rung.Band.From, rung.SpellLevel.Min), (rung.Band.To, rung.SpellLevel.Max) })
+            {
+                var with = War(level, ranks);
+                var without = War(level, 0);
+                output.WriteLine($"{rung.Key} level {level}: War Magic {without} without the floor, {with} with it (Strength floor cost {table.AttributeXpList[ranks]:N0} of {table.XpForLevel(level):N0})");
+                Assert.True(with <= without);
+                Assert.Equal(planned, SpellPlan.LevelAt(with, ladder.PlanCastChance));
+            }
+        }
     }
 }

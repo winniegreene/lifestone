@@ -28,4 +28,7 @@ public interface IAutopilotSession
 
     /// <summary>Why the last login failed (a short phrase for the log), or null.</summary>
     string? LoginFailure { get; }
+
+    /// <summary>M6 14 body: how the last login ended in the world when it did not enter itself (another owner's entry it adopted), or null. The reconnect's success line carries it.</summary>
+    string? LoginNote => null;
 }

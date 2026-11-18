@@ -1,3 +1,4 @@
+using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Net.Session;
 
@@ -119,6 +120,62 @@ internal sealed class TellTracker(ActionHandle handle, string target, string tex
                 return false;
         }
     }
+}
+
+/// <summary>
+/// <see cref="IActionApi.TalkDirect"/> (M6 14): GameAction 0x0032 {message, target id}, the tell to an object by its id. Retail's sender is the <c>Event_TalkDirect</c> docs/retail-ui.md names (the
+/// chat's Selected focus); its body and address were not read, so the wire and the answers are ACE's (<c>GameActionTalkDirect.cs:15-50</c>, ACEmulator/ACE@95ef426d). ACE looks the id up on the
+/// teller's landblock: for a creature it sends the F7E0 line <c>You tell NAME, "MESSAGE"</c> of chat type OutgoingTell first, then hands the text to the creature (an NPC's emote set for a direct
+/// talk; a player's incoming tell); for anything else it sends WeenieError CharacterNotAvailable (0x052B) and nothing more.
+/// </summary>
+/// <remarks>
+/// <para><b>Which line is its own.</b> The answers carry no request id, so the confirmation is the first OutgoingTell line that holds this tell's text (the line quotes the message as sent), and the
+/// refusal completes the oldest direct talk in flight. A tell by name in flight before it takes the first OutgoingTell line whatever its text (<see cref="TellTracker"/>, unchanged), so a caller does
+/// not send the two side by side.</para>
+/// <para><b>What it does not wait for.</b> The creature's answer (an NPC's tells arrive as <see cref="ChatKind.Tell"/> lines from its id, its casts as enchantments) follows the confirmation and is
+/// the caller's to read. The gag line is not an answer here: ACE checks the gag after the confirmation line, and only for a player target.</para>
+/// <para><b>Offline.</b> The stand-in has no creature that answers a direct talk, so it does not take the action: the Action API refuses it offline, as it does every action the stand-in does not
+/// answer.</para>
+/// </remarks>
+internal sealed class TalkDirectTracker(ActionHandle handle, uint target, string text) : ActionTracker(handle, ActionLane.Chat, ActionPolicy.TalkDirectSeconds)
+{
+    /// <inheritdoc/>
+    internal override string WouldSend => "GameAction 0x0032 TalkDirect target=" + ActionText.Hex(target) + " (" + ActionText.Count(text.Length) + " characters)";
+
+    /// <inheritdoc/>
+    internal override string? Refusal(ActionApi api) => WorldTrackers.NotInWorld(api);
+
+    /// <inheritdoc/>
+    internal override ActionOutcome? Send(IAcSession? session, ActionApi api)
+    {
+        session!.SendTalkDirect(target, text);
+        return null;
+    }
+
+    /// <inheritdoc/>
+    internal override bool OnChat(in ChatReceived e, ActionApi api)
+    {
+        var line = e.Line;
+        switch (line.Kind)
+        {
+            case ChatKind.System when line.ChatType == ChatReplies.OutgoingTellChatType && line.Text.Contains(text, StringComparison.Ordinal):
+                Resolve(new ActionOutcome(ActionOutcomeKind.Confirmed));
+                return true;
+            case ChatKind.WeenieError when line.ChatType == ChatReplies.CharacterNotAvailable:
+                Resolve(new ActionOutcome(ActionOutcomeKind.ServerError, line.ChatType, "no creature with the id " + ActionText.Hex(target) + " is on the landblock (WeenieError 0x052B)"));
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /// <inheritdoc/>
+    internal override void OnTimedOut(ActionApi api) =>
+        api.Log.Warn(
+            SessionLog.Category,
+            "direct talk: neither the confirmation line nor WeenieError 0x052B came for " + ActionText.Hex(target),
+            new LogField("target", ActionText.Hex(target)),
+            new LogField("chars", text.Length));
 }
 
 /// <summary>What ACE answers chat with (ACEmulator/ACE@95ef426d), for the chat trackers.</summary>

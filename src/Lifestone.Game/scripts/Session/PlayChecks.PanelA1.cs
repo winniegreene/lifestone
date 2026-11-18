@@ -52,6 +52,17 @@ public sealed partial class PlayChecks
             name,
             opened && haveStrength && haveMana && panel?.OpenTabId == GameAttributesTab.TabId && tab.IsTabShown && strengthRow == wantStrength && manaRow == wantMana && strengthColour == wantStrengthColour && manaColour == wantManaColour,
             $"opened={opened} open_tab=0x{panel?.OpenTabId ?? 0:X8} strength_row='{strengthRow}' want='{wantStrength}' mana_row='{manaRow}' want='{wantMana}' strength_colour={strengthColour} want={wantStrengthColour} (base {strengthBase}) mana_colour={manaColour} want={wantManaColour} (base max {manaBase}, vitae {manaVitae}) redraws={tab.Redraws}");
+        // M6 7 S: the real mouse route on a row (the owner's report was a skill row that would not select): a left click on Strength selects it and the raise button reads its state.
+        if (tab.LineOf(false, 1) is { } strength1 && tab.List is { } attrList && attrList.GetItem(tab.StatLines.ToList().IndexOf(strength1)) is { } strengthLine && attrList.Manager is { } manager)
+        {
+            attrList.ScrollToShow(tab.StatLines.ToList().IndexOf(strength1));
+            await Frames(2);
+            await ClickAsync(this, manager, strengthLine);
+            var raise = tab.RaiseButton;
+            Check("attributes-tab-row-click-selects-the-attribute", tab.SelectedIndex >= 0 && raise is not null,
+                $"selected_index={tab.SelectedIndex} raise_state=0x{raise?.State ?? 0:X} xp_available={q.AvailableExperience}");
+        }
+
         await ClosePanelAsync(shell, GameAttributesTab.SkillPagePanelId);
         Check("the-skill-page-closes-after-the-attributes-check", !host.IsOpen && host.CurrentPanel == 0, $"open={host.IsOpen} panel={host.CurrentPanel}");
     }

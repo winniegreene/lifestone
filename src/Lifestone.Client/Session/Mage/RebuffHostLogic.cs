@@ -28,8 +28,25 @@ public static class BuffProfiles
             return ArenaProfile.Buffs;
         }
 
+        if (CharacterPolicy.For(characterName).BuffsByPlay)
+        {
+            return Climber;
+        }
+
         return Fighter.FighterProfile.ForName(characterName);
     }
+
+    /// <summary>
+    /// Winnie's buff profile (M6 item 0 a6, <c>m6-ladder-buff-profile</c>): the arena profile's lines (the level VI-VII plan) with every line learned by play (<see cref="ProfileLine.ByPlay"/>): Winnie is built by what she earns, never by a
+    /// grant, so her spellbook holds only the levels she has learned. The buff cycle then wants a line only while the book holds a level of it, casts only the levels the book holds, and logs each line the book lacks once, by name
+    /// (<c>BuffCycle.Wants</c>, <c>Choose</c>). M6 14 (<c>m6-banes</c>): with the six other armour banes (<see cref="ArmourBanes.Lines"/>: Piercing, Blade, Lightning, Flame, Frost and Acid Bane), cast in the pass at home and, in the
+    /// field, only where the ground's creatures deal their damage type (<see cref="BuffCycle.FieldDamageTypes"/>). The cast order, the mana lines and the extras are the arena profile's; the profile teaches nothing (no <see cref="IBuffProfile.SpellsToLearn"/> line, only the fight extras, which no scenario sends for Winnie).
+    /// </summary>
+    public static IBuffProfile Climber { get; } = new BuffProfile(
+        MageTemplate.ClimberName,
+        [.. ArenaProfile.Lines.Select(l => l with { ByPlay = true }), .. ArmourBanes.Lines], // M6 14 (m6-banes): the six other armour banes are hers alone (BSD Mage's profile, build and kit are the arena's, unchanged)
+        ["Focus Self", "Willpower Self", "Creature Enchantment Mastery Self", "Life Magic Mastery Self", "War Magic Mastery Self", "Item Enchantment Mastery Self", "Mana Mastery Self", "Mana Renewal Self", "Rejuvenation Self", "Regeneration Self", "Armor Self", "Bludgeon Protection Self", "Impenetrability", "Bludgeon Bane", .. ArmourBanes.Names, "Endurance Self", "Strength Self", "Quickness Self", "Coordination Self", "Invulnerability Self"], // M6 7 AK, the owner's order: the bootstrap, the school masteries, the attributes, Invulnerability; last the protections and the armor lines, at the highest level the buffed skill allows; M6 14 (m6-banes, the owner's order of 2026-11-12): the six other banes right after Impenetrability and Bludgeon Bane, so the pass at home casts all eight armour lines together
+        ArenaProfile.FightExtras);
 }
 
 /// <summary>

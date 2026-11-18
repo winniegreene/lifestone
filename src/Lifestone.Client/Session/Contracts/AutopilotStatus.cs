@@ -30,7 +30,8 @@ public enum AutopilotMode
 /// <param name="Cycle">The cycle in progress.</param>
 /// <param name="Interrupted">How many times a person took the controls this run.</param>
 /// <param name="Resumed">How many times the controls were handed back.</param>
-public readonly record struct AutopilotStatus(AutopilotMode Mode, string State, string LastDecision, string NextTrigger, int Cycle, int Interrupted, int Resumed);
+/// <param name="Job">M6 6 MA: the task the dial runs, as the inspector prints it (<c>level up (rung r4)</c>, <c>do a quest: tusk-female</c>, <c>errand</c>); empty when none is known.</param>
+public readonly record struct AutopilotStatus(AutopilotMode Mode, string State, string LastDecision, string NextTrigger, int Cycle, int Interrupted, int Resumed, string Job = "");
 
 /// <summary>Something that reports the autopilot's status and says when it changed (the inspector reads it).</summary>
 public interface IAutopilotStatusSource

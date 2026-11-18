@@ -44,6 +44,7 @@ public sealed class DeathTally : IDisposable
 
     private readonly List<IDisposable> _subscriptions = [];
     private IGameSessionView? _view;
+    private List<double> _packAtDeath = [];
     private int _deathsBaseline;
     private bool _deathsBaselinePending;
     private bool _afterDeath;
@@ -59,6 +60,10 @@ public sealed class DeathTally : IDisposable
     {
         Reset();
     }
+
+    /// <summary>M6 7 AY: the living creatures within <paramref name="metres"/> of her at the last death by a monster (a suicide counts none): within a creature's awareness range, which is the read of awake (<see cref="Mage.BigPackRule"/>).</summary>
+    /// <param name="metres">The reach.</param>
+    public int AwakeAtDeath(double metres) => _packAtDeath.Count(d => d <= metres);
 
     /// <summary>The embedded fight tally (started and reset with this one): the blows taken.</summary>
     public FightTally Fight { get; } = new();
@@ -213,6 +218,7 @@ public sealed class DeathTally : IDisposable
     /// <summary>Zeroes every counter and takes the baselines again (the subscriptions stay).</summary>
     public void Reset()
     {
+        _packAtDeath = [];
         VictimNotices = 0;
         DeadMotions = 0;
         Deaths = 0;
@@ -302,6 +308,10 @@ public sealed class DeathTally : IDisposable
 
         VictimNotices++;
         NoteDeathSignal();
+        if (_view is { } view)
+        {
+            _packAtDeath = HostileReach.Distances(view); // M6 7 AY: the creatures around her as she fell: the notice comes first (ACE's order, above), before the teleport moves her
+        }
     }
 
     private void OnMotion(in ObjectMotionChanged e)

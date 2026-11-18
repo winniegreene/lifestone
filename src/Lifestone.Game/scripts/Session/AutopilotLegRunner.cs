@@ -32,7 +32,7 @@ namespace Lifestone.Game.Sessions;
 /// (<see cref="FrameDelaySeconds"/>), the developer HUD hidden. A frame that cannot be saved is logged by name; nothing here fails the run.</para>
 /// <para><b>The dial (M5 4 h3; the controls of M5 7 D145).</b> The run is stepped by the same <see cref="AutopilotHostLogic"/> the play host runs (<see cref="AutopilotHost"/>): /stop and /auto in the chat and the tools panel's Autopilot button are wired to it, /stop
 /// stops him where he stands and /auto hands back (the gate's scripted version: <c>--autopilot-test-interrupt-at</c>, <c>--autopilot-test-handback-after</c>, typed into the chat), the checkpoint is a file in the user data
-/// (<see cref="UserDataCheckpointStore"/>, closing <c>TODO(m5-autopilot-checkpoint)</c>) and a dropped session reconnects (<see cref="GameSessionAutopilotSession"/>, closing <c>TODO(m5-autopilot-reconnect)</c>).</para>
+/// (<see cref="UserDataCheckpointStore"/>, closing <c>m5-autopilot-checkpoint (closed)</c>) and a dropped session reconnects (<see cref="GameSessionAutopilotSession"/>, closing <c>m5-autopilot-reconnect (closed)</c>).</para>
 /// <para><b>Limits.</b> <see cref="WholeSecondsFor"/>: the login, the margin and <c>--autopilot-minutes</c>; with no minutes the run has no time limit (its stop rules or a stop request end it).</para>
 /// </remarks>
 public sealed partial class AutopilotLegRunner : Node
@@ -107,7 +107,7 @@ public sealed partial class AutopilotLegRunner : Node
     /// <summary>The dial's logic (the same <see cref="AutopilotHostLogic"/> the play host runs: the key, the button, the person's interrupt and the hand-back), or null before the login ended.</summary>
     public AutopilotHostLogic? Logic => _logic;
 
-    /// <summary>The checkpoint file (M5 4 h3: <see cref="UserDataCheckpointStore"/>, <c>user://autopilot/&lt;character&gt;.json</c>, closing <c>TODO(m5-autopilot-checkpoint)</c>).</summary>
+    /// <summary>The checkpoint file (M5 4 h3: <see cref="UserDataCheckpointStore"/>, <c>user://autopilot/&lt;character&gt;.json</c>, closing <c>m5-autopilot-checkpoint (closed)</c>).</summary>
     public string CheckpointPath { get; private set; } = string.Empty;
 
     /// <summary>Adds the check to the scene; it starts with the scene's first frame.</summary>

@@ -1,0 +1,117 @@
+{
+  "key": "tusk-redeemer",
+  "name": "Brighteyes's Tusker Redeemer Tusk (hunted at Tusker Abode, turned in at the Refuge)",
+  "giver": {
+    "wcid": 22642,
+    "name": "Brighteyes, the Tailor"
+  },
+  "start": {
+    "cell": "0xF6820033",
+    "point": [
+      145.7,
+      49.855,
+      58.005
+    ],
+    "name": "the Refuge's arrival on Tusker Island (the quest's hunt is at its ground first)"
+  },
+  "steps": [
+    {
+      "kind": "hunt-until",
+      "what": "one Tusker Redeemer Tusk from a Tusker Redeemer's corpse at Tusker Abode",
+      "place": null,
+      "target": {
+        "wcid": 22601,
+        "name": "Tusker Redeemer"
+      },
+      "item": {
+        "wcid": 22430,
+        "name": "Tusker Redeemer Tusk"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/5/facts.md): weenie_properties_create_list id 59860: object 22601 (Tusker Redeemer) holds 22430 (Tusker Redeemer Tusk) at destination_Type 1 (Contain), stack 1, so it is on the corpse for sure (ACE Creature_Death.cs:646-705 @95ef426d); the carrier is on the ground profile tusker-abode's targets; the pickup is gated by the tusk's own Quest string TuskRedeemerPickup (quest id 5064 'TuskRedeemerPickUp', min_Delta 72000 s, max_Solves -1; ACE Player_Inventory.cs:1249-1262)",
+      "todo": null,
+      "count": 1,
+      "ground": "tusker-abode"
+    },
+    {
+      "kind": "go",
+      "what": "to Brighteyes in the Refuge",
+      "place": {
+        "cell": "0xF682011C",
+        "point": [
+          175.994,
+          30.9674,
+          63.605
+        ],
+        "name": "Brighteyes's building in the Refuge (indoors)"
+      },
+      "target": {
+        "wcid": 22642,
+        "name": "Brighteyes, the Tailor"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/5/facts.md): Brighteyes 22642 landblock_instance guid 0x7F68200D, cell 0xF682011C (indoors), origin (175.994, 30.9674, 63.605), 35.7 m from the Refuge arrival 0xF6820033 (facts.md section 1)",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "give Brighteyes the Tusker Redeemer Tusk",
+      "place": null,
+      "target": {
+        "wcid": 22642,
+        "name": "Brighteyes, the Tailor"
+      },
+      "item": {
+        "wcid": 22430,
+        "name": "Tusker Redeemer Tusk"
+      },
+      "expect": {
+        "reply": "Yes! Finally getting some breathing space. I've been alone here for so long that I'd begun to think that no one would ever come to help.",
+        "stamp": null,
+        "item": {
+          "wcid": 22729,
+          "name": "Aphus Lassel Portal Gem"
+        }
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/5/facts.md): weenie_properties_emote id 48426 (Brighteyes 22642, category 6 Give, weenie_Class_Id 22430): TurnToTarget (0), Tell (1) 'Yes! Finally getting some breathing space. I've been alone here for so long that I'd begun to think that no one would ever come to help.', AwardXP (order 2) amount_64 750,000, AddCharacterTitle, Give 22729 x1 (order 4), Tell (delay 2) 'The portal gem will get you back here quickly, until you steal the scroll from the clutches of the mighty Bobo.'; she needs AllowGive (weenie_properties_bool type 8 = 1; ACE Player_Inventory.cs:3423) and refuses a Give while her chain runs (AiRefuseItemDuringEmote, :3405-3409)",
+      "todo": null
+    }
+  ],
+  "done": {
+    "stamp": null,
+    "reply": "The portal gem will get you back here quickly",
+    "item": {
+      "wcid": 22729,
+      "name": "Aphus Lassel Portal Gem"
+    }
+  },
+  "timer_seconds": 72000,
+  "level": {
+    "min": 20,
+    "max": null
+  },
+  "experience": {
+    "amount": 750000,
+    "kind": "fixed",
+    "max": null,
+    "percent": null,
+    "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/5/facts.md): weenie_properties_emote_action of emote 48426 order 2, type 2 AwardXP, amount_64 750,000; ACE EmoteManager.cs:170-181 @95ef426d (EarnXP with ShareType.All), the line 'You've earned N experience.' Player_Xp.cs:114"
+  },
+  "sources": [
+    "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/5/facts.md): Brighteyes 22642's Give set 48426 for the Tusker Redeemer Tusk 22430 (its quest column is NULL: she stamps and inquires nothing); the tusk's Quest string (weenie_properties_string type 33) is TuskRedeemerPickup",
+    "timer_seconds 72000 (D57): the PICKUP's gate, not Brighteyes's: quest row TuskRedeemerPickUp (id 5064) min_Delta 72000 s = 20 h, max_Solves -1; ACE refuses to pick this tusk from a corpse that is not the player's own while the quest cannot be solved again (Player_Inventory.cs:1249-1262; HandleSolveError QuestManager.cs:558-578), so one Tusker Redeemer Tusk per 20 hours; a completion is recorded at the turn-in, so the next due time is never early",
+    "level: min 20 and max null are the ground tusker-abode's entry portal 22654 MinLevel 20 and MaxLevel (none) (weenie_properties_int types 86 and 87; the profile's entry block)",
+    "experience: fixed 750,000 (the AwardXP amount_64 of emote 48426), not level-proportional",
+    "hunt-until: the carrier 22601 Tusker Redeemer is on the tusker-abode profile's targets; the item is the tusk 22430 (one per kill, a guaranteed Contain row); the step's count 1 is checked before the hunt, so a tusk already held skips it (the autopilot's errand runs this same file)",
+    "The Aphus Lassel Portal Gem 22729 that Brighteyes gives is the rung change's fallback (item 4's travel file gems, 'aphus-lassel': spell 2936 'Entrance to Tusker Island', arriving at the Refuge 0xF6820033): the turn-in's reward is also the way back to the Refuge, and item 4's travel file names this item as its source"
+  ]
+}

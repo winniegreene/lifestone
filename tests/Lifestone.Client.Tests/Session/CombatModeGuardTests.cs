@@ -28,6 +28,23 @@ public sealed class CombatModeGuardTests
     }
 
     [Fact]
+    public void M6_6_I_describe_is_exhaustive_every_refusal_has_its_text_and_none_or_an_unknown_value_fails_loudly()
+    {
+        var wielded = default(WieldedWeapons);
+        foreach (var problem in Enum.GetValues<CombatModeProblem>().Where(p => p != CombatModeProblem.None))
+        {
+            var text = CombatModeGuard.Describe(problem, CombatModes.Melee, in wielded);
+            Assert.False(string.IsNullOrWhiteSpace(text), problem + " has no text");
+            Assert.DoesNotContain("TODO(", text, StringComparison.Ordinal);
+        }
+
+        var none = Assert.Throws<ArgumentException>(() => CombatModeGuard.Describe(CombatModeProblem.None, CombatModes.Melee, in wielded));
+        Assert.Contains("TODO(combat-mode-guard-problem)", none.Message, StringComparison.Ordinal);
+        var unknown = Assert.Throws<ArgumentOutOfRangeException>(() => CombatModeGuard.Describe((CombatModeProblem)99, CombatModes.Melee, in wielded));
+        Assert.Contains("TODO(combat-mode-guard-problem)", unknown.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void A_melee_mode_with_a_caster_or_a_launcher_is_refused_with_a_text_that_names_the_item()
     {
         var wand = CombatModeGuard.Check(CombatMode.Melee, WieldedSetups.World(WieldedSetups.Wand).State);

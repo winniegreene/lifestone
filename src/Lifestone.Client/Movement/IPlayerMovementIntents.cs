@@ -62,6 +62,12 @@ public interface IPlayerMovementIntents
     bool OnGround { get; }
 
     /// <summary>
+    /// M6 14 airborne: true while the body is in the world and off walkable ground (a jump, a fall): ACE's <c>Player.IsJumping</c> (<c>Player.cs</c>:49-62 @95ef426d: no OnWalkable), for which it refuses a cast, a melee or missile
+    /// attack, a heal and a drink with 0x04EB. A body that is not placed in a cell yet is nowhere, not in the air. The default is <c>!</c><see cref="OnGround"/> (a body with no placement of its own to tell).
+    /// </summary>
+    bool InTheAir => !OnGround;
+
+    /// <summary>
     /// M5 7 P7p (D141): the server MoveTos the controller's stuck rule ended (<c>PlayerMovementController.ServerMoveToStuckEnds</c>, <c>TODO(m5-moveto-stuck)</c>), so a caller can read before and after an
     /// action whether ACE's walk-to-use ended stuck in between. 0 for a body with no such rule.
     /// </summary>
@@ -76,4 +82,13 @@ public interface IPlayerMovementIntents
 
     /// <summary>M5 7 P7p: how the last server MoveTo ended (<c>PlayerMovementController.LastServerMoveToEnd</c>: <c>arrived</c>, <c>cancelled (...)</c>, <c>not started</c>, <c>stuck</c>), or null.</summary>
     string? LastServerMoveToEnd => null;
+
+    /// <summary>
+    /// M6 14 (check, act, check, D141): whether the server's MoveTo or TurnTo of the player is under way now (retail <c>CPhysicsObj::IsMovingTo</c>, 11.6096 0x0050F5E0, while the server has control): an out-of-range Use's walk,
+    /// which a movement key ends. A caller reads it before and after the key. Null when this body cannot tell.
+    /// </summary>
+    bool? ServerMoving => null;
+
+    /// <summary>M6 14: what the movement stack believes the player is doing, in one line for a log (<c>PlayerMovementController.DescribeMotion</c>), or null when this body does not say.</summary>
+    string? MotionText => null;
 }

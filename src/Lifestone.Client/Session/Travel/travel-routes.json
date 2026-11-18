@@ -1,0 +1,4056 @@
+{
+  "key": "travel-routes",
+  "name": "the travel routes: portals, routes per ground, ways home",
+  "sources": {
+    "world": "the pinned world SQL v0.9.296; each record names its table and row; MinLevel is PropertyInt key 86, MaxLevel 87, PortalBitmask 111 (ACE PropertyInt.cs @95ef426d)",
+    "decision": "M6 item 4 D50: a ground's travel is a tied tie record, else the first admitted route of this file, else the named stop TODO(m6-ground-route); no gate or distance lives in code (D26, D28)",
+    "distances": "straight lines on global x/y in metres (landblock index * 192 + local); hints only: the runs are planned at run time",
+    "todo": "TODO(m6-ladder-routes) closed (M6 4 R1): war-mage.json labels the Temple 20-40 'walk:new-colier' and this file routes it by the New Colier Portal first, by Neydisa Castle second"
+  },
+  "start": {
+    "place": "holtburg",
+    "wcid": 509,
+    "guid": "0x7A9B404F",
+    "cell": "0xA9B40000",
+    "origin": {
+      "x": 81.3304,
+      "y": 11.7974,
+      "z": 94.005
+    },
+    "source": "landblock_instance guid 0x7A9B404F (weenie_Class_Id 509 lifestone): Holtburg's lifestone, the home of the island grounds (M6 3 D48)"
+  },
+  "places": [
+    {
+      "key": "holtburg",
+      "name": "Holtburg and the mainland walk to the New Colier Portal",
+      "landblocks": [
+        "0xA9B4",
+        "0xABB1",
+        "0xAAB1"
+      ],
+      "source": "0xA9B4: landblock_instance guid 0x7A9B4080 (weenie 43065, holtburg-to-network): cell; weenie_properties_position object_Id 42820 position_Type 2 (network-to-holtburg): destination (+1 more); 0xABB1: landblock_instance guid 0x7ABB1005 (weenie 12527, new-colier): cell; checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "town-network",
+      "name": "the Town Network",
+      "landblocks": [
+        "0x0007"
+      ],
+      "source": "0x0007: weenie_properties_position object_Id 43065 position_Type 2 (holtburg-to-network): destination; landblock_instance guid 0x70007079 (weenie 43002, network-to-refuge): cell (+16 more); checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "island",
+      "name": "Tusker Island's surface (Oolutanga's Refuge, the Facility Hub drops and the dungeons' Surface exits)",
+      "landblocks": [
+        "0xF682",
+        "0xF681",
+        "0xF981",
+        "0xF97F",
+        "0xF880",
+        "0xF67B",
+        "0xF77E",
+        "0xF67C",
+        "0xF07E",
+        "0xF982",
+        "0xFA7F",
+        "0xF07F",
+        "0xEA7B",
+        "0xEF7F"
+      ],
+      "source": "0xF682: weenie_properties_position object_Id 43002 position_Type 2 (network-to-refuge): destination; landblock_instance guid 0x7F682018 (weenie 42852, refuge-to-network): cell (+1 more); 0xF681: landblock_instance guid 0x7F681000 (weenie 22725, the Refuge's Healer): cell 0xF6810000; 0xF981: weenie_properties_position object_Id 42177 position_Type 2 (hub-burrow): destination; 0xF97F: weenie_properties_position object_Id 42181 position_Type 2 (hub-lodge): destination; weenie_properties_position object_Id 42178 position_Type 2 (hub-cave): destination; 0xF880: weenie_properties_position object_Id 42179 position_Type 2 (hub-cavern): destination; 0xF67B: weenie_properties_position object_Id 42175 position_Type 2 (hub-abode): destination; 0xF77E: weenie_properties_position object_Id 42180 position_Type 2 (hub-habitat): destination; 0xF67C: weenie_properties_position object_Id 42182 position_Type 2 (hub-quarters): destination; 0xF07E: weenie_properties_position object_Id 42176 position_Type 2 (hub-barracks): destination; 0xF982: the destination of an island dungeon's Surface exit portal (weenie_properties_position object_Id 22664, 22689, 22666, 22668, 22655, 22679, 22693, 22662, 22681, 22658 position_Type 2; the list in TravelRoutesSqlTests); 0xFA7F: the destination of an island dungeon's Surface exit portal (weenie_properties_position object_Id 22664, 22689, 22666, 22668, 22655, 22679, 22693, 22662, 22681, 22658 position_Type 2; the list in TravelRoutesSqlTests); 0xF07F: the destination of an island dungeon's Surface exit portal (weenie_properties_position object_Id 22664, 22689, 22666, 22668, 22655, 22679, 22693, 22662, 22681, 22658 position_Type 2; the list in TravelRoutesSqlTests); 0xEA7B: the destination of an island dungeon's Surface exit portal (weenie_properties_position object_Id 22664, 22689, 22666, 22668, 22655, 22679, 22693, 22662, 22681, 22658 position_Type 2; the list in TravelRoutesSqlTests); 0xEF7F: the destination of an island dungeon's Surface exit portal (weenie_properties_position object_Id 22664, 22689, 22666, 22668, 22655, 22679, 22693, 22662, 22681, 22658 position_Type 2; the list in TravelRoutesSqlTests; M6 14 armory: the Tusker Armory's Surface 22658 drops at 0xEF7F000B); checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "facility-hub",
+      "name": "the Facility Hub",
+      "landblocks": [
+        "0x8A02"
+      ],
+      "source": "0x8A02: weenie_properties_position object_Id 42851 position_Type 2 (network-to-facility-hub): destination; landblock_instance guid 0x78A020BC (weenie 42815, facility-hub-to-eastham): cell (+8 more); checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "fort-tethana",
+      "name": "Fort Tethana",
+      "landblocks": [
+        "0x2681",
+        "0x2581",
+        "0x2780",
+        "0x2481"
+      ],
+      "source": "0x2681: weenie_properties_position object_Id 43001 position_Type 2 (network-to-fort-tethana): destination; 0x2581: landblock_instance guid 0x7258104B (weenie 43065, fort-tethana-to-network): cell; 0x2780: landblock_instance guid 0x72780000 (weenie 509, the town lifestone); 0x2481: landblock_instance guid 0x72481001 (weenie 2314, Zisaha's room); checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "stonehold",
+      "name": "Stonehold",
+      "landblocks": [
+        "0x64D5"
+      ],
+      "source": "0x64D5: weenie_properties_position object_Id 42811 position_Type 2 (network-to-stonehold): destination; landblock_instance guid 0x764D504A (weenie 43065, stonehold-to-network): cell; checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "plateau",
+      "name": "Plateau Village",
+      "landblocks": [
+        "0x49B7",
+        "0x49B6"
+      ],
+      "source": "0x49B7: weenie_properties_position object_Id 42812 position_Type 2 (network-to-plateau): destination; 0x49B6: landblock_instance guid 0x749B6043 (weenie 43065, plateau-to-network): cell; checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "qalabar",
+      "name": "Qalaba'r",
+      "landblocks": [
+        "0x9722"
+      ],
+      "source": "0x9722: weenie_properties_position object_Id 42833 position_Type 2 (network-to-qalabar): destination; landblock_instance guid 0x79722051 (weenie 43066, qalabar-to-network): cell; checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "dryreach",
+      "name": "Dryreach",
+      "landblocks": [
+        "0xDA75"
+      ],
+      "source": "0xDA75: weenie_properties_position object_Id 42813 position_Type 2 (network-to-dryreach): destination; landblock_instance guid 0x7DA75040 (weenie 43065, dryreach-to-network): cell; checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "eastham",
+      "name": "Eastham",
+      "landblocks": [
+        "0xCE94",
+        "0xCE95"
+      ],
+      "source": "0xCE94: weenie_properties_position object_Id 42815 position_Type 2 (facility-hub-to-eastham): destination; 0xCE95: landblock_instance guid 0x7CE95089 (weenie 43065, eastham-to-network): cell; checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "new-colier",
+      "name": "New Colier",
+      "landblocks": [
+        "0xA6CB"
+      ],
+      "source": "0xA6CB: weenie_properties_position object_Id 12527 position_Type 2 (new-colier): destination; checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "neydisa-castle",
+      "name": "Neydisa Castle",
+      "landblocks": [
+        "0x95D6"
+      ],
+      "source": "0x95D6: weenie_properties_position object_Id 42828 position_Type 2 (network-to-neydisa): destination; landblock_instance guid 0x795D6014 (weenie 42852, neydisa-castle-to-network): cell; checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "shoushi",
+      "name": "Shoushi (the Blood Shreth Kill Task's San Ming; the Stone Cathedral portal's house 0xD854; Nen Ai's tower 0xD853)",
+      "landblocks": [
+        "0xDA55",
+        "0xD854",
+        "0xD853"
+      ],
+      "source": "0xDA55: weenie_properties_position object_Id 42840 position_Type 2 (network-to-shoushi): destination 0xDA55001D; landblock_instance guid 0x7DA55094 (weenie 43067, shoushi-to-network): cell; 0xD854: the rows of the edges shoushi-to-cathedral (cell) and cathedral-to-shoushi (destination); 0xD853: Nen Ai's landblock_instance guid 0x7D853001; checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "lin",
+      "name": "Lin (the Tusker Guard Kill Task's Shoichi: the arrival 0xDC3C and the return portal and Shoichi in 0xDA3B)",
+      "landblocks": [
+        "0xDC3C",
+        "0xDA3B"
+      ],
+      "source": "0xDC3C: weenie_properties_position object_Id 42844 position_Type 2 (network-to-lin): destination 0xDC3C0011; 0xDA3B: landblock_instance guid 0x7DA3B039 (weenie 43067, lin-to-network): cell; checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "glenden-wood",
+      "name": "Glenden Wood and the walk to the Highland Manors portal",
+      "landblocks": [
+        "0xA0A4",
+        "0xA4A2"
+      ],
+      "source": "0xA0A4: weenie_properties_position object_Id 42814 position_Type 2: destination; 0xA4A2: landblock_instance guid 0x7A4A2007 (weenie 13108): cell; checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "highland-manors",
+      "name": "the Highland Manors and the walk to the Crater Pathway portal",
+      "landblocks": [
+        "0x94CE",
+        "0x93CB"
+      ],
+      "source": "0x94CE: weenie_properties_position object_Id 13108 position_Type 2: destination; 0x93CB: landblock_instance guid 0x793CB000 (weenie 2552): cell; checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "crater-pathway",
+      "name": "the Crater Pathway dungeon",
+      "landblocks": [
+        "0x01A7"
+      ],
+      "source": "0x01A7: weenie_properties_position object_Id 2552 position_Type 2: destination; landblock_instance guid 0x701A701B (weenie 2555): cell; checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "crater-lake",
+      "name": "Crater Lake Village and the walk to the Crater Caves portal",
+      "landblocks": [
+        "0x90D0",
+        "0x8FD2"
+      ],
+      "source": "0x90D0: weenie_properties_position object_Id 2555 position_Type 2: destination; landblock_instance guid 0x790D000D (weenie 42852): cell; 0x8FD2: landblock_instance guid 0x78FD2000 (weenie 2387): cell; checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "samsur",
+      "name": "Samsur and the walk to the Yinar Portal",
+      "landblocks": [
+        "0x977B",
+        "0x977E"
+      ],
+      "source": "0x977B: weenie_properties_position object_Id 42834 position_Type 2: destination; 0x977E: landblock_instance guid 0x7977E006 (weenie 14293): cell; checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "yinar",
+      "name": "the Yinar drop and the run south-west to the cave of the Minor Smoldering Stone",
+      "landblocks": [
+        "0xA973",
+        "0xA66C"
+      ],
+      "source": "0xA973: weenie_properties_position object_Id 14293 position_Type 2: destination; 0xA66C: landblock_instance guid 0x7A66C000 (weenie 6320, the stone in the cave): cell; checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "holtburg-redoubt",
+      "name": "the Holtburg Redoubt dungeon",
+      "landblocks": [
+        "0x0163"
+      ],
+      "source": "0x0163: the rows of the edges holtburg-to-redoubt (destination) and redoubt-to-holtburg (cell); checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "stone-cathedral",
+      "name": "the Stone Cathedral (Nen Ai's Pet Drudge)",
+      "landblocks": [
+        "0x0154"
+      ],
+      "source": "0x0154: the rows of the edges shoushi-to-cathedral (destination) and cathedral-to-shoushi (cell); checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "yaraq",
+      "name": "Yaraq and the walk to the Sea Temple portal",
+      "landblocks": [
+        "0x7D64",
+        "0x7D63",
+        "0x7966"
+      ],
+      "source": "0x7D64: weenie_properties_position object_Id 42824 position_Type 2 (network-to-yaraq): destination 0x7D64000D, and landblock_instance guid 0x77D6406A (weenie 43066, yaraq-to-network): cell; 0x7966: the Sea Temple portal's row (yaraq-to-sea-temple); 0x7D63: Lubziklan al-Luq's landblock_instance guid 0x77D6300C; checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "sea-temple",
+      "name": "the Sea Temple Catacombs (Lubziklan al-Luq's Stolen Goods)",
+      "landblocks": [
+        "0x0156"
+      ],
+      "source": "0x0156: the rows of the edges yaraq-to-sea-temple (destination) and sea-temple-to-yaraq (cell); checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "danbys-outpost",
+      "name": "Danby's Outpost",
+      "landblocks": [
+        "0x5A9C",
+        "0x5B9C"
+      ],
+      "source": "0x5A9C: weenie_properties_position object_Id 43003 position_Type 2 (network-to-danbys): destination; 0x5B9C: landblock_instance guid 0x75B9C007 (weenie 9685, danbys-to-desert-march): cell; checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "desert-march",
+      "name": "the dungeon the Desert March Portal leads to (landblock 0x02AA; the file gives it no retail name)",
+      "landblocks": [
+        "0x02AA"
+      ],
+      "source": "0x02AA: weenie_properties_position object_Id 9685 position_Type 2 (danbys-to-desert-march): destination; landblock_instance guid 0x702AA015 (weenie 2328, desert-march-to-black-hill): cell; checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "black-hill",
+      "name": "the Black Hill portal's drop in the Direlands",
+      "landblocks": [
+        "0x3E31"
+      ],
+      "source": "0x3E31: weenie_properties_position object_Id 2328 position_Type 2 (desert-march-to-black-hill): destination; checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "uziz",
+      "name": "Uziz (the town stock's Archmage Sammam al-Ashiz, who sells the Gold and the Pyreal Scarab)",
+      "landblocks": [
+        "0xA260"
+      ],
+      "source": "0xA260: weenie_properties_position object_Id 42821 position_Type 2 (network-to-uziz): destination 0xA260003C; landblock_instance guid 0x7A260022 (weenie 43066, uziz-to-network): cell; Archmage Sammam al-Ashiz's landblock_instance guid 0x7A260006 (weenie 1824, cell 0xA2600112) stands in the same landblock; checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "holtburg-wilderness",
+      "name": "the Holtburg Wilderness Settlement drop and the climb north-east to the igloo of the Minor Shivering Stone",
+      "landblocks": [
+        "0xBAB2",
+        "0xBDB4"
+      ],
+      "source": "0xBAB2: weenie_properties_position object_Id 12503 position_Type 2 (holtburg-to-wilderness): destination 0xBAB2001B; 0xBDB4: landblock_instance guid 0x7BDB4001 (weenie 6321, the stone in the igloo): cell 0xBDB40102; checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "blackmire",
+      "name": "the Blackmire Temple drop and the run south-west to the swamp cave of the Minor Stinging Stone",
+      "landblocks": [
+        "0xBB64",
+        "0xBA60"
+      ],
+      "source": "0xBB64: weenie_properties_position object_Id 42151 position_Type 2 (facility-hub-to-blackmire): destination 0xBB64001B; 0xBA60: landblock_instance guid 0x7BA60011 (weenie 6319, the stone in the cave): cell 0xBA600100; checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "mayoi",
+      "name": "Mayoi and the walk to the West Mayoi Mountain Villas Portal",
+      "landblocks": [
+        "0xE632",
+        "0xE333"
+      ],
+      "source": "0xE632: weenie_properties_position object_Id 42842 position_Type 2 (network-to-mayoi): destination 0xE6320021; 0xE333: landblock_instance guid 0x7E333004 (weenie 13139, mayoi-to-west-villas): cell; checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    },
+    {
+      "key": "west-mayoi-villas",
+      "name": "the West Mayoi Mountain Villas drop and the run north-east to the cave of the Minor Sparking Stone",
+      "landblocks": [
+        "0xDB33",
+        "0xDD34"
+      ],
+      "source": "0xDB33: weenie_properties_position object_Id 13139 position_Type 2 (mayoi-to-west-villas): destination 0xDB330021; 0xDD34: landblock_instance guid 0x7DD34002 (weenie 6318, the stone in the cave): cell 0xDD340100; checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+    }
+  ],
+  "edges": [
+    {
+      "key": "holtburg-to-network",
+      "name": "Holtburg's Portal to Town Network",
+      "from": "holtburg",
+      "to": "town-network",
+      "wcid": 43065,
+      "guid": "0x7A9B4080",
+      "cell": "0xA9B40003",
+      "origin": {
+        "x": 14.3926,
+        "y": 55.6124,
+        "z": 78.198
+      },
+      "facing": {
+        "w": 0.658662,
+        "x": 0,
+        "y": 0,
+        "z": -0.752439
+      },
+      "dest_cell": "0x00070143",
+      "dest_origin": {
+        "x": 70,
+        "y": -60,
+        "z": 0.005
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 129,
+      "source": "landblock_instance guid 0x7A9B4080 (weenie_Class_Id 43065, Portal to Town Network): cell and origin; weenie_properties_position object_Id 43065 position_Type 2: destination; weenie_properties_int object_Id 43065 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "network-to-refuge",
+      "name": "Town Network: Oolutanga's Refuge",
+      "from": "town-network",
+      "to": "island",
+      "wcid": 43002,
+      "guid": "0x70007079",
+      "cell": "0x0007015F",
+      "origin": {
+        "x": 79.991,
+        "y": -176.283,
+        "z": -0.0504
+      },
+      "facing": {
+        "w": 0,
+        "x": 0,
+        "y": 0,
+        "z": -1
+      },
+      "dest_cell": "0xF6820033",
+      "dest_origin": {
+        "x": 145.7,
+        "y": 49.855,
+        "z": 58.005
+      },
+      "min_level": 10,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x70007079 (weenie_Class_Id 43002, Oolutanga's Refuge): cell and origin; weenie_properties_position object_Id 43002 position_Type 2: destination; weenie_properties_int object_Id 43002 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "network-to-facility-hub",
+      "name": "Town Network: Portal to Facility Hub",
+      "from": "town-network",
+      "to": "facility-hub",
+      "wcid": 42851,
+      "guid": "0x70007029",
+      "cell": "0x00070126",
+      "origin": {
+        "x": 53.554,
+        "y": -99.995,
+        "z": -0.063
+      },
+      "facing": {
+        "w": -0.707107,
+        "x": 0,
+        "y": 0,
+        "z": -0.707107
+      },
+      "dest_cell": "0x8A020212",
+      "dest_origin": {
+        "x": 58.6391,
+        "y": -89.9231,
+        "z": 6.005
+      },
+      "min_level": 10,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x70007029 (weenie_Class_Id 42851, Portal to Facility Hub): cell and origin; weenie_properties_position object_Id 42851 position_Type 2: destination; weenie_properties_int object_Id 42851 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "network-to-holtburg",
+      "name": "Town Network: Portal to Holtburg",
+      "from": "town-network",
+      "to": "holtburg",
+      "wcid": 42820,
+      "guid": "0x70007028",
+      "cell": "0x00070124",
+      "origin": {
+        "x": 53.906,
+        "y": -39.953,
+        "z": -0.063
+      },
+      "facing": {
+        "w": -0.707107,
+        "x": 0,
+        "y": 0,
+        "z": -0.707107
+      },
+      "dest_cell": "0xA9B40019",
+      "dest_origin": {
+        "x": 84,
+        "y": 7.1,
+        "z": 94
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x70007028 (weenie_Class_Id 42820, Portal to Holtburg): cell and origin; weenie_properties_position object_Id 42820 position_Type 2: destination; weenie_properties_int object_Id 42820 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "network-to-fort-tethana",
+      "name": "Town Network: Fort Tethana Portal",
+      "from": "town-network",
+      "to": "fort-tethana",
+      "wcid": 43001,
+      "guid": "0x7000704E",
+      "cell": "0x0007013D",
+      "origin": {
+        "x": 69.989,
+        "y": -3.562,
+        "z": -0.063
+      },
+      "facing": {
+        "w": 1,
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "dest_cell": "0x2681001D",
+      "dest_origin": {
+        "x": 77.7,
+        "y": 108.1,
+        "z": 240
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x7000704E (weenie_Class_Id 43001, Fort Tethana Portal): cell and origin; weenie_properties_position object_Id 43001 position_Type 2: destination; weenie_properties_int object_Id 43001 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "network-to-stonehold",
+      "name": "Town Network: Stonehold Portal",
+      "from": "town-network",
+      "to": "stonehold",
+      "wcid": 42811,
+      "guid": "0x7000705A",
+      "cell": "0x00070150",
+      "origin": {
+        "x": 79.939,
+        "y": -3.349,
+        "z": -0.063
+      },
+      "facing": {
+        "w": -1,
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "dest_cell": "0x64D5000B",
+      "dest_origin": {
+        "x": 30,
+        "y": 50,
+        "z": 78
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x7000705A (weenie_Class_Id 42811, Stonehold Portal): cell and origin; weenie_properties_position object_Id 42811 position_Type 2: destination; weenie_properties_int object_Id 42811 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "network-to-plateau",
+      "name": "Town Network: Plateau Portal",
+      "from": "town-network",
+      "to": "plateau",
+      "wcid": 42812,
+      "guid": "0x70007030",
+      "cell": "0x0007012D",
+      "origin": {
+        "x": 60,
+        "y": -3.482,
+        "z": -0.063
+      },
+      "facing": {
+        "w": -1,
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "dest_cell": "0x49B70021",
+      "dest_origin": {
+        "x": 100.1,
+        "y": 20.8,
+        "z": 238.6
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x70007030 (weenie_Class_Id 42812, Plateau Portal): cell and origin; weenie_properties_position object_Id 42812 position_Type 2: destination; weenie_properties_int object_Id 42812 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "network-to-qalabar",
+      "name": "Town Network: Qalaba'r Portal",
+      "from": "town-network",
+      "to": "qalabar",
+      "wcid": 42833,
+      "guid": "0x70007014",
+      "cell": "0x00070117",
+      "origin": {
+        "x": 30.011,
+        "y": -53.7,
+        "z": -0.063
+      },
+      "facing": {
+        "w": 1,
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "dest_cell": "0x9722003A",
+      "dest_origin": {
+        "x": 168.354,
+        "y": 24.618,
+        "z": 102.005
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x70007014 (weenie_Class_Id 42833, Qalaba'r Portal): cell and origin; weenie_properties_position object_Id 42833 position_Type 2: destination; weenie_properties_int object_Id 42833 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "network-to-dryreach",
+      "name": "Town Network: Portal to Dryreach",
+      "from": "town-network",
+      "to": "dryreach",
+      "wcid": 42813,
+      "guid": "0x7000707A",
+      "cell": "0x00070160",
+      "origin": {
+        "x": 86.4152,
+        "y": -10,
+        "z": -0.063
+      },
+      "facing": {
+        "w": 0.707107,
+        "x": 0,
+        "y": 0,
+        "z": -0.707107
+      },
+      "dest_cell": "0xDA75002B",
+      "dest_origin": {
+        "x": 132,
+        "y": 60,
+        "z": 18.005
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x7000707A (weenie_Class_Id 42813, Portal to Dryreach): cell and origin; weenie_properties_position object_Id 42813 position_Type 2: destination; weenie_properties_int object_Id 42813 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "network-to-neydisa",
+      "name": "Town Network: Neydisa Castle",
+      "from": "town-network",
+      "to": "neydisa-castle",
+      "wcid": 42828,
+      "guid": "0x7000702D",
+      "cell": "0x0007012A",
+      "origin": {
+        "x": 54.052,
+        "y": -149.981,
+        "z": -0.063
+      },
+      "facing": {
+        "w": -0.707107,
+        "x": 0,
+        "y": 0,
+        "z": -0.707107
+      },
+      "dest_cell": "0x95D60033",
+      "dest_origin": {
+        "x": 146.9,
+        "y": 71.3,
+        "z": 99.8
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x7000702D (weenie_Class_Id 42828, Portal to Neydisa Castle): cell and origin; weenie_properties_position object_Id 42828 position_Type 2: destination; weenie_properties_int object_Id 42828 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "network-to-shoushi",
+      "name": "Town Network: Shoushi",
+      "from": "town-network",
+      "to": "shoushi",
+      "wcid": 42840,
+      "guid": "0x70007085",
+      "cell": "0x0007016C",
+      "origin": {
+        "x": 100,
+        "y": -53.6244,
+        "z": -0.063
+      },
+      "facing": {
+        "w": 1,
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "dest_cell": "0xDA55001D",
+      "dest_origin": {
+        "x": 84.8,
+        "y": 99,
+        "z": 20
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x70007085 (weenie_Class_Id 42840, Portal to Shoushi): cell and origin; weenie_properties_position object_Id 42840 position_Type 2: destination; weenie_properties_int object_Id 42840 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "network-to-lin",
+      "name": "Town Network: Lin",
+      "from": "town-network",
+      "to": "lin",
+      "wcid": 42844,
+      "guid": "0x70007096",
+      "cell": "0x00070176",
+      "origin": {
+        "x": 120,
+        "y": -53.43,
+        "z": -0.063
+      },
+      "facing": {
+        "w": 1,
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "dest_cell": "0xDC3C0011",
+      "dest_origin": {
+        "x": 59.72,
+        "y": 10.774,
+        "z": 18.958
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x70007096 (weenie_Class_Id 42844, Lin Portal): cell and origin; weenie_properties_position object_Id 42844 position_Type 2: destination; weenie_properties_int object_Id 42844 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "fort-tethana-to-network",
+      "name": "Fort Tethana's Portal to Town Network",
+      "from": "fort-tethana",
+      "to": "town-network",
+      "wcid": 43065,
+      "guid": "0x7258104B",
+      "cell": "0x2581002C",
+      "origin": {
+        "x": 138.929,
+        "y": 72.6891,
+        "z": 220.198
+      },
+      "facing": {
+        "w": -0.724326,
+        "x": 0,
+        "y": 0,
+        "z": 0.689458
+      },
+      "dest_cell": "0x00070143",
+      "dest_origin": {
+        "x": 70,
+        "y": -60,
+        "z": 0.005
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 129,
+      "source": "landblock_instance guid 0x7258104B (weenie_Class_Id 43065, Portal to Town Network): cell and origin; weenie_properties_position object_Id 43065 position_Type 2: destination; weenie_properties_int object_Id 43065 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "stonehold-to-network",
+      "name": "Stonehold's Portal to Town Network",
+      "from": "stonehold",
+      "to": "town-network",
+      "wcid": 43065,
+      "guid": "0x764D504A",
+      "cell": "0x64D50013",
+      "origin": {
+        "x": 71.7399,
+        "y": 62.3963,
+        "z": 78.198
+      },
+      "facing": {
+        "w": -0.993905,
+        "x": 0,
+        "y": 0,
+        "z": 0.11024
+      },
+      "dest_cell": "0x00070143",
+      "dest_origin": {
+        "x": 70,
+        "y": -60,
+        "z": 0.005
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 129,
+      "source": "landblock_instance guid 0x764D504A (weenie_Class_Id 43065, Portal to Town Network): cell and origin; weenie_properties_position object_Id 43065 position_Type 2: destination; weenie_properties_int object_Id 43065 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "plateau-to-network",
+      "name": "Plateau Village's Portal to Town Network",
+      "from": "plateau",
+      "to": "town-network",
+      "wcid": 43065,
+      "guid": "0x749B6043",
+      "cell": "0x49B60007",
+      "origin": {
+        "x": 20.637,
+        "y": 147.066,
+        "z": 240.198
+      },
+      "facing": {
+        "w": -0.353075,
+        "x": 0,
+        "y": 0,
+        "z": 0.935595
+      },
+      "dest_cell": "0x00070143",
+      "dest_origin": {
+        "x": 70,
+        "y": -60,
+        "z": 0.005
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 129,
+      "source": "landblock_instance guid 0x749B6043 (weenie_Class_Id 43065, Portal to Town Network): cell and origin; weenie_properties_position object_Id 43065 position_Type 2: destination; weenie_properties_int object_Id 43065 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "qalabar-to-network",
+      "name": "Qalaba'r's Portal to Town Network (wcid 43066: it drops at hub cell 0x00070133)",
+      "from": "qalabar",
+      "to": "town-network",
+      "wcid": 43066,
+      "guid": "0x79722051",
+      "cell": "0x9722001D",
+      "origin": {
+        "x": 74.2978,
+        "y": 99.2338,
+        "z": 102.198
+      },
+      "facing": {
+        "w": 0.922207,
+        "x": 0,
+        "y": 0,
+        "z": -0.386698
+      },
+      "dest_cell": "0x00070133",
+      "dest_origin": {
+        "x": 60,
+        "y": -70,
+        "z": 0.005
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 129,
+      "source": "landblock_instance guid 0x79722051 (weenie_Class_Id 43066, Portal to Town Network): cell and origin; weenie_properties_position object_Id 43066 position_Type 2: destination; weenie_properties_int object_Id 43066 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "dryreach-to-network",
+      "name": "Dryreach's Portal to Town Network",
+      "from": "dryreach",
+      "to": "town-network",
+      "wcid": 43065,
+      "guid": "0x7DA75040",
+      "cell": "0xDA75002D",
+      "origin": {
+        "x": 125.225,
+        "y": 108.214,
+        "z": 18.198
+      },
+      "facing": {
+        "w": -0.741119,
+        "x": 0,
+        "y": 0,
+        "z": 0.671373
+      },
+      "dest_cell": "0x00070143",
+      "dest_origin": {
+        "x": 70,
+        "y": -60,
+        "z": 0.005
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 129,
+      "source": "landblock_instance guid 0x7DA75040 (weenie_Class_Id 43065, Portal to Town Network): cell and origin; weenie_properties_position object_Id 43065 position_Type 2: destination; weenie_properties_int object_Id 43065 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "neydisa-castle-to-network",
+      "name": "Neydisa Castle's Portal to Town Network",
+      "from": "neydisa-castle",
+      "to": "town-network",
+      "wcid": 42852,
+      "guid": "0x795D6014",
+      "cell": "0x95D6001C",
+      "origin": {
+        "x": 73.9336,
+        "y": 74.9926,
+        "z": 100.198
+      },
+      "facing": {
+        "w": -0.899764,
+        "x": 0,
+        "y": 0,
+        "z": 0.436378
+      },
+      "dest_cell": "0x00070145",
+      "dest_origin": {
+        "x": 70,
+        "y": -80,
+        "z": 0.005
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 129,
+      "source": "landblock_instance guid 0x795D6014 (weenie_Class_Id 42852, Portal to Town Network): cell and origin; weenie_properties_position object_Id 42852 position_Type 2: destination; weenie_properties_int object_Id 42852 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "eastham-to-network",
+      "name": "Eastham's Portal to Town Network",
+      "from": "eastham",
+      "to": "town-network",
+      "wcid": 43065,
+      "guid": "0x7CE95089",
+      "cell": "0xCE95002D",
+      "origin": {
+        "x": 123.797,
+        "y": 114.757,
+        "z": 20.198
+      },
+      "facing": {
+        "w": 0.999839,
+        "x": 0,
+        "y": 0,
+        "z": -0.017936
+      },
+      "dest_cell": "0x00070143",
+      "dest_origin": {
+        "x": 70,
+        "y": -60,
+        "z": 0.005
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 129,
+      "source": "landblock_instance guid 0x7CE95089 (weenie_Class_Id 43065, Portal to Town Network): cell and origin; weenie_properties_position object_Id 43065 position_Type 2: destination; weenie_properties_int object_Id 43065 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "refuge-to-network",
+      "name": "Oolutanga's Refuge: Portal to Town Network",
+      "from": "island",
+      "to": "town-network",
+      "wcid": 42852,
+      "guid": "0x7F682018",
+      "cell": "0xF6820033",
+      "origin": {
+        "x": 145.337,
+        "y": 63.357,
+        "z": 58.198
+      },
+      "facing": {
+        "w": -0.098031,
+        "x": 0,
+        "y": 0,
+        "z": -0.995183
+      },
+      "dest_cell": "0x00070145",
+      "dest_origin": {
+        "x": 70,
+        "y": -80,
+        "z": 0.005
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 129,
+      "source": "landblock_instance guid 0x7F682018 (weenie_Class_Id 42852, Portal to Town Network): cell and origin; weenie_properties_position object_Id 42852 position_Type 2: destination; weenie_properties_int object_Id 42852 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "shoushi-to-network",
+      "name": "Shoushi's Portal to Town Network",
+      "from": "shoushi",
+      "to": "town-network",
+      "wcid": 43067,
+      "guid": "0x7DA55094",
+      "cell": "0xDA550014",
+      "origin": {
+        "x": 66.1818,
+        "y": 92.2689,
+        "z": 20.198
+      },
+      "facing": {
+        "w": 0.339298,
+        "x": 0,
+        "y": 0,
+        "z": 0.940679
+      },
+      "dest_cell": "0x00070156",
+      "dest_origin": {
+        "x": 80,
+        "y": -70,
+        "z": 0.005
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 129,
+      "source": "landblock_instance guid 0x7DA55094 (weenie_Class_Id 43067, Portal to Town Network): cell and origin; weenie_properties_position object_Id 43067 position_Type 2: destination; weenie_properties_int object_Id 43067 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "lin-to-network",
+      "name": "Lin's Portal to Town Network (in 0xDA3B, by Shoichi)",
+      "from": "lin",
+      "to": "town-network",
+      "wcid": 43067,
+      "guid": "0x7DA3B039",
+      "cell": "0xDA3B003B",
+      "origin": {
+        "x": 181.605,
+        "y": 52.8087,
+        "z": 0.198001
+      },
+      "facing": {
+        "w": -0.828594,
+        "x": 0,
+        "y": 0,
+        "z": -0.559849
+      },
+      "dest_cell": "0x00070156",
+      "dest_origin": {
+        "x": 80,
+        "y": -70,
+        "z": 0.005
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 129,
+      "source": "landblock_instance guid 0x7DA3B039 (weenie_Class_Id 43067, Portal to Town Network): cell and origin; weenie_properties_position object_Id 43067 position_Type 2: destination; weenie_properties_int object_Id 43067 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "facility-hub-to-eastham",
+      "name": "Facility Hub: Eastham Portal",
+      "from": "facility-hub",
+      "to": "eastham",
+      "wcid": 42815,
+      "guid": "0x78A020BC",
+      "cell": "0x8A0201F4",
+      "origin": {
+        "x": 109.997,
+        "y": -37.5519,
+        "z": -0.063
+      },
+      "facing": {
+        "w": 1,
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "dest_cell": "0xCE940035",
+      "dest_origin": {
+        "x": 151.053,
+        "y": 112.61,
+        "z": 17.417
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x78A020BC (weenie_Class_Id 42815, Eastham Portal): cell and origin; weenie_properties_position object_Id 42815 position_Type 2: destination; weenie_properties_int object_Id 42815 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "new-colier",
+      "name": "New Colier Portal",
+      "from": "holtburg",
+      "to": "new-colier",
+      "wcid": 12527,
+      "guid": "0x7ABB1005",
+      "cell": "0xABB10000",
+      "origin": {
+        "x": 68.63,
+        "y": 126.407,
+        "z": 94.5297
+      },
+      "facing": {
+        "w": -0.871911,
+        "x": 0,
+        "y": 0,
+        "z": -0.489665
+      },
+      "dest_cell": "0xA6CB001F",
+      "dest_origin": {
+        "x": 82.544,
+        "y": 154.642,
+        "z": 56.892
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x7ABB1005 (weenie_Class_Id 12527, New Colier Portal): cell and origin; weenie_properties_position object_Id 12527 position_Type 2: destination; weenie_properties_int object_Id 12527 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "hub-burrow",
+      "name": "Facility Hub: Tusker Burrow",
+      "from": "facility-hub",
+      "to": "island",
+      "wcid": 42177,
+      "guid": "0x78A02073",
+      "cell": "0x8A020118",
+      "origin": {
+        "x": 71.69,
+        "y": -31.667,
+        "z": -12.0504
+      },
+      "facing": {
+        "w": 0.382683,
+        "x": 0,
+        "y": 0,
+        "z": -0.92388
+      },
+      "dest_cell": "0xF9810038",
+      "dest_origin": {
+        "x": 155.573,
+        "y": 188.208,
+        "z": 13.0406
+      },
+      "min_level": 15,
+      "max_level": null,
+      "bitmask": 49,
+      "source": "landblock_instance guid 0x78A02073 (weenie_Class_Id 42177, Tusker Burrow): cell and origin; weenie_properties_position object_Id 42177 position_Type 2: destination; weenie_properties_int object_Id 42177 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "hub-lodge",
+      "name": "Facility Hub: Tusker Lodge",
+      "from": "facility-hub",
+      "to": "island",
+      "wcid": 42181,
+      "guid": "0x78A02074",
+      "cell": "0x8A020119",
+      "origin": {
+        "x": 70,
+        "y": -40,
+        "z": -12.0504
+      },
+      "facing": {
+        "w": 0.707107,
+        "x": 0,
+        "y": 0,
+        "z": -0.707107
+      },
+      "dest_cell": "0xF97F003E",
+      "dest_origin": {
+        "x": 187.876,
+        "y": 122.937,
+        "z": 46.1508
+      },
+      "min_level": 15,
+      "max_level": null,
+      "bitmask": 49,
+      "source": "landblock_instance guid 0x78A02074 (weenie_Class_Id 42181, Tusker Lodge): cell and origin; weenie_properties_position object_Id 42181 position_Type 2: destination; weenie_properties_int object_Id 42181 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "hub-cave",
+      "name": "Facility Hub: Tusker Cave",
+      "from": "facility-hub",
+      "to": "island",
+      "wcid": 42178,
+      "guid": "0x78A02075",
+      "cell": "0x8A02011A",
+      "origin": {
+        "x": 72.688,
+        "y": -48.437,
+        "z": -12.0504
+      },
+      "facing": {
+        "w": 0.923879,
+        "x": 0,
+        "y": 0,
+        "z": -0.382684
+      },
+      "dest_cell": "0xF97F0008",
+      "dest_origin": {
+        "x": 18.4629,
+        "y": 180.623,
+        "z": 17.1861
+      },
+      "min_level": 15,
+      "max_level": null,
+      "bitmask": 49,
+      "source": "landblock_instance guid 0x78A02075 (weenie_Class_Id 42178, Tusker Cave): cell and origin; weenie_properties_position object_Id 42178 position_Type 2: destination; weenie_properties_int object_Id 42178 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "hub-barracks",
+      "name": "Facility Hub: Tusker Barracks",
+      "from": "facility-hub",
+      "to": "island",
+      "wcid": 42176,
+      "guid": "0x78A02076",
+      "cell": "0x8A02011E",
+      "origin": {
+        "x": 80,
+        "y": -40,
+        "z": -12.0504
+      },
+      "facing": {
+        "w": 1,
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "dest_cell": "0xF07E0040",
+      "dest_origin": {
+        "x": 171.613,
+        "y": 188.834,
+        "z": 10.9496
+      },
+      "min_level": 40,
+      "max_level": null,
+      "bitmask": 49,
+      "source": "landblock_instance guid 0x78A02076 (weenie_Class_Id 42176, Tusker Barracks): cell and origin; weenie_properties_position object_Id 42176 position_Type 2: destination; weenie_properties_int object_Id 42176 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "hub-cavern",
+      "name": "Facility Hub: Tusker Cavern",
+      "from": "facility-hub",
+      "to": "island",
+      "wcid": 42179,
+      "guid": "0x78A02077",
+      "cell": "0x8A02011F",
+      "origin": {
+        "x": 80,
+        "y": -50,
+        "z": -12.0504
+      },
+      "facing": {
+        "w": 1,
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "dest_cell": "0xF8800027",
+      "dest_origin": {
+        "x": 97.682,
+        "y": 147.319,
+        "z": 12.005
+      },
+      "min_level": 15,
+      "max_level": null,
+      "bitmask": 49,
+      "source": "landblock_instance guid 0x78A02077 (weenie_Class_Id 42179, Tusker Cavern): cell and origin; weenie_properties_position object_Id 42179 position_Type 2: destination; weenie_properties_int object_Id 42179 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "hub-quarters",
+      "name": "Facility Hub: Tusker Quarters",
+      "from": "facility-hub",
+      "to": "island",
+      "wcid": 42182,
+      "guid": "0x78A02078",
+      "cell": "0x8A020121",
+      "origin": {
+        "x": 87.245,
+        "y": -31.588,
+        "z": -12.0504
+      },
+      "facing": {
+        "w": -0.382684,
+        "x": 0,
+        "y": 0,
+        "z": -0.923879
+      },
+      "dest_cell": "0xF67C003D",
+      "dest_origin": {
+        "x": 172.539,
+        "y": 112.711,
+        "z": 19.4264
+      },
+      "min_level": 30,
+      "max_level": null,
+      "bitmask": 49,
+      "source": "landblock_instance guid 0x78A02078 (weenie_Class_Id 42182, Tusker Quarters): cell and origin; weenie_properties_position object_Id 42182 position_Type 2: destination; weenie_properties_int object_Id 42182 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "hub-habitat",
+      "name": "Facility Hub: Tusker Habitat",
+      "from": "facility-hub",
+      "to": "island",
+      "wcid": 42180,
+      "guid": "0x78A02079",
+      "cell": "0x8A020122",
+      "origin": {
+        "x": 90,
+        "y": -40,
+        "z": -12.0504
+      },
+      "facing": {
+        "w": -0.707107,
+        "x": 0,
+        "y": 0,
+        "z": -0.707107
+      },
+      "dest_cell": "0xF77E0017",
+      "dest_origin": {
+        "x": 57.8188,
+        "y": 165.736,
+        "z": 18.0187
+      },
+      "min_level": 25,
+      "max_level": null,
+      "bitmask": 49,
+      "source": "landblock_instance guid 0x78A02079 (weenie_Class_Id 42180, Tusker Habitat): cell and origin; weenie_properties_position object_Id 42180 position_Type 2: destination; weenie_properties_int object_Id 42180 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "hub-abode",
+      "name": "Facility Hub: Tusker Abode",
+      "from": "facility-hub",
+      "to": "island",
+      "wcid": 42175,
+      "guid": "0x78A0207A",
+      "cell": "0x8A020123",
+      "origin": {
+        "x": 88.309,
+        "y": -48.327,
+        "z": -12.0504
+      },
+      "facing": {
+        "w": -0.923879,
+        "x": 0,
+        "y": 0,
+        "z": -0.382684
+      },
+      "dest_cell": "0xF67B000C",
+      "dest_origin": {
+        "x": 26.259,
+        "y": 84.692,
+        "z": -0.095
+      },
+      "min_level": 20,
+      "max_level": null,
+      "bitmask": 49,
+      "source": "landblock_instance guid 0x78A0207A (weenie_Class_Id 42175, Tusker Abode): cell and origin; weenie_properties_position object_Id 42175 position_Type 2: destination; weenie_properties_int object_Id 42175 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "network-to-glenden",
+      "name": "Town Network: Portal to Glenden Wood",
+      "from": "town-network",
+      "to": "glenden-wood",
+      "wcid": 42814,
+      "guid": "0x70007025",
+      "cell": "0x00070121",
+      "origin": {
+        "x": 53.5,
+        "y": -10,
+        "z": -0.063
+      },
+      "facing": {
+        "w": -0.707107,
+        "x": 0,
+        "y": 0,
+        "z": -0.707107
+      },
+      "dest_cell": "0xA0A40025",
+      "dest_origin": {
+        "x": 96.302,
+        "y": 119.847,
+        "z": 59.955
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x70007025 (weenie_Class_Id 42814, Glenden Wood Portal): cell and origin; weenie_properties_position object_Id 42814 position_Type 2: destination; weenie_properties_int object_Id 42814 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "glenden-to-highland",
+      "name": "Highland Manors Portal",
+      "from": "glenden-wood",
+      "to": "highland-manors",
+      "wcid": 13108,
+      "guid": "0x7A4A2007",
+      "cell": "0xA4A20000",
+      "origin": {
+        "x": 51.9685,
+        "y": 75.1124,
+        "z": 138.154
+      },
+      "facing": {
+        "w": -0.999997,
+        "x": 0,
+        "y": 0,
+        "z": -0.002526
+      },
+      "dest_cell": "0x94CE0024",
+      "dest_origin": {
+        "x": 113.133,
+        "y": 92.646,
+        "z": 220.005
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x7A4A2007 (weenie_Class_Id 13108, Highland Manors Portal): cell and origin; weenie_properties_position object_Id 13108 position_Type 2: destination; weenie_properties_int object_Id 13108 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "highland-to-pathway",
+      "name": "Crater Pathway",
+      "from": "highland-manors",
+      "to": "crater-pathway",
+      "wcid": 2552,
+      "guid": "0x793CB000",
+      "cell": "0x93CB0102",
+      "origin": {
+        "x": 12,
+        "y": 41.443,
+        "z": 101.205
+      },
+      "facing": {
+        "w": 1,
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "dest_cell": "0x01A70108",
+      "dest_origin": {
+        "x": 17.571,
+        "y": -509.205,
+        "z": 0
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x793CB000 (weenie_Class_Id 2552, Crater Pathway): cell and origin; weenie_properties_position object_Id 2552 position_Type 2: destination; weenie_properties_int object_Id 2552 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)",
+      "note": "M6 8 B1: the portal stands in the room 0x93CB0102, reached from the street by the door of 0x93CB010F and a stair the room graph cannot walk (0x93CB010F to 0x93CB0110 to the floorless 0x93CB010C): the hop walks to the door's front, then the file's way through the door and down the stair, along x 12 (walk_in, the check is WalkToPoint's; proven by CraterLakeWalkDatTests)",
+      "walk_in": [
+        {
+          "cell": "0x93CB0001",
+          "origin": {
+            "x": 12,
+            "y": 0.8,
+            "z": 106.1
+          },
+          "why": "the front of the Crater Pathway's door on the street (the door's opening is a metre wide at x 12)"
+        },
+        {
+          "cell": "0x93CB0110",
+          "origin": {
+            "x": 12,
+            "y": 9.5,
+            "z": 106.45
+          },
+          "why": "through the door of 0x93CB010F into the room 0x93CB0110"
+        },
+        {
+          "cell": "0x93CB0110",
+          "origin": {
+            "x": 12,
+            "y": 10.7,
+            "z": 106.4
+          },
+          "why": "the stair's top, on the room's floor at x 12"
+        },
+        {
+          "cell": "0x93CB0105",
+          "origin": {
+            "x": 12,
+            "y": 18,
+            "z": 101.2
+          },
+          "why": "down the stair (0x93CB010E, y 11 to 18, 106.4 to 101.2) to the room 0x93CB0105's floor"
+        },
+        {
+          "cell": "0x93CB0102",
+          "origin": {
+            "x": 12,
+            "y": 35,
+            "z": 101.2
+          },
+          "why": "straight on through 0x93CB0104 into the portal's room 0x93CB0102: the portal 2552 stands 6.4 m on, within the hop's near walk"
+        }
+      ]
+    },
+    {
+      "key": "pathway-to-crater-lake",
+      "name": "Surface (the Crater Pathway's top, to Crater Lake Village)",
+      "from": "crater-pathway",
+      "to": "crater-lake",
+      "wcid": 2555,
+      "guid": "0x701A701B",
+      "cell": "0x01A701A7",
+      "origin": {
+        "x": 17.0608,
+        "y": -0.146708,
+        "z": 138
+      },
+      "facing": {
+        "w": 0.707107,
+        "x": 0,
+        "y": 0,
+        "z": -0.707107
+      },
+      "dest_cell": "0x90D00107",
+      "dest_origin": {
+        "x": 95.521,
+        "y": 84,
+        "z": 277.3
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x701A701B (weenie_Class_Id 2555, Surface): cell and origin; weenie_properties_position object_Id 2555 position_Type 2: destination; weenie_properties_int object_Id 2555 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)",
+      "note": "M6 8 B1: out of the Crater Pathway's top building: the room graph has no way from the arrival room 0x90D00107 up the ramp of 0x90D00110 (the floorless 0x90D0010E) to the door of 0x90D00111, so the hop walks it: to the ramp's foot, then straight up it and out of the door onto the village's street; the dat test CraterLakeWalkDatTests walks a body along it",
+      "walk_out": [
+        {
+          "cell": "0x90D00107",
+          "origin": {
+            "x": 90.3,
+            "y": 84,
+            "z": 277.2
+          },
+          "why": "the arrival room's west end, the foot of the ramp up to the village's street"
+        },
+        {
+          "cell": "0x90D00107",
+          "origin": {
+            "x": 72,
+          "y": 84,
+          "z": 282
+        },
+        "why": "straight up the ramp through 0x90D00110, 0x90D0010E and 0x90D00112, out of the door of 0x90D00111 and off the porch onto the street of the village at (72, 84), the first tile of the street the outdoor lattice takes (the porch nodes belong to the building); the plan keeps to the arrival room, the physics finds the cells on the way"
+        }
+      ]
+    },
+    {
+      "key": "crater-lake-to-network",
+      "name": "Crater Lake Village's Portal to Town Network",
+      "from": "crater-lake",
+      "to": "town-network",
+      "wcid": 42852,
+      "guid": "0x790D000D",
+      "cell": "0x90D00014",
+      "origin": {
+        "x": 69.1709,
+        "y": 82.6791,
+        "z": 282.198
+      },
+      "facing": {
+        "w": 0.999955,
+        "x": 0,
+        "y": 0,
+        "z": 0.009455
+      },
+      "dest_cell": "0x00070145",
+      "dest_origin": {
+        "x": 70,
+        "y": -80,
+        "z": 0.005
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 129,
+      "source": "landblock_instance guid 0x790D000D (weenie_Class_Id 42852, Portal to Town Network): cell and origin; weenie_properties_position object_Id 42852 position_Type 2: destination; weenie_properties_int object_Id 42852 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "network-to-samsur",
+      "name": "Town Network: Portal to Samsur",
+      "from": "town-network",
+      "to": "samsur",
+      "wcid": 42834,
+      "guid": "0x70007019",
+      "cell": "0x0007011C",
+      "origin": {
+        "x": 39.967,
+        "y": -53.6,
+        "z": -0.063
+      },
+      "facing": {
+        "w": 1,
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "dest_cell": "0x977B000C",
+      "dest_origin": {
+        "x": 25.811,
+        "y": 73.853,
+        "z": 0.005
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x70007019 (weenie_Class_Id 42834, Portal to Samsur): cell and origin; weenie_properties_position object_Id 42834 position_Type 2: destination; weenie_properties_int object_Id 42834 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "samsur-to-yinar",
+      "name": "Yinar Portal",
+      "from": "samsur",
+      "to": "yinar",
+      "wcid": 14293,
+      "guid": "0x7977E006",
+      "cell": "0x977E0000",
+      "origin": {
+        "x": 20.6096,
+        "y": 53.1273,
+        "z": 30.005
+      },
+      "facing": {
+        "w": 0.788967,
+        "x": 0,
+        "y": 0,
+        "z": 0.614436
+      },
+      "dest_cell": "0xA9730005",
+      "dest_origin": {
+        "x": 16.262,
+        "y": 113.936,
+        "z": 30.65
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x7977E006 (weenie_Class_Id 14293, Yinar Portal): cell and origin; weenie_properties_position object_Id 14293 position_Type 2: destination; weenie_properties_int object_Id 14293 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)"
+    },
+    {
+      "key": "holtburg-to-redoubt",
+      "name": "the Holtburg Redoubt portal",
+      "from": "holtburg",
+      "to": "holtburg-redoubt",
+      "wcid": 4935,
+      "guid": "0x7AAB1000",
+      "cell": "0xAAB10000",
+      "origin": {
+        "x": 99.7059,
+        "y": 180.63,
+        "z": 124.005
+      },
+      "facing": {
+        "w": 0.536112,
+        "x": 0,
+        "y": 0,
+        "z": 0.844147
+      },
+      "dest_cell": "0x016301AC",
+      "dest_origin": {
+        "x": 140,
+        "y": -40,
+        "z": 0
+      },
+      "min_level": 1,
+      "max_level": 20,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x7AAB1000 (weenie_Class_Id 4935, Holtburg Redoubt): cell and origin; weenie_properties_position object_Id 4935 position_Type 2: destination; weenie_properties_int object_Id 4935 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing",
+      "note": "M6 8 B2a: Worcer's Missing Heirlooms; a level-capped portal (1 to 20)"
+    },
+    {
+      "key": "redoubt-to-holtburg",
+      "name": "the Redoubt's Surface portal",
+      "from": "holtburg-redoubt",
+      "to": "holtburg",
+      "wcid": 4936,
+      "guid": "0x70163026",
+      "cell": "0x016301A9",
+      "origin": {
+        "x": 129.714,
+        "y": -53.1287,
+        "z": 0
+      },
+      "facing": {
+        "w": 1,
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "dest_cell": "0xAAB10020",
+      "dest_origin": {
+        "x": 95.6,
+        "y": 174.5,
+        "z": 124
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x70163026 (weenie_Class_Id 4936, Surface): cell and origin; weenie_properties_position object_Id 4936 position_Type 2: destination; weenie_properties_int object_Id 4936 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing"
+    },
+    {
+      "key": "shoushi-to-cathedral",
+      "name": "the Stone Cathedral portal",
+      "from": "shoushi",
+      "to": "stone-cathedral",
+      "wcid": 4955,
+      "guid": "0x7D854002",
+      "cell": "0xD8540102",
+      "origin": {
+        "x": 85.0052,
+        "y": 26.3172,
+        "z": 26.044
+      },
+      "facing": {
+        "w": 0.999859,
+        "x": 0,
+        "y": 0,
+        "z": 0.016782
+      },
+      "dest_cell": "0x0154017E",
+      "dest_origin": {
+        "x": 30,
+        "y": -10,
+        "z": -6
+      },
+      "min_level": 1,
+      "max_level": 20,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x7D854002 (weenie_Class_Id 4955, Stone Cathedral): cell and origin; weenie_properties_position object_Id 4955 position_Type 2: destination; weenie_properties_int object_Id 4955 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)",
+      "note": "M6 8 B2c: Nen Ai's Pet Drudge; a level-capped portal (1 to 20); its house's stair round a floorless shaft is the walk_in",
+      "walk_in": [
+        {
+          "cell": "0xD8540103",
+          "origin": {
+            "x": 84.75,
+            "y": 10.5,
+            "z": 31.3
+          },
+          "why": "the door hall of the portal's house, by the ordinary walk: then the stair round the floorless shaft"
+        },
+        {
+          "cell": "0xD8540103",
+          "origin": {
+            "x": 84.75,
+            "y": 18.5,
+            "z": 26.05
+          },
+          "why": "the foot of the stair in the portal's room (M6 8 B2c, walked by a body in TownNetworkWalkDatTests.Fetch)"
+        }
+      ]
+    },
+    {
+      "key": "cathedral-to-shoushi",
+      "name": "the Cathedral's Surface portal",
+      "from": "stone-cathedral",
+      "to": "shoushi",
+      "wcid": 4956,
+      "guid": "0x70154015",
+      "cell": "0x0154017E",
+      "origin": {
+        "x": 26.8865,
+        "y": -13.1398,
+        "z": -6
+      },
+      "facing": {
+        "w": 0.92388,
+        "x": 0,
+        "y": 0,
+        "z": -0.382683
+      },
+      "dest_cell": "0xD8540019",
+      "dest_origin": {
+        "x": 84.8,
+        "y": 2.1,
+        "z": 31.8
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x70154015 (weenie_Class_Id 4956, Surface): cell and origin; weenie_properties_position object_Id 4956 position_Type 2: destination; weenie_properties_int object_Id 4956 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)",
+      "note": "M6 8 B2c: the way out of Nen Ai's Pet Drudge; M6 8 long round 3: the hop's computed approach-side point stands where the physics finds no floor, so the walk in is the quest file's own stand",
+      "walk_in": [
+        {
+          "cell": "0x0154017E",
+          "origin": {
+            "x": 30,
+            "y": -10,
+            "z": -6
+          },
+          "why": "the Cathedral's arrival point (the destination of shoushi-to-cathedral), by the ordinary walk: a floor a body is known to stand on, 4.4 m from the portal on its facing side"
+        },
+        {
+          "cell": "0x0154017E",
+          "origin": {
+            "x": 29.008,
+            "y": -11.018,
+            "z": -6
+          },
+          "why": "the stand 3 m in front of the Surface portal (the quest file's own go; the physics refuses the approach side)"
+        }
+      ]
+    },
+    {
+      "key": "network-to-yaraq",
+      "name": "Town Network: Yaraq",
+      "from": "town-network",
+      "to": "yaraq",
+      "wcid": 42824,
+      "guid": "0x70007024",
+      "cell": "0x00070120",
+      "origin": {
+        "x": 39.996,
+        "y": -86.178,
+        "z": -0.063
+      },
+      "facing": {
+        "w": 0,
+        "x": 0,
+        "y": 0,
+        "z": -1
+      },
+      "dest_cell": "0x7D64000D",
+      "dest_origin": {
+        "x": 31.9,
+        "y": 104.6,
+        "z": 11.9
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x70007024 (weenie_Class_Id 42824, Portal to Yaraq): cell and origin; weenie_properties_position object_Id 42824 position_Type 2: destination; weenie_properties_int object_Id 42824 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)",
+      "note": "M6 8 B2c: Lubziklan al-Luq's Stolen Goods"
+    },
+    {
+      "key": "yaraq-to-network",
+      "name": "Yaraq's Portal to Town Network",
+      "from": "yaraq",
+      "to": "town-network",
+      "wcid": 43066,
+      "guid": "0x77D6406A",
+      "cell": "0x7D640025",
+      "origin": {
+        "x": 102.999,
+        "y": 106.787,
+        "z": 12.198
+      },
+      "facing": {
+        "w": 0.072717,
+        "x": 0,
+        "y": 0,
+        "z": 0.997353
+      },
+      "dest_cell": "0x00070133",
+      "dest_origin": {
+        "x": 60,
+        "y": -70,
+        "z": 0.005
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 129,
+      "source": "landblock_instance guid 0x77D6406A (weenie_Class_Id 43066, Portal to Town Network): cell and origin; weenie_properties_position object_Id 43066 position_Type 2: destination; weenie_properties_int object_Id 43066 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)",
+      "note": "M6 8 B2c: the way home from Yaraq"
+    },
+    {
+      "key": "yaraq-to-sea-temple",
+      "name": "the Sea Temple Catacombs portal",
+      "from": "yaraq",
+      "to": "sea-temple",
+      "wcid": 5198,
+      "guid": "0x77966000",
+      "cell": "0x79660101",
+      "origin": {
+        "x": 179.71,
+        "y": 35.965,
+        "z": 57
+      },
+      "facing": {
+        "w": -0.708839,
+        "x": 0,
+        "y": 0,
+        "z": -0.705371
+      },
+      "dest_cell": "0x0156018F",
+      "dest_origin": {
+        "x": 49.1,
+        "y": -61.9,
+        "z": 0
+      },
+      "min_level": 1,
+      "max_level": 20,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x77966000 (weenie_Class_Id 5198, Sea Temple Catacombs): cell and origin; weenie_properties_position object_Id 5198 position_Type 2: destination; weenie_properties_int object_Id 5198 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)",
+      "note": "M6 8 B2c: Lubziklan's Stolen Goods; a level-capped portal (1 to 20); the destination row's cell is stale (the point stands in 0x01560192, the dats); its door and ramp are the walk_in",
+      "walk_in": [
+        {
+          "cell": "0x7966003A",
+          "origin": {
+            "x": 172,
+            "y": 36,
+            "z": 50.5
+          },
+          "why": "the open ground in front of the Sea Temple's door, by the ordinary walk"
+        },
+        {
+          "cell": "0x7966003A",
+          "origin": {
+            "x": 176.5,
+            "y": 36,
+            "z": 52
+          },
+          "why": "the doorway (the outdoor tile stamps the door's front blocked: this way is authored)"
+        },
+        {
+          "cell": "0x79660100",
+          "origin": {
+            "x": 178.4,
+            "y": 36,
+            "z": 52.02
+          },
+          "why": "inside the door"
+        },
+        {
+          "cell": "0x79660101",
+          "origin": {
+            "x": 179.0,
+            "y": 34.2,
+            "z": 52.02
+          },
+          "why": "the south aisle of the portal room"
+        },
+        {
+          "cell": "0x79660101",
+          "origin": {
+            "x": 184.3,
+            "y": 34.4,
+            "z": 52.02
+          },
+          "why": "along the south aisle"
+        },
+        {
+          "cell": "0x79660101",
+          "origin": {
+            "x": 185.4,
+            "y": 34.9,
+            "z": 52.02
+          },
+          "why": "the end of the aisle"
+        },
+        {
+          "cell": "0x79660101",
+          "origin": {
+            "x": 185.4,
+            "y": 36,
+            "z": 52.05
+          },
+          "why": "the foot of the ramp"
+        },
+        {
+          "cell": "0x79660101",
+          "origin": {
+            "x": 182.5,
+            "y": 36,
+            "z": 54.5
+          },
+          "why": "on the ramp, 2.8 m from the portal"
+        }
+      ]
+    },
+    {
+      "key": "sea-temple-to-yaraq",
+      "name": "the Catacombs' Surface portal",
+      "from": "sea-temple",
+      "to": "yaraq",
+      "wcid": 5199,
+      "guid": "0x7015601C",
+      "cell": "0x01560183",
+      "origin": {
+        "x": 37.2983,
+        "y": -46.897,
+        "z": 0
+      },
+      "facing": {
+        "w": 1,
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "dest_cell": "0x7966003A",
+      "dest_origin": {
+        "x": 168.871,
+        "y": 36.099,
+        "z": 50.005
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 1,
+      "walk_in": [
+        {"cell": "0x01560183", "origin": {"x": 40, "y": -48, "z": 0}, "why": "the stand before the Surface portal, the quest file's own go (the hop's front points north of the portal lie over no floor: M6 8 M)"},
+        {"cell": "0x01560183", "origin": {"x": 39, "y": -47.6, "z": 0}, "why": "a step on toward the portal, within the hop's near distance"}
+      ],
+      "source": "landblock_instance guid 0x7015601C (weenie_Class_Id 5199, Surface): cell and origin; weenie_properties_position object_Id 5199 position_Type 2: destination; weenie_properties_int object_Id 5199 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)",
+      "note": "M6 8 B2c: the way out of Lubziklan's Stolen Goods"
+    },
+    {
+      "key": "network-to-danbys",
+      "name": "Town Network: Danby's Outpost",
+      "from": "town-network",
+      "to": "danbys-outpost",
+      "wcid": 43003,
+      "guid": "0x70007083",
+      "cell": "0x0007016A",
+      "origin": {
+        "x": 86.419,
+        "y": -160.001,
+        "z": -0.063
+      },
+      "facing": {
+        "w": 0.707107,
+        "x": 0,
+        "y": 0,
+        "z": -0.707107
+      },
+      "dest_cell": "0x5A9C0004",
+      "dest_origin": {
+        "x": 23.5,
+        "y": 77.1,
+        "z": 6
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x70007083 (weenie_Class_Id 43003, Danby's Outpost): cell and origin; weenie_properties_position object_Id 43003 position_Type 2: destination; weenie_properties_int object_Id 43003 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)",
+      "note": "M6 item 14 (the den run): the Network holds a second Danby's Outpost row, guid 0x70007074 (weenie 42994) in cell 0x0007015D, whose weenie has no destination row (weenie_properties_position position_Type 2); this edge is the one with a destination"
+    },
+    {
+      "key": "danbys-to-desert-march",
+      "name": "Desert March Portal",
+      "from": "danbys-outpost",
+      "to": "desert-march",
+      "wcid": 9685,
+      "guid": "0x75B9C007",
+      "cell": "0x5B9C0000",
+      "origin": {
+        "x": 74.7335,
+        "y": 8.74883,
+        "z": 0.89386
+      },
+      "facing": {
+        "w": -0.99093,
+        "x": 0,
+        "y": 0,
+        "z": 0.134378
+      },
+      "dest_cell": "0x02AA022F",
+      "dest_origin": {
+        "x": 50,
+        "y": -500,
+        "z": 30
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x75B9C007 (weenie_Class_Id 9685, Desert March Portal): cell and origin; weenie_properties_position object_Id 9685 position_Type 2: destination; weenie_properties_int object_Id 9685 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)",
+      "note": "M6 item 14 (the den run): the portal stands 252.7 m from the outpost's drop, outside the town, at the south edge of 0x5B9C; the walk is the hop's (encounter rows of the Mid North Plains Generator 23159 lie 18.9, 18.5 and 11.1 m off its straight line)"
+    },
+    {
+      "key": "desert-march-to-black-hill",
+      "name": "Black Hill",
+      "from": "desert-march",
+      "to": "black-hill",
+      "wcid": 2328,
+      "guid": "0x702AA015",
+      "cell": "0x02AA0167",
+      "origin": {
+        "x": 310,
+        "y": -160,
+        "z": 0.005
+      },
+      "facing": {
+        "w": 1,
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "dest_cell": "0x3E310004",
+      "dest_origin": {
+        "x": 11.8,
+        "y": 93.1,
+        "z": 238.6
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x702AA015 (weenie_Class_Id 2328, Black Hill): cell and origin; weenie_properties_position object_Id 2328 position_Type 2: destination; weenie_properties_int object_Id 2328 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)",
+      "note": "M6 item 14 (the den run): weenie 2328 has two more rows (guid 0x74031001 in 0x4031, guid 0x7156801E in 0x1568) with the same destination; this edge is the one inside 0x02AA, 428.0 m in a straight line from the arrival 0x02AA022F"
+    },
+    {
+      "key": "network-to-uziz",
+      "name": "Town Network: Uziz Portal",
+      "from": "town-network",
+      "to": "uziz",
+      "wcid": 42821,
+      "guid": "0x7000700A",
+      "cell": "0x00070111",
+      "origin": {
+        "x": 9.864,
+        "y": -86.531,
+        "z": -0.063
+      },
+      "facing": {
+        "w": 0,
+        "x": 0,
+        "y": 0,
+        "z": -1
+      },
+      "dest_cell": "0xA260003C",
+      "dest_origin": {
+        "x": 182.919,
+        "y": 87.934,
+        "z": 20.005
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x7000700A (weenie_Class_Id 42821, Uziz Portal): cell and origin; weenie_properties_position object_Id 42821 position_Type 2: destination; weenie_properties_int object_Id 42821 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)",
+      "note": "M6 item 14 (m6-goldscarab): the town stock's stop at Archmage Sammam al-Ashiz (the Gold and the Pyreal Scarab); no gate (no row 86 or 87), no quest flag"
+    },
+    {
+      "key": "uziz-to-network",
+      "name": "Uziz's Portal to Town Network (wcid 43066: it drops at hub cell 0x00070133)",
+      "from": "uziz",
+      "to": "town-network",
+      "wcid": 43066,
+      "guid": "0x7A260022",
+      "cell": "0xA2600029",
+      "origin": {
+        "x": 129.741,
+        "y": 1.40805,
+        "z": 20.198
+      },
+      "facing": {
+        "w": 0.719475,
+        "x": 0,
+        "y": 0,
+        "z": -0.694518
+      },
+      "dest_cell": "0x00070133",
+      "dest_origin": {
+        "x": 60,
+        "y": -70,
+        "z": 0.005
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 129,
+      "source": "landblock_instance guid 0x7A260022 (weenie_Class_Id 43066, Portal to Town Network): cell and origin; weenie_properties_position object_Id 43066 position_Type 2: destination; weenie_properties_int object_Id 43066 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)",
+      "note": "M6 item 14 (m6-goldscarab): the way back from the stop at Uziz"
+    },
+    {
+      "key": "holtburg-to-wilderness",
+      "name": "Holtburg Wilderness Settlement Portal",
+      "from": "holtburg",
+      "to": "holtburg-wilderness",
+      "wcid": 12503,
+      "guid": "0x7ABB1004",
+      "cell": "0xABB10000",
+      "origin": {
+        "x": 61.7226,
+        "y": 140.597,
+        "z": 96.2908
+      },
+      "facing": {
+        "w": -0.056603,
+        "x": 0,
+        "y": 0,
+        "z": -0.998397
+      },
+      "dest_cell": "0xBAB2001B",
+      "dest_origin": {
+        "x": 84.766,
+        "y": 69.389,
+        "z": 85.787
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x7ABB1004 (weenie_Class_Id 12503, Holtburg Wilderness Settlement Portal): cell and origin; weenie_properties_position object_Id 12503 position_Type 2: destination; weenie_properties_int object_Id 12503 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)",
+      "note": "M6 villa: the Minor Shivering Stone's way (cache/m6/villa/writ-caves.md); it stands beside the New Colier Portal in Holtburg's place"
+    },
+    {
+      "key": "facility-hub-to-blackmire",
+      "name": "Facility Hub: Blackmire Temple",
+      "from": "facility-hub",
+      "to": "blackmire",
+      "wcid": 42151,
+      "guid": "0x78A02082",
+      "cell": "0x8A020196",
+      "origin": {
+        "x": 19.9827,
+        "y": -50.1056,
+        "z": 0.25273
+      },
+      "facing": {
+        "w": 0.707107,
+        "x": 0,
+        "y": 0,
+        "z": -0.707107
+      },
+      "dest_cell": "0xBB64001B",
+      "dest_origin": {
+        "x": 76.086,
+        "y": 49.2145,
+        "z": 5.555
+      },
+      "min_level": 45,
+      "max_level": null,
+      "bitmask": 49,
+      "source": "landblock_instance guid 0x78A02082 (weenie_Class_Id 42151, Blackmire Temple): cell and origin; weenie_properties_position object_Id 42151 position_Type 2: destination; weenie_properties_int object_Id 42151 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)",
+      "note": "M6 villa: the Minor Stinging Stone's way (cache/m6/villa/writ-caves.md); bitmask 49 (no summon, no recall: the way home is Lifestone Recall from the cave)"
+    },
+    {
+      "key": "network-to-mayoi",
+      "name": "Town Network: Mayoi Portal",
+      "from": "town-network",
+      "to": "mayoi",
+      "wcid": 42842,
+      "guid": "0x70007090",
+      "cell": "0x00070171",
+      "origin": {
+        "x": 110,
+        "y": -53.3694,
+        "z": -0.063
+      },
+      "facing": {
+        "w": 1,
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "dest_cell": "0xE6320021",
+      "dest_origin": {
+        "x": 107.417,
+        "y": 10.763,
+        "z": 29.908
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x70007090 (weenie_Class_Id 42842, Mayoi Portal): cell and origin; weenie_properties_position object_Id 42842 position_Type 2: destination; weenie_properties_int object_Id 42842 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)",
+      "note": "M6 villa: the first hop of the Minor Sparking Stone's way (cache/m6/villa/writ-caves.md)"
+    },
+    {
+      "key": "mayoi-to-west-villas",
+      "name": "West Mayoi Mountain Villas Portal",
+      "from": "mayoi",
+      "to": "west-mayoi-villas",
+      "wcid": 13139,
+      "guid": "0x7E333004",
+      "cell": "0xE3330000",
+      "origin": {
+        "x": 171.32,
+        "y": 85.7033,
+        "z": 118.835
+      },
+      "facing": {
+        "w": -0.891821,
+        "x": 0,
+        "y": 0,
+        "z": 0.452388
+      },
+      "dest_cell": "0xDB330021",
+      "dest_origin": {
+        "x": 113.791,
+        "y": 13.356,
+        "z": 170.522
+      },
+      "min_level": null,
+      "max_level": null,
+      "bitmask": 1,
+      "source": "landblock_instance guid 0x7E333004 (weenie_Class_Id 13139, West Mayoi Mountain Villas Portal): cell and origin; weenie_properties_position object_Id 13139 position_Type 2: destination; weenie_properties_int object_Id 13139 types 86 MinLevel, 87 MaxLevel, 111 PortalBitmask (an absent row is no limit); the same landblock_instance row's angles_W/X/Y/Z: facing (the portal's +Y rotated by the quaternion, horizontal)",
+      "note": "M6 villa: the second hop of the Minor Sparking Stone's way (cache/m6/villa/writ-caves.md)"
+    }
+  ],
+  "grounds": {
+    "tusker-burrow": {
+      "routes": [
+        {
+          "key": "by-facility-hub",
+          "start": "holtburg",
+          "steps": [
+            {
+              "edge": "holtburg-to-network",
+              "walk_m": 80.0
+            },
+            {
+              "edge": "network-to-facility-hub",
+              "walk_m": 43.2
+            },
+            {
+              "edge": "hub-burrow",
+              "walk_m": 59.7
+            }
+          ],
+          "run": {
+            "to": {
+              "wcid": 22663,
+              "name": "Tusker Burrow",
+              "guid": "0x7F981000",
+              "cell": "0xF9810000",
+              "origin": {
+                "x": 176.323,
+                "y": 186.044,
+                "z": 12.5013
+              },
+              "facing": {
+                "w": 0.783702,
+                "x": 0,
+                "y": 0,
+                "z": -0.621137
+              }
+            },
+            "metres": 20.9,
+            "source": "straight line on global x/y (landblock index * 192 + local) from the last drop 0xF9810038 to the entry portal's landblock_instance row (guid 0x7F981000, weenie 22663); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z"
+          },
+          "note": "first (M6 7 J): admitted from level 15 (the hub portal's gate), it takes the climber off the island's surface; the walk from the hub's drop 0x8A020212 down its two ramps to the portal is proven on the dats (FacilityHubWalkDatTests: planned, confirmed, a body run with no rung and no wall frame; the two doors on it are the runner's to Use, unproven live) and so is the run from the drop to the entry (IslandRunDatTests)"
+        },
+        {
+          "key": "by-refuge",
+          "start": "holtburg",
+          "steps": [
+            {
+              "edge": "holtburg-to-network",
+              "walk_m": 80.0
+            },
+            {
+              "edge": "network-to-refuge",
+              "walk_m": 116.7
+            }
+          ],
+          "run": {
+            "to": {
+              "wcid": 22663,
+              "name": "Tusker Burrow",
+              "guid": "0x7F981000",
+              "cell": "0xF9810000",
+              "origin": {
+                "x": 176.323,
+                "y": 186.044,
+                "z": 12.5013
+              },
+              "facing": {
+                "w": 0.783702,
+                "x": 0,
+                "y": 0,
+                "z": -0.621137
+              }
+            },
+            "metres": 609.2,
+            "source": "straight line on global x/y (landblock index * 192 + local) from the last drop 0xF6820033 to the entry portal's landblock_instance row (guid 0x7F981000, weenie 22663); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z",
+            "via": {
+              "below_level": 31,
+              "points": [
+                {
+                  "cell": "0xF882002C",
+                  "origin": {
+                    "x": 143.5,
+                    "y": 73.5,
+                    "z": 12.0
+                  },
+                  "why": "the climb down off the Refuge's plateau keeps north of the straight line, which passes 7 m from 0xF882:6,1 and 21 m from 0xF882:4,0: this point lies in the gap between 0xF882:6,1 and 0xF882:7,5, about 50 m from each"
+                },
+                {
+                  "cell": "0xF9820034",
+                  "origin": {
+                    "x": 150.0,
+                    "y": 72.0,
+                    "z": 12.0
+                  },
+                  "why": "along the same gap, north of 0xF982:4,1, 0xF982:5,0 and 0xF982:5,1 (the straight line passes 1 m from 0xF982:5,0), then south to the front east of them; 0xFA81:0,7 stands 23 m from the front and cannot be kept off"
+                }
+              ],
+              "source": "computed offline by M6 7 Z: a 1 m search over the attached tiles of 0xF4..0xFC by 0x7E..0x86 with the planner's own step costs plus a cost inside every danger_cells disc (ClearMetres), its route pulled to straight lines; the walk is proven by IslandDangerRunDatTests. Soft: a via that cannot be walked is skipped by name. A level from below_level on runs straight: the low tables' creatures are level 30 at most"
+            }
+          },
+          "note": "second (M6 7 J): the route a level under 15 takes, every hop walked on the dats from every start (TownNetworkWalkDatTests); a failed hop of the first route does not fall back to this one by itself: the station stops by name, or uses the gem when it is held (RungChangeStation)"
+        }
+      ]
+    },
+    "tusker-lodge": {
+      "routes": [
+        {
+          "key": "by-facility-hub",
+          "start": "holtburg",
+          "steps": [
+            {
+              "edge": "holtburg-to-network",
+              "walk_m": 80.0
+            },
+            {
+              "edge": "network-to-facility-hub",
+              "walk_m": 43.2
+            },
+            {
+              "edge": "hub-lodge",
+              "walk_m": 51.2
+            }
+          ],
+          "run": {
+            "to": {
+              "wcid": 22688,
+              "name": "Tusker Lodge",
+              "guid": "0x7FA7F000",
+              "cell": "0xFA7F0000",
+              "origin": {
+                "x": 7.6049,
+                "y": 120.782,
+                "z": 45.4365
+              },
+              "facing": {
+                "w": 0.626728,
+                "x": 0,
+                "y": 0,
+                "z": -0.779238
+              }
+            },
+            "metres": 11.9,
+            "source": "straight line on global x/y (landblock index * 192 + local) from the last drop 0xF97F003E to the entry portal's landblock_instance row (guid 0x7FA7F000, weenie 22688); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z"
+          },
+          "note": "first (M6 7 J): admitted from level 15 (the hub portal's gate), it takes the climber off the island's surface; the walk from the hub's drop 0x8A020212 down its two ramps to the portal is proven on the dats (FacilityHubWalkDatTests: planned, confirmed, a body run with no rung and no wall frame; the two doors on it are the runner's to Use, unproven live) and so is the run from the drop to the entry (IslandRunDatTests)"
+        },
+        {
+          "key": "by-refuge",
+          "start": "holtburg",
+          "steps": [
+            {
+              "edge": "holtburg-to-network",
+              "walk_m": 80.0
+            },
+            {
+              "edge": "network-to-refuge",
+              "walk_m": 116.7
+            }
+          ],
+          "run": {
+            "to": {
+              "wcid": 22688,
+              "name": "Tusker Lodge",
+              "guid": "0x7FA7F000",
+              "cell": "0xFA7F0000",
+              "origin": {
+                "x": 7.6049,
+                "y": 120.782,
+                "z": 45.4365
+              },
+              "facing": {
+                "w": 0.626728,
+                "x": 0,
+                "y": 0,
+                "z": -0.779238
+              }
+            },
+            "metres": 807.4,
+            "source": "straight line on global x/y (landblock index * 192 + local) from the last drop 0xF6820033 to the entry portal's landblock_instance row (guid 0x7FA7F000, weenie 22688); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z",
+            "via": {
+              "below_level": 31,
+              "points": [
+                {
+                  "cell": "0xF7820003",
+                  "origin": {
+                    "x": 21.5,
+                    "y": 50.5,
+                    "z": 59.6
+                  },
+                  "why": "along the Refuge's plateau before the descent: the straight line comes down 17 m from 0xF881:0,1"
+                },
+                {
+                  "cell": "0xF781003C",
+                  "origin": {
+                    "x": 191.5,
+                    "y": 73.5,
+                    "z": 44.1
+                  },
+                  "why": "the descent, about 50 m north of 0xF881:0,1"
+                },
+                {
+                  "cell": "0xF8810021",
+                  "origin": {
+                    "x": 110.5,
+                    "y": 0.5,
+                    "z": 12.0
+                  },
+                  "why": "the valley floor, 73 m north of 0xF880:5,5, which the straight line passes at 4 m"
+                },
+                {
+                  "cell": "0xF8800040",
+                  "origin": {
+                    "x": 190.5,
+                    "y": 189.5,
+                    "z": 23.8
+                  },
+                  "why": "the climb east, 51 m north of 0xF880:7,6"
+                },
+                {
+                  "cell": "0xF9800016",
+                  "origin": {
+                    "x": 49.5,
+                    "y": 122.5,
+                    "z": 44.3
+                  },
+                  "why": "the ridge east of 0xF980:0,2, which the straight line passes at 20 m"
+                },
+                {
+                  "cell": "0xF97F0038",
+                  "origin": {
+                    "x": 156.5,
+                    "y": 175.5,
+                    "z": 47.5
+                  },
+                  "why": "along the ridge north of 0xF97F:4,7 and 0xF97F:6,4 to the Lodge's front; the straight line passes 0xF97F:4,7 at 18 m"
+                }
+              ],
+              "source": "computed offline by M6 7 Z: a 1 m search over the attached tiles of 0xF4..0xFC by 0x7E..0x86 with the planner's own step costs plus a cost inside every danger_cells disc (ClearMetres), its route pulled to straight lines; the walk is proven by IslandDangerRunDatTests. Soft: a via that cannot be walked is skipped by name. A level from below_level on runs straight: the low tables' creatures are level 30 at most"
+            }
+          },
+          "note": "second (M6 7 J): the route a level under 15 takes, every hop walked on the dats from every start (TownNetworkWalkDatTests); a failed hop of the first route does not fall back to this one by itself: the station stops by name, or uses the gem when it is held (RungChangeStation)"
+        }
+      ]
+    },
+    "tusker-cave": {
+      "routes": [
+        {
+          "key": "by-facility-hub",
+          "start": "holtburg",
+          "steps": [
+            {
+              "edge": "holtburg-to-network",
+              "walk_m": 80.0
+            },
+            {
+              "edge": "network-to-facility-hub",
+              "walk_m": 43.2
+            },
+            {
+              "edge": "hub-cave",
+              "walk_m": 43.8
+            }
+          ],
+          "run": {
+            "to": {
+              "wcid": 22665,
+              "name": "Tusker Cave",
+              "guid": "0x7F97F000",
+              "cell": "0xF97F0000",
+              "origin": {
+                "x": 30.2914,
+                "y": 181.197,
+                "z": 19.25
+              },
+              "facing": {
+                "w": -0.950727,
+                "x": 0,
+                "y": 0,
+                "z": 0.310028
+              }
+            },
+            "metres": 11.8,
+            "source": "straight line on global x/y (landblock index * 192 + local) from the last drop 0xF97F0008 to the entry portal's landblock_instance row (guid 0x7F97F000, weenie 22665); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z"
+          },
+          "note": "first (M6 7 J): admitted from level 15 (the hub portal's gate), it takes the climber off the island's surface; the walk from the hub's drop 0x8A020212 down its two ramps to the portal is proven on the dats (FacilityHubWalkDatTests: planned, confirmed, a body run with no rung and no wall frame; the two doors on it are the runner's to Use, unproven live) and so is the run from the drop to the entry (IslandRunDatTests)"
+        },
+        {
+          "key": "by-refuge",
+          "start": "holtburg",
+          "steps": [
+            {
+              "edge": "holtburg-to-network",
+              "walk_m": 80.0
+            },
+            {
+              "edge": "network-to-refuge",
+              "walk_m": 116.7
+            }
+          ],
+          "run": {
+            "to": {
+              "wcid": 22665,
+              "name": "Tusker Cave",
+              "guid": "0x7F97F000",
+              "cell": "0xF97F0000",
+              "origin": {
+                "x": 30.2914,
+                "y": 181.197,
+                "z": 19.25
+              },
+              "facing": {
+                "w": -0.950727,
+                "x": 0,
+                "y": 0,
+                "z": 0.310028
+              }
+            },
+            "metres": 640.2,
+            "source": "straight line on global x/y (landblock index * 192 + local) from the last drop 0xF6820033 to the entry portal's landblock_instance row (guid 0x7F97F000, weenie 22665); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z"
+          },
+          "note": "second (M6 7 J): the route a level under 15 takes, every hop walked on the dats from every start (TownNetworkWalkDatTests); a failed hop of the first route does not fall back to this one by itself: the station stops by name, or uses the gem when it is held (RungChangeStation)"
+        }
+      ]
+    },
+    "tusker-cavern": {
+      "routes": [
+        {
+          "key": "by-facility-hub",
+          "start": "holtburg",
+          "steps": [
+            {
+              "edge": "holtburg-to-network",
+              "walk_m": 80.0
+            },
+            {
+              "edge": "network-to-facility-hub",
+              "walk_m": 43.2
+            },
+            {
+              "edge": "hub-cavern",
+              "walk_m": 45.3
+            }
+          ],
+          "run": {
+            "to": {
+              "wcid": 22667,
+              "name": "Tusker Cavern",
+              "guid": "0x7F880000",
+              "cell": "0xF8800000",
+              "origin": {
+                "x": 103.346,
+                "y": 133.513,
+                "z": 12.005
+              },
+              "facing": {
+                "w": -0.286371,
+                "x": 0,
+                "y": 0,
+                "z": -0.958119
+              }
+            },
+            "metres": 14.9,
+            "source": "straight line on global x/y (landblock index * 192 + local) from the last drop 0xF8800027 to the entry portal's landblock_instance row (guid 0x7F880000, weenie 22667); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z"
+          },
+          "note": "first (M6 7 J): admitted from level 15 (the hub portal's gate), it takes the climber off the island's surface; the walk from the hub's drop 0x8A020212 down its two ramps to the portal is proven on the dats (FacilityHubWalkDatTests: planned, confirmed, a body run with no rung and no wall frame; the two doors on it are the runner's to Use, unproven live) and so is the run from the drop to the entry (IslandRunDatTests)"
+        },
+        {
+          "key": "by-refuge",
+          "start": "holtburg",
+          "steps": [
+            {
+              "edge": "holtburg-to-network",
+              "walk_m": 80.0
+            },
+            {
+              "edge": "network-to-refuge",
+              "walk_m": 116.7
+            }
+          ],
+          "run": {
+            "to": {
+              "wcid": 22667,
+              "name": "Tusker Cavern",
+              "guid": "0x7F880000",
+              "cell": "0xF8800000",
+              "origin": {
+                "x": 103.346,
+                "y": 133.513,
+                "z": 12.005
+              },
+              "facing": {
+                "w": -0.286371,
+                "x": 0,
+                "y": 0,
+                "z": -0.958119
+              }
+            },
+            "metres": 454.9,
+            "source": "straight line on global x/y (landblock index * 192 + local) from the last drop 0xF6820033 to the entry portal's landblock_instance row (guid 0x7F880000, weenie 22667); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z"
+          },
+          "note": "second (M6 7 J): the route a level under 15 takes, every hop walked on the dats from every start (TownNetworkWalkDatTests); a failed hop of the first route does not fall back to this one by itself: the station stops by name, or uses the gem when it is held (RungChangeStation)"
+        }
+      ]
+    },
+    "tusker-abode": {
+      "routes": [
+        {
+          "key": "by-facility-hub",
+          "start": "holtburg",
+          "steps": [
+            {
+              "edge": "holtburg-to-network",
+              "walk_m": 80.0
+            },
+            {
+              "edge": "network-to-facility-hub",
+              "walk_m": 43.2
+            },
+            {
+              "edge": "hub-abode",
+              "walk_m": 51.1
+            }
+          ],
+          "run": {
+            "to": {
+              "wcid": 22654,
+              "name": "Tusker Abode",
+              "guid": "0x7F67B000",
+              "cell": "0xF67B0000",
+              "origin": {
+                "x": 27.7204,
+                "y": 93.3047,
+                "z": -0.095
+              },
+              "facing": {
+                "w": -0.912617,
+                "x": 0,
+                "y": 0,
+                "z": -0.408816
+              }
+            },
+            "metres": 8.7,
+            "source": "straight line on global x/y (landblock index * 192 + local) from the last drop 0xF67B000C to the entry portal's landblock_instance row (guid 0x7F67B000, weenie 22654); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z"
+          },
+          "note": "first (M6 7 J): admitted from level 20 (the hub portal's gate), it takes the climber off the island's surface; the walk from the hub's drop 0x8A020212 down its two ramps to the portal is proven on the dats (FacilityHubWalkDatTests: planned, confirmed, a body run with no rung and no wall frame; the two doors on it are the runner's to Use, unproven live) and so is the run from the drop to the entry (IslandRunDatTests)"
+        },
+        {
+          "key": "by-refuge",
+          "start": "holtburg",
+          "steps": [
+            {
+              "edge": "holtburg-to-network",
+              "walk_m": 80.0
+            },
+            {
+              "edge": "network-to-refuge",
+              "walk_m": 116.7
+            }
+          ],
+          "run": {
+            "to": {
+              "wcid": 22654,
+              "name": "Tusker Abode",
+              "guid": "0x7F67B000",
+              "cell": "0xF67B0000",
+              "origin": {
+                "x": 27.7204,
+                "y": 93.3047,
+                "z": -0.095
+              },
+              "facing": {
+                "w": -0.912617,
+                "x": 0,
+                "y": 0,
+                "z": -0.408816
+              }
+            },
+            "metres": 1305.9,
+            "source": "straight line on global x/y (landblock index * 192 + local) from the last drop 0xF6820033 to the entry portal's landblock_instance row (guid 0x7F67B000, weenie 22654); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z"
+          },
+          "note": "second (M6 7 J): the route a level under 20 takes, every hop walked on the dats from every start (TownNetworkWalkDatTests); a failed hop of the first route does not fall back to this one by itself: the station stops by name, or uses the gem when it is held (RungChangeStation)"
+        }
+      ]
+    },
+    "tusker-habitat": {
+      "routes": [
+        {
+          "key": "by-facility-hub",
+          "start": "holtburg",
+          "steps": [
+            {
+              "edge": "holtburg-to-network",
+              "walk_m": 80.0
+            },
+            {
+              "edge": "network-to-facility-hub",
+              "walk_m": 43.2
+            },
+            {
+              "edge": "hub-habitat",
+              "walk_m": 59.0
+            }
+          ],
+          "run": {
+            "to": {
+              "wcid": 22678,
+              "name": "Tusker Habitat",
+              "guid": "0x7F77E000",
+              "cell": "0xF77E0000",
+              "origin": {
+                "x": 53.7317,
+                "y": 154.137,
+                "z": 19.2708
+              },
+              "facing": {
+                "w": -0.000857,
+                "x": 0,
+                "y": 0,
+                "z": -1
+              }
+            },
+            "metres": 12.3,
+            "source": "straight line on global x/y (landblock index * 192 + local) from the last drop 0xF77E0017 to the entry portal's landblock_instance row (guid 0x7F77E000, weenie 22678); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z"
+          },
+          "note": "first (M6 7 J): admitted from level 25 (the hub portal's gate), it takes the climber off the island's surface; the walk from the hub's drop 0x8A020212 down its two ramps to the portal is proven on the dats (FacilityHubWalkDatTests: planned, confirmed, a body run with no rung and no wall frame; the two doors on it are the runner's to Use, unproven live) and so is the run from the drop to the entry (IslandRunDatTests)"
+        },
+        {
+          "key": "by-refuge",
+          "start": "holtburg",
+          "steps": [
+            {
+              "edge": "holtburg-to-network",
+              "walk_m": 80.0
+            },
+            {
+              "edge": "network-to-refuge",
+              "walk_m": 116.7
+            }
+          ],
+          "run": {
+            "to": {
+              "wcid": 22678,
+              "name": "Tusker Habitat",
+              "guid": "0x7F77E000",
+              "cell": "0xF77E0000",
+              "origin": {
+                "x": 53.7317,
+                "y": 154.137,
+                "z": 19.2708
+              },
+              "facing": {
+                "w": -0.000857,
+                "x": 0,
+                "y": 0,
+                "z": -1
+              }
+            },
+            "metres": 671.2,
+            "source": "straight line on global x/y (landblock index * 192 + local) from the last drop 0xF6820033 to the entry portal's landblock_instance row (guid 0x7F77E000, weenie 22678); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z"
+          },
+          "note": "second (M6 7 J): the route a level under 25 takes, every hop walked on the dats from every start (TownNetworkWalkDatTests); a failed hop of the first route does not fall back to this one by itself: the station stops by name, or uses the gem when it is held (RungChangeStation)"
+        }
+      ]
+    },
+    "tusker-quarters": {
+      "routes": [
+        {
+          "key": "by-facility-hub",
+          "start": "holtburg",
+          "steps": [
+            {
+              "edge": "holtburg-to-network",
+              "walk_m": 80.0
+            },
+            {
+              "edge": "network-to-facility-hub",
+              "walk_m": 43.2
+            },
+            {
+              "edge": "hub-quarters",
+              "walk_m": 65.0
+            }
+          ],
+          "run": {
+            "to": {
+              "wcid": 22692,
+              "name": "Tusker Quarters",
+              "guid": "0x7F67C000",
+              "cell": "0xF67C0000",
+              "origin": {
+                "x": 179.658,
+                "y": 116.6,
+                "z": 19.8777
+              },
+              "facing": {
+                "w": -0.586125,
+                "x": 0,
+                "y": 0,
+                "z": -0.810221
+              }
+            },
+            "metres": 8.1,
+            "source": "straight line on global x/y (landblock index * 192 + local) from the last drop 0xF67C003D to the entry portal's landblock_instance row (guid 0x7F67C000, weenie 22692); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z"
+          },
+          "note": "first (M6 7 J): admitted from level 30 (the hub portal's gate), it takes the climber off the island's surface; the walk from the hub's drop 0x8A020212 down its two ramps to the portal is proven on the dats (FacilityHubWalkDatTests: planned, confirmed, a body run with no rung and no wall frame; the two doors on it are the runner's to Use, unproven live) and so is the run from the drop to the entry (IslandRunDatTests)"
+        },
+        {
+          "key": "by-refuge",
+          "start": "holtburg",
+          "steps": [
+            {
+              "edge": "holtburg-to-network",
+              "walk_m": 80.0
+            },
+            {
+              "edge": "network-to-refuge",
+              "walk_m": 116.7
+            }
+          ],
+          "run": {
+            "to": {
+              "wcid": 22692,
+              "name": "Tusker Quarters",
+              "guid": "0x7F67C000",
+              "cell": "0xF67C0000",
+              "origin": {
+                "x": 179.658,
+                "y": 116.6,
+                "z": 19.8777
+              },
+              "facing": {
+                "w": -0.586125,
+                "x": 0,
+                "y": 0,
+                "z": -0.810221
+              }
+            },
+            "metres": 1085.8,
+            "source": "straight line on global x/y (landblock index * 192 + local) from the last drop 0xF6820033 to the entry portal's landblock_instance row (guid 0x7F67C000, weenie 22692); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z"
+          },
+          "note": "second (M6 7 J): the route a level under 30 takes, every hop walked on the dats from every start (TownNetworkWalkDatTests); a failed hop of the first route does not fall back to this one by itself: the station stops by name, or uses the gem when it is held (RungChangeStation)"
+        }
+      ]
+    },
+    "tusker-barracks": {
+      "routes": [
+        {
+          "key": "by-facility-hub",
+          "start": "holtburg",
+          "steps": [
+            {
+              "edge": "holtburg-to-network",
+              "walk_m": 80.0
+            },
+            {
+              "edge": "network-to-facility-hub",
+              "walk_m": 43.2
+            },
+            {
+              "edge": "hub-barracks",
+              "walk_m": 54.3
+            }
+          ],
+          "run": {
+            "to": {
+              "wcid": 22661,
+              "name": "Tusker Barracks",
+              "guid": "0x7F07F000",
+              "cell": "0xF07F0000",
+              "origin": {
+                "x": 177.07,
+                "y": 15.6767,
+                "z": 12.005
+              },
+              "facing": {
+                "w": -0.034146,
+                "x": 0,
+                "y": 0,
+                "z": -0.999417
+              }
+            },
+            "metres": 19.6,
+            "source": "straight line on global x/y (landblock index * 192 + local) from the last drop 0xF07E0040 to the entry portal's landblock_instance row (guid 0x7F07F000, weenie 22661); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z"
+          },
+          "note": "first (M6 7 J): admitted from level 40 (the hub portal's gate), it takes the climber off the island's surface; the walk from the hub's drop 0x8A020212 down its two ramps to the portal is proven on the dats (FacilityHubWalkDatTests: planned, confirmed, a body run with no rung and no wall frame; the two doors on it are the runner's to Use, unproven live) and so is the run from the drop to the entry (IslandRunDatTests)"
+        },
+        {
+          "key": "by-refuge",
+          "start": "holtburg",
+          "steps": [
+            {
+              "edge": "holtburg-to-network",
+              "walk_m": 80.0
+            },
+            {
+              "edge": "network-to-refuge",
+              "walk_m": 116.7
+            }
+          ],
+          "run": {
+            "to": {
+              "wcid": 22661,
+              "name": "Tusker Barracks",
+              "guid": "0x7F07F000",
+              "cell": "0xF07F0000",
+              "origin": {
+                "x": 177.07,
+                "y": 15.6767,
+                "z": 12.005
+              },
+              "facing": {
+                "w": -0.034146,
+                "x": 0,
+                "y": 0,
+                "z": -0.999417
+              }
+            },
+            "metres": 1276.0,
+            "source": "straight line on global x/y (landblock index * 192 + local) from the last drop 0xF6820033 to the entry portal's landblock_instance row (guid 0x7F07F000, weenie 22661); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z"
+          },
+          "note": "second (M6 7 J): the route a level under 40 takes, every hop walked on the dats from every start (TownNetworkWalkDatTests); a failed hop of the first route does not fall back to this one by itself: the station stops by name, or uses the gem when it is held (RungChangeStation)"
+        }
+      ]
+    },
+    "tusker-holding": {
+      "routes": [
+        {
+          "key": "by-facility-hub-barracks",
+          "start": "holtburg",
+          "steps": [
+            {
+              "edge": "holtburg-to-network",
+              "walk_m": 80.0
+            },
+            {
+              "edge": "network-to-facility-hub",
+              "walk_m": 43.2
+            },
+            {
+              "edge": "hub-barracks",
+              "walk_m": 54.3
+            }
+          ],
+          "run": {
+            "to": {
+              "wcid": 22680,
+              "name": "Tusker Holding",
+              "guid": "0x7EA7B000",
+              "cell": "0xEA7B0000",
+              "origin": {
+                "x": 15.744,
+                "y": 17.1596,
+                "z": 54.575
+              },
+              "facing": {
+                "w": -0.462664,
+                "x": 0,
+                "y": 0,
+                "z": 0.886534
+              }
+            },
+            "metres": 1506.5,
+            "source": "straight line on global x/y (landblock index * 192 + local) from the last drop 0xF07E0040 to the entry portal's landblock_instance row (guid 0x7EA7B000, weenie 22680); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z"
+          },
+          "note": "first (M6 7 J): the Barracks drop is the nearest start to the Holding (m6-plan D51); the hub's Barracks portal gate is 40, the Holding's entry gate 60; the walk from the hub's drop 0x8A020212 down its two ramps to the portal is proven on the dats (FacilityHubWalkDatTests: planned, confirmed, a body run with no rung and no wall frame; the two doors on it are the runner's to Use, unproven live) and so is the run from the drop to the entry (IslandRunDatTests)"
+        },
+        {
+          "key": "by-refuge",
+          "start": "holtburg",
+          "steps": [
+            {
+              "edge": "holtburg-to-network",
+              "walk_m": 80.0
+            },
+            {
+              "edge": "network-to-refuge",
+              "walk_m": 116.7
+            }
+          ],
+          "run": {
+            "to": {
+              "wcid": 22680,
+              "name": "Tusker Holding",
+              "guid": "0x7EA7B000",
+              "cell": "0xEA7B0000",
+              "origin": {
+                "x": 15.744,
+                "y": 17.1596,
+                "z": 54.575
+              },
+              "facing": {
+                "w": -0.462664,
+                "x": 0,
+                "y": 0,
+                "z": 0.886534
+              }
+            },
+            "metres": 2796.3,
+            "source": "straight line on global x/y (landblock index * 192 + local) from the last drop 0xF6820033 to the entry portal's landblock_instance row (guid 0x7EA7B000, weenie 22680); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z"
+          },
+          "note": "second (M6 7 J): the only route a level under 40 passes, which the entry's own gate 60 refuses; every hop walked on the dats from every start (TownNetworkWalkDatTests); a failed hop of the first route does not fall back to this one by itself: the station stops by name, or uses the gem when it is held (RungChangeStation)"
+        }
+      ]
+    },
+    "tusker-armory": {
+      "routes": [
+        {
+          "key": "by-facility-hub-barracks",
+          "start": "holtburg",
+          "steps": [
+            {
+              "edge": "holtburg-to-network",
+              "walk_m": 80.0
+            },
+            {
+              "edge": "network-to-facility-hub",
+              "walk_m": 43.2
+            },
+            {
+              "edge": "hub-barracks",
+              "walk_m": 54.3
+            }
+          ],
+          "run": {
+            "to": {
+              "wcid": 22657,
+              "name": "Tusker Armory",
+              "guid": "0x7EF7F000",
+              "cell": "0xEF7F0000",
+              "origin": {
+                "x": 31.9169,
+                "y": 92.1597,
+                "z": 12.005
+              },
+              "facing": {
+                "w": 0.906617,
+                "x": 0,
+                "y": 0,
+                "z": -0.421954
+              }
+            },
+            "metres": 345.1,
+            "source": "straight line on global x/y (landblock index * 192 + local) from the last drop 0xF07E0040 to the entry portal's landblock_instance row (guid 0x7EF7F000, weenie 22657); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z"
+          },
+          "note": "first and only (M6 14 armory, the owner's order of 2026-11-14): the Barracks drop is the nearest start to the Armory, as to the Holding (m6-plan D51); the hub's Barracks portal gate is 40, the Armory's entry gate 50, so a level under 40, the only one the Refuge's route would add, is refused at the entry anyway; the walk from the hub's drop 0x8A020212 down its two ramps to the portal is proven on the dats (FacilityHubWalkDatTests) and proven live (2026-11-13 and 2026-11-14), and so is the 345 m run from the drop to the entry on the dats (IslandRunDatTests, hub-barracks>armory); the entry is NoRecall (PortalBitmask 0x31): no tie, every trip back is this run"
+        }
+      ]
+    },
+    "tusker-temple-20-40": {
+      "routes": [
+        {
+          "key": "by-new-colier",
+          "start": "holtburg",
+          "steps": [
+            {
+              "edge": "new-colier",
+              "walk_m": 592.2
+            }
+          ],
+          "run": {
+            "to": {
+              "wcid": 22698,
+              "name": "Tusker Temple",
+              "guid": "0x7A2CA000",
+              "cell": "0xA2CA0000",
+              "origin": {
+                "x": 186.042,
+                "y": 34.5873,
+                "z": 110.391
+              },
+              "facing": {
+                "w": -0.990788,
+                "x": 0,
+                "y": 0,
+                "z": -0.13542
+              }
+            },
+            "metres": 734.1,
+            "source": "straight line on global x/y (landblock index * 192 + local) from the last drop 0xA6CB001F to the entry portal's landblock_instance row (guid 0x7A2CA000, weenie 22698); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z"
+          },
+          "note": "M6 4 D50: Holtburg to the New Colier Portal on foot, then the run to the Temple; TODO(m6-ladder-routes): the ladder's label for this rung names Neydisa Castle, the data routes it by New Colier (the shorter way)"
+        },
+        {
+          "key": "by-neydisa-castle",
+          "start": "holtburg",
+          "steps": [
+            {
+              "edge": "holtburg-to-network",
+              "walk_m": 80.0
+            },
+            {
+              "edge": "network-to-neydisa",
+              "walk_m": 91.4
+            }
+          ],
+          "run": {
+            "to": {
+              "wcid": 22698,
+              "name": "Tusker Temple",
+              "guid": "0x7A2CA000",
+              "cell": "0xA2CA0000",
+              "origin": {
+                "x": 186.042,
+                "y": 34.5873,
+                "z": 110.391
+              },
+              "facing": {
+                "w": -0.990788,
+                "x": 0,
+                "y": 0,
+                "z": -0.13542
+              }
+            },
+            "metres": 3450.5,
+            "source": "straight line on global x/y (landblock index * 192 + local) from the last drop 0x95D60033 to the entry portal's landblock_instance row (guid 0x7A2CA000, weenie 22698); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z"
+          },
+          "note": "the ladder's labelled route: the Network's Neydisa Castle portal and a long run"
+        }
+      ]
+    },
+    "tusker-temple-fort-tethana": {
+      "routes": [
+        {
+          "key": "by-fort-tethana",
+          "start": "holtburg",
+          "steps": [
+            {
+              "edge": "holtburg-to-network",
+              "walk_m": 80.0
+            },
+            {
+              "edge": "network-to-fort-tethana",
+              "walk_m": 56.4
+            }
+          ],
+          "run": {
+            "to": {
+              "wcid": 22696,
+              "name": "Tusker Temple",
+              "guid": "0x72A80000",
+              "cell": "0x2A800000",
+              "origin": {
+                "x": 57.7292,
+                "y": 64.9681,
+                "z": 70.005
+              },
+              "facing": {
+                "w": 0.999794,
+                "x": 0,
+                "y": 0,
+                "z": -0.02029
+              }
+            },
+            "metres": 784.1,
+            "source": "straight line on global x/y (landblock index * 192 + local) from the last drop 0x2681001D to the entry portal's landblock_instance row (guid 0x72A80000, weenie 22696); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z"
+          },
+          "note": "used when the profile's tie record is not tied (D50: a tied tie record recalls to the portal instead); the plateau drop is z 240, the portal z 70, a descent"
+        }
+      ]
+    },
+    "holtburg-outskirts": {
+      "routes": [
+        {
+          "key": "on-foot",
+          "start": "holtburg",
+          "steps": [],
+          "run": null,
+          "note": "no travel leg: the ground is hunted from Holtburg on foot"
+        }
+      ]
+    },
+    "black-spawn-den-aluvian": {
+      "routes": [
+        {
+          "key": "recall-or-tie",
+          "start": "holtburg",
+          "steps": [],
+          "run": null,
+          "note": "no travel leg in this file: the den's own recall/tie station (Primary Portal Recall) takes the climber; D50"
+        }
+      ]
+    },
+    "black-spawn-den-sho": {
+      "routes": [
+        {
+          "key": "recall-or-tie",
+          "start": "holtburg",
+          "steps": [],
+          "run": null,
+          "note": "first, as the Aluvian den's: no travel leg in this file for an ordinary rung change: the den's own recall/tie station (Primary Portal Recall) takes the climber; D50. The first tie is the den run's (the route below), made once by order"
+        },
+        {
+          "key": "den-run",
+          "start": "holtburg",
+          "steps": [
+            {
+              "edge": "holtburg-to-network",
+              "walk_m": 80.0
+            },
+            {
+              "edge": "network-to-danbys",
+              "walk_m": 101.3
+            },
+            {
+              "edge": "danbys-to-desert-march",
+              "walk_m": 252.7
+            },
+            {
+              "edge": "desert-march-to-black-hill",
+              "walk_m": 428.0
+            }
+          ],
+          "run": {
+            "to": {
+              "wcid": 7246,
+              "name": "Black Spawn Den",
+              "guid": "0x73734000",
+              "cell": "0x37340000",
+              "origin": {
+                "x": 75.3624,
+                "y": 71.714,
+                "z": 81.4512
+              },
+              "facing": {
+                "w": 0.972624,
+                "x": 0,
+                "y": 0,
+                "z": 0.232386
+              }
+            },
+            "metres": 1395.4,
+            "source": "straight line on global x/y (landblock index * 192 + local) from the last drop 0x3E310004 to the entry portal's landblock_instance row (guid 0x73734000, weenie 7246): 1,395.4 m at heading 293.4 degrees (0 north, clockwise); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z",
+            "via": {
+              "below_level": 275,
+              "points": [
+                {
+                  "cell": "0x3932000E",
+                  "origin": {
+                    "x": 40.5,
+                    "y": 120.5,
+                    "z": 98.54
+                  },
+                  "why": "the one bend of the den run: the straight line from the Black Hill drop to the den crosses ground too steep to stand on between 694 m and 877 m; by this point both halves are straight lines the body walks"
+                }
+              ],
+              "source": "M6 item 14 (the den run), on the retail dats (TownNetworkWalkDatTests.DenRun): the straight 1,395 m crosses nodes too steep to walk (the tile flag Blocked: a surface normal under FloorZ) at 694-705 m, 723-746 m and 825-877 m from the drop, and the body's physics refuses it 692 m along (no walkable ground within 0.6 m up or 1.8 m down, in 0x3A320030); no water lies on it. A search of every point of an 8 m grid over the landblocks 0x35 to 0x40 by 0x2F to 0x37 found 1,069 points with no blocked node on either straight half; the physics confirms both halves by this one (956.8 m at heading 283.3 degrees, then 486.8 m at heading 314.0: a turn of 30.7 degrees to the right; 1,443.6 m in all, 48 m over the straight line, z 238.6 down to 98.5 and on to 81.5, no water). It is the shortest of those with the fewest encounter rows of the Obsidian Outer Mix Generator 1982 within 25 m of the path: 6, with 12 within 40 m and 22 within 60 m (the shortest one-bend path of all, 1,420.2 m by (88.5, 64.5) in 0x3A32, has 10, 15 and 22). The den-run station walks each half straight, in pieces (TravelLeg.RunStraight); the planner's own walk to this point is 1,037.5 m with twelve turns, since its lattice refuses steps of over 0.6 m a metre that the body takes. below_level 275: every level walks it"
+            }
+          },
+          "note": "M6 item 14 (the owner's den run, 2026-11-12): second, and taken only by name (the den-run station asks for this key; TravelRoutes.FirstAdmitted returns the first route, so no ordinary rung change plans it). The only portal chain open to a level-40 character that ends within 2.5 km of a Black Spawn Den entrance: the Town Network, Danby's Outpost, the Desert March Portal, the Black Hill portal, then the run through the Direlands. Encounter rows of the Obsidian Outer Mix Generator 1982 (table encounter, generator at cell_X * 24, cell_Y * 24) within 25, 40 and 60 m of the straight line: 5, 10 and 14"
+        }
+      ]
+    },
+    "cave-of-alabree": {
+      "routes": [
+        {
+          "key": "on-foot-to-the-entry",
+          "start": "holtburg",
+          "steps": [],
+          "run": {
+            "to": {
+              "wcid": 4937,
+              "name": "Cave of Alabree",
+              "guid": "0x7A7B3007",
+              "cell": "0xA7B30100",
+              "origin": {
+                "x": 117.574,
+                "y": 134.945,
+                "z": 24.805
+              },
+              "facing": {
+                "w": -0.675448,
+                "x": 0,
+                "y": 0,
+                "z": 0.737408
+              }
+            },
+            "metres": 354.5,
+            "source": "straight line on global x/y (landblock index * 192 + local) from Holtburg's lifestone (guid 0x7A9B404F) to the entry portal's landblock_instance row (guid 0x7A7B3007, weenie 4937, landblock 0xA7B3, two landblocks west and one south of Holtburg 0xA9B4); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z"
+          },
+          "note": "M6 5 q6b (D55): no portal step; the run from Holtburg to the entry portal's front point and the entry's Use (MinLevel 1, MaxLevel 20, PortalBitmask 1: tieable); the cave's own exit 4938 'Surface' leads back to 0xA7B3001E, 379 m from Holtburg's lifestone (TODO(m6-alabree-way-home): the walk home from 0xA7B3 is not in the file)"
+        }
+      ]
+    },
+    "crater-caves": {
+      "routes": [
+        {
+          "key": "from-the-village",
+          "start": "crater-lake",
+          "steps": [],
+          "run": {
+            "to": {
+              "wcid": 2387,
+              "name": "Crater Caves Dungeon",
+              "guid": "0x78FD2000",
+              "cell": "0x8FD20000",
+              "origin": {
+                "x": 16.6376,
+                "y": 152.056,
+                "z": 277.943
+              },
+              "facing": {
+                "w": 0.970739,
+                "x": 0,
+                "y": 0,
+                "z": 0.240135
+              }
+            },
+            "metres": 527.0,
+          "via": {"below_level": 275, "points": [{"cell": "0x8FD20010", "origin": {"x": 40, "y": 178, "z": 279.75}, "why": "round the crater lake by the north shore: the lake floor (z 277) is water terrain the walker cannot cross, and the direct plan is refused along it (the dat test reaches the portal this way, not the other)"}], "source": "M6 8 B1: the terrain under the crater reads water (a land cell water type, the tile flag Water) from y 60 to y 164 of 0x8FD2 and a walk planned across it fails the physics check; the north band at y 172 and above is dry; the via point is the first dry point the plan confirms from Crater Lake Village (below_level 275: every level walks it)"},
+            "source": "straight line on global x/y (landblock index * 192 + local) from the last drop 0x90D00107 to the entry portal's landblock_instance row (guid 0x78FD2000, weenie 2387); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z"
+          },
+          "note": "first (M6 8 B1): a body already in Crater Lake Village (the place's own start) walks the crater to the portal; RungRoute picks it only when the body stands in the village (FirstAdmitted's bodyPlace)"
+        },
+        {
+          "key": "by-the-crater-pathway",
+          "start": "holtburg",
+          "steps": [
+            {
+              "edge": "holtburg-to-network",
+              "walk_m": 80.0
+            },
+            {
+              "edge": "network-to-glenden",
+              "walk_m": 52.7
+            },
+            {
+              "edge": "glenden-to-highland",
+              "walk_m": 841.1
+            },
+            {
+              "edge": "highland-to-pathway",
+              "walk_m": 692.3
+            },
+            {
+              "edge": "pathway-to-crater-lake",
+              "walk_m": 509.1
+            }
+          ],
+          "run": {
+            "to": {
+              "wcid": 2387,
+              "name": "Crater Caves Dungeon",
+              "guid": "0x78FD2000",
+              "cell": "0x8FD20000",
+              "origin": {
+                "x": 16.6376,
+                "y": 152.056,
+                "z": 277.943
+              },
+              "facing": {
+                "w": 0.970739,
+                "x": 0,
+                "y": 0,
+                "z": 0.240135
+              }
+            },
+            "metres": 527.0,
+          "via": {"below_level": 275, "points": [{"cell": "0x8FD20010", "origin": {"x": 40, "y": 178, "z": 279.75}, "why": "round the crater lake by the north shore: the lake floor (z 277) is water terrain the walker cannot cross, and the direct plan is refused along it (the dat test reaches the portal this way, not the other)"}], "source": "M6 8 B1: the terrain under the crater reads water (a land cell water type, the tile flag Water) from y 60 to y 164 of 0x8FD2 and a walk planned across it fails the physics check; the north band at y 172 and above is dry; the via point is the first dry point the plan confirms from Crater Lake Village (below_level 275: every level walks it)"},
+            "source": "straight line on global x/y (landblock index * 192 + local) from the last drop 0x90D00107 to the entry portal's landblock_instance row (guid 0x78FD2000, weenie 2387); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z"
+          },
+          "note": "M6 8 B1: the Town Network, Glenden Wood, the Highland Manors, the Crater Pathway's ramps, the village: no portal gate on the way (the weenie rows name no 86 or 87); the walks are the dat tests TownNetworkWalkDatTests and CraterLakeWalkDatTests"
+        }
+      ]
+    }
+  },
+  "ways_home": [
+    {
+      "key": "town-network",
+      "from": "town-network",
+      "steps": [
+        {
+          "edge": "network-to-holtburg",
+          "walk_m": null
+        }
+      ],
+      "first_walk_hints": [
+        {
+          "arrived_by": "holtburg-to-network",
+          "walk_m": 25.7
+        },
+        {
+          "arrived_by": "fort-tethana-to-network",
+          "walk_m": 25.7
+        },
+        {
+          "arrived_by": "stonehold-to-network",
+          "walk_m": 25.7
+        },
+        {
+          "arrived_by": "plateau-to-network",
+          "walk_m": 25.7
+        },
+        {
+          "arrived_by": "qalabar-to-network",
+          "walk_m": 30.7
+        },
+        {
+          "arrived_by": "dryreach-to-network",
+          "walk_m": 25.7
+        },
+        {
+          "arrived_by": "neydisa-castle-to-network",
+          "walk_m": 43.2
+        },
+        {
+          "arrived_by": "eastham-to-network",
+          "walk_m": 25.7
+        },
+        {
+          "arrived_by": "refuge-to-network",
+          "walk_m": 43.2
+        },
+        {
+          "arrived_by": "yaraq-to-network",
+          "walk_m": 30.7
+        },
+        {
+          "arrived_by": "shoushi-to-network",
+          "walk_m": 39.8
+        },
+        {
+          "arrived_by": "lin-to-network",
+          "walk_m": 39.8
+        },
+        {
+          "arrived_by": "crater-lake-to-network",
+          "walk_m": 43.2
+        },
+        {
+          "arrived_by": "uziz-to-network",
+          "walk_m": 30.7
+        }
+      ],
+      "note": "M6 4 T3a (closes TODO(m6-way-home) for the hub as a starting place): a station started in the Town Network (a hop that failed after the arrival) walks to the Holtburg portal 42820 and uses it; every portal that drops in the Network is a hint"
+    },
+    {
+      "key": "refuge",
+      "from": "island",
+      "steps": [
+        {
+          "edge": "refuge-to-network",
+          "walk_m": null
+        },
+        {
+          "edge": "network-to-holtburg",
+          "walk_m": 43.2
+        }
+      ],
+      "first_walk_hints": [
+        {
+          "arrived_by": "network-to-refuge",
+          "walk_m": 13.5
+        }
+      ]
+    },
+    {
+      "key": "island-drops",
+      "from": "island",
+      "steps": [
+        {
+          "edge": "refuge-to-network",
+          "walk_m": null
+        },
+        {
+          "edge": "network-to-holtburg",
+          "walk_m": 43.2
+        }
+      ],
+      "first_walk_hints": [
+        {
+          "arrived_by": "hub-burrow",
+          "walk_m": 590.1
+        },
+        {
+          "arrived_by": "hub-lodge",
+          "walk_m": 805.8
+        },
+        {
+          "arrived_by": "hub-cave",
+          "walk_m": 642.0
+        },
+        {
+          "arrived_by": "hub-barracks",
+          "walk_m": 1296.2
+        },
+        {
+          "arrived_by": "hub-cavern",
+          "walk_m": 450.7
+        },
+        {
+          "arrived_by": "hub-quarters",
+          "walk_m": 1103.0
+        },
+        {
+          "arrived_by": "hub-habitat",
+          "walk_m": 673.8
+        },
+        {
+          "arrived_by": "hub-abode",
+          "walk_m": 1328.0
+        }
+      ],
+      "note": "the hub's drops have no portal home: the climber walks to the Refuge's Portal to Town Network; the long runs (the Barracks drop is over 1 km) are planned at run time on the dats (TODO(m6-island-water-run) closed, M6 4 W3 and W5); Lifestone Recall to Holtburg (the profile's exit) is the other way and is not data of this file"
+    },
+    {
+      "key": "facility-hub",
+      "from": "facility-hub",
+      "steps": [
+        {
+          "edge": "facility-hub-to-eastham",
+          "walk_m": null
+        },
+        {
+          "edge": "eastham-to-network",
+          "walk_m": 196.1
+        },
+        {
+          "edge": "network-to-holtburg",
+          "walk_m": 25.7
+        }
+      ],
+      "first_walk_hints": [
+        {
+          "arrived_by": "network-to-facility-hub",
+          "walk_m": 73.4
+        }
+      ],
+      "note": "the hub (landblock 0x8A02) holds no portal to the Town Network: its placed portals are the dungeons, the eight tusker portals and the Eastham Portal 42815; Eastham's own Portal to Town Network is the way"
+    },
+    {
+      "key": "eastham",
+      "from": "eastham",
+      "steps": [
+        {
+          "edge": "eastham-to-network",
+          "walk_m": null
+        },
+        {
+          "edge": "network-to-holtburg",
+          "walk_m": 25.7
+        }
+      ],
+      "first_walk_hints": [
+        {
+          "arrived_by": "facility-hub-to-eastham",
+          "walk_m": 196.1
+        }
+      ]
+    },
+    {
+      "key": "fort-tethana",
+      "from": "fort-tethana",
+      "steps": [
+        {
+          "edge": "fort-tethana-to-network",
+          "walk_m": null
+        },
+        {
+          "edge": "network-to-holtburg",
+          "walk_m": 25.7
+        }
+      ],
+      "first_walk_hints": [
+        {
+          "arrived_by": "network-to-fort-tethana",
+          "walk_m": 135.5
+        }
+      ]
+    },
+    {
+      "key": "stonehold",
+      "from": "stonehold",
+      "steps": [
+        {
+          "edge": "stonehold-to-network",
+          "walk_m": null
+        },
+        {
+          "edge": "network-to-holtburg",
+          "walk_m": 25.7
+        }
+      ],
+      "first_walk_hints": [
+        {
+          "arrived_by": "network-to-stonehold",
+          "walk_m": 43.5
+        }
+      ]
+    },
+    {
+      "key": "plateau",
+      "from": "plateau",
+      "steps": [
+        {
+          "edge": "plateau-to-network",
+          "walk_m": null
+        },
+        {
+          "edge": "network-to-holtburg",
+          "walk_m": 25.7
+        }
+      ],
+      "first_walk_hints": [
+        {
+          "arrived_by": "network-to-plateau",
+          "walk_m": 103.1
+        }
+      ]
+    },
+    {
+      "key": "qalabar",
+      "from": "qalabar",
+      "steps": [
+        {
+          "edge": "qalabar-to-network",
+          "walk_m": null
+        },
+        {
+          "edge": "network-to-holtburg",
+          "walk_m": 30.7
+        }
+      ],
+      "first_walk_hints": [
+        {
+          "arrived_by": "network-to-qalabar",
+          "walk_m": 120.1
+        }
+      ]
+    },
+    {
+      "key": "dryreach",
+      "from": "dryreach",
+      "steps": [
+        {
+          "edge": "dryreach-to-network",
+          "walk_m": null
+        },
+        {
+          "edge": "network-to-holtburg",
+          "walk_m": 25.7
+        }
+      ],
+      "first_walk_hints": [
+        {
+          "arrived_by": "network-to-dryreach",
+          "walk_m": 48.7
+        }
+      ]
+    },
+    {
+      "key": "neydisa-castle",
+      "from": "neydisa-castle",
+      "steps": [
+        {
+          "edge": "neydisa-castle-to-network",
+          "walk_m": null
+        },
+        {
+          "edge": "network-to-holtburg",
+          "walk_m": 43.2
+        }
+      ],
+      "first_walk_hints": [
+        {
+          "arrived_by": "network-to-neydisa",
+          "walk_m": 73.1
+        }
+      ]
+    },
+    {
+      "key": "shoushi",
+      "from": "shoushi",
+      "steps": [
+        {
+          "edge": "shoushi-to-network",
+          "walk_m": null
+        },
+        {
+          "edge": "network-to-holtburg",
+          "walk_m": 39.8
+        }
+      ],
+      "first_walk_hints": [
+        {
+          "arrived_by": "network-to-shoushi",
+          "walk_m": 19.8
+        }
+      ],
+      "note": "M6 5 q6b (D55): from Shoushi's arrival 19.8 m to its return portal 43067 (guid 0x7DA55094), then the Network's Holtburg portal 42820; San Ming stands 11.2 m from the arrival, so the portal is 19.8 m on"
+    },
+    {
+      "key": "lin",
+      "from": "lin",
+      "steps": [
+        {
+          "edge": "lin-to-network",
+          "walk_m": null
+        },
+        {
+          "edge": "network-to-holtburg",
+          "walk_m": 39.8
+        }
+      ],
+      "first_walk_hints": [
+        {
+          "arrived_by": "network-to-lin",
+          "walk_m": 302.0
+        }
+      ],
+      "note": "M6 5 q6b (D55): Lin's arrival 0xDC3C0011 is 302.0 m from its return portal 43067 (guid 0x7DA3B039 in 0xDA3B, which stands 71 m from Shoichi); Shoichi is 355.8 m from the arrival (indoors, cell 0xDA3B0116)"
+    },
+    {
+      "key": "crater-lake",
+      "from": "crater-lake",
+      "steps": [
+        {
+          "edge": "crater-lake-to-network",
+          "walk_m": null
+        },
+        {
+          "edge": "network-to-holtburg",
+          "walk_m": 43.2
+        }
+      ],
+      "first_walk_hints": [
+        {
+          "arrived_by": "pathway-to-crater-lake",
+          "walk_m": 26.4
+        }
+      ]
+    },
+    {
+      "key": "holtburg-redoubt",
+      "from": "holtburg-redoubt",
+      "steps": [
+        {
+          "edge": "redoubt-to-holtburg",
+          "walk_m": null
+        }
+      ],
+      "first_walk_hints": [
+        {
+          "arrived_by": "holtburg-to-redoubt",
+          "walk_m": 16.7
+        }
+      ],
+      "note": "M6 8 B2a (D118): the way out of a low-level fetch for a mage without Lifestone Recall"
+    },
+    {
+      "key": "stone-cathedral",
+      "from": "stone-cathedral",
+      "steps": [
+        {
+          "edge": "cathedral-to-shoushi",
+          "walk_m": null
+        },
+        {
+          "edge": "shoushi-to-network",
+          "walk_m": 461.7
+        },
+        {
+          "edge": "network-to-holtburg",
+          "walk_m": 39.8
+        }
+      ],
+      "first_walk_hints": [
+        {
+          "arrived_by": "shoushi-to-cathedral",
+          "walk_m": 4.4
+        }
+      ],
+      "note": "M6 8 B2c (D118): the way out of a low-level fetch for a mage without Lifestone Recall"
+    },
+    {
+      "key": "yaraq",
+      "from": "yaraq",
+      "steps": [
+        {
+          "edge": "yaraq-to-network",
+          "walk_m": null
+        },
+        {
+          "edge": "network-to-holtburg",
+          "walk_m": 30.7
+        }
+      ],
+      "first_walk_hints": [
+        {
+          "arrived_by": "network-to-yaraq",
+          "walk_m": 71.1
+        },
+        {
+          "arrived_by": "sea-temple-to-yaraq",
+          "walk_m": 768.9
+        }
+      ],
+      "note": "M6 8 B2c: Yaraq's way home"
+    },
+    {
+      "key": "sea-temple",
+      "from": "sea-temple",
+      "steps": [
+        {
+          "edge": "sea-temple-to-yaraq",
+          "walk_m": null
+        },
+        {
+          "edge": "yaraq-to-network",
+          "walk_m": 768.9
+        },
+        {
+          "edge": "network-to-holtburg",
+          "walk_m": 30.7
+        }
+      ],
+      "first_walk_hints": [
+        {
+          "arrived_by": "yaraq-to-sea-temple",
+          "walk_m": 19.1
+        }
+      ],
+      "note": "M6 8 B2c (D118): the way out of a low-level fetch for a mage without Lifestone Recall"
+    },
+    {
+      "key": "uziz",
+      "from": "uziz",
+      "steps": [
+        {
+          "edge": "uziz-to-network",
+          "walk_m": null
+        },
+        {
+          "edge": "network-to-holtburg",
+          "walk_m": 30.7
+        }
+      ],
+      "first_walk_hints": [
+        {
+          "arrived_by": "network-to-uziz",
+          "walk_m": 101.6
+        }
+      ],
+      "note": "M6 item 14 (m6-goldscarab): Uziz's way home (a hop of the stop that fails after the arrival leaves her here)"
+    }
+  ],
+  "gems": [
+    {
+      "key": "aphus-lassel",
+      "name": "Aphus Lassel Portal Gem",
+      "wcid": 22729,
+      "spell": 2936,
+      "spell_name": "Entrance to Tusker Island",
+      "dest_cell": "0xF6820033",
+      "dest_origin": {
+        "x": 145.7,
+        "y": 49.855,
+        "z": 58.005
+      },
+      "replaces_hops_into": "island",
+      "source": "weenie_properties_string object_Id 22729 type 1 'Aphus Lassel Portal Gem'; weenie_properties_d_i_d object_Id 22729 type 28 (Spell) = 2936; spell id 2936 'Entrance to Tusker Island': position_Obj_Cell_ID 0xF6820033, position_Origin_X/Y/Z 145.7/49.855/58.005 (the Oolutanga arrival, the Refuge's drop; cache/m6/4/facts.md section 6); the gem replaces, when a hop fails by name, the hops of a route whose next place is 'island' up to the Refuge's Portal from the Town Network (M6 4 F2); its source is item 5's (Brighteyes's tusk turn-ins)"
+    }
+  ],
+  "ways_out": [
+    {
+      "key": "cathedral-portal-house",
+      "rooms": ["0xD8540100", "0xD8540101", "0xD8540102"],
+      "way": [
+        {"cell": "0xD8540102", "origin": {"x": 84.75, "y": 18.5, "z": 26.05}, "why": "the foot of the stair in the portal's room"},
+        {"cell": "0xD8540103", "origin": {"x": 84.75, "y": 10.5, "z": 31.3}, "why": "up the stair to the door hall, whose door the room graph joins"}
+      ],
+      "source": "the dats (M6 8 B2c, the stair's heights; M6 8 M, walked up by a body in TownNetworkWalkDatTests.WayOut): the room graph has no walkable portal through the floorless shaft 0xD8540100, so the portal's room is cut off from the door hall"
+    },
+    {
+      "key": "nen-ai-upper-floor",
+      "rooms": ["0xD8530100", "0xD8530102"],
+      "way": [
+        {"cell": "0xD8530100", "origin": {"x": 84.2, "y": 185.6, "z": 36.5}, "why": "the top of the flight on the upper floor"},
+        {"cell": "0xD8530101", "origin": {"x": 84.2, "y": 182.2, "z": 33.8}, "why": "down the flight round the floorless shaft to the landing"},
+        {"cell": "0xD8530101", "origin": {"x": 80.5, "y": 181.6, "z": 32.05}, "why": "down the first flight to the ground floor, whose door the room graph joins"}
+      ],
+      "source": "the dats (M6 8 B2c, the points of the quest file's step down Nen Ai's stair; M6 8 M, the first walk home from the upper floor, TownNetworkWalkDatTests.WayOut): the room graph has no walkable portal through the floorless shaft 0xD8530102"
+    },
+    {
+      "key": "sea-temple-portal-room",
+      "rooms": ["0x79660100", "0x79660101"],
+      "way": [
+        {"cell": "0x79660101", "origin": {"x": 182.5, "y": 36, "z": 54.5}, "why": "the top of the ramp, at the portal"},
+        {"cell": "0x79660101", "origin": {"x": 185.4, "y": 36, "z": 52.05}, "why": "the ramp's foot"},
+        {"cell": "0x79660101", "origin": {"x": 185.4, "y": 34.9, "z": 52.02}, "why": "the turn into the south aisle"},
+        {"cell": "0x79660101", "origin": {"x": 184.3, "y": 34.4, "z": 52.02}, "why": "along the south aisle"},
+        {"cell": "0x79660101", "origin": {"x": 179.0, "y": 34.2, "z": 52.02}, "why": "the aisle's west end"},
+        {"cell": "0x79660100", "origin": {"x": 178.4, "y": 36, "z": 52.02}, "why": "inside the door"},
+        {"cell": "0x7966003A", "origin": {"x": 176.5, "y": 36, "z": 52}, "why": "the doorway (the outdoor tile stamps the door's front blocked)"},
+        {"cell": "0x7966003A", "origin": {"x": 172, "y": 36, "z": 50.5}, "why": "the open ground in front of the door"}
+      ],
+      "source": "the dats (M6 8 B2c, the way in of yaraq-to-sea-temple, walked backwards; M6 8 M, the first walk home from the portal room, TownNetworkWalkDatTests.WayOut): the outdoor tile stamps the door's lane blocked, so the planner has no walk out of the door"
+    }
+  ],
+  "danger_cells": [
+    {
+      "weenie": 22387,
+      "name": "Tusker Island Low Mix Gen",
+      "min_level": 8,
+      "max_level": 30,
+      "awareness_m": 25,
+      "scatter_m": 10,
+      "source": "encounter rows of weenie_Class_Id 22387 (landblock, cell_X, cell_Y; the world SQL's table encounter; ACE places the generator at (cell_X * 24, cell_Y * 24), Landblock.cs:282-283 @95ef426d, not at the cell's centre); levels and awareness: its weenie_properties_generator outcomes, the camp generators among them followed: PropertyInt 25 (Level) 8..30, PropertyFloat 31 (VisualAwarenessRange) up to 25; scatter: PropertyFloat 43 (GeneratorRadius) 5 on the generator plus 5 on a camp",
+      "cells": [
+        "0xF47C:3,3", "0xF57C:1,4", "0xF57D:5,2", "0xF57D:6,7", "0xF57D:7,6", "0xF57E:5,2", "0xF584:4,4", "0xF585:4,3",
+        "0xF585:4,7", "0xF67C:1,3", "0xF67C:4,2", "0xF67C:7,7", "0xF67E:3,3", "0xF67E:4,2", "0xF67F:1,4", "0xF686:0,4",
+        "0xF686:5,6", "0xF686:6,1", "0xF686:7,3", "0xF687:5,0", "0xF77C:5,4", "0xF77C:7,0", "0xF77D:2,0", "0xF77D:3,3",
+        "0xF77E:3,4", "0xF77E:7,3", "0xF780:7,5", "0xF781:5,0", "0xF786:4,7", "0xF787:0,1", "0xF87C:0,7", "0xF87C:2,4",
+        "0xF87C:2,5", "0xF87C:5,3", "0xF87C:7,6", "0xF87D:3,1", "0xF87D:7,6", "0xF87E:4,1", "0xF87E:5,3", "0xF87E:6,0",
+        "0xF87F:0,3", "0xF87F:7,3", "0xF880:4,2", "0xF880:7,6", "0xF881:0,1", "0xF881:3,4", "0xF881:5,5", "0xF881:6,2",
+        "0xF882:4,0", "0xF882:6,1", "0xF882:7,5", "0xF886:1,7", "0xF886:3,3", "0xF886:4,5", "0xF97C:2,1", "0xF97C:3,0",
+        "0xF97C:5,1", "0xF97C:5,6", "0xF97C:6,0", "0xF97C:6,2", "0xF97D:1,5", "0xF97D:1,6", "0xF97E:0,1", "0xF97E:1,5",
+        "0xF97E:2,4", "0xF97E:3,2", "0xF97E:3,4", "0xF97E:5,0", "0xF97F:5,2", "0xF97F:6,4", "0xF97F:7,2", "0xF980:6,3",
+        "0xF980:7,4", "0xF980:7,6", "0xF981:0,6", "0xF981:1,2", "0xF981:3,5", "0xF981:4,0", "0xF981:5,4", "0xF981:6,1",
+        "0xF981:6,5", "0xF981:7,4", "0xF982:4,1", "0xF982:5,0", "0xF982:5,1", "0xF983:0,7", "0xF983:2,3", "0xF983:3,5",
+        "0xF984:1,1", "0xF984:2,0", "0xF984:2,7", "0xF984:4,1", "0xF984:4,7", "0xF984:7,6", "0xF985:2,7", "0xF985:3,3",
+        "0xF985:4,1", "0xF985:4,7", "0xF985:5,4", "0xFA7E:0,3", "0xFA7E:2,2", "0xFA7E:2,4", "0xFA7E:2,6", "0xFA7F:0,0",
+        "0xFA7F:0,3", "0xFA7F:3,2", "0xFA7F:3,7", "0xFA7F:4,5", "0xFA7F:5,6", "0xFA7F:6,6", "0xFA80:0,1", "0xFA80:0,3",
+        "0xFA80:1,4", "0xFA80:2,2", "0xFA80:2,3", "0xFA80:2,5", "0xFA80:2,7", "0xFA80:4,1", "0xFA80:5,6", "0xFA80:5,7",
+        "0xFA81:0,0", "0xFA81:0,7", "0xFA81:2,1", "0xFA81:2,2", "0xFA81:4,0", "0xFA81:4,1", "0xFA81:5,0", "0xFB7C:0,3",
+        "0xFB7C:0,4", "0xFB7C:0,6", "0xFB7C:0,7", "0xFB7C:1,2", "0xFB7C:1,6", "0xFB7C:2,3", "0xFB7C:3,7", "0xFB7D:1,0",
+        "0xFB7D:2,2", "0xFB7D:3,1", "0xFB7D:3,3"
+      ]
+    },
+    {
+      "weenie": 22535,
+      "name": "Tusker Island Low Beach Mix Gen",
+      "min_level": 8,
+      "max_level": 30,
+      "awareness_m": 25,
+      "scatter_m": 10,
+      "source": "encounter rows of weenie_Class_Id 22535 (landblock, cell_X, cell_Y; the world SQL's table encounter; ACE places the generator at (cell_X * 24, cell_Y * 24), Landblock.cs:282-283 @95ef426d, not at the cell's centre); levels and awareness: its weenie_properties_generator outcomes, the camp generators among them followed: PropertyInt 25 (Level) 8..30, PropertyFloat 31 (VisualAwarenessRange) up to 25; scatter: PropertyFloat 43 (GeneratorRadius) 5 on the generator plus 5 on a camp",
+      "cells": [
+        "0xF687:7,4", "0xF787:3,5", "0xF787:7,4", "0xF887:0,5", "0xF887:3,4", "0xF887:6,0", "0xF97D:7,4", "0xF983:6,2",
+        "0xF983:6,7", "0xF983:7,4", "0xF986:0,6", "0xF986:3,4", "0xF986:5,5", "0xF987:1,0", "0xFA7C:1,5", "0xFA7C:2,4",
+        "0xFA7C:4,6", "0xFA7C:6,2", "0xFA7D:0,0", "0xFA7D:3,2", "0xFA7D:5,6", "0xFA7D:6,4", "0xFA7D:6,6", "0xFA7D:7,2",
+        "0xFA7D:7,7", "0xFA7E:5,4", "0xFA7E:7,2", "0xFA7E:7,4", "0xFA7F:7,2", "0xFA80:7,7", "0xFA81:3,6", "0xFA81:4,3",
+        "0xFA82:4,1", "0xFA83:1,1", "0xFA84:0,3", "0xFA84:1,0", "0xFA84:2,6", "0xFA85:1,0", "0xFA85:2,6", "0xFA86:0,0",
+        "0xFB7C:6,1", "0xFB7C:6,6", "0xFB7D:2,7", "0xFB7D:5,2", "0xFB7E:0,3", "0xFB7E:1,7", "0xFB7E:3,5", "0xFB7E:4,1",
+        "0xFB7E:4,5", "0xFB7E:5,3", "0xFB7F:0,5", "0xFB7F:4,0", "0xFB80:0,2"
+      ]
+    },
+    {
+      "weenie": 22536,
+      "name": "Tusker Island Low Mountain Mix Gen",
+      "min_level": 8,
+      "max_level": 30,
+      "awareness_m": 25,
+      "scatter_m": 10,
+      "source": "encounter rows of weenie_Class_Id 22536 (landblock, cell_X, cell_Y; the world SQL's table encounter; ACE places the generator at (cell_X * 24, cell_Y * 24), Landblock.cs:282-283 @95ef426d, not at the cell's centre); levels and awareness: its weenie_properties_generator outcomes, the camp generators among them followed: PropertyInt 25 (Level) 8..30, PropertyFloat 31 (VisualAwarenessRange) up to 25; scatter: PropertyFloat 43 (GeneratorRadius) 5 on the generator plus 5 on a camp",
+      "cells": [
+        "0xF482:2,4", "0xF482:7,6", "0xF57D:7,0", "0xF67D:3,7", "0xF77F:3,0", "0xF786:2,1", "0xF87C:2,7", "0xF87C:4,1",
+        "0xF87D:3,7", "0xF87D:5,3", "0xF87E:1,3", "0xF885:1,5", "0xF885:4,1", "0xF886:2,0"
+      ]
+    },
+    {
+      "weenie": 22388,
+      "name": "Tusker Island Mid Mix Gen",
+      "min_level": 40,
+      "max_level": 60,
+      "awareness_m": 30,
+      "scatter_m": 10,
+      "source": "encounter rows of weenie_Class_Id 22388 (landblock, cell_X, cell_Y; the world SQL's table encounter; ACE places the generator at (cell_X * 24, cell_Y * 24), Landblock.cs:282-283 @95ef426d, not at the cell's centre); levels and awareness: its weenie_properties_generator outcomes, the camp generators among them followed: PropertyInt 25 (Level) 40..60, PropertyFloat 31 (VisualAwarenessRange) up to 30; scatter: PropertyFloat 43 (GeneratorRadius) 5 on the generator plus 5 on a camp",
+      "cells": [
+        "0xF47C:4,0", "0xF47C:5,4", "0xF47C:6,3", "0xF47C:6,4", "0xF47C:7,4", "0xF47C:7,6", "0xF484:6,4", "0xF57C:0,4",
+        "0xF57C:2,5", "0xF57C:2,7", "0xF57C:7,0", "0xF57D:1,1", "0xF57D:2,5", "0xF57D:3,2", "0xF57D:4,1", "0xF57D:4,2",
+        "0xF57D:5,0", "0xF57D:5,4", "0xF57D:5,5", "0xF57D:5,6", "0xF57D:7,7", "0xF57E:7,2", "0xF57E:7,7", "0xF57F:6,0",
+        "0xF57F:7,2", "0xF67C:0,3", "0xF67C:0,5", "0xF67C:1,0", "0xF67C:2,2", "0xF67C:3,0", "0xF67C:4,5", "0xF67C:4,7",
+        "0xF67C:5,2", "0xF67C:5,4", "0xF67D:0,5", "0xF67D:1,1", "0xF67D:4,1", "0xF67D:4,5", "0xF67D:5,1", "0xF67D:6,0",
+        "0xF67D:6,1", "0xF67D:6,5", "0xF67E:0,0", "0xF67E:0,1", "0xF67E:0,4", "0xF67E:1,2", "0xF67E:1,4", "0xF67E:2,2",
+        "0xF67E:2,3", "0xF67E:2,5", "0xF67E:3,7", "0xF67E:4,1", "0xF67E:5,4", "0xF67E:6,4", "0xF67E:7,4", "0xF67F:0,0",
+        "0xF67F:1,0", "0xF67F:3,6", "0xF67F:4,2", "0xF67F:6,7", "0xF67F:7,2", "0xF77C:0,7", "0xF77C:1,5", "0xF77C:2,5",
+        "0xF77C:6,6", "0xF77D:0,4", "0xF77D:0,5", "0xF77D:1,4", "0xF77D:1,5", "0xF77D:1,6", "0xF77D:2,1", "0xF77D:2,2",
+        "0xF77D:2,5", "0xF77D:2,6", "0xF77D:3,0", "0xF77D:3,1", "0xF77D:3,2", "0xF77D:4,5", "0xF77D:5,3", "0xF77D:5,4",
+        "0xF77D:7,2", "0xF77D:7,3", "0xF77D:7,5", "0xF77D:7,6", "0xF77D:7,7", "0xF77E:1,1", "0xF77E:1,7", "0xF77E:3,2",
+        "0xF77E:3,6", "0xF77E:4,4", "0xF77E:5,5", "0xF77E:5,6", "0xF77E:5,7", "0xF77E:6,4", "0xF77E:6,5", "0xF77E:7,0",
+        "0xF77E:7,5", "0xF77F:0,0", "0xF77F:0,1", "0xF77F:1,5", "0xF77F:1,6", "0xF77F:5,1", "0xF77F:5,2", "0xF77F:6,0",
+        "0xF77F:6,5", "0xF77F:6,6", "0xF77F:7,2", "0xF77F:7,4", "0xF77F:7,6", "0xF77F:7,7", "0xF780:1,3", "0xF780:1,6",
+        "0xF780:3,2", "0xF780:4,0", "0xF780:4,5", "0xF780:5,4", "0xF87C:0,4", "0xF87C:1,6", "0xF87C:1,7", "0xF87D:0,2",
+        "0xF87D:0,3", "0xF87E:0,1", "0xF87E:0,4", "0xF87E:0,5", "0xF87E:0,7", "0xF87E:1,1", "0xF87E:2,2", "0xF87E:2,3",
+        "0xF87E:3,3", "0xF87E:4,3", "0xF87E:4,4", "0xF87F:0,4", "0xF87F:0,7", "0xF87F:1,1", "0xF87F:2,0", "0xF87F:3,0",
+        "0xF87F:3,4", "0xF87F:3,5", "0xF87F:5,3", "0xF87F:5,4", "0xF87F:5,7", "0xF87F:6,2", "0xF87F:6,6", "0xF87F:7,2",
+        "0xF880:0,1", "0xF880:1,4", "0xF880:2,0", "0xF880:2,3", "0xF880:2,4", "0xF880:2,6", "0xF880:3,3", "0xF880:5,5",
+        "0xF880:6,2", "0xF880:7,2", "0xF97F:0,0", "0xF97F:1,6", "0xF97F:4,7", "0xF980:0,2"
+      ]
+    },
+    {
+      "weenie": 22537,
+      "name": "Tusker Island Mid Beach Mix Gen",
+      "min_level": 40,
+      "max_level": 60,
+      "awareness_m": 30,
+      "scatter_m": 10,
+      "source": "encounter rows of weenie_Class_Id 22537 (landblock, cell_X, cell_Y; the world SQL's table encounter; ACE places the generator at (cell_X * 24, cell_Y * 24), Landblock.cs:282-283 @95ef426d, not at the cell's centre); levels and awareness: its weenie_properties_generator outcomes, the camp generators among them followed: PropertyInt 25 (Level) 40..60, PropertyFloat 31 (VisualAwarenessRange) up to 30; scatter: PropertyFloat 43 (GeneratorRadius) 5 on the generator plus 5 on a camp",
+      "cells": [
+        "0xF47C:0,1", "0xF47C:0,4", "0xF47C:2,7", "0xF47C:4,7", "0xF47D:4,2", "0xF47D:5,5", "0xF47D:6,2", "0xF47D:6,5",
+        "0xF47D:6,6", "0xF47E:7,4", "0xF57E:1,3"
+      ]
+    },
+    {
+      "weenie": 22538,
+      "name": "Tusker Island Mid Mountain Mix Gen",
+      "min_level": 40,
+      "max_level": 60,
+      "awareness_m": 30,
+      "scatter_m": 10,
+      "source": "encounter rows of weenie_Class_Id 22538 (landblock, cell_X, cell_Y; the world SQL's table encounter; ACE places the generator at (cell_X * 24, cell_Y * 24), Landblock.cs:282-283 @95ef426d, not at the cell's centre); levels and awareness: its weenie_properties_generator outcomes, the camp generators among them followed: PropertyInt 25 (Level) 40..60, PropertyFloat 31 (VisualAwarenessRange) up to 30; scatter: PropertyFloat 43 (GeneratorRadius) 5 on the generator plus 5 on a camp",
+      "cells": [
+        "0xF47C:6,0", "0xF47C:7,0", "0xF480:0,5", "0xF480:6,5", "0xF481:3,2", "0xF481:3,3", "0xF481:5,3", "0xF481:6,7",
+        "0xF481:7,3", "0xF482:2,0", "0xF482:2,1", "0xF482:6,2", "0xF57C:0,0", "0xF57C:2,2", "0xF57C:4,1", "0xF57C:4,3",
+        "0xF57C:4,5", "0xF57C:5,6", "0xF57C:7,7", "0xF581:1,6", "0xF581:2,2", "0xF67C:1,7", "0xF67C:2,7", "0xF67D:1,3",
+        "0xF67D:5,3", "0xF67D:6,7", "0xF67D:7,7", "0xF67E:6,6", "0xF67E:7,0", "0xF67E:7,2", "0xF67F:6,4", "0xF77D:0,2",
+        "0xF77E:1,3", "0xF77E:1,5", "0xF77E:3,0", "0xF77E:5,2", "0xF77F:2,3", "0xF77F:3,5", "0xF77F:3,6", "0xF780:0,0"
+      ]
+    },
+    {
+      "weenie": 22386,
+      "name": "Tusker Island High Mix Gen",
+      "min_level": 40,
+      "max_level": 100,
+      "awareness_m": 30,
+      "scatter_m": 10,
+      "source": "encounter rows of weenie_Class_Id 22386 (landblock, cell_X, cell_Y; the world SQL's table encounter; ACE places the generator at (cell_X * 24, cell_Y * 24), Landblock.cs:282-283 @95ef426d, not at the cell's centre); levels and awareness: its weenie_properties_generator outcomes, the camp generators among them followed: PropertyInt 25 (Level) 40..100, PropertyFloat 31 (VisualAwarenessRange) up to 30; scatter: PropertyFloat 43 (GeneratorRadius) 5 on the generator plus 5 on a camp",
+      "cells": [
+        "0xF47F:0,4", "0xF47F:0,7", "0xF47F:1,3", "0xF47F:2,5", "0xF47F:4,6", "0xF47F:6,7", "0xF47F:7,5", "0xF480:0,1",
+        "0xF480:1,3", "0xF480:1,7", "0xF480:2,0", "0xF480:2,4", "0xF480:2,6", "0xF480:3,4", "0xF480:3,7", "0xF480:4,1",
+        "0xF480:4,2", "0xF480:4,6", "0xF480:5,3", "0xF480:5,7", "0xF480:6,0", "0xF481:1,1", "0xF481:1,5", "0xF481:2,0",
+        "0xF481:3,5", "0xF481:4,6", "0xF481:5,0", "0xF481:7,0", "0xF481:7,1", "0xF481:7,5", "0xF482:0,0", "0xF482:0,3",
+        "0xF482:0,5", "0xF482:0,7", "0xF482:2,6", "0xF482:4,0", "0xF482:4,4", "0xF482:4,7", "0xF482:5,4", "0xF483:0,2",
+        "0xF483:2,5", "0xF483:3,7", "0xF483:5,5", "0xF483:6,0", "0xF483:7,3", "0xF484:1,1", "0xF484:4,2", "0xF484:5,7",
+        "0xF484:6,0", "0xF485:7,3", "0xF57F:1,6", "0xF57F:2,7", "0xF57F:4,6", "0xF580:0,4", "0xF580:0,6", "0xF580:0,7",
+        "0xF580:2,1", "0xF580:3,1", "0xF580:3,3", "0xF580:3,5", "0xF580:4,1", "0xF580:5,0", "0xF580:6,5", "0xF580:6,7",
+        "0xF581:2,3", "0xF581:3,0", "0xF581:5,1", "0xF582:0,3", "0xF582:2,1", "0xF582:2,7", "0xF582:3,5", "0xF584:0,1",
+        "0xF584:1,5", "0xF585:1,1", "0xF585:1,5", "0xF586:1,1", "0xF586:3,3", "0xF586:4,5", "0xF586:5,4", "0xF686:0,6",
+        "0xF686:4,7"
+      ]
+    },
+    {
+      "weenie": 22533,
+      "name": "Tusker Island High Beach Mix Gen",
+      "min_level": 40,
+      "max_level": 100,
+      "awareness_m": 30,
+      "scatter_m": 10,
+      "source": "encounter rows of weenie_Class_Id 22533 (landblock, cell_X, cell_Y; the world SQL's table encounter; ACE places the generator at (cell_X * 24, cell_Y * 24), Landblock.cs:282-283 @95ef426d, not at the cell's centre); levels and awareness: its weenie_properties_generator outcomes, the camp generators among them followed: PropertyInt 25 (Level) 40..100, PropertyFloat 31 (VisualAwarenessRange) up to 30; scatter: PropertyFloat 43 (GeneratorRadius) 5 on the generator plus 5 on a camp",
+      "cells": [
+        "0xF47E:1,6", "0xF47E:5,7", "0xF47F:0,1", "0xF47F:1,2", "0xF47F:3,1", "0xF47F:4,0", "0xF47F:4,2", "0xF47F:6,0",
+        "0xF47F:7,3", "0xF57F:0,0"
+      ]
+    }
+  ]
+}

@@ -33,6 +33,8 @@ internal sealed class VendorRig
     private uint _guid = 0x8000035F;
     private byte _seq;
     private ushort _position = 100;
+    private ushort _teleport = 1;
+    private ushort _stateStamp = 10;
     private ushort _placed = 1;
 
     public VendorRig(int coins = 10000, Lifestone.Net.Messages.PlayerDescriptionMsg? description = null)
@@ -55,7 +57,20 @@ internal sealed class VendorRig
         Place(Thelnoth, "Thelnoth Cort the Healer", x: 12, y: 20);
     }
 
+    /// <summary>
+    /// M6 16 E5b: the vendor's side over a world another rig already made (a quest's stand-in ACE, <c>QuestRig</c>): the coin is set and nothing else; no player description is sent again and Thelnoth is not placed. The caller places
+    /// its own vendor (<see cref="PlaceAt"/>) and pumps its <see cref="ScriptedShop"/>.
+    /// </summary>
+    public VendorRig(WorldActionRig world, int coins)
+    {
+        R = world;
+        Coins(coins);
+    }
+
     public WorldActionRig R { get; }
+
+    /// <summary>M6 14 (peace swap): when set, a mode change is answered with the mode, as ACE does; off by default (the full-audit tests' server keeps peace).</summary>
+    public bool AnswersCombatMode { get; set; }
 
     public ActionHarness H => R.H;
 
@@ -92,7 +107,19 @@ internal sealed class VendorRig
     public void StandAt(uint cell, Vector3 at)
     {
         _position++;
-        H.R.Reducer.OnUpdatePosition(H.R.Context, new UpdatePositionMsg(Player, PositionFlags.Grounded, new AcPosition(cell, at, Quaternion.Identity), null, null, 1, _position, 1, 1));
+        H.R.Reducer.OnUpdatePosition(H.R.Context, new UpdatePositionMsg(Player, PositionFlags.Grounded, new AcPosition(cell, at, Quaternion.Identity), null, null, 1, _position, _teleport, 1));
+    }
+
+    /// <summary>
+    /// M6 item 14: the server teleports the player to <paramref name="cell"/> (a death's respawn, a recall), in ACE's order: the announce (F751), the own position with the next teleport sequence (the arrival), then the SetState
+    /// without Hidden that ends the arrival (the player is present again). <see cref="StandAt"/> after it keeps the new teleport sequence.
+    /// </summary>
+    public void TeleportTo(uint cell, Vector3 at)
+    {
+        _teleport++;
+        H.R.Reducer.OnPlayerTeleport(H.R.Context, new PlayerTeleportMsg(_teleport));
+        StandAt(cell, at);
+        H.Unhide(++_stateStamp);
     }
 
     /// <summary>The player moves to x metres (in the player's cell, y 20): an own position update.</summary>
@@ -137,19 +164,20 @@ internal sealed class VendorRig
     public void ErrorText(uint code, string text) => R.Raw(AceWireWriters.WeenieErrorWithString(Player, ++_event, code, text));
 
     /// <summary>GameEvent 0x0022: the item goes into <paramref name="container"/> (the player's main pack by default).</summary>
-    public void Put(uint item, uint? container = null) => R.Raw(AceM3Writers.PutObjInContainer(Player, ++_event, item, container ?? Player, 0, 0));
+    public void Put(uint item, uint? container = null, uint containerType = 0) => R.Raw(AceM3Writers.PutObjInContainer(Player, ++_event, item, container ?? Player, 0, containerType));
 
     /// <summary>GameMessage 0x0197: a stack's size and value.</summary>
     public void Stack(uint item, uint size, uint value) => R.Raw(AceM3Writers.SetStackSize(++_seq, item, size, value));
 
     /// <summary>An F745 for something the player holds (the way a bought item or a payout stack arrives).</summary>
-    public void Arrive(uint guid, string name, uint wcid, uint itemType, uint value, ushort? stackSize = null, ushort? maxStack = null)
+    public void Arrive(uint guid, string name, uint wcid, uint itemType, uint value, ushort? stackSize = null, ushort? maxStack = null, uint? validLocations = null, uint? priority = null)
     {
         var basis = ReducerHarness.Create(guid, ReducerHarness.Stamps(), null, name: name, itemType: itemType);
-        var header = WeenieHeaderFlags.Container | WeenieHeaderFlags.Value | (stackSize is null ? WeenieHeaderFlags.None : WeenieHeaderFlags.StackSize) | (maxStack is null ? WeenieHeaderFlags.None : WeenieHeaderFlags.MaxStackSize);
+        var header = WeenieHeaderFlags.Container | WeenieHeaderFlags.Value | (stackSize is null ? WeenieHeaderFlags.None : WeenieHeaderFlags.StackSize) | (maxStack is null ? WeenieHeaderFlags.None : WeenieHeaderFlags.MaxStackSize)
+            | (validLocations is null ? WeenieHeaderFlags.None : WeenieHeaderFlags.ValidLocations) | (priority is null ? WeenieHeaderFlags.None : WeenieHeaderFlags.Priority);
         H.R.Reducer.OnCreateObject(
             H.R.Context,
-            basis with { Weenie = basis.Weenie with { Header = header, WeenieClassId = wcid, ContainerId = Player, Value = value, StackSize = stackSize, MaxStackSize = maxStack } },
+            basis with { Weenie = basis.Weenie with { Header = header, WeenieClassId = wcid, ContainerId = Player, Value = value, StackSize = stackSize, MaxStackSize = maxStack, ValidLocations = validLocations, Priority = priority } },
             isUpdate: false);
     }
 
@@ -199,6 +227,7 @@ internal sealed class VendorRig
 internal sealed class ScriptedShop(VendorRig rig)
 {
     private readonly Dictionary<uint, Shop> _shops = [];
+    private readonly List<(int Left, Action Deliver)> _arriving = [];
     private int _seen;
 
     /// <summary>The Use, Buy and Sell sends answered.</summary>
@@ -233,6 +262,15 @@ internal sealed class ScriptedShop(VendorRig rig)
 
         /// <summary>M5 7 D136: the MaxStackSize of a row's weenie class (on the 0062 and on the bought stack's F745), as the world data gives it; a class not named has none.</summary>
         public Dictionary<uint, ushort> MaxStacks { get; } = [];
+
+        /// <summary>M6 7 AH: the ValidLocations and ClothingPriority a bought piece of this weenie class arrives with (a robe, a pair of gauntlets), as the world data gives them.</summary>
+        public Dictionary<uint, (uint Valid, uint Priority)> Wearables { get; } = [];
+
+        /// <summary>M6 7 AX: the ContainerType a bought ware of this weenie class arrives with (a focus: 2, <c>WorldObject.ContainerType</c>, WorldObject.cs:453-462 @95ef426d), as the server sends it; a class not named is an ordinary item.</summary>
+        public Dictionary<uint, uint> ContainerTypes { get; } = [];
+
+        /// <summary>M6 7 AX: how many pumps the bought stack's F745 and 0022 come after the Buy's answer: 0 at once; <see cref="int.MaxValue"/> never.</summary>
+        public int ArriveAfterPumps { get; set; }
 
         /// <summary>
         /// M5 7 D136 follow-up: a vendor that lists a trade note lists all ten, as Archmage Cindrue's CreateList does (ACE-World-Database v0.9.296, rows 21060-21069): the missing ones are added as promissory notes (ItemType 0x40000, the
@@ -278,6 +316,19 @@ internal sealed class ScriptedShop(VendorRig rig)
     /// <summary>Answers every send since the last pump.</summary>
     public void Pump()
     {
+        for (var i = _arriving.Count - 1; i >= 0; i--)
+        {
+            var (left, deliver) = _arriving[i];
+            if (left > 0)
+            {
+                _arriving[i] = (left == int.MaxValue ? left : left - 1, deliver);
+                continue;
+            }
+
+            _arriving.RemoveAt(i);
+            deliver();
+        }
+
         var sends = rig.H.Net.Sends;
         for (; _seen < sends.Count; _seen++)
         {
@@ -287,6 +338,12 @@ internal sealed class ScriptedShop(VendorRig rig)
                 // M5 7 D99: a drop leaves the pack (into a stand-in for the ground's landblock; ACE confirms with the same move)
                 Drops++;
                 rig.Put(send.Guid, GroundStandIn);
+                continue;
+            }
+
+            if (send.Kind == FakeSendKind.ChangeCombatMode && rig.AnswersCombatMode)
+            {
+                rig.R.CombatModeIs((int)send.Amount); // M6 14 (peace swap): ACE answers a mode change with the mode, as J3bRig's and QuestRig's servers do
                 continue;
             }
 
@@ -391,8 +448,20 @@ internal sealed class ScriptedShop(VendorRig rig)
         {
             var row = shop.Rows.First(r => r.Guid == item);
             var guid = rig.NextGuid();
-            rig.Arrive(guid, row.Name, row.Wcid, row.ItemType, (uint)(row.Value * amount), stackSize: (ushort)amount, maxStack: shop.MaxStacks.TryGetValue(row.Wcid, out var max) ? max : null);
-            rig.Put(guid);
+            void Deliver()
+            {
+                rig.Arrive(guid, row.Name, row.Wcid, row.ItemType, (uint)(row.Value * amount), stackSize: (ushort)amount, maxStack: shop.MaxStacks.TryGetValue(row.Wcid, out var max) ? max : null, validLocations: shop.Wearables.TryGetValue(row.Wcid, out var wear) ? wear.Valid : null, priority: shop.Wearables.TryGetValue(row.Wcid, out wear) ? wear.Priority : null);
+                rig.Put(guid, containerType: shop.ContainerTypes.TryGetValue(row.Wcid, out var type) ? type : 0);
+            }
+
+            if (shop.ArriveAfterPumps > 0)
+            {
+                _arriving.Add((shop.ArriveAfterPumps, Deliver));
+            }
+            else
+            {
+                Deliver();
+            }
         }
 
         Stock(shop);
@@ -422,7 +491,7 @@ internal sealed class ScriptedShop(VendorRig rig)
         }
 
         // M5 7 G1: ACE refuses the whole sale when the payout's coin stacks (25,000 each) exceed the free slots, counted before the items leave (Player_Commerce.cs 176-191 @95ef426d)
-        if (taken > 0 && (payout + 24_999) / 25_000 > Lifestone.Client.Session.Mage.MageLootRules.FreeSlots(rig.State))
+        if (taken > 0 && (payout + 24_999) / 25_000 > Lifestone.Client.Session.Quartermaster.PackView.MainPackFree(rig.State))
         {
             SlotRefusals++;
             rig.Refusal();

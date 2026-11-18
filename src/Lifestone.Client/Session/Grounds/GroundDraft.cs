@@ -44,7 +44,20 @@ public sealed record DraftSlot(uint Generator, uint Guid, uint Cell, uint Wcid);
 /// <param name="Wcid">The weenie class id.</param>
 /// <param name="Name">The name, or <c>"(no name)"</c>.</param>
 /// <param name="Level">The level, or null.</param>
-public sealed record DraftCreature(uint Wcid, string Name, int? Level);
+public sealed record DraftCreature(uint Wcid, string Name, int? Level)
+{
+    /// <summary>M6 3 a1: the six attributes' current values (weenie_properties_attribute init_Level + level_From_C_P), or null when a row is missing (named in the notes).</summary>
+    public GroundAttributes? Attributes { get; init; }
+
+    /// <summary>M6 3 a1: ACE's current maximum health (<see cref="GroundDraft.MaxHealthOf"/>), or null when the vital or Endurance row is missing (named).</summary>
+    public int? MaxHealth { get; init; }
+
+    /// <summary>M6 3 a1: ACE's current Magic Defense (<see cref="GroundDraft.MagicDefenseOf"/>), or null when the skill row is missing or the skill is not trained (named).</summary>
+    public int? MagicDefense { get; init; }
+
+    /// <summary>M6 3 a1: the OR of the d_Type of its body parts with a d_Val (weenie_properties_body_part), or null when it has none (named).</summary>
+    public uint? DamageTypes { get; init; }
+}
 
 /// <summary>A portal instance of the landblock and where it leads (its weenie's Destination, PositionType 2).</summary>
 /// <param name="Guid">The instance guid.</param>
@@ -71,15 +84,32 @@ public sealed record DraftArrival(uint Wcid, Vector3 Origin, float HeadingW, flo
 /// <param name="Origin">The destination point.</param>
 /// <param name="HeadingW">The destination quaternion's w.</param>
 /// <param name="HeadingZ">The destination quaternion's z.</param>
-/// <param name="MinLevel">The portal's MinLevel (PropertyInt 86), or null when it has none (an entry gate the profile has no field for, <c>TODO(m6-ground-fields)</c>).</param>
-public sealed record DraftEntry(uint Wcid, string Name, uint Cell, Vector3 Origin, float HeadingW, float HeadingZ, int? MinLevel);
+/// <param name="MinLevel">The portal's MinLevel (PropertyInt 86), or null when it has none (the profile's <c>entry.min_level</c>, M6 3 a1).</param>
+public sealed record DraftEntry(uint Wcid, string Name, uint Cell, Vector3 Origin, float HeadingW, float HeadingZ, int? MinLevel)
+{
+    /// <summary>M6 3 a1: the portal's MaxLevel (PropertyInt 87), or null when it has none.</summary>
+    public int? MaxLevel { get; init; }
+
+    /// <summary>M6 3 a1: the portal's PortalBitmask (PropertyInt 111), or null when it has none (ACE then reads Unrestricted, Portal_Properties.cs:10 @95ef426d).</summary>
+    public int? PortalBitmask { get; init; }
+
+    /// <summary>M6 3 a1: false when the bitmask carries NoRecall (0x20), which is ACE's <c>Portal.NoTie</c> (Portal_Properties.cs:14-16 @95ef426d).</summary>
+    public bool Tieable => PortalBitmask is not { } bits || (bits & GroundDraft.NoRecallBit) == 0;
+}
 
 /// <summary>A world object at a place: a landblock_instance row, with the cell its point lies in (an outdoor row carries cell 0xLLLL0000; <see cref="GroundDraft.OutdoorCell"/>).</summary>
 /// <param name="Guid">The instance guid.</param>
 /// <param name="Wcid">The weenie class id.</param>
 /// <param name="Cell">The cell the point lies in (an indoor row's own cell).</param>
 /// <param name="Point">The landblock-local point.</param>
-public sealed record DraftPlace(uint Guid, uint Wcid, uint Cell, Vector3 Point);
+public sealed record DraftPlace(uint Guid, uint Wcid, uint Cell, Vector3 Point)
+{
+    /// <summary>M6 3 a1: the row's quaternion w (angles_W; 1 when not read).</summary>
+    public float HeadingW { get; init; } = 1f;
+
+    /// <summary>M6 3 a1: the row's quaternion z (angles_Z).</summary>
+    public float HeadingZ { get; init; }
+}
 
 /// <summary>A lifestone instance and its distance to the entry portal in world metres.</summary>
 /// <param name="Place">The lifestone's instance.</param>
@@ -151,6 +181,9 @@ public sealed record DraftWorld(IReadOnlyList<DraftGenerator> Generators, IReadO
     /// <summary>The creatures of the slots whose Death or Use emote teleports (exits that are not portal objects).</summary>
     public IReadOnlyList<DraftEmoteExit> EmoteExits { get; init; } = [];
 
+    /// <summary>M6 3 a1: each exit portal's landblock-local origin (its landblock_instance row), by the exit's guid.</summary>
+    public IReadOnlyDictionary<uint, Vector3> ExitOrigins { get; init; } = new Dictionary<uint, Vector3>();
+
     /// <summary>The exits' cells, distinct, in id order: the exit portals' and the emote exits' slot cells (the draft's no-go cells).</summary>
     public IReadOnlyList<uint> ExitCells => Exits.Select(e => e.Cell).Concat(EmoteExits.SelectMany(e => e.Cells)).Distinct().Order().ToArray();
 }
@@ -192,8 +225,9 @@ public static class GroundDraft
     /// <param name="all">Every cell of the landblock (<see cref="LandblockCellSet.Load"/>).</param>
     /// <param name="arrival">The arrival cell (a full cell id in the landblock).</param>
     /// <param name="doorwayLean">The ground's doorway lean.</param>
+    /// <param name="jumps">M6 14 pits: the pits a running jump crosses (the profile's <c>jumps</c>, <see cref="HuntingGround.Jumps"/>), each an edge both ways between its two rooms; null or empty: walks only.</param>
     /// <exception cref="ArgumentException">The arrival is not a cell of the landblock.</exception>
-    public static DraftCells Cells(LandblockCellSet all, uint arrival, float doorwayLean)
+    public static DraftCells Cells(LandblockCellSet all, uint arrival, float doorwayLean, IReadOnlyList<Lifestone.Client.Movement.Routes.PitJump>? jumps = null)
     {
         ArgumentNullException.ThrowIfNull(all);
         if (all.GetCell(arrival) is null)
@@ -201,7 +235,7 @@ public static class GroundDraft
             throw new ArgumentException($"the arrival 0x{arrival:X8} is not a cell of landblock 0x{all.Coord.X:X2}{all.Coord.Y:X2} ({all.Count} cells)", nameof(arrival));
         }
 
-        var graph = new RoomGraph(all, doorwayLean);
+        var graph = new RoomGraph(all, doorwayLean) { Jumps = jumps ?? [] };
         var reached = new HashSet<uint> { arrival };
         var queue = new Queue<uint>([arrival]);
         while (queue.Count > 0)
@@ -216,6 +250,14 @@ public static class GroundDraft
 
                 reached.Add(other.Id);
                 queue.Enqueue(other.Id);
+            }
+
+            foreach (var jump in graph.Planner.JumpsFrom(cell.Id))
+            {
+                if (reached.Add(jump.To.Cell))
+                {
+                    queue.Enqueue(jump.To.Cell); // M6 14 pits: the far side of a pit, by a running jump
+                }
             }
         }
 
@@ -240,14 +282,15 @@ public static class GroundDraft
     /// <param name="doorwayLean">The ground's doorway lean.</param>
     /// <param name="walkable">The draft's walkable cells.</param>
     /// <param name="noGo">The no-go test of the cells set by hand.</param>
+    /// <param name="jumps">M6 14 pits: the pits a running jump crosses (<see cref="Cells"/>); null or empty: walks only.</param>
     /// <returns>The cut-off cells, in id order.</returns>
-    public static IReadOnlyList<uint> CutOff(LandblockCellSet all, uint arrival, float doorwayLean, IEnumerable<uint> walkable, Func<uint, bool> noGo)
+    public static IReadOnlyList<uint> CutOff(LandblockCellSet all, uint arrival, float doorwayLean, IEnumerable<uint> walkable, Func<uint, bool> noGo, IReadOnlyList<Lifestone.Client.Movement.Routes.PitJump>? jumps = null)
     {
         ArgumentNullException.ThrowIfNull(all);
         ArgumentNullException.ThrowIfNull(walkable);
         ArgumentNullException.ThrowIfNull(noGo);
         var keep = walkable.Where(c => !noGo(c)).ToHashSet();
-        var graph = new RoomGraph(LandblockCellSet.FromCells(all.Structures, all.Coord, all.Cells.Where(c => keep.Contains(c.Id))), doorwayLean);
+        var graph = new RoomGraph(LandblockCellSet.FromCells(all.Structures, all.Coord, all.Cells.Where(c => keep.Contains(c.Id))), doorwayLean) { Jumps = jumps ?? [] };
         return keep.Where(c => c != arrival && graph.FindPath(arrival, c) is null).Order().ToArray();
     }
 
@@ -263,6 +306,30 @@ public static class GroundDraft
 
     /// <summary>PropertyInt Value (19), MerchandiseItemTypes (74) and MinLevel (86); PropertyFloat BuyPrice (37) and SellPrice (38) (ACE.Entity/Enum/Properties/PropertyInt.cs, PropertyFloat.cs @95ef426d).</summary>
     internal const int ValueProperty = 19, MerchandiseItemTypesProperty = 74, MinLevelProperty = 86, SellPriceProperty = 38;
+
+    /// <summary>M6 3 a1: PropertyInt MaxLevel (87) and PortalBitmask (111) (ACE.Entity/Enum/Properties/PropertyInt.cs:127 and 163 @95ef426d).</summary>
+    internal const int MaxLevelProperty = 87, PortalBitmaskProperty = 111;
+
+    /// <summary>M6 3 a1: PortalBitmask.NoRecall (ACE.Entity/Enum/PortalBitmask.cs:15 @95ef426d), which ACE's <c>Portal.NoTie</c> also reads (Portal_Properties.cs:14-16).</summary>
+    internal const int NoRecallBit = 0x20;
+
+    /// <summary>M6 3 a1: PropertyAttribute Strength 1, Endurance 2, Quickness 3, Coordination 4, Focus 5, Self 6 (ACE.Entity/Enum/Properties/PropertyAttribute.cs:9-14 @95ef426d).</summary>
+    internal const int StrengthAttribute = 1, EnduranceAttribute = 2, QuicknessAttribute = 3, CoordinationAttribute = 4, FocusAttribute = 5, SelfAttribute = 6;
+
+    /// <summary>M6 3 a1: PropertyAttribute2nd MaxHealth (1) and Skill MagicDefense (15) (ACE.Entity/Enum/Properties/PropertyAttribute2nd.cs:9, ACE.Entity/Enum/Skill.cs @95ef426d).</summary>
+    internal const int MaxHealthVital = 1, MagicDefenseSkill = 15;
+
+    /// <summary>M6 3 a1: SkillAdvancementClass Trained (2); Specialized is 3 (ACE.Entity/Enum/SkillAdvancementClass.cs:6-9 @95ef426d): a trained skill adds its attribute formula (CreatureSkill.IsUsable, CreatureSkill.cs:48-53).</summary>
+    internal const int TrainedSkill = 2;
+
+    /// <summary>
+    /// M6 3 a1: the retail formulas the draft's health and Magic Defense apply (<c>SkillFormula::Calculate</c>, 11.6096 0x00592660, rounded half up as ACE's AttributeFormula.cs:55-71 @95ef426d): MaxHealth is Endurance / 2 (the
+    /// SecondaryAttributeTable's, the same as <c>PlayerQualities.TryGetVitalLevels</c>'s live-checked (Endurance + 1) / 2), Magic Defense (Focus + Self) / 7 (the SkillTable's skill 15; GroundDraftTownTests reads it from the dats).
+    /// </summary>
+    internal static readonly Lifestone.Data.CharacterCreation.SkillTableFormula MaxHealthFormula = new(0, 1, 0, 2, EnduranceAttribute, 0), MagicDefenseFormula = new(0, 1, 1, 7, SelfAttribute, FocusAttribute);
+
+    /// <summary>M6 3 a1: how far in front of a portal the tie point stands, in metres, along its facing (the den's W0 stand read against its row lies 3 m along the facing to within 5 cm; tusker-temple-fort-tethana.json's portal source).</summary>
+    internal const float TieFrontMetres = 3f;
 
     /// <summary>DestinationType.Shop (ACE.Entity/Enum/DestinationType.cs @95ef426d line 11): a create-list row with this bit is a vendor's ware.</summary>
     internal const int ShopDestination = 4;
@@ -294,7 +361,11 @@ public static class GroundDraft
         ["landblock_instance_link"] = _ => true,
         ["weenie_properties_generator"] = _ => true,
         ["weenie_properties_float"] = r => r.L("type") is RegenerationIntervalProperty or SellPriceProperty,
-        ["weenie_properties_int"] = r => r.L("type") is LevelProperty or ValueProperty or MerchandiseItemTypesProperty or MinLevelProperty,
+        ["weenie_properties_int"] = r => r.L("type") is LevelProperty or ValueProperty or MerchandiseItemTypesProperty or MinLevelProperty or MaxLevelProperty or PortalBitmaskProperty,
+        ["weenie_properties_attribute"] = _ => true, // M6 3 a1: the target stats
+        ["weenie_properties_attribute_2nd"] = r => r.L("type") == MaxHealthVital,
+        ["weenie_properties_skill"] = r => r.L("type") == MagicDefenseSkill,
+        ["weenie_properties_body_part"] = r => r.L("d_Val") != 0,
         ["weenie_properties_string"] = r => r.L("type") == NameProperty,
         ["weenie_properties_position"] = r => r.L("position_Type") == DestinationPosition,
         ["weenie_properties_create_list"] = r => (r.L("destination_Type") & ShopDestination) != 0,
@@ -515,14 +586,18 @@ public static class GroundDraft
             generators.Add(new DraftGenerator(guid, wcid, cell, delay, tick));
         }
 
-        var creatures = slots.Select(s => s.Wcid).Distinct().Order()
-            .Select(w => new DraftCreature(w, names.GetValueOrDefault(w, "(no name)"), levels.TryGetValue(w, out var l) ? l : null)).ToArray();
+        var creatures = CreatureStats(Rows, slots.Select(s => s.Wcid).Distinct().Order()
+            .Select(w => new DraftCreature(w, names.GetValueOrDefault(w, "(no name)"), levels.TryGetValue(w, out var l) ? l : null)), notes);
         var exits = instances.Values
             .Where(r => destinationOf.TryGetValue((uint)r.L("weenie_Class_Id"), out var to) && to != 0 && to >> 16 != landblock)
             .OrderBy(r => r.L("guid"))
             .Select(r => new DraftPortal((uint)r.L("guid"), (uint)r.L("weenie_Class_Id"), (uint)r.L("obj_Cell_Id"), destinationOf[(uint)r.L("weenie_Class_Id")]))
             .ToArray();
-        var minLevels = Rows("weenie_properties_int").Where(r => r.L("type") == MinLevelProperty).GroupBy(r => (uint)r.L("object_Id")).ToDictionary(g => g.Key, g => (int)g.First().L("value"));
+        var exitOrigins = exits.ToDictionary(e => e.Guid, e => { var r = instances[e.Guid]; return new Vector3((float)r.F("origin_X"), (float)r.F("origin_Y"), (float)r.F("origin_Z")); }); // M6 3 a1: the exit section's place
+        Dictionary<uint, int> IntsOf(int type) => Rows("weenie_properties_int").Where(r => r.L("type") == type).GroupBy(r => (uint)r.L("object_Id")).ToDictionary(g => g.Key, g => (int)g.First().L("value"));
+        var minLevels = IntsOf(MinLevelProperty);
+        var maxLevels = IntsOf(MaxLevelProperty); // M6 3 a1: the entry gate's top and the tie rule
+        var bitmasks = IntsOf(PortalBitmaskProperty);
         var entries = destinations
             .Where(r => ((uint)r.L("obj_Cell_Id") >> 16) == landblock)
             .OrderBy(r => r.L("object_Id")).ThenBy(r => r.L("id"))
@@ -536,7 +611,11 @@ public static class GroundDraft
                     new Vector3((float)r.F("origin_X"), (float)r.F("origin_Y"), (float)r.F("origin_Z")),
                     (float)r.F("angles_W"),
                     (float)r.F("angles_Z"),
-                    minLevels.TryGetValue(wcid, out var min) ? min : null);
+                    minLevels.TryGetValue(wcid, out var min) ? min : null)
+                {
+                    MaxLevel = maxLevels.TryGetValue(wcid, out var max) ? max : null,
+                    PortalBitmask = bitmasks.TryGetValue(wcid, out var bits) ? bits : null,
+                };
             })
             .ToArray();
         var chosen = arrival is { } want ? entries.FirstOrDefault(e => e.Cell == want) : entries.FirstOrDefault();
@@ -555,7 +634,120 @@ public static class GroundDraft
         var arrivalPoint = chosen is null ? null : new DraftArrival(chosen.Wcid, chosen.Origin, chosen.HeadingW, chosen.HeadingZ) { Cell = chosen.Cell };
         var emoteExits = EmoteExits(Rows, slots, names);
         var town = chosen is null ? null : BuildTown(Rows, chosen, home, types, names, notes);
-        return new DraftWorld(generators, slots, creatures, exits, arrivalPoint, notes) { Entries = entries, Town = town, EmoteExits = emoteExits };
+        return new DraftWorld(generators, slots, creatures, exits, arrivalPoint, notes) { Entries = entries, Town = town, EmoteExits = emoteExits, ExitOrigins = exitOrigins };
+    }
+
+    /// <summary>
+    /// M6 3 a1: the slot creatures' stats from their weenies' rows: the six attributes (weenie_properties_attribute, init_Level + level_From_C_P), ACE's current maximum health and Magic Defense
+    /// (<see cref="MaxHealthOf"/>, <see cref="MagicDefenseOf"/>) and the damage types of the body-part attacks (weenie_properties_body_part d_Type where d_Val is not 0). A missing row is a named note and no value, never a default.
+    /// The seconds between swings are not drafted: <c>TODO(f11-swing-seconds)</c>, one note naming why.
+    /// </summary>
+    private static DraftCreature[] CreatureStats(Func<string, IEnumerable<SqlRow>> rows, IEnumerable<DraftCreature> creatures, List<string> notes)
+    {
+        var list = creatures.ToArray();
+        var wanted = list.Select(c => c.Wcid).ToHashSet();
+        var attributes = rows("weenie_properties_attribute").Where(r => wanted.Contains((uint)r.L("object_Id")))
+            .GroupBy(r => (uint)r.L("object_Id")).ToDictionary(g => g.Key, g => g.GroupBy(r => (int)r.L("type")).ToDictionary(t => t.Key, t => (uint)(t.First().L("init_Level") + t.First().L("level_From_C_P"))));
+        var vitals = rows("weenie_properties_attribute_2nd").Where(r => r.L("type") == MaxHealthVital && wanted.Contains((uint)r.L("object_Id")))
+            .GroupBy(r => (uint)r.L("object_Id")).ToDictionary(g => g.Key, g => ((uint)g.First().L("init_Level"), (uint)g.First().L("level_From_C_P")));
+        var skills = rows("weenie_properties_skill").Where(r => r.L("type") == MagicDefenseSkill && wanted.Contains((uint)r.L("object_Id")))
+            .GroupBy(r => (uint)r.L("object_Id")).ToDictionary(g => g.Key, g => ((uint)g.First().L("init_Level"), (uint)g.First().L("level_From_P_P"), (int)g.First().L("s_a_c")));
+        var damage = rows("weenie_properties_body_part").Where(r => r.L("d_Val") != 0 && wanted.Contains((uint)r.L("object_Id")))
+            .GroupBy(r => (uint)r.L("object_Id")).ToDictionary(g => g.Key, g => g.Aggregate(0u, (m, r) => m | (uint)r.L("d_Type")));
+        var result = new DraftCreature[list.Length];
+        for (var i = 0; i < list.Length; i++)
+        {
+            var c = list[i];
+            var own = attributes.GetValueOrDefault(c.Wcid) ?? [];
+            uint? At(int type) => own.TryGetValue(type, out var v) ? v : null;
+            var missing = new[] { StrengthAttribute, EnduranceAttribute, QuicknessAttribute, CoordinationAttribute, FocusAttribute, SelfAttribute }.Where(t => At(t) is null).ToArray();
+            GroundAttributes? six = null;
+            if (missing.Length > 0)
+            {
+                notes.Add($"TODO(ground-draft-attributes): creature {c.Wcid} {c.Name} has no weenie_properties_attribute row of type {string.Join(", ", missing)}; its attributes are not drafted");
+            }
+            else
+            {
+                six = new GroundAttributes((int)At(StrengthAttribute)!.Value, (int)At(EnduranceAttribute)!.Value, (int)At(CoordinationAttribute)!.Value, (int)At(QuicknessAttribute)!.Value, (int)At(FocusAttribute)!.Value, (int)At(SelfAttribute)!.Value);
+            }
+
+            int? health = null;
+            if (vitals.TryGetValue(c.Wcid, out var vital) && At(EnduranceAttribute) is { } endurance)
+            {
+                health = MaxHealthOf(vital.Item1, vital.Item2, endurance);
+            }
+            else
+            {
+                notes.Add($"TODO(ground-draft-health): creature {c.Wcid} {c.Name} has no weenie_properties_attribute_2nd row of type {MaxHealthVital} (MaxHealth) or no Endurance row; its max_health is not drafted");
+            }
+
+            int? magicDefense = null;
+            if (!skills.TryGetValue(c.Wcid, out var skill))
+            {
+                notes.Add($"TODO(ground-draft-magic-defense): creature {c.Wcid} {c.Name} has no weenie_properties_skill row of type {MagicDefenseSkill} (Magic Defense); its magic_defence is not drafted");
+            }
+            else if (skill.Item3 < TrainedSkill)
+            {
+                notes.Add($"TODO(ground-draft-magic-defense): creature {c.Wcid} {c.Name}: its Magic Defense is not trained (s_a_c {skill.Item3}); ACE adds the formula share only when the SkillTable says it is usable untrained (CreatureSkill.IsUsable, CreatureSkill.cs:48-63 @95ef426d), which the SQL does not say; its magic_defence is not drafted");
+            }
+            else if (At(FocusAttribute) is { } focus && At(SelfAttribute) is { } self)
+            {
+                magicDefense = MagicDefenseOf(skill.Item1, skill.Item2, focus, self);
+            }
+
+            uint? types = damage.TryGetValue(c.Wcid, out var d) && d != 0 ? d : null;
+            if (types is null)
+            {
+                notes.Add($"TODO(ground-draft-damage-types): creature {c.Wcid} {c.Name} has no weenie_properties_body_part row with a d_Val; its damage_types are not drafted (a wielded weapon's damage is not in the body parts)");
+            }
+
+            result[i] = c with { Attributes = six, MaxHealth = health, MagicDefense = magicDefense, DamageTypes = types };
+        }
+
+        if (result.Length > 0)
+        {
+            notes.Add($"TODO(f11-swing-seconds): swing_s is not drafted for {string.Join(", ", result.Select(c => $"{c.Wcid} {c.Name}"))}: ACE times a monster's next melee swing as the swing animation's length plus a random delay up to its PowerupTime (PropertyFloat 34, 1 s when absent; Monster_Melee.cs:151-156 @95ef426d), the animation being MotionTable.GetAnimationLength over the creature's motion table for a maneuver its CombatTable picks at random by attack height (Monster_Melee.cs:164-215, 340-354) at GetAnimSpeed's Quickness-based speed (Creature_Combat.cs:510-521); the repository reads the motion table but not the combat maneuver table, so the draft cannot pick the maneuvers, and retail 11.6096's client does none of this (every attack roll and timing is server-side: docs/research/game-logic.md, the acclient-AI-RE reading); a profile's swing_s is a measure, named in its source");
+        }
+
+        return result;
+    }
+
+    /// <summary>M6 3 a1: ACE's current maximum health of a creature: the vital's start plus its ranks plus Endurance / 2 rounded half up (<see cref="MaxHealthFormula"/>; CreatureVital.cs:104-131 @95ef426d, with no enchantment).</summary>
+    /// <param name="start">weenie_properties_attribute_2nd type 1 init_Level.</param>
+    /// <param name="ranks">Its level_From_C_P.</param>
+    /// <param name="endurance">The Endurance's current value.</param>
+    public static int MaxHealthOf(uint start, uint ranks, uint endurance)
+    {
+        MaxHealthFormula.TryCalculate(endurance, 0, out var part);
+        return checked((int)(start + ranks + part));
+    }
+
+    /// <summary>M6 3 a1: ACE's current Magic Defense of a creature whose skill is trained: init_Level plus its ranks plus (Focus + Self) / 7 rounded half up (<see cref="MagicDefenseFormula"/>; CreatureSkill.cs:154-163 @95ef426d).</summary>
+    /// <param name="start">weenie_properties_skill type 15 init_Level.</param>
+    /// <param name="ranks">Its level_From_P_P.</param>
+    /// <param name="focus">The Focus's current value.</param>
+    /// <param name="self">The Self's current value.</param>
+    public static int MagicDefenseOf(uint start, uint ranks, uint focus, uint self)
+    {
+        MagicDefenseFormula.TryCalculate(focus, self, out var part);
+        return checked((int)(start + ranks + part));
+    }
+
+    /// <summary>
+    /// M6 3 a1: the tie point in front of a portal: <see cref="TieFrontMetres"/> along its facing (the +Y axis turned by the row's yaw quaternion), the z to the centimetre (the den's row z 30.005 stands at 30.01), in the
+    /// outdoor cell the point lies in (<see cref="OutdoorCell"/>; an indoor row keeps its own cell, which a 3 m step may leave: named in the draft's source).
+    /// </summary>
+    /// <param name="portal">The portal's instance.</param>
+    public static (uint Cell, Vector3 Point) FrontOf(DraftPlace portal)
+    {
+        ArgumentNullException.ThrowIfNull(portal);
+        var yaw = 2.0 * Math.Atan2(portal.HeadingZ, portal.HeadingW);
+        var x = portal.Point.X + (TieFrontMetres * -Math.Sin(yaw));
+        var y = portal.Point.Y + (TieFrontMetres * Math.Cos(yaw));
+        var z = (float)Math.Round((decimal)portal.Point.Z, 2, MidpointRounding.AwayFromZero);
+        var point = new Vector3((float)x, (float)y, z);
+        var rowCell = (portal.Cell & 0xFFFF) < 0x100 ? portal.Cell & 0xFFFF0000u : portal.Cell;
+        return (OutdoorCell(rowCell, point), point);
     }
 
     /// <summary>The slot creatures whose Death or Use emote teleports: a CastSpell or CastSpellInstant action whose spell the dump's spell table gives a destination cell (a Portal Sending spell), or a TeleportTarget or TeleportSelf action.</summary>
@@ -609,7 +801,7 @@ public static class GroundDraft
         DraftPlace PlaceOf(SqlRow r)
         {
             var point = new Vector3((float)r.F("origin_X"), (float)r.F("origin_Y"), (float)r.F("origin_Z"));
-            return new DraftPlace((uint)r.L("guid"), (uint)r.L("weenie_Class_Id"), OutdoorCell((uint)r.L("obj_Cell_Id"), point), point);
+            return new DraftPlace((uint)r.L("guid"), (uint)r.L("weenie_Class_Id"), OutdoorCell((uint)r.L("obj_Cell_Id"), point), point) { HeadingW = (float)r.F("angles_W", 1), HeadingZ = (float)r.F("angles_Z") };
         }
 
         double Metres(DraftPlace from, DraftPlace to)
@@ -697,24 +889,30 @@ public static class GroundDraft
     /// <param name="storeys">The storeys, in the tour's order.</param>
     /// <param name="arrival">The arrival cell.</param>
     /// <param name="huntCells">The cells to visit (repeats are visited once).</param>
-    public static IReadOnlyList<uint> FirstTour(LandblockCellSet all, IReadOnlyList<GroundStorey> storeys, uint arrival, IEnumerable<uint> huntCells)
+    /// <param name="walkMetres">
+    /// M6 14 pits: the walk between two cells (<see cref="GroundTour.RoomMetres"/> over the ground's room graph, jumps counted), or null: the straight line between cell origins (every draft before the Abode's
+    /// jump). Across a pit the straight line is short and the walk is not, so a tour drafted on the line would cross back and forth; with the walk it ends one side before it jumps.
+    /// </param>
+    public static IReadOnlyList<uint> FirstTour(LandblockCellSet all, IReadOnlyList<GroundStorey> storeys, uint arrival, IEnumerable<uint> huntCells, Func<uint, uint, double>? walkMetres = null)
     {
         ArgumentNullException.ThrowIfNull(all);
         ArgumentNullException.ThrowIfNull(storeys);
         Vector3 At(uint cell) => all.GetCell(cell)?.Frame.Origin ?? throw new ArgumentException($"0x{cell:X8} is not a cell of the landblock", nameof(huntCells));
         var wanted = huntCells.Distinct().ToHashSet();
         var tour = new List<uint>();
-        var here = At(arrival);
+        var here = arrival;
         foreach (var storey in storeys)
         {
             var left = storey.Cells.Cells.Where(wanted.Contains).ToList();
             while (left.Count > 0)
             {
                 var from = here;
-                var next = left.OrderBy(c => Vector3.DistanceSquared(from, At(c))).ThenBy(c => c).First();
+                var next = walkMetres is null
+                    ? left.OrderBy(c => Vector3.DistanceSquared(At(from), At(c))).ThenBy(c => c).First()
+                    : left.OrderBy(c => walkMetres(from, c)).ThenBy(c => c).First();
                 left.Remove(next);
                 tour.Add(next);
-                here = At(next);
+                here = next;
             }
         }
 
@@ -750,6 +948,7 @@ public static class GroundDraft
             ? string.Empty
             : "; exits by emote (a creature whose Death or Use emote teleports, its slot cells): " + string.Join(", ", world.EmoteExits.Select(e => $"wcid {e.Wcid} {e.Name}, {e.CategoryName} emote casts {(e.Spell == 0 ? e.SpellName : $"'{e.SpellName}' (spell {e.Spell})")} to {Hex(e.Destination)}, in {string.Join("/", e.Cells.Select(Hex))}"));
         var origin = world.Arrival?.Origin ?? all.GetCell(cells.Arrival)!.Frame.Origin;
+        var statsSource = "M6 3 a1, the target stats (each from the weenie's rows; a missing row is a draft note and no value): max_health is ACE's CreatureVital.MaxValue (CreatureVital.cs:104-131 @95ef426d), weenie_properties_attribute_2nd type 1 init_Level + level_From_C_P + Endurance / 2 rounded half up (AttributeFormula.cs:55-71), the health ACE spawns a creature with whatever the row's current_Level says (Creature.cs:132-135); magic_defence is ACE's CreatureSkill.Current (CreatureSkill.cs:154-163), weenie_properties_skill type 15 init_Level + level_From_P_P + (Focus + Self) / 7 for a trained skill (s_a_c 2 or 3); attributes are weenie_properties_attribute types 1 to 6, init_Level + level_From_C_P; damage_types is the OR of weenie_properties_body_part d_Type over the parts with a d_Val (Monster_Melee.cs:590-615); swing_s is not drafted (TODO(f11-swing-seconds), the notes)";
         var storeyNote = $"{cells.Walkable.Count} walkable cells in {cells.Storeys.Count} storeys of {cells.Total}; {cells.Floorless.Count} floorless and {cells.Pockets.Count} unreached pocket cells left out";
 
         using var stream = new MemoryStream();
@@ -767,10 +966,12 @@ public static class GroundDraft
             w.WriteString("walk", $"the draft's doorway lean {cells.DoorwayLean.ToString("0.###", CultureInfo.InvariantCulture)}; the leg's stop rules are {HandSet}");
             w.WriteString("storeys", $"the dats (GroundDraft.Cells): every cell the arrival {Hex(cells.Arrival)} reaches over the doorways RoomGraph.IsPassable accepts at lean {cells.DoorwayLean.ToString("0.###", CultureInfo.InvariantCulture)}, grouped by origin z; {storeyNote}");
             w.WriteString("no_go", $"the pinned world SQL v0.9.296: the exit portals' cells (a portal whose Destination is outside {lb}): {exitText}{emoteText}; the rest is {HandSet}");
-            w.WriteString("targets", $"the pinned world SQL v0.9.296: every slot's weenie with its Name (PropertyString 1) and Level (PropertyInt 25); the roles are proposed (GroundDraft.ProposedRole): avoid for a creature whose emote is an exit, target for the rest; the design's avoided classes are {HandSet}");
+            w.WriteString("targets", $"the pinned world SQL v0.9.296: every slot's weenie with its Name (PropertyString 1) and Level (PropertyInt 25); the roles are proposed (GroundDraft.ProposedRole): avoid for a creature whose emote is an exit, target for the rest; the design's avoided classes and any kill-first role are {HandSet}; {statsSource}");
             w.WriteString("level_band", $"the pinned world SQL v0.9.296: the proposed targets' levels only ({(targetBand is { } tb ? $"{tb.Min} to {tb.Max}" : HandSet)}); the slot creatures' range is {slotRange}");
-            w.WriteString("portal", town?.Portal is { } tp
-                ? $"the pinned world SQL v0.9.296 (GroundDraft's town half): weenie {town.Entry.Wcid} {town.Entry.Name}'s landblock_instance row, guid {Hex(tp.Guid)} at ({Pt(tp.Point)}) in landblock 0x{tp.Cell >> 16:X4}, in the outdoor cell its point lies in, {Hex(tp.Cell)} (x/24*8 + y/24 + 1 with whole divisions); {town.Portals.Count} instance(s) of the weenie; Primary Portal Tie {PrimaryPortalTieSpell} and Recall {PrimaryPortalRecallSpell} are the global spell ids; {HandSet}: the tie and the recall are not measured live (TODO(m6-ground-live-facts)); wcid and origin are the row's; {HandSet}: front_cell and front_point, the tie point 3 m along the portal's facing (the row's quaternion), derived the way the den's W0 stand reads against its row (3 m along the facing to within 5 cm){(town.Entry.MinLevel is { } ml ? $"; the portal's MinLevel {ml} (PropertyInt 86) has no field (TODO(m6-ground-fields))" : string.Empty)}"
+            w.WriteString("portal", town?.Portal is { } np && !town.Entry.Tieable
+                ? $"none: the entry portal, weenie {town.Entry.Wcid} {town.Entry.Name} (guid {Hex(np.Guid)}), has PortalBitmask 0x{town.Entry.PortalBitmask:X} (PropertyInt 111), which carries NoRecall (0x20, ACE.Entity/Enum/PortalBitmask.cs:15 @95ef426d), and ACE's Portal.NoTie is NoRecall (Portal_Properties.cs:14-16), so it cannot be tied and the ground has no tie record (the entry section holds its place)"
+                : town?.Portal is { } tp
+                ? $"the pinned world SQL v0.9.296 (GroundDraft's town half): weenie {town.Entry.Wcid} {town.Entry.Name}'s landblock_instance row, guid {Hex(tp.Guid)} at ({Pt(tp.Point)}) in landblock 0x{tp.Cell >> 16:X4}, in the outdoor cell its point lies in, {Hex(tp.Cell)} (x/24*8 + y/24 + 1 with whole divisions); {town.Portals.Count} instance(s) of the weenie; Primary Portal Tie {PrimaryPortalTieSpell} and Recall {PrimaryPortalRecallSpell} are the global spell ids; {HandSet}: the tie and the recall are not measured live (TODO(m6-ground-live-facts)); wcid and origin are the row's; front_cell and front_point are the tie point 3 m along the portal's facing (the row's quaternion, the z to the centimetre; GroundDraft.FrontOf, M6 3 a1), derived the way the den's W0 stand reads against its row (3 m along the facing to within 5 cm)"
                 : HandSet);
             w.WriteString("home", town?.Lifestone is { } tl
                 ? $"the pinned world SQL v0.9.296 (GroundDraft's town half): the lifestone nearest the portal ({tl.Metres:0} m), guid {Hex(tl.Place.Guid)} at ({Pt(tl.Place.Point)}) in the outdoor cell its point lies in, {Hex(tl.Place.Cell)}; {HandSet}: the town's name, and whether this is the town the ground's characters live in; the point is the lifestone's own, not a standing point measured beside it (TODO(m6-ground-live-facts))"
@@ -848,6 +1049,33 @@ public static class GroundDraft
                 }
 
                 w.WriteString("role", ProposedRole(world, c.Wcid) == GroundRole.Target ? "target" : "avoid");
+                if (c.MaxHealth is { } health)
+                {
+                    w.WriteNumber("max_health", health);
+                }
+
+                if (c.MagicDefense is { } magicDefense)
+                {
+                    w.WriteNumber("magic_defence", magicDefense);
+                }
+
+                if (c.Attributes is { } six)
+                {
+                    w.WriteStartObject("attributes");
+                    w.WriteNumber("strength", six.Strength);
+                    w.WriteNumber("endurance", six.Endurance);
+                    w.WriteNumber("coordination", six.Coordination);
+                    w.WriteNumber("quickness", six.Quickness);
+                    w.WriteNumber("focus", six.Focus);
+                    w.WriteNumber("self", six.Self);
+                    w.WriteEndObject();
+                }
+
+                if (c.DamageTypes is { } damage)
+                {
+                    w.WriteString("damage_types", $"0x{damage:X4}");
+                }
+
                 w.WriteEndObject();
             }
 
@@ -865,8 +1093,13 @@ public static class GroundDraft
             }
 
             w.WriteEndObject();
-            if (town?.Portal is { } portal)
+            if (town?.Portal is not null && !town.Entry.Tieable)
             {
+                w.WriteNull("portal"); // M6 3 a1: a NoRecall portal cannot be tied, so there is no tie record (the catalog refuses one beside entry.tieable false)
+            }
+            else if (town?.Portal is { } portal)
+            {
+                var (frontCell, front) = FrontOf(portal);
                 w.WriteStartObject("portal");
                 w.WriteString("guid", Hex(portal.Guid));
                 w.WriteString("cell", Hex(portal.Cell));
@@ -874,14 +1107,17 @@ public static class GroundDraft
                 w.WriteNumber("recall_spell", PrimaryPortalRecallSpell);
                 w.WriteNumber("wcid", portal.Wcid);
                 WritePoint(w, "origin", portal.Point);
-                w.WriteString("front_cell", HandSet); // the tie point is 3 m along the portal's facing, which the draft's place does not carry: derive it from the row's quaternion and say how in the source
-                w.WriteString("front_point", HandSet);
+                w.WriteString("front_cell", Hex(frontCell)); // M6 3 a1: the tie point 3 m along the portal's facing (FrontOf), as the hand-set profiles derived it
+                WritePoint(w, "front_point", front);
                 w.WriteEndObject();
             }
             else
             {
                 w.WriteString("portal", HandSet);
             }
+
+            WriteEntry(w, town);
+            WriteExit(w, world, cells.Arrival, origin);
 
             if (town?.Lifestone is { } home)
             {
@@ -986,6 +1222,83 @@ public static class GroundDraft
         return Encoding.UTF8.GetString(stream.ToArray()) + "\n";
     }
 
+    /// <summary>M6 3 a1: the draft's <c>entry</c> section from the chosen entry and its instance (its place, the front point, the gate and the tie rule), each value's source in its <c>source</c>; the marker when the town half has no portal.</summary>
+    private static void WriteEntry(Utf8JsonWriter w, DraftTown? town)
+    {
+        if (town?.Portal is not { } portal)
+        {
+            w.WriteString("entry", $"{HandSet}: the entry portal has no landblock_instance row (the draft's notes)");
+            return;
+        }
+
+        var e = town.Entry;
+        var (frontCell, front) = FrontOf(portal);
+        w.WriteStartObject("entry");
+        w.WriteNumber("wcid", e.Wcid);
+        w.WriteString("guid", $"0x{portal.Guid:X8}");
+        w.WriteString("cell", $"0x{portal.Cell:X8}");
+        WritePoint(w, "origin", portal.Point);
+        w.WriteString("front_cell", $"0x{frontCell:X8}");
+        WritePoint(w, "front_point", front);
+        if (e.MinLevel is { } min)
+        {
+            w.WriteNumber("min_level", min);
+        }
+        else
+        {
+            w.WriteNull("min_level");
+        }
+
+        if (e.MaxLevel is { } max)
+        {
+            w.WriteNumber("max_level", max);
+        }
+        else
+        {
+            w.WriteNull("max_level");
+        }
+
+        w.WriteBoolean("tieable", e.Tieable);
+        var bits = e.PortalBitmask is { } b ? $"PortalBitmask 0x{b:X} (PropertyInt 111){((b & NoRecallBit) != 0 ? ", which carries NoRecall (0x20)" : ", no NoRecall bit")}" : "no PortalBitmask row (PropertyInt 111; ACE reads Unrestricted, Portal_Properties.cs:10 @95ef426d)";
+        w.WriteString("source", string.Create(CultureInfo.InvariantCulture,
+            $"the pinned world SQL v0.9.296 (GroundDraft, M6 3 a1): weenie {e.Wcid} {e.Name}, whose Destination (weenie_properties_position, PositionType 2) is 0x{e.Cell:X8}; its landblock_instance row guid 0x{portal.Guid:X8} at the row's origin, in the cell its point lies in (0x{portal.Cell:X8}, x/24*8 + y/24 + 1 for an outdoor row); the front point {TieFrontMetres:0} m along the row's facing (quaternion w {portal.HeadingW:0.######}, z {portal.HeadingZ:0.######}), z to the centimetre, in its cell (GroundDraft.FrontOf); min_level from weenie_properties_int type 86 (MinLevel){(e.MinLevel is null ? ", none" : string.Empty)}, max_level from type 87 (MaxLevel){(e.MaxLevel is null ? ", none" : string.Empty)}; tieable from {bits}: ACE's Portal.NoTie is NoRecall (ACE.Server/WorldObjects/Portal_Properties.cs:14-16 @95ef426d; the flag ACE.Entity/Enum/PortalBitmask.cs:15)"));
+        w.WriteEndObject();
+    }
+
+    /// <summary>
+    /// M6 3 a1: the draft's <c>exit</c> section from the exits by portal object: none is an exit by <c>recall</c> (the exits by emote are named in the source, avoided); one or more is a <c>portal</c> exit, the one nearest the arrival
+    /// (the others named in the source and the notes), with its straight-line distance from the arrival as the <c>from_arrival_m</c> hint (a walk over the room graph is travel's, item 4).
+    /// </summary>
+    private static void WriteExit(Utf8JsonWriter w, DraftWorld world, uint arrivalCell, Vector3 arrival)
+    {
+        var emotes = world.EmoteExits.Count == 0
+            ? "no exit by emote"
+            : "the exits by emote are avoided creatures, not a way out the loop takes: " + string.Join(", ", world.EmoteExits.Select(e => $"wcid {e.Wcid} {e.Name} ({e.CategoryName} emote to 0x{e.Destination:X8})"));
+        w.WriteStartObject("exit");
+        if (world.Exits.Count == 0)
+        {
+            w.WriteString("kind", "recall");
+            w.WriteString("source", $"the pinned world SQL v0.9.296 (GroundDraft, M6 3 a1): no landblock_instance row of the landblock is a portal whose Destination (weenie_properties_position, PositionType 2) lies outside it, so the ground is left by recall; {emotes}");
+        }
+        else
+        {
+            Vector3 At(DraftPortal e) => world.ExitOrigins.TryGetValue(e.Guid, out var o) ? o : throw new InvalidOperationException($"exit portal 0x{e.Guid:X8} has no origin in DraftWorld.ExitOrigins");
+            var nearest = world.Exits.OrderBy(e => Vector3.Distance(arrival, At(e))).ThenBy(e => e.Guid).First();
+            var metres = Math.Round(Vector3.Distance(arrival, At(nearest)), 1);
+            var others = world.Exits.Where(e => e != nearest).Select(e => $"0x{e.Guid:X8} wcid {e.Wcid} in 0x{e.Cell:X8} to 0x{e.Destination:X8}").ToArray();
+            w.WriteString("kind", "portal");
+            w.WriteNumber("wcid", nearest.Wcid);
+            w.WriteString("cell", $"0x{nearest.Cell:X8}");
+            WritePoint(w, "origin", At(nearest));
+            w.WriteString("destination", $"0x{nearest.Destination:X8}");
+            w.WriteNumber("from_arrival_m", metres);
+            w.WriteString("source", string.Create(CultureInfo.InvariantCulture,
+                $"the pinned world SQL v0.9.296 (GroundDraft, M6 3 a1): the exit portal, landblock_instance guid 0x{nearest.Guid:X8} (wcid {nearest.Wcid}) in 0x{nearest.Cell:X8} at the row's origin, whose weenie's Destination (weenie_properties_position, PositionType 2) is 0x{nearest.Destination:X8}, outside the landblock; from_arrival_m {metres} is a hint, the straight-line distance from the arrival in 0x{arrivalCell:X8} to the portal's origin (a walk over the room graph is longer: item 4's){(others.Length == 0 ? string.Empty : $"; {HandSet}: {others.Length} other exit portal(s), the nearest taken: {string.Join(", ", others)} (TODO(ground-draft-exit))")}; {emotes}"));
+        }
+
+        w.WriteEndObject();
+    }
+
     private static void WritePoint(Utf8JsonWriter w, string name, Vector3 p)
     {
         w.WriteStartObject(name);
@@ -1017,7 +1330,7 @@ public static class GroundDraft
 
         foreach (var c in world.Creatures)
         {
-            sb.Append(CultureInfo.InvariantCulture, $"  creature {c.Wcid} {c.Name} level {c.Level?.ToString(CultureInfo.InvariantCulture) ?? "none"}: {world.Slots.Count(s => s.Wcid == c.Wcid)} slots\n");
+            sb.Append(CultureInfo.InvariantCulture, $"  creature {c.Wcid} {c.Name} level {c.Level?.ToString(CultureInfo.InvariantCulture) ?? "none"}: {world.Slots.Count(s => s.Wcid == c.Wcid)} slots; health {c.MaxHealth?.ToString(CultureInfo.InvariantCulture) ?? "none"}, Magic Defense {c.MagicDefense?.ToString(CultureInfo.InvariantCulture) ?? "none"}, attributes {(c.Attributes is { } at ? $"{at.Strength}/{at.Endurance}/{at.Coordination}/{at.Quickness}/{at.Focus}/{at.Self}" : "none")}, damage types {(c.DamageTypes is { } dt ? $"0x{dt:X4}" : "none")}\n");
         }
 
         foreach (var e in world.Exits)
@@ -1035,7 +1348,7 @@ public static class GroundDraft
         sb.Append(CultureInfo.InvariantCulture, $"  levels: the slot creatures' {(levels.Length == 0 ? "none" : $"{levels.Min()} to {levels.Max()}")}; the proposed band, from the proposed targets only, {(band is { } b ? $"{b.Min} to {b.Max}" : "none")}\n");
         foreach (var e in world.Entries)
         {
-            sb.Append(CultureInfo.InvariantCulture, $"  entry portal wcid {e.Wcid} {e.Name} leads to 0x{e.Cell:X8} at ({e.Origin.X:0.####}, {e.Origin.Y:0.####}, {e.Origin.Z:0.####}), min level {e.MinLevel?.ToString(CultureInfo.InvariantCulture) ?? "none"}{(e.Cell == world.Arrival?.Cell ? " (the arrival)" : string.Empty)}\n");
+            sb.Append(CultureInfo.InvariantCulture, $"  entry portal wcid {e.Wcid} {e.Name} leads to 0x{e.Cell:X8} at ({e.Origin.X:0.####}, {e.Origin.Y:0.####}, {e.Origin.Z:0.####}), min level {e.MinLevel?.ToString(CultureInfo.InvariantCulture) ?? "none"}, max level {e.MaxLevel?.ToString(CultureInfo.InvariantCulture) ?? "none"}, PortalBitmask {(e.PortalBitmask is { } pb ? $"0x{pb:X}" : "none")}{(e.Tieable ? string.Empty : " (NoRecall: not tieable)")}{(e.Cell == world.Arrival?.Cell ? " (the arrival)" : string.Empty)}\n");
         }
 
         if (world.Town is { } town)

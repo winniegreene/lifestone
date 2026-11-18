@@ -10,11 +10,13 @@ public static partial class OptionCatalog
     public static OptionGroup Session() => new("Session", "main scene and headless host",
     [
         new("--play", null, "Play mode: log in to the bundled ACE on 127.0.0.1 instead of exploring (tools\\play.ps1 passes it; with no arguments the game stays in explore mode; the headless host always logs in)."),
+        new("--live-raise-check", null, "The live raise proof (M6 7 S; the play host only; Lifestone Throwaway only, any other character is refused): after login it opens the character panel skills tab, clicks the cheapest trained skill row and the Raise button through the shell mouse, waits for the server reply, logs one line raise_check skill=<id> ranks_before= ranks_after= ok=yes|no why=... read from the session qualities, and quits (exit 0 on yes). It needs unassigned experience that covers one rank."),
         new("--account", "NAME", "The account to log in with: a key of server\\runtime\\secrets.json's accounts (play, test, or one added by setup-server.ps1 -AddAccount), else a username. Default: the file's defaultAccount (the play account); the headless host (always an automated run) accepts only the test account. A name only: no option takes a password."),
         new("--character", "NAME", "Enter the world with this character (case-insensitive) instead of stopping at the character list; refused when it is pending deletion."),
         new("--server", "IP:PORT", "ACE's login endpoint, an IP literal on loopback (default 127.0.0.1:9000, from server\\versions.json); host names and every address off loopback are refused before anything is sent."),
         new("--record-session", "DIR", "Record the session's messages as a .lsrec file in DIR (default cache/sessions; relative to the repository root, never under src/ or tests/). The headless host always records.", ValueOptional: true),
         new("--session-budget-ms", "X", "Main-thread milliseconds per frame for applying server messages (default 2; the transport's acks and resends always run)."),
         new("--retail-net", null, "Retail's network behaviour where Lifestone deviates: the 140 s silence timeout, one login attempt, no tail probe, arrival-order delivery (default: Lifestone's, docs/protocol.md)."),
+        new("--allow-climber-grant", "[on|off]", "Lets this session grant or place the climber Winnie (M6 item 0 F5, 0-R4; D34: item 8's one Alchemy grant; default off). Off, every item, experience, place, spell-learn and corpses-rot request for the character named Winnie is refused on the client with TODO(m6-climber-no-grant) and never sent."),
     ], OptionScenes.Main | OptionScenes.Headless);
 }

@@ -1,6 +1,7 @@
 using System.Globalization;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Tools;
+using Lifestone.Net.Session;
 
 namespace Lifestone.Client.Session.Scenarios;
 
@@ -104,6 +105,12 @@ public sealed class LoginScenario : IScenario
     /// <summary>The character entered (its guid), or 0.</summary>
     public uint EnteredGuid { get; private set; }
 
+    /// <summary>
+    /// M6 14 body (live ladder49 01:59:12 UTC): set when another owner's EnterWorld put the chosen character in the world first (the game's <c>--character</c> auto-enter on the same character list) and this login adopted that entry
+    /// (the check before its own EnterWorld, or its refusal "not at the character list (phase InWorld)" read against the session's phase and player) instead of failing; null otherwise.
+    /// </summary>
+    public string? Adopted { get; private set; }
+
     /// <summary>The status the server mod reported, or null.</summary>
     public ToolStatus? Status { get; private set; }
 
@@ -163,7 +170,7 @@ public sealed class LoginScenario : IScenario
                 {
                     if (entered.Kind != ActionOutcomeKind.Confirmed)
                     {
-                        return Fail("entering the world", entered);
+                        return EnteredElsewhere(session, EnteredGuid) ? Adopt(session, EnteredGuid, $"its own EnterWorld was {entered.Kind.ToString().ToLowerInvariant()} ({entered.Detail ?? "no detail"})") : Fail("entering the world", entered);
                     }
 
                     _arrivalStart = session.Clock.Now;
@@ -337,9 +344,26 @@ public sealed class LoginScenario : IScenario
 
     private ScenarioStatus Enter(IGameSessionView session, uint guid)
     {
+        if (EnteredElsewhere(session, guid))
+        {
+            return Adopt(session, guid, "before its own EnterWorld"); // the check before: the session is already past the character list as this character
+        }
+
         EnteredGuid = guid;
         _pending = session.Actions.EnterWorld(guid, ActionSource.Host);
         return Go("entering");
+    }
+
+    /// <summary>True when the session is entering or in the world as <paramref name="guid"/> (another owner's entry of the chosen character).</summary>
+    private static bool EnteredElsewhere(IGameSessionView session, uint guid) =>
+        guid != 0 && session.State.Phase is SessionPhase.EnteringWorld or SessionPhase.InWorld && session.State.Self.Guid == guid;
+
+    private ScenarioStatus Adopt(IGameSessionView session, uint guid, string when)
+    {
+        EnteredGuid = guid;
+        Adopted = string.Create(CultureInfo.InvariantCulture, $"{when}: the session was already {session.State.Phase.ToString().ToLowerInvariant()} as the chosen character 0x{guid:X8} (another owner's entry): the login adopted it and waited for the arrival");
+        _arrivalStart = session.Clock.Now;
+        return Go("arriving");
     }
 
     private bool Settled(out ActionOutcome outcome)

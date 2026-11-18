@@ -9,10 +9,13 @@ using Lifestone.Client.RetailUi.Panels;
 using Lifestone.Client.RetailUi.Screens;
 using Lifestone.Client.Session;
 using Lifestone.Client.Session.Autopilot;
+using Lifestone.Client.Session.Autopilot.Commands;
+using Lifestone.Client.Session.Autopilot.Steer;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Hosting;
 using Lifestone.Client.Session.Mage;
+using Lifestone.Client.Session.Quests;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Session.Scenarios.Journey;
 using Lifestone.Data.Dat;
@@ -36,7 +39,7 @@ namespace Lifestone.Game.Sessions;
 /// <para>Installed by <see cref="PlayMode.Install"/> for a normal play session (not for a <c>--login-check</c> leg: <see cref="AutopilotLegRunner"/> runs the same logic inside its own session flow). The checkpoint is a file under the user data
 /// (<c>user://autopilot/&lt;character&gt;.json</c>, <see cref="UserDataCheckpointStore"/>; <c>-IsolateUserData</c> isolates it); the reconnect is <see cref="GameSessionAutopilotSession"/>.</para>
 /// <para>Only BSD Mage plays (the mage plan): a press on another character is refused by a log line. The panel button is a <b>placeholder</b> for what retail never had, like every Lifestone panel.</para>
-/// <para><b>Hand-back and the checkpoint.</b> A hand-back builds a fresh scenario carrying the old one's counts in memory (<see cref="AutopilotCarry"/>); its checkpoint store reads as empty once (<see cref="ColdReadOnce"/>), so the file is
+/// <para><b>Hand-back and the checkpoint.</b> A hand-back builds a fresh scenario carrying the old one's counts in memory (<see cref="AutopilotCarry"/>); its checkpoint store reads as empty once (<see cref="ColdReadOnceStore"/>), so the file is
 /// not counted on top of the carry, and writes through, so the file stays current. A first start reads the file (a restart of the game resumes the totals and the minutes used).</para>
 /// </remarks>
 public sealed partial class AutopilotHost : Node
@@ -49,6 +52,15 @@ public sealed partial class AutopilotHost : Node
     private AutopilotHostOptions _hostOptions = new();
     private AutopilotTestHandOff? _handOff;
     private string? _requiredCharacter;
+    private AutopilotOptions? _jobOptions;
+    private JourneyPlan? _plan;
+    private DatSet? _dats;
+    private PlayMode? _mode;
+    private GameServices? _services;
+    private string[]? _arguments;
+    private string? _account;
+    private IAutopilotCheckpointStore? _store;
+    private AutopilotRungKits? _rungs;
     private AutopilotKit? _kit;
     private KitLoads? _loads;
     private bool _pressPending;
@@ -60,6 +72,10 @@ public sealed partial class AutopilotHost : Node
     private StopFileWatch? _stopFile;
     private ControlDrill? _drill;
     private string? _pressRefusal;
+    private CommandRunner? _orders;
+    private AutopilotJobSource? _jobs;
+    private double _jobsRefreshedAt = double.NegativeInfinity;
+    private QuestTimers? _fileTimers;
     private readonly Lifestone.Client.Session.Hosting.LegFaultGuard _guard = new("AutopilotHost", LogCategory, GodotLogSink.Instance);
 
     /// <summary>The logic the node ticks (the checks read its mode).</summary>
@@ -70,6 +86,12 @@ public sealed partial class AutopilotHost : Node
 
     /// <summary>How many times the dial was pressed (the key, the button or the scripted hand-back).</summary>
     public int Presses { get; private set; }
+
+    /// <summary>M6 6 MD2: the automation menu's source (the screen's menu and the inspector read it), or null before the host is set up.</summary>
+    public AutopilotJobSource? Jobs => _jobs;
+
+    /// <summary>M6 6 MD2: how often the host refreshes <see cref="Jobs"/> (seconds); a choice from the menu refreshes it at once.</summary>
+    public const double JobsRefreshSeconds = 1.0;
 
     /// <summary>The scripted hand-off of <c>--autopilot-test-interrupt-at</c> (null when not asked for).</summary>
     public AutopilotTestHandOff? HandOff => _handOff;
@@ -82,10 +104,11 @@ public sealed partial class AutopilotHost : Node
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(mode);
         var dats = services.Dats ?? throw new InvalidOperationException("the autopilot needs the dats (Main checks for them first)");
-        var plan = JourneyPlans.Mage;
         var arguments = OS.GetCmdlineUserArgs();
         var parsed = CommandLineArgument.ParseAll(arguments);
         var options = AutopilotOptions.FromArguments(parsed) with { Buff = BuffOptions.FromArguments(parsed) }; // 4-R4: the upkeep reads the re-buff driver's own margin (--buff-rebuff-margin)
+        var plan = AutopilotHostLogic.PlanFor(options); // M6 0 a6: the level up job plays Winnie on the climber plan (her own checkpoint file); the den job plays BSD Mage on the mage plan, as before
+        var levelUp = options.Job == AutopilotJob.LevelUp;
         var hostOptions = AutopilotHostOptions.FromArguments(parsed);
         var ground = JourneyLimits.FightOf(arguments).GroundProfile;
         foreach (var error in options.Errors.Concat(hostOptions.Errors))
@@ -106,10 +129,25 @@ public sealed partial class AutopilotHost : Node
             },
             GodotLogSink.Instance,
             options,
-            ground);
+            levelUp ? null : ground); // the level up job's ground is the ladder's rung for the character's level, known only once the character is in the world (the first press gives it: AutopilotHostLogic.UseGround)
         WireHost(logic, () => node._kit, () => node._ui?.Manager?.Input.Bindings);
-        node.Setup(host, ui, logic, hostOptions, plan.Character, options.Errors.Count == 0 && hostOptions.Errors.Count == 0);
-        node._loads = new KitLoads(dats, plan, ground, () => node._kit = new AutopilotKit(plan, () => host.Session, mode, services, dats, arguments, host.Options.Account, options, ground, node._loads!, store, scenario => node.OnScenario(scenario)));
+        FightWalkRefusals.Sink ??= GodotLogSink.Instance; // M6 6 B1/MD2: a walk's named refusal (no-planner:<walk>) reaches the run's log
+        var questFile = ProjectSettings.GlobalizePath("user://" + QuestTimers.FileName(plan.Character));
+        var jobs = AutopilotJobSource.For(logic, options.Job, () => host.Session, () => node.TimersNow(plan.Character, questFile), TimeProvider.System, GodotLogSink.Instance);
+        node._steerTimers = () => node.TimersNow(plan.Character, questFile);
+        node.Setup(host, ui, logic, hostOptions, AutopilotHostLogic.RequiredCharacter(options), options.Errors.Count == 0 && hostOptions.Errors.Count == 0, jobs);
+        (node._jobOptions, node._plan, node._dats, node._mode, node._services, node._arguments, node._account, node._store) = (options, plan, dats, mode, services, arguments, host.Options.Account, store);
+        if (levelUp)
+        {
+            node._rungs = new AutopilotRungKits(logic, options, new RungKitSeam(node), GodotLogSink.Instance); // M6 16 E0b: the order of a rung move is the client's; this node builds the parts
+            logic.MoveOn = node._rungs.MoveOnNext; // M6 0 a6: on stop=rung-moved:* the dial restarts once by itself on the next rung
+            node._loads = null; // built at the first press, over the rung's ground
+        }
+        else
+        {
+            node._loads = node.NewLoads(ground, spells: null);
+        }
+
         main.AddChild(node);
         Log.Info(
             LogCategory,
@@ -123,31 +161,42 @@ public sealed partial class AutopilotHost : Node
     /// <summary>
     /// Adds a host over a ready-made logic (the play-checks: no spell table, no den, no required character; a station factory of their own). The key and the button are wired as in a real session.
     /// </summary>
-    internal static AutopilotHost InstallWith(Node parent, SessionHost host, RetailUiLayer? ui, AutopilotHostLogic logic, AutopilotHostOptions hostOptions)
+    /// <param name="parent">The node the host is added to.</param>
+    /// <param name="host">The session host.</param>
+    /// <param name="ui">The retail UI.</param>
+    /// <param name="logic">The ready-made dial.</param>
+    /// <param name="hostOptions">The host's options.</param>
+    /// <param name="jobs">M6 6 MD2: the menu's source; null: one over <paramref name="logic"/>, the session and empty quest timers in memory (the options' default job).</param>
+    internal static AutopilotHost InstallWith(Node parent, SessionHost host, RetailUiLayer? ui, AutopilotHostLogic logic, AutopilotHostOptions hostOptions, AutopilotJobSource? jobs = null)
     {
         var node = new AutopilotHost { Name = "AutopilotHost" };
-        node.Setup(host, ui, logic, hostOptions, requiredCharacter: null, enabled: true);
+        var memory = new QuestTimers("check");
+        node.Setup(host, ui, logic, hostOptions, requiredCharacter: null, enabled: true, jobs ?? AutopilotJobSource.For(logic, new AutopilotOptions().Job, () => host.Session, () => memory, TimeProvider.System, GodotLogSink.Instance));
         parent.AddChild(node);
         return node;
     }
 
-    private void Setup(SessionHost host, RetailUiLayer? ui, AutopilotHostLogic logic, AutopilotHostOptions hostOptions, string? requiredCharacter, bool enabled)
+    private void Setup(SessionHost host, RetailUiLayer? ui, AutopilotHostLogic logic, AutopilotHostOptions hostOptions, string? requiredCharacter, bool enabled, AutopilotJobSource jobs)
     {
         ProcessPriority = 60; // after the session host (-900), play mode (-800), the retail UI and the re-buff driver (50): it reads what they did this frame
         _host = host;
         _ui = ui;
         _logic = logic;
+        _jobs = jobs;
+        logic.MenuInput ??= jobs.BuildInput; // M6 6 FXU (6-M9): the dial judges a quest task (the chat, the menu, the option) by the menu's own input; null while the level is unread
         _hostOptions = hostOptions;
         _requiredCharacter = requiredCharacter;
         _disabledByOptions = !enabled;
         _startByOption = enabled && hostOptions.StartAtLogin;
         _unattendedRun = _startByOption;
         SetupStopFile(hostOptions);
+        SetupOrders(logic);
+        SetupSteer(hostOptions);
         _closeGate = new WindowCloseGate(() => _logic.Mode, why => _logic.Stop(why), message => Log.Info(LogCategory, message));
         host.CloseDeferral = () => _closeGate.Request() == CloseDecision.Wait; // M5 7 F18: a window close during a run recalls home first (SessionHost._Notification)
         if (hostOptions.HasHandOff)
         {
-            _handOff = new AutopilotTestHandOff(hostOptions, line => TypeInChat(_ui, line), logic.TestDeathScripted);
+            _handOff = new AutopilotTestHandOff(hostOptions, line => TypeInChat(_ui, line), logic.TestDeathScripted, () => _ui?.Screens?.Flow.CurrentScreen is GamePlayScreen { Chat.Main: not null });
         }
 
         if (hostOptions.ControlDrillDirectory is { } drill)
@@ -179,6 +228,7 @@ public sealed partial class AutopilotHost : Node
     /// <inheritdoc/>
     public override void _Process(double delta)
     {
+        using var framePhase = Lifestone.Game.Diagnostics.FramePhases.Autopilot(); // M6 16 Eperf2: this call's share of a long frame
         if (_closeGate.Tick(delta))
         {
             _host.QuitGame("the window was closed during an autopilot run, which has ended or timed out"); // M5 7 F18
@@ -198,7 +248,8 @@ public sealed partial class AutopilotHost : Node
 
         try
         {
-            WireShell(_ui, new DialControls(() => StopHere(), Auto), PressButton, _logic, ref _wiredScreen);
+            WireShell(_ui, new DialControls(() => StopHere(), Auto, task => RunTask(task), ChatOrder), PressButton, _logic, ref _wiredScreen, new MenuWiring(_jobs, ChooseFromMenu, StopFromMenu));
+            RefreshJobs(session, force: false);
             if (_loads is { } loads && _kit is null)
             {
                 if (loads.Poll() is { } failure)
@@ -223,8 +274,10 @@ public sealed partial class AutopilotHost : Node
 
             TickUnattendedStart(session);
             TickStopFile(delta);
+            TickSteer(session, delta);
             _handOff?.Tick(delta, _logic);
             _logic.Tick(session, PortalSpaceSetup.Now());
+            _orders?.Tick(); // the command registry: after the dial, it reads what the dial did this frame (a safe point, a taken order, an end)
             if (_drill is { Finished: false } drill)
             {
                 drill.Tick(_logic, session, session.Clock.Now); // M5 7 D145: the control drill, after the dial (it reads what the dial did this frame)
@@ -274,6 +327,7 @@ public sealed partial class AutopilotHost : Node
     /// <inheritdoc/>
     public override void _ExitTree()
     {
+        CloseSteer();
         _logic?.Dispose();
         _kit?.Dispose();
     }
@@ -281,7 +335,11 @@ public sealed partial class AutopilotHost : Node
     /// <summary>
     /// The dial's press (/auto, the unattended start). A press that needs the journey's parts (a start, a hand-back) reads them first (the first press only: two workers), then toggles; a stop needs none.
     /// </summary>
-    public void Press() => Press(startedBy: null);
+    public void Press()
+    {
+        _logic.PersonPressed();
+        Press(startedBy: null);
+    }
 
     /// <summary>
     /// M5 7 D145, <b>/auto</b> (the chat's, and the tools panel's button while the dial is not running): while it runs or stops it answers and does nothing else; otherwise the press, with the reason <see cref="AutopilotHostLogic.ResumeReason"/>
@@ -290,6 +348,7 @@ public sealed partial class AutopilotHost : Node
     public string Auto()
     {
         var mode = _logic.Mode;
+        _logic.PersonPressed();
         Log.Info(LogCategory, $"autopilot: /auto (mode {mode.ToString().ToLowerInvariant()})");
         if (mode == AutopilotMode.Running)
         {
@@ -318,15 +377,111 @@ public sealed partial class AutopilotHost : Node
         return "Lifestone: the autopilot did not start (" + (_pressRefusal ?? _logic.Status.LastDecision) + ").";
     }
 
+    /// <summary>
+    /// M6 6 MD1, <b>/auto &lt;task&gt;</b>: chooses <paramref name="task"/> (<see cref="AutopilotHostLogic.UseTask"/>, by the chat) and then presses as <see cref="Auto"/> does. A refusal is the returned line and nothing starts (check, act, check:
+    /// the choice is checked by the dial before, and the press by its own mode after).
+    /// </summary>
+    /// <param name="task">The task.</param>
+    /// <param name="by">Who chose it (<see cref="AutopilotHostLogic.TaskByChat"/>, or <see cref="AutopilotHostLogic.TaskByMenu"/> for the menu's row).</param>
+    public string RunTask(AutopilotTask task, string by = AutopilotHostLogic.TaskByChat)
+    {
+        Log.Info(LogCategory, $"autopilot: /auto {task.Name} by the {by} (mode {_logic.Mode.ToString().ToLowerInvariant()})");
+        var previous = _logic.Task;
+        if (_logic.UseTask(task, by) is { } refusal)
+        {
+            Log.Warn(LogCategory, $"autopilot: /auto {task.Name} by the {by} refused: {refusal}");
+            return $"Lifestone: the autopilot did not take the task {task.Name} ({refusal}); nothing was started.";
+        }
+
+        var line = Auto();
+        // 6-M12, check after: a press that did not start (and is not waiting on the kit's reads) leaves no task chosen behind it: the previous task is restored, and the line says so.
+        if (_logic.Mode is not (AutopilotMode.Running or AutopilotMode.Stopping) && !_pressPending && previous != task)
+        {
+            var restored = _logic.UseTask(previous, by) is null;
+            Log.Warn(LogCategory, $"autopilot: /auto {task.Name} by the {by}: the start was refused, so the task {(restored ? "goes back to " + previous.Name : "could not go back to " + previous.Name)}");
+            line += restored ? $" The task stays {previous.Name}." : $" The task {task.Name} stays chosen (it could not go back to {previous.Name}).";
+        }
+
+        return line;
+    }
+
+    /// <summary>M6 6 MD2 (L1): the menu's row: <see cref="RunTask"/> by the menu; the answer goes to the chat too (as <c>/auto</c>'s does) and the source is refreshed at once (the current task moved).</summary>
+    private string ChooseFromMenu(AutopilotTask task)
+    {
+        var line = RunTask(task, AutopilotHostLogic.TaskByMenu);
+        ShowChat(_ui, line);
+        RefreshJobs(_host?.Session, force: true);
+        return line;
+    }
+
+    /// <summary>M6 6 MD2 (L1): the menu's stop row: <see cref="StopHere"/> (the <c>/stop</c> path); the answer goes to the chat too.</summary>
+    private string StopFromMenu()
+    {
+        var line = StopHere("the menu's stop row");
+        ShowChat(_ui, line);
+        RefreshJobs(_host?.Session, force: true);
+        return line;
+    }
+
+    /// <summary>M6 6 MD2: refreshes the menu's source at most every <see cref="JobsRefreshSeconds"/> (always when <paramref name="force"/>), once the character has a level (before that the rows would be level 0's).</summary>
+    private void RefreshJobs(GameSession? session, bool force)
+    {
+        if (_jobs is null || session is null || AutopilotHostLogic.LevelOf(session) <= 0)
+        {
+            return;
+        }
+
+        var now = session.Clock.Now;
+        if (!force && now - _jobsRefreshedAt < JobsRefreshSeconds)
+        {
+            return;
+        }
+
+        _jobsRefreshedAt = now;
+        _jobs.Refresh();
+    }
+
+    /// <summary>
+    /// M6 6 MD2: the character's quest timers for the menu: the live run's (the last scenario's context, <see cref="JourneyContext.QuestTimersInUse"/>), else a read-only load of the character's file (once; never written here). A file that
+    /// cannot be read is logged by name and the menu reads empty timers (every quest due), so it never hides the fault.
+    /// </summary>
+    private QuestTimers TimersNow(string character, string path)
+    {
+        if (_kit?.Context is { } context)
+        {
+            return context.QuestTimersInUse;
+        }
+
+        if (_fileTimers is null)
+        {
+            try
+            {
+                _fileTimers = QuestTimers.Load(new UserDataCheckpointStore(path), character);
+                Log.Info(LogCategory, $"autopilot menu: the quest timers of {character} read from {System.IO.Path.GetFileName(path)} (read-only; {_fileTimers.Entries.Count} entr(ies) under guid 0x{_fileTimers.CharacterGuid:X8}; TODO(m6-menu-timers-guid): the menu does not check the guid, a run binds them)");
+            }
+            catch (Exception e) when (e is System.IO.IOException or UnauthorizedAccessException or System.IO.InvalidDataException)
+            {
+                _fileTimers = new QuestTimers(character);
+                Log.Error(LogCategory, $"autopilot menu: the quest timers file {System.IO.Path.GetFileName(path)} could not be read ({e.Message}); the menu reads every quest as due until a run loads them (TODO(m6-menu-timers-file))");
+            }
+        }
+
+        return _fileTimers;
+    }
+
     /// <summary>M5 7 D145, <b>/stop</b> (the chat's, the tools panel's button while it runs, the drill): he stops where he stands (<see cref="AutopilotHostLogic.StopHere"/>). Returns the chat line.</summary>
     /// <param name="via">Who asked, for the log.</param>
-    public string StopHere(string via = "/stop")
+    public string StopHere(string via = "/stop") => _orders is { } orders ? orders.StopByPerson(via) : StopHereCore(via); // the command registry: a person's stop empties the order queue first
+
+    /// <summary>The person's stop itself (the command runner's dial calls it after emptying its queue).</summary>
+    private string StopHereCore(string via)
     {
         if (_guard.Tripped)
         {
             return "Lifestone: the autopilot is stopped for this run after a fault; the controls are yours.";
         }
 
+        WithdrawSteerPress(); // a person's stop beats an order's press still waiting for the parts
         return _host?.Session is { } session ? _logic.StopHere(session, via) : "Lifestone: there is no session; nothing to stop.";
     }
 
@@ -351,10 +506,24 @@ public sealed partial class AutopilotHost : Node
             return;
         }
 
-        if (_requiredCharacter is { } required && session.State.Self.Name is { Length: > 0 } name && !string.Equals(name, required, StringComparison.Ordinal))
+        var name = session.State.Self.Name;
+        var refusal = _jobOptions is { } job
+            ? AutopilotHostLogic.StartRefusal(job, name) // M6 0 a6 (D7, D25): the level up job plays Winnie only, the den job BSD Mage only
+            : _requiredCharacter is { } required && name is { Length: > 0 } && !string.Equals(name, required, StringComparison.Ordinal) ? $"it plays {required} only; this character is {name}" : null;
+        if (refusal is not null)
         {
-            _pressRefusal = $"it plays {required} only; this character is {name}";
-            Log.Warn(LogCategory, $"autopilot: it plays {required} only; this character is {name}");
+            _pressRefusal = refusal;
+            Log.Warn(LogCategory, "autopilot: " + refusal);
+            if (_jobOptions?.Job == AutopilotJob.LevelUp && startedBy is not (null or OrderDesk.StartedBy))
+            {
+                BeginFaultEnd(refusal); // an unattended level up run that cannot start ends (exit code 1) rather than idling; an order that cannot start is answered, and the game stays
+            }
+
+            return;
+        }
+
+        if (_jobOptions is { Job: AutopilotJob.LevelUp } && _logic.Mode is AutopilotMode.Off or AutopilotMode.Done && !_pressPending && !PrepareRung(session, startedBy))
+        {
             return;
         }
 
@@ -378,10 +547,78 @@ public sealed partial class AutopilotHost : Node
     }
 
     /// <summary>
+    /// The level up job's first press, and each press that starts a fresh run (M6 0 a6; since M6 16 E0b the steps are the client's, <see cref="AutopilotRungKits.PrepareRung"/>): the rung's ground for the character's level and the
+    /// run's parts over it. A level whose rung has no run refuses by the ladder's own name (logged there); an unattended press that is refused ends the game with exit code 1. Returns true when the press goes on.
+    /// </summary>
+    private bool PrepareRung(IGameSessionView session, string? startedBy)
+    {
+        if (_rungs!.PrepareRung(session) is not { } refusal)
+        {
+            return true;
+        }
+
+        _pressRefusal = refusal;
+        if (startedBy is not (null or OrderDesk.StartedBy)) // an order's refusal is answered by the order desk, never ends the game
+        {
+            BeginFaultEnd(_pressRefusal);
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The play host's half of the level up job's kits (M6 16 E0b; <see cref="IAutopilotKitFactory"/>): what needs the game. The kit is the journey's parts over the game's nodes with the player's own body as the walker
+    /// (<see cref="AutopilotKit"/>), read on workers (<see cref="KitLoads"/>; the spell table is shared, not read again) and built by the node's frame when they are read; the press that waits on them is the node's.
+    /// </summary>
+    private sealed class RungKitSeam(AutopilotHost host) : IAutopilotKitFactory
+    {
+        /// <inheritdoc/>
+        public bool Ready => host._kit is not null;
+
+        /// <inheritdoc/>
+        public void Prepare(HuntingGround ground, JourneyPlan plan)
+        {
+            var spells = host._loads?.SpellsTask;
+            host._kit?.Dispose();
+            host._kit = null;
+            host._plan = plan;
+            host._loads = host.NewLoads(ground, spells);
+            host._loadsNeeded = true;
+        }
+
+        /// <inheritdoc/>
+        public void PressWhenReady(string? startedBy, string? reason)
+        {
+            host._pendingStartedBy = startedBy;
+            host._pendingReason = reason;
+            host._pressPending = true;
+            host._loads!.Start();
+        }
+
+        /// <inheritdoc/>
+        public AutopilotScenario Create(AutopilotCarry carry) => (host._kit ?? throw new InvalidOperationException("the autopilot's parts are not built yet (the first press reads the spell table and the den's rooms)")).Create(carry);
+    }
+
+    /// <summary>The loads (and, when read, the kit) over <paramref name="ground"/> with the host's one plan, options and checkpoint; <paramref name="spells"/> is a spell table already being read, or null to read it.</summary>
+    private KitLoads NewLoads(HuntingGround ground, Task<IReadOnlyDictionary<uint, SpellInfo>>? spells)
+    {
+        KitLoads? loads = null;
+        var plan = _plan!;
+        loads = new KitLoads(_dats!, plan, ground, () => _kit = new AutopilotKit(plan, () => _host.Session, _mode!, _services!, _dats!, _arguments!, _account, _jobOptions!, ground, loads!, _store!, scenario => OnScenario(scenario)), spells);
+        return loads;
+    }
+
+    /// <summary>
     /// Wires the chat's /stop and /auto to <paramref name="controls"/> (M5 7 D145), the tools panel's Autopilot button to <paramref name="button"/>, the dial's chat lines to the chat window, Num Lock to its hint, and the inspector to
     /// <paramref name="logic"/>, once to each game screen (its hotkeys exist while the screen does; shared with the login-check leg).
     /// </summary>
-    internal static void WireShell(RetailUiLayer? ui, IAutopilotChatControls controls, Action button, AutopilotHostLogic logic, ref object? wired)
+    /// <param name="ui">The retail UI.</param>
+    /// <param name="controls">The chat's controls.</param>
+    /// <param name="button">The tools panel's Autopilot button.</param>
+    /// <param name="logic">The dial.</param>
+    /// <param name="wired">The hotkeys last wired (one wiring per game screen).</param>
+    /// <param name="menu">M6 6 MD2: the automation menu's source and delegates (the play host's); null leaves the menu without a source (it says so) and the tools panel's Jobs button still opens it.</param>
+    internal static void WireShell(RetailUiLayer? ui, IAutopilotChatControls controls, Action button, AutopilotHostLogic logic, ref object? wired, MenuWiring? menu = null)
     {
         if (ui?.Screens?.Flow.CurrentScreen is not GamePlayScreen { Hotkeys: { } hotkeys } screen || ReferenceEquals(hotkeys, wired))
         {
@@ -390,13 +627,14 @@ public sealed partial class AutopilotHost : Node
 
         wired = hotkeys;
         hotkeys.AutopilotKeyHint = line => ShowChat(ui, line); // D145: Num Lock no longer toggles the dial; it says so
-        if (screen.Chat is { } chat)
+        // m5-autopilot-chat-missing: screen.Chat is never null once Hotkeys exists, so the guard asks for what typing needs: the main chat window.
+        if (screen.Chat is { Main: not null } chat)
         {
             chat.Autopilot = controls;
         }
         else
         {
-            Log.Error(LogCategory, "autopilot: the game screen has no chat, so /stop and /auto cannot be typed (TODO(m5-autopilot-chat-missing))");
+            Log.Error(LogCategory, "autopilot: the game screen has no main chat, so /stop and /auto cannot be typed; the rest is still wired (TODO(m5-autopilot-chat-missing): Main is built with the screen, so this is a layout fault)");
         }
 
         logic.ChatNotice += line => ShowChat(ui, line); // the host logic forwards every scenario's notices (P7n)
@@ -421,9 +659,35 @@ public sealed partial class AutopilotHost : Node
         if (screen.Inspector is { } inspector)
         {
             inspector.Autopilot = logic;
+            inspector.Jobs = menu?.Source; // M6 6 MD2: the inspector's Job line counts the menu's open quests
         }
 
-        Log.Info(LogCategory, "autopilot: /stop and /auto in the chat, the dial's chat lines, the tools panel's Autopilot button and the inspector are wired to the dial; Num Lock answers with a hint (D145)");
+        // M6 6 MD2 (L1): the automation menu (a Lifestone placeholder window) reads the host's source and acts through the host's delegates (never IActionApi); the tools panel's Jobs button toggles it.
+        if (screen.Menu is { } jobsMenu)
+        {
+            jobsMenu.Source = menu?.Source;
+            jobsMenu.Choose = menu?.Choose;
+            jobsMenu.Stop = menu?.Stop;
+            if (screen.ToolsUi is { } toolsPanel)
+            {
+                // M6 6 FXU: the menu hangs under the shell's root (its rows take the clicks) just behind the tools panel; the button that opens it puts the tools panel away, so the menu shows whole (F7 brings the panel back, and
+                // its Jobs button, in front of the menu, closes it).
+                toolsPanel.ToggleJobs = () =>
+                {
+                    jobsMenu.Toggle();
+                    if (jobsMenu.IsOpen && toolsPanel.IsOpen)
+                    {
+                        toolsPanel.Close();
+                    }
+                };
+            }
+        }
+        else
+        {
+            Log.Error(LogCategory, "autopilot: the game screen has no automation menu (TODO(m6-menu-layout): menu.json is not embedded), so the Jobs button has nothing to open");
+        }
+
+        Log.Info(LogCategory, "autopilot: /stop and /auto in the chat, the dial's chat lines, the tools panel's Autopilot and Jobs buttons, the automation menu" + (menu is null ? " (no job source)" : string.Empty) + " and the inspector are wired to the dial; Num Lock answers with a hint (D145)");
     }
 
     /// <summary>M5 7 D145: shows <paramref name="line"/> in the current game screen's chat as a local system line (never sent) and logs it; a screen with no chat logs that it was not shown.</summary>
@@ -471,10 +735,14 @@ public sealed partial class AutopilotHost : Node
 /// <summary>
 /// The spell table and the den's rooms, read on workers when the first press asks (<see cref="JourneyLegRunner.StartLoads"/>, as the login-check leg does at its install) and the kit built when they are done.
 /// </summary>
-internal sealed class KitLoads(DatSet dats, JourneyPlan plan, HuntingGround ground, Action build)
+internal sealed class KitLoads(DatSet dats, JourneyPlan plan, HuntingGround ground, Action build, Task<IReadOnlyDictionary<uint, SpellInfo>>? spells = null)
 {
-    private Task<IReadOnlyDictionary<uint, SpellInfo>>? _spells;
+    private Task<IReadOnlyDictionary<uint, SpellInfo>>? _spells = spells;
     private Task<RoomGraph>? _den;
+    private bool _started;
+
+    /// <summary>The spell table's read (null before <see cref="Start"/>), shared with the next rung's loads (M6 0 a6: the table is read once a run).</summary>
+    public Task<IReadOnlyDictionary<uint, SpellInfo>>? SpellsTask => _spells;
 
     /// <summary>The spell table once read.</summary>
     public IReadOnlyDictionary<uint, SpellInfo> Spells => _spells!.Result;
@@ -485,17 +753,27 @@ internal sealed class KitLoads(DatSet dats, JourneyPlan plan, HuntingGround grou
     /// <summary>Starts the two workers (once).</summary>
     public void Start()
     {
+        if (_started)
+        {
+            return;
+        }
+
+        _started = true;
         if (_spells is null)
         {
             (_spells, _den) = JourneyLegRunner.StartLoads(dats, plan, ground);
         }
+        else if (plan.Ground == StationWhere.Den)
+        {
+            _den = Task.Factory.StartNew(() => GroundRooms.Load(dats, ground), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default); // a next rung's dungeon: its rooms, the table already read
+        }
     }
 
     /// <summary>True when both are read.</summary>
-    public bool Ready => _spells is { IsCompletedSuccessfully: true } && (_den is null || _den.IsCompletedSuccessfully);
+    public bool Ready => _started && _spells is { IsCompletedSuccessfully: true } && (_den is null || _den.IsCompletedSuccessfully);
 
     /// <summary>The failure of a worker, or null (while running or when read).</summary>
-    public string? Poll() => _spells is null ? null : _spells.IsFaulted ? _spells.Exception?.GetBaseException().Message ?? "unknown" : _den is { IsFaulted: true } ? _den.Exception?.GetBaseException().Message ?? "unknown" : null;
+    public string? Poll() => !_started || _spells is null ? null : _spells.IsFaulted ? _spells.Exception?.GetBaseException().Message ?? "unknown" : _den is { IsFaulted: true } ? _den.Exception?.GetBaseException().Message ?? "unknown" : null;
 
     /// <summary>Builds the kit.</summary>
     public void Build() => build();
@@ -531,6 +809,9 @@ internal sealed class AutopilotKit : IDisposable
     /// <summary>The runner host of the scenario made last (its streamer stats), or null.</summary>
     public GodotJourneyRunnerHost? Runners => _runners;
 
+    /// <summary>M6 6 MD2: the journey context of the scenario made last (its quest timers are the live run's: the menu reads them), or null before the first.</summary>
+    public JourneyContext? Context { get; private set; }
+
     /// <summary>The session's reconnects that were not the autopilot's own tries: the person's Reconnect button (M5 4 F3, 4-R8). Moves only when a person reconnects.</summary>
     public int ForeignReconnects => _session() is { } game ? game.Reconnects - _ownReconnects : 0;
 
@@ -542,11 +823,10 @@ internal sealed class AutopilotKit : IDisposable
         _runners?.Dispose();
         var (factory, context, runners) = JourneyLegRunner.BuildParts(_plan, game, _loads.Spells, _arguments, _dats, _account, _mode, _services, _loads.Den, _ground, observer: null, windows: null);
         _runners = runners;
-        IAutopilotCheckpointStore store = carry.IsEmpty ? _store : new ColdReadOnce(_store);
-        // A hand-back continues where the abandoned scenario was (4-R9, 4-R5): its cycle and cycles ended, the seconds used (the minutes stay the run's total, see AutopilotCarry.Remaining), a cut death's tally and a cut trip.
-        var session = new OwnTryCountingSession(new GameSessionAutopilotSession(game, _plan.Character), () => game.Reconnects, tries => _ownReconnects += tries);
-        var scenario = new AutopilotScenario(carry.Remaining(_options), factory, context, store, session, carry.Seed);
-        carry.Apply(scenario);
+        Context = context;
+        var session = new OwnTryCountingSession(new GameSessionAutopilotSession(game, _plan.Character, owner => _mode.Flow.HoldAutoEnter(owner)), () => game.Reconnects, tries => _ownReconnects += tries);
+        // M6 16 E0b: the carry is the client's, one copy for every host (AutopilotRungKits.Scenario): a hand-back's seed, totals and cold-read store (4-R9, 4-R5), a move-on's hand-over (M6 item 14).
+        var scenario = AutopilotRungKits.Scenario(carry, _options, factory, context, _store, session);
         _onCreated?.Invoke(scenario);
         return scenario;
     }
@@ -584,36 +864,6 @@ internal sealed class OwnTryCountingSession(IAutopilotSession inner, Func<int> r
 
     /// <inheritdoc/>
     public ScenarioStatus StepLogin(double now) => inner.StepLogin(now);
-}
-
-/// <summary>
-/// A checkpoint store that reads as empty the first time (a hand-back carries the old scenario's counts in memory, so the file written at the interrupt must not be counted again) and writes through; <see cref="SetAside"/> passes on.
-/// </summary>
-/// <param name="inner">The real store.</param>
-internal sealed class ColdReadOnce(IAutopilotCheckpointStore inner) : IAutopilotCheckpointStore
-{
-    private bool _read;
-
-    /// <inheritdoc/>
-    public string Describe => inner.Describe;
-
-    /// <inheritdoc/>
-    public string? Read()
-    {
-        if (!_read)
-        {
-            _read = true;
-            return null;
-        }
-
-        return inner.Read();
-    }
-
-    /// <inheritdoc/>
-    public void Write(string json) => inner.Write(json);
-
-    /// <inheritdoc/>
-    public string SetAside() => inner.SetAside();
 }
 
 /// <summary>
@@ -690,6 +940,8 @@ public sealed class AutopilotTestHandOff
     private readonly AutopilotHostOptions _options;
     private readonly Func<string, bool> _type;
     private readonly AutopilotInterruptArm _arm;
+    private readonly Func<bool>? _chatReady;
+    private readonly ChatWait _wait = new();
     private Step _step = Step.WaitStart;
     private string? _state;
     private double _clock;
@@ -699,8 +951,10 @@ public sealed class AutopilotTestHandOff
     /// <param name="options">The options (<see cref="AutopilotHostOptions.InterruptAtSeconds"/> must be set).</param>
     /// <param name="type">Types a line into the main chat's entry and sends it; false when there is no chat.</param>
     /// <param name="deathScripted">True when the run scripts a death: S then counts from the first fight after its cycle (4-R10).</param>
-    internal AutopilotTestHandOff(AutopilotHostOptions options, Func<string, bool> type, bool deathScripted = false)
+    /// <param name="chatReady">True while a game screen with a main chat is up (M6 6 MD1, <c>m5-autopilot-test-chat</c>): each typing waits for it, bounded by <see cref="ChatWait"/>; null means always.</param>
+    internal AutopilotTestHandOff(AutopilotHostOptions options, Func<string, bool> type, bool deathScripted = false, Func<bool>? chatReady = null)
     {
+        _chatReady = chatReady;
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _type = type ?? throw new ArgumentNullException(nameof(type));
         _arm = new AutopilotInterruptArm(deathScripted);
@@ -748,7 +1002,7 @@ public sealed class AutopilotTestHandOff
             case Step.WaitInterrupt:
                 _clock += delta;
                 _state = logic.Scenario?.Stage;
-                if (_clock >= _options.InterruptAtSeconds!.Value)
+                if (_clock >= _options.InterruptAtSeconds!.Value && ChatUp(delta))
                 {
                     TypeStop();
                 }
@@ -756,7 +1010,7 @@ public sealed class AutopilotTestHandOff
                 break;
             case Step.WaitHandBack:
                 _clock += delta;
-                if (_clock >= _until)
+                if (_clock >= _until && ChatUp(delta))
                 {
                     _step = Step.Done;
                     HandedBack = _type("/auto");
@@ -765,6 +1019,30 @@ public sealed class AutopilotTestHandOff
 
                 break;
         }
+    }
+
+    // m5-autopilot-test-chat: before typing, a bounded and logged wait for a game screen with a main chat (a reconnect or portal screen is the real case); false while waiting; on the bound the script ends by name.
+    private bool ChatUp(double delta)
+    {
+        var result = _wait.Poll(delta, _chatReady?.Invoke() ?? true, out var line);
+        if (line is not null)
+        {
+            if (result == ChatWaitResult.GaveUp)
+            {
+                Log.Error(LogCategory, line);
+            }
+            else
+            {
+                Log.Info(LogCategory, line);
+            }
+        }
+
+        if (result == ChatWaitResult.GaveUp)
+        {
+            _step = Step.Done;
+        }
+
+        return result == ChatWaitResult.Ready;
     }
 
     private void TypeStop()
@@ -851,3 +1129,9 @@ public sealed class AutopilotTestHandOff
         return null;
     }
 }
+
+/// <summary>M6 6 MD2 (L1): the automation menu's host wiring: the source the menu and the inspector read, and the two delegates its rows call (each returns the line the menu's status shows).</summary>
+/// <param name="Source">The job source.</param>
+/// <param name="Choose">A job, quest or errand row: the task by the menu, then the press.</param>
+/// <param name="Stop">The stop row: the <c>/stop</c> path.</param>
+internal sealed record MenuWiring(IAutopilotJobSource? Source, Func<AutopilotTask, string>? Choose, Func<string>? Stop);

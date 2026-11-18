@@ -26,11 +26,11 @@ namespace Lifestone.Client.Tests.Session.Mage;
 /// </summary>
 public sealed class FightManaTests
 {
-    private const uint Den = 0x01050375;
+    internal const uint Den = 0x01050375;
     private const uint FloorCell = 0x01050303;
     private const uint TuskerSlave = 1628;
-    private const float PlayerX = 100;
-    private const float PlayerY = 20;
+    internal const float PlayerX = 100;
+    internal const float PlayerY = 20;
 
     /// <summary>
     /// A Mana Conversion seed (<see cref="ScriptedCaster"/>'s rolls) whose first three tries are refused 0x0401 and whose fourth lands, both for the bolt at 40 mana and for the dance at 2: the default seed lands both on the first
@@ -57,6 +57,26 @@ public sealed class FightManaTests
         public ActionLog ActionLog => rig.H.ActionLog;
 
         public LinkStats Link => default;
+    }
+
+    /// <summary>M6 16 E2b: a view over <paramref name="rig"/> of a session that draws bodies: a creature stands where <paramref name="live"/> says.</summary>
+    internal sealed class DrawnView(WorldActionRig rig, LivePositions live) : IGameSessionView
+    {
+        public GameState State => rig.H.State;
+
+        public IEventBus Events => rig.H.R.Bus;
+
+        public IActionApi Actions => rig.Api;
+
+        public PlayerTools Tools => rig.Api.Tools;
+
+        public SessionClock Clock => rig.H.R.Clock;
+
+        public ActionLog ActionLog => rig.H.ActionLog;
+
+        public LinkStats Link => default;
+
+        public LivePositions Live => live;
     }
 
     /// <summary>A walk that arrives after <see cref="TicksPerLeg"/> ticks.</summary>
@@ -117,10 +137,10 @@ public sealed class FightManaTests
         private uint _nextProjectile = 0x80009000;
         private uint _nextTusker = 0x80001001;
 
-        public Rig(uint mana, uint stamina, uint manaPotions = 0, FightOptions? fight = null, int manaSeed = ScriptedCaster.DefaultManaSeed, uint staminaPotions = 0, bool knowsRevitalize = true, bool knowsDrain = false, bool knowsStaminaDrain = false, uint lifeMagicRanks = 0)
+        public Rig(uint mana, uint stamina, uint manaPotions = 0, FightOptions? fight = null, int manaSeed = ScriptedCaster.DefaultManaSeed, uint staminaPotions = 0, bool knowsRevitalize = true, bool knowsDrain = false, bool knowsStaminaDrain = false, uint lifeMagicRanks = 0, bool knowsDance = true, IReadOnlyList<(uint Wcid, uint Count)>? healthDrinks = null, uint manaTinctures = 0, IReadOnlyList<ProfileLine>? lines = null, IReadOnlyList<uint>? alsoKnown = null, WorldActionRig? world = null)
         {
-            R = new WorldActionRig();
-            Caster = new ScriptedCaster(R, mana, stamina, manaSeed, manaPotions: manaPotions, known: [.. (knowsRevitalize ? KnownIds() : [.. KnownIds().Except(VitalsMeans.RevitalizeSelf)]), .. (knowsDrain ? ScriptedCaster.DrainLine.Spells.Concat(ScriptedCaster.HealLine.Spells).Select(s => s.Id) : []), .. (knowsStaminaDrain ? ScriptedCaster.StaminaDrainLine.Spells.Select(s => s.Id) : [])], staminaPotions: staminaPotions, withDrain: knowsDrain, withStaminaDrain: knowsStaminaDrain, lifeMagicRanks: lifeMagicRanks);
+            R = world ?? new WorldActionRig(); // M6 16 E3.1: over another rig's world (the autopilot's), which places the player itself
+            Caster = new ScriptedCaster(R, mana, stamina, manaSeed, lines: lines, manaPotions: manaPotions, known: [.. alsoKnown ?? [], .. (knowsRevitalize ? KnownIds() : [.. KnownIds().Except(VitalsMeans.RevitalizeSelf)]).Except(knowsDance ? [] : VitalsMeans.StaminaToManaSelf), .. (knowsDrain ? ScriptedCaster.DrainLine.Spells.Concat(ScriptedCaster.HealLine.Spells).Select(s => s.Id) : []), .. (knowsStaminaDrain ? ScriptedCaster.StaminaDrainLine.Spells.Select(s => s.Id) : [])], staminaPotions: staminaPotions, withDrain: knowsDrain, withStaminaDrain: knowsStaminaDrain, lifeMagicRanks: lifeMagicRanks, healthDrinks: healthDrinks, manaTinctures: manaTinctures);
             foreach (var bolt in BoltIds)
             {
                 Caster.Table[bolt] = Caster.Table[bolt] with { BaseRangeConstant = 30f, BaseRangeMod = 0f };
@@ -129,6 +149,11 @@ public sealed class FightManaTests
             Caster.ProjectileHook = Land;
             Fight = fight ?? new FightOptions();
             View = new View(R);
+            if (world is not null)
+            {
+                return;
+            }
+
             var h = R.H.R;
             h.Reducer.OnPlayerTeleport(h.Context, new PlayerTeleportMsg(2));
             h.Reducer.OnUpdatePosition(h.Context, ReducerHarness.Move(ActionHarness.Amy, 1, 2, 2, 1, cell: Den, x: PlayerX));
@@ -151,6 +176,9 @@ public sealed class FightManaTests
         /// <summary>Hits a tusker takes before it dies.</summary>
         public int HitsToKill { get; set; } = 2;
 
+        /// <summary>M6 16 E3.0: the object description flags of the tuskers added from here on (0, as ever; <c>WorldObjectTable.AttackableFlag</c> for a test whose reader asks the threat board, which counts only what may be attacked).</summary>
+        public uint TuskerFlags { get; set; }
+
         /// <summary>True: a killed tusker is followed at once by a new one 20 m away (an endless floor).</summary>
         public bool Respawn { get; set; }
 
@@ -171,14 +199,30 @@ public sealed class FightManaTests
 
         public static bool IsBolt(uint id) => BoltIds.Contains(id);
 
+        /// <summary>The wcid <see cref="AddTusker"/> gives a new tusker (M6 7 AB: a ground of its own).</summary>
+        public uint TuskerWcid { get; set; } = TuskerSlave;
+
+        /// <summary>The cell a bolt starts from: the player's.</summary>
+        public uint PlayerCell { get; set; } = Den;
+
+        /// <summary>The cell <see cref="AddTusker"/> puts a new tusker in.</summary>
+        public uint TuskerCell { get; set; } = FloorCell;
+
+        /// <summary>The name <see cref="AddTusker"/> gives a new tusker (M6 16 E1b: a creature outside the ground's list).</summary>
+        public string TuskerName { get; set; } = "Tusker Slave";
+
         public uint AddTusker(float y = 40)
         {
             var guid = _nextTusker++;
-            _tuskers[guid] = ("Tusker Slave", HitsToKill, 0);
-            var basis = ReducerHarness.Create(guid, ReducerHarness.Stamps(), ReducerHarness.Position(FloorCell, PlayerX, y, 30), name: "Tusker Slave");
-            R.H.R.Reducer.OnCreateObject(R.H.R.Context, basis with { Weenie = basis.Weenie with { ItemType = 0x10, WeenieClassId = TuskerSlave } }, isUpdate: false);
+            _tuskers[guid] = (TuskerName, HitsToKill, 0);
+            var basis = ReducerHarness.Create(guid, ReducerHarness.Stamps(), ReducerHarness.Position(TuskerCell, PlayerX, y, 30), name: TuskerName);
+            R.H.R.Reducer.OnCreateObject(R.H.R.Context, basis with { Weenie = basis.Weenie with { ItemType = 0x10, WeenieClassId = TuskerWcid, ObjectDescriptionFlags = TuskerFlags } }, isUpdate: false);
             return guid;
         }
+
+        /// <summary>The server moves a tusker to <paramref name="y"/> (once per tusker: the position stamp is fixed).</summary>
+        public void MoveTusker(uint guid, float y) =>
+            R.H.R.Reducer.OnUpdatePosition(R.H.R.Context, new UpdatePositionMsg(guid, PositionFlags.Grounded, ReducerHarness.Position(TuskerCell, PlayerX, y, 30), null, null, 1, 50, 1, 1));
 
         public FightScenario Scenario(IFightWalk? walk = null) => new(Kit, Caster.Table, Buff, Fight, walk ?? new Walk(), Log, endSession: false, stages: FightStages.Mode);
 
@@ -213,7 +257,7 @@ public sealed class FightManaTests
             var id = _nextProjectile++;
             R.H.R.Reducer.OnCreateObject(
                 R.H.R.Context,
-                ReducerHarness.Create(id, ReducerHarness.Stamps(), ReducerHarness.Position(Den, PlayerX, PlayerY, 30), state: PhysicsState.Missile | PhysicsState.Gravity, velocity: new Vector3(0, 20, 0)),
+                ReducerHarness.Create(id, ReducerHarness.Stamps(), ReducerHarness.Position(PlayerCell, PlayerX, PlayerY, 30), state: PhysicsState.Missile | PhysicsState.Gravity, velocity: new Vector3(0, 20, 0)),
                 isUpdate: false);
             var t = _tuskers[target];
             t.Hits++;

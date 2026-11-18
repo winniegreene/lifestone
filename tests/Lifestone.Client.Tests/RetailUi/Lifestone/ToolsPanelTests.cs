@@ -269,6 +269,42 @@ public sealed class ToolsPanelTests(DatSetFixture fixture) : IClassFixture<DatSe
         Assert.Equal("Autopilot", button.Text);
     }
 
+    [RequiresLocalDatsFact]
+    public void M6_6_md2_the_jobs_button_sits_above_the_autopilot_button_and_toggles_the_menu_the_host_wired()
+    {
+        var (rig, screen, panel) = Enter();
+        using var _ = rig;
+        Tap(rig, LifestoneHotkeys.ToolsKey);
+        var jobs = Assert.IsAssignableFrom<UiTextElement>(panel.Window!.GetChildRecursive(ToolsPanel.JobsButtonId));
+        var autopilot = panel.Window.GetChildRecursive(ToolsPanel.AutopilotButtonId)!;
+        Assert.Equal("Jobs", jobs.Text);
+        Assert.Equal(autopilot.ScreenBox.X0, jobs.ScreenBox.X0); // the same column, above it
+        Assert.True(jobs.ScreenBox.Y1 <= autopilot.ScreenBox.Y0);
+
+        var menu = Assert.IsType<AutomationMenu>(screen.Menu);
+        panel.ToggleJobs = menu.Toggle; // the play host's wiring (AutopilotHost.WireShell)
+        Assert.True(rig.Click(jobs));
+        Assert.Equal(1, panel.JobsPresses);
+        Assert.True(menu.IsOpen);
+        Assert.True(rig.Click(jobs));
+        Assert.Equal(2, panel.JobsPresses);
+        Assert.False(menu.IsOpen);
+        Assert.DoesNotContain(rig.Log.Entries, e => e.Message.Contains("TODO(g7-tools-layout)", StringComparison.Ordinal));
+    }
+
+    [RequiresLocalDatsFact]
+    public void M6_6_md2_an_unwired_jobs_button_says_so_in_the_status_and_the_chat()
+    {
+        var (rig, screen, panel) = Enter();
+        using var _ = rig;
+        Tap(rig, LifestoneHotkeys.ToolsKey);
+        panel.PressJobs();
+        rig.Frame();
+        Assert.Equal(1, panel.JobsPresses);
+        Assert.Contains("automation menu is not available", Statuses(panel), StringComparison.Ordinal);
+        Assert.Contains("Lifestone: The automation menu is not available in this host.", screen.Chat!.Main!.LogText, StringComparison.Ordinal);
+    }
+
     private static string Statuses(ToolsPanel panel) =>
         ((Lifestone.Client.RetailUi.Text.UiTextElement)panel.Window!.GetChildRecursive(ToolsPanel.StatusId)!).Text;
 

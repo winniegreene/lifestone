@@ -534,7 +534,7 @@ public sealed class HarmHealScript
         var book = _session.State.Self.Spellbook;
         var worn = _session.State.Self.Inventory.Equipped.Count;
         var castable = new List<uint>();
-        var held = LevelFloor.HeldFor(_session.State, DatReaderWriter.Enums.MagicSchool.LifeMagic);
+        var held = LevelFloor.HeldForAccount(_session.State, DatReaderWriter.Enums.MagicSchool.LifeMagic, Account);
         foreach (var id in VitalsMeans.HarmSelf)
         {
             if (book.Knows(id) && _spells.TryGetValue(id, out var info) && GearCasts.TryCurrentSkill(q, GearCasts.SkillOf(info.School), out var skill, out _) && GearCasts.Chance(skill, info.Power) >= _options.CastChance && !Unpayable(held, info))
@@ -561,12 +561,20 @@ public sealed class HarmHealScript
     private uint _restFloor;
 
     /// <summary>
+    /// M6 1 h2 (closes <c>m6-account-formula-callers</c> for the heal side): the account's name as the server stores it (the login name, not the secrets key), or null (then the keeper's, <see cref="VitalsKeeper.AccountName"/>, or none).
+    /// With it the level floor also judges Life Magic casts of a pack that holds no Life focus on the account's full formula (<see cref="AccountFormula"/>); it is hashed there, never stored in a record, logged or printed.
+    /// </summary>
+    public string? AccountName { get; init; }
+
+    private string? Account => AccountName ?? _keeper.AccountName;
+
+    /// <summary>
     /// True when the pack casts Life Magic on the foci formula (it holds the focus) and lacks a component of <paramref name="info"/>'s formula: the level floor (<see cref="LevelFloor"/>, as the buff cycle's). M5 3 gate round 3:
     /// Harm Self II needs an Iron Scarab the ground's kit does not carry, and ACE refused it with 0x0400. The skip is logged once per spell.
     /// </summary>
     private bool Unpayable(IReadOnlyDictionary<uint, int>? held, SpellInfo info)
     {
-        if (held is null || !LevelFloor.ShortOf(held, info, out var need))
+        if (held is null || !LevelFloor.ShortOf(held, info, out var need, Account))
         {
             return false;
         }
@@ -625,7 +633,7 @@ public sealed class HarmHealScript
         _known.Clear();
         _affordable.Clear();
         var worn = _session.State.Self.Inventory.Equipped.Count;
-        var held = LevelFloor.HeldFor(_session.State, DatReaderWriter.Enums.MagicSchool.LifeMagic);
+        var held = LevelFloor.HeldForAccount(_session.State, DatReaderWriter.Enums.MagicSchool.LifeMagic, Account);
         foreach (var id in VitalsMeans.HarmSelf)
         {
             if (!book.Knows(id) || !_spells.TryGetValue(id, out var info) || !GearCasts.TryCurrentSkill(q, GearCasts.SkillOf(info.School), out var skill, out _) || GearCasts.Chance(skill, info.Power) < _options.CastChance || Unpayable(held, info))
@@ -727,13 +735,22 @@ public sealed class HarmHealScript
         return true;
     }
 
-    /// <summary>The highest known level of Stamina to Mana Self whose chance reaches the cast chance, whose cost the mana pays and that would give more mana than it costs; null with the reason in <paramref name="why"/>.</summary>
+    /// <summary>The highest known level of Stamina to Mana Self whose chance reaches the cast chance, whose cost the mana pays and that would give more mana than it costs (the owner's rule of picking by the sum, 2026-11-08: for the ladder's character, of those levels the one that nets the most); null with the reason in <paramref name="why"/>.</summary>
     private SpellInfo? PickTransfer(PlayerQualities q, uint mana, uint stamina, uint manaMissing, out string why)
     {
         why = "Stamina to Mana Self: no level is known";
         var book = _session.State.Self.Spellbook;
         var ids = VitalsMeans.StaminaToManaSelf;
-        var held = LevelFloor.HeldFor(_session.State, DatReaderWriter.Enums.MagicSchool.LifeMagic);
+        var held = LevelFloor.HeldForAccount(_session.State, DatReaderWriter.Enums.MagicSchool.LifeMagic, Account);
+        var byNet = CharacterPolicy.For(_session.State.Self.Name).ManaBySum;
+        var conversion = 0u;
+        if (byNet)
+        {
+            ManaOrder.TryManaConversion(q, out conversion);
+        }
+
+        SpellInfo? bestNet = null;
+        var bestYield = double.MinValue;
         for (var i = ids.Count - 1; i >= 0; i--)
         {
             if (!book.Knows(ids[i]) || !_spells.TryGetValue(ids[i], out var info))
@@ -773,11 +790,29 @@ public sealed class HarmHealScript
                 continue;
             }
 
+            if (byNet && BuffStatMods.TransferOf(info.Id) is { } row)
+            {
+                var level = new DanceLevel(info.Id, GearCasts.ManaCeiling(info, 0), info.Power, row);
+                var net = ManaOrder.NetYield(in level, stamina, conversion, mana);
+                if (bestNet is null || net >= bestYield) // the walk is highest first: the lower on a tie
+                {
+                    (bestNet, bestYield) = (info, net);
+                }
+
+                continue;
+            }
+
             why = string.Empty;
             return info;
         }
 
-        return null;
+        if (bestNet is not null)
+        {
+            why = string.Empty;
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"Stamina to Mana Self: by the sum: {bestNet.Name} nets {bestYield:0.#} at stamina {stamina}, mana {mana}"));
+        }
+
+        return bestNet;
     }
 
     private void Note(string key, string message)
@@ -865,7 +900,7 @@ public sealed class HarmHealScript
         }
 
         var q = _session.State.Self.Qualities;
-        var held = LevelFloor.HeldFor(_session.State, DatReaderWriter.Enums.MagicSchool.LifeMagic); // M5 4 G1: the level floor for Heal Self too (named once per level)
+        var held = LevelFloor.HeldForAccount(_session.State, DatReaderWriter.Enums.MagicSchool.LifeMagic, Account); // M5 4 G1: the level floor for Heal Self too (named once per level)
         if (held is not null)
         {
             var heals = VitalsMeans.HealSelf;
@@ -878,11 +913,11 @@ public sealed class HarmHealScript
             }
         }
 
-        var info = VitalsMeans.Pick(q, _session.State.Self.Spellbook, _spells, VitalsLine.HealSelf, _options.CastChance, out var why, held);
+        var info = VitalsMeans.Pick(q, _session.State.Self.Spellbook, _spells, VitalsLine.HealSelf, _options.CastChance, out var why, held, Account);
         if (info is null)
         {
             // P5a round 3: under a vitae penalty (BSD Mage at 40%: Life Magic 310) no known Heal Self level may reach the 0.9 rule. Not a failure: the best known level is cast, its fizzles counted, the heal cap still decides.
-            info = VitalsMeans.PickBestChance(q, _session.State.Self.Spellbook, _spells, VitalsLine.HealSelf, out var best, held);
+            info = VitalsMeans.PickBestChance(q, _session.State.Self.Spellbook, _spells, VitalsLine.HealSelf, out var best, held, Account);
             if (info is null)
             {
                 return Fail("heal-nospell:" + why);

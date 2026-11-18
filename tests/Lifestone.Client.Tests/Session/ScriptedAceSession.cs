@@ -750,6 +750,17 @@ internal sealed class ScriptedAceSession : IAcSession
         return Action(GameActionTypes.Tell, w => Write16(w, message));
     }
 
+    /// <summary>0x0032 TalkDirect: the message, then the target, as ACE reads them. The scripted server has no creature that answers a direct talk, so, like its Tell, it answers nothing.</summary>
+    public OutboundTicket SendTalkDirect(uint target, ReadOnlySpan<char> text)
+    {
+        var message = text.ToString();
+        return Action(GameActionTypes.TalkDirect, w =>
+        {
+            Write16(w, message);
+            w.Write(target);
+        });
+    }
+
     /// <inheritdoc/>
     public void LogOff()
     {

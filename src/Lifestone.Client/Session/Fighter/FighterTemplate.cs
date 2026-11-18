@@ -83,7 +83,7 @@ public sealed class FighterTemplate
     /// <summary>The creation value of an attribute the template leaves at the chargen minimum.</summary>
     public const uint LowAttribute = 10;
 
-    /// <summary>The share of a character's total experience (at its target level) that no spendable stat's next rank may cost less than: 0.1% (owner rule D40, "nothing should cost less to raise than about 0.1% of the total"). The floor rule of the fighters' plans.</summary>
+    /// <summary>The share of a character's total experience (at its target level) that no spendable stat's next rank may cost less than: 0.1% (owner rule D40: nothing should cost less to raise than about 0.1% of the total). The floor rule of the fighters' plans.</summary>
     public const int FloorPerMille = 1;
 
     /// <summary>The level of the base plan (<see cref="Shares"/>): the Hunter's build level, and the level the Brawler and the Archer were first built to. Since M4 P5a the Brawler and the Archer build on to <see cref="Level"/> (<see cref="MagicLevel"/>); the Hunter stays here.</summary>

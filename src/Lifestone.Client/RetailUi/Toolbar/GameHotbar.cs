@@ -32,7 +32,8 @@ namespace Lifestone.Client.RetailUi.Toolbar;
 /// </para>
 /// <para>
 /// <b>The cooldown overlay.</b> While the action a use started is not complete the slot shows the last cooldown step (<see cref="UiItem.SetCooldown"/>, the dats' art), cleared when it completes. Retail drives the steps from the item's cooldown in the enchantment
-/// registry, which the client does not track for items; only a use started from this bar shows it (<c>TODO(m4-shortcut-cooldown-source)</c>: the hunt loop's own drink does not).
+/// registry, which the client does not track for items; only a use started from this bar shows it (<c>TODO(m4-shortcut-cooldown-source)</c>), and since M6 item 15 the automation's drink, which is the use of its kind's slot
+/// (<see cref="ShortcutUsed"/>, the player's rules; with the rule off the automation's drink shows nothing here).
 /// </para>
 /// <para>
 /// <b>Drag.</b> Every slot list is a drag source and a drop target. An item from a pack onto a slot adds it (<c>HandleDropRelease</c> 0x004BF450, <c>CreateShortcutToItem</c>: <see cref="IActionApi.AddShortcut"/>, which moves an item that is already on the bar and puts an occupant
@@ -118,6 +119,7 @@ public sealed class GameHotbar : IDisposable, IUiDragSourceOwner
         _subscriptions.Add(events.Subscribe<InventoryChanged>(OnInventoryChanged));
         _subscriptions.Add(events.Subscribe<ObjectCreated>(OnObjectCreated));
         _subscriptions.Add(events.Subscribe<ObjectUpdated>(OnObjectUpdated));
+        _subscriptions.Add(events.Subscribe<ShortcutUsed>(OnShortcutUsed));
         _keys = new KeySink(this);
         context.Manager.Input.RegisterInputMap(InputMap, _keys, InputMapPriority);
         Refresh();
@@ -128,6 +130,9 @@ public sealed class GameHotbar : IDisposable, IUiDragSourceOwner
 
     /// <summary>How many uses a key or a click asked for (an empty slot counts: the Action API refuses it).</summary>
     public int Uses { get; private set; }
+
+    /// <summary>M6 item 15: how many automation drinks the bar showed on their slots (<see cref="ShortcutUsed"/>).</summary>
+    public int AutomationUses { get; private set; }
 
     /// <summary>The handle of the last use, or null.</summary>
     public ActionHandle? LastUse { get; private set; }
@@ -344,6 +349,16 @@ public sealed class GameHotbar : IDisposable, IUiDragSourceOwner
         else
         {
             RefreshSlot(slot);
+        }
+    }
+
+    // M6 15: the automation drank from this slot (the player's rules): the slot shows what a person's own use of it shows, the cooldown overlay until the drink completes.
+    private void OnShortcutUsed(in ShortcutUsed used)
+    {
+        if (CheckAlive())
+        {
+            AutomationUses++;
+            TrackBusy(used.Slot, used.Action);
         }
     }
 

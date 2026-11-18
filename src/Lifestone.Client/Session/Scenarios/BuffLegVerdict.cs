@@ -108,6 +108,15 @@ public static class BuffLegVerdict
         return Array.IndexOf(FizzleWhys, why) >= 0;
     }
 
+    /// <summary>M6 7 AO: the autopilot's own station on a climber's pass: the cycle ended Done with what stands (M6 7 AN: never a stop of the run), so neither judge fails a line it left, missed or dropped; each stays named in the cycle's log. Read by this verdict and by <see cref="BuffScenario"/>'s own judge.</summary>
+    /// <param name="pass">The pass's result.</param>
+    /// <param name="unattendedEnd">True when the station ended with the ordered cycle.</param>
+    public static bool EndsWithWhatStands(BuffResult pass, bool unattendedEnd)
+    {
+        ArgumentNullException.ThrowIfNull(pass);
+        return unattendedEnd && pass.EndsWithWhatStands;
+    }
+
     /// <summary>Composes the leg's verdict from the scenario's result and the game's measures.</summary>
     /// <param name="scenario">What the scenario left.</param>
     /// <param name="measures">What the game measured.</param>
@@ -123,14 +132,14 @@ public static class BuffLegVerdict
             problems.Add("the scenario did not succeed: " + (scenario.Failure ?? "no reason given"));
         }
 
-        if (gear != "wielded")
+        if (gear is not ("wielded" or "bare")) // M6 0 lead: "bare" is the climber's kit-less ground (GearKit.Bare), which wields nothing by rule
         {
             problems.Add("gear=" + gear + " (wielded expected)");
         }
 
         var active = best?.Active ?? 0;
         var wanted = best?.Wanted ?? 0;
-        if (best is null || wanted == 0 || active < wanted)
+        if (best is null || wanted == 0 || (active < wanted && !EndsWithWhatStands(best, scenario.UnattendedEnd)))
         {
             problems.Add(string.Create(CultureInfo.InvariantCulture, $"buffs={active}/{wanted} (every wanted line active expected)"));
         }

@@ -64,7 +64,7 @@ public sealed class CharPurgeRulesTests
             Assert.Contains(CharPurgeRules.Graduated, g => string.Equals(g, name, StringComparison.OrdinalIgnoreCase) && decision.Refusal.Message.StartsWith(g, StringComparison.Ordinal));
         }
 
-        Assert.Equal(["Lifestone Smoke", "Lifestone Loopback", "BSD Mage", "Holtburg Hunter", "Holtburg Brawler", "Holtburg Archer", "Lifestone Tools"], CharPurgeRules.Graduated);
+        Assert.Equal(["Lifestone Smoke", "Lifestone Loopback", "BSD Mage", "Holtburg Hunter", "Holtburg Brawler", "Holtburg Archer", "Lifestone Tools", "Winnie", "Qwinnie"], CharPurgeRules.Graduated);
     }
 
     [Fact]
@@ -266,7 +266,7 @@ public sealed class CharPurgeRulesTests
         // No old copy left: unknown-character ends the repeat; the new copy itself is never the target.
         var done = Purge(self);
         Assert.Equal(new ToolError(ToolErrors.UnknownCharacter, "no old copy of \"Holtburg Brawler\" is pending deletion on your account"), done.Refusal);
-        Assert.Equal(["BSD Mage", "Holtburg Brawler", "Holtburg Archer"], CharPurgeRules.Recreated);
+        Assert.Equal(["BSD Mage", "Holtburg Brawler", "Holtburg Archer", "Winnie", "Qwinnie"], CharPurgeRules.Recreated); // M6 D7: Winnie, the ladder's climber
         Assert.All(CharPurgeRules.Recreated, r => Assert.Contains(r, CharPurgeRules.Graduated));
     }
 

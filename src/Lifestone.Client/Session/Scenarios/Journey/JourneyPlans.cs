@@ -1,4 +1,5 @@
 using Lifestone.Client.Session.Fighter;
+using Lifestone.Client.Session.Credentials;
 using Lifestone.Client.Session.Mage;
 
 namespace Lifestone.Client.Session.Scenarios.Journey;
@@ -56,6 +57,9 @@ public static class StationKinds
     /// <summary>Holtburg's lifestone on foot: Use, then Lifestone Tie (J3b).</summary>
     public const string Bind = "bind";
 
+    /// <summary>M6 item 14: the stop at the buff bot by Holtburg's lifestone (<c>BuffBotStation</c>).</summary>
+    public const string BuffBot = "buff-bot";
+
     /// <summary>Into the den: Primary Portal Recall, or the hop, the tie and the portal on foot (J3b).</summary>
     public const string DenTravel = "den-travel";
 
@@ -101,10 +105,38 @@ public static class StationKinds
     /// <summary>The logistics trip (M5 item 3 c2a, DoD 6, D52): <see cref="LogisticsStation"/> reads the counters after the den fight and, when a trip is due or forced, recalls home, resupplies, spends the experience and recalls back.</summary>
     public const string Logistics = "logistics";
 
+    /// <summary>The Pathwarden quest as a station (M6 item 0 a3a): <see cref="PathwardenStation"/> reads <c>quests/pathwarden.json</c>.</summary>
+    public const string Pathwarden = "pathwarden";
+
+    /// <summary>The Training Academy by play as a station (M6 item 0 a3b): <see cref="AcademyStation"/> reads <c>quests/academy.json</c>.</summary>
+    public const string Academy = "academy";
+
+    /// <summary>The buy-trip (M6 item 1 d, D12): <see cref="BuyTripStation"/> to the archmage who sells a carried-only scarab (no plan lists it yet; the logistics stop names it).</summary>
+    public const string BuyTrip = "buy-trip";
+
+    /// <summary>The rung change (M6 item 4 t2, D50): <see cref="RungChangeStation"/> to the journey's ground by the travel file's portals and the entry, or home (<c>direction=home</c>); no plan lists it yet (the autopilot's Travel state is T3's).</summary>
+    public const string RungChange = "rung-change";
+
+    /// <summary>M6 item 14: the den run (<c>DenRunStation</c>): the run-only road to a Black Spawn Den's entrance, the minute inside, the tie and home.</summary>
+    public const string DenRun = "den-run";
+
+    /// <summary>
+    /// The quest station (M6 item 5): runs one quest file's steps by kind (args <see cref="JourneyPlans.QuestArgument"/> <c>=&lt;key&gt;</c> and
+    /// <see cref="JourneyPlans.FromArgument"/> <c>=home|ground</c>, default home); its verdict line is <c>quest: key= from= steps= done= xp=+&lt;n&gt; reward_line=&lt;n&gt; timer= ok= fail=</c>.
+    /// No plan lists it yet (the autopilot's errand and the kill task's round call it).
+    /// </summary>
+    public const string Quest = "quest";
+
+    /// <summary>
+    /// M6 villa: the villa's steps (<c>Housing.VillaStations</c>; arg <c>step=</c> one of writ-hand-in, lockpick-buy, villa-purchase, villa-storage, villa-rent). No plan lists it: the level up job's villa schedule calls it at a town
+    /// trip's boundary.
+    /// </summary>
+    public const string Villa = "villa";
+
     /// <summary>Every kind, in the table's order.</summary>
     public static IReadOnlyList<string> All { get; } =
     [
-        BuildVerify, Gear, Buff, CastFacts, KitRefused, HarmHeal, Bind, DenTravel, DenFight, Death, Hunt, Vendor, RecallHome, Chests, AppraiseItems, AppraiseVendor, VendorFacts, Shortcuts, Hotbar, Corpses, Resupply, Logistics,
+        BuildVerify, Gear, Buff, CastFacts, KitRefused, HarmHeal, Bind, DenTravel, DenFight, Death, Hunt, Vendor, RecallHome, Chests, AppraiseItems, AppraiseVendor, VendorFacts, Shortcuts, Hotbar, Corpses, Resupply, Logistics, Pathwarden, Academy, BuyTrip, RungChange, Quest,
     ];
 }
 
@@ -121,6 +153,19 @@ public sealed record JourneyPlan(string Name, string Character, string Account, 
 {
     /// <summary>The sum of the stations' expected seconds (the hosts size the journey's limit from it, with the login and the margin).</summary>
     public double ExpectedSeconds => Stations.Sum(s => s.ExpectedSeconds);
+
+    /// <summary>
+    /// The cheat-free climber's rule (M6 item 0 a3b, DoD 2): the journey sends no <c>place</c> of any kind (no pre-journey recovery place, no recovery place after a failed station). When the known state is not where the first station needs it (<see cref="IKnownStart"/>, else the plan's
+    /// <see cref="Ground"/>), the journey stops by name (<c>stop=known-state-unplayable:&lt;where&gt;</c>); the mod verbs are counted from the journey's start, and the climber line carries <c>granted= place= recovery_place=</c>.
+    /// </summary>
+    public bool CheatFree { get; init; }
+
+    /// <summary>
+    /// M6 7 H (the loopbacks' round 1): the buff profile the journey's cycles run (its buff station's, its fights' and the death station's rebuff), or null: each cycle's own choice by the character's name (<see cref="BuffCycle"/>: Winnie's lines by play, else the arena
+    /// profile's 24 lines the build teaches). A Lifestone Throwaway that stands in for the climber sets <see cref="BuffProfiles.Climber"/>, the climb's own profile: it buffs the lines its book holds, each only while its school is trained, so a line the plan never bought is no
+    /// failure (<c>skill 32 is not trained</c>, 0x03FC).
+    /// </summary>
+    public IBuffProfile? BuffProfile { get; init; }
 }
 
 /// <summary>
@@ -175,6 +220,12 @@ public static class JourneyPlans
 
     /// <summary>The value of <see cref="TripArgument"/> that forces the trip (<c>trigger=forced</c>); any other value, or none, lets the counters decide.</summary>
     public const string TripForced = "forced";
+
+    /// <summary>
+    /// M6 14 sell first (an owner ruling, 2026-11-17): the value of <see cref="TripArgument"/> for the sale before an errand from home (<c>trigger=errand-room</c>, <c>Autopilot.ErrandRoomRule</c>): forced as <see cref="TripForced"/> is (the
+    /// autopilot's room check before the errand decided it), named by its own trigger.
+    /// </summary>
+    public const string TripErrandRoom = "errand-room";
 
     /// <summary>The mage's logistics arguments: the trip is forced in the gate (D52).</summary>
     public static IReadOnlyDictionary<string, string> MageLogisticsArguments { get; } = new Dictionary<string, string>(StringComparer.Ordinal) { [TripArgument] = TripForced };
@@ -286,11 +337,35 @@ public static class JourneyPlans
     /// <summary>The argument of a <see cref="StationKinds.DenFight"/> spec that names the storeys the fight's tour visits before it stays (<see cref="FightOptions.StoreysMin"/>, <c>--fight-storeys-min</c>).</summary>
     public const string StoreysMinArgument = "storeys-min";
 
+    /// <summary>M6 item 0 a5: the argument of a <see cref="StationKinds.DenFight"/> spec that caps the bolt level (<see cref="FightOptions.MaxLevel"/>, <c>--fight-max-level</c>; the level up job's rung cap, <c>AutopilotScenario.BoltLevel</c>).</summary>
+    public const string MaxLevelArgument = "max-level";
+
+    /// <summary>M6 0 F5 (review 0-R5): the argument of a <see cref="StationKinds.DenFight"/> spec that carries the rung's <c>target_margin</c> to the outdoor fight's pick (<see cref="FightOptions.TargetMargin"/>).</summary>
+    public const string TargetMarginArgument = "target-margin";
+
     /// <summary>The argument of a <see cref="StationKinds.Gear"/> spec whose kit carries Cassius' Ring of Fire's components (the hero mage's only; P5b-R12).</summary>
     public const string RingArgument = "ring";
 
     /// <summary>The argument of a <see cref="StationKinds.DenTravel"/> spec that steps off the lifestone before Primary Portal Recall's cast (the hero mage's only; <see cref="DenTravelStation.StepOff"/>).</summary>
     public const string StepOffArgument = "step-off";
+
+    /// <summary>The argument of a <see cref="StationKinds.Academy"/> spec that names the quest file it plays (M6 0 F7): <see cref="AcademyStation.SkipKey"/> or <see cref="AcademyStation.FullRouteKey"/> (the default, no argument).</summary>
+    public const string QuestArgument = "quest";
+
+    /// <summary>
+    /// M6 item 5: the argument of a <see cref="StationKinds.Quest"/> spec that says where the run starts: <see cref="FromHome"/> (the default, no argument) or
+    /// <see cref="FromGround"/> (the climber's ground, the trophy errand on the way home). The quest spec names its file with <see cref="QuestArgument"/>.
+    /// </summary>
+    public const string FromArgument = "from";
+
+    /// <summary>M6 5 F2 (D62): the argument of a <see cref="StationKinds.Quest"/> spec that runs only a range of the file's steps, <c>steps=&lt;from&gt;-&lt;to&gt;</c> (0-based, inclusive); the done check and the completion run only when the range ends at the last step.</summary>
+    public const string StepsArgument = "steps";
+
+    /// <summary>M6 item 5: <see cref="FromArgument"/>'s value for a run that starts at home (Holtburg).</summary>
+    public const string FromHome = "home";
+
+    /// <summary>M6 item 5: <see cref="FromArgument"/>'s value for a run that starts on the climber's ground.</summary>
+    public const string FromGround = "ground";
 
     /// <summary>
     /// The mage's hero journey (<c>test</c>): build-verify (teaches 1785), the bar, gear (the ring's components), buff, bind, den-travel (a step off the lifestone, then Primary Portal Recall once the portal is tied), the den's leftover corpses of
@@ -301,7 +376,7 @@ public static class JourneyPlans
         MageTemplate.CharacterName,
         "test",
         StationWhere.Den,
-        1, // TODO(m5-hero-budget): the hero mage keeps its video-era budget; its tied den-travel makes no place and an untied one is refused (travel:ground:untied), so the budget is never spent
+        1, // m5-hero-budget (closed): the hero mage keeps its video-era budget; its tied den-travel makes no place and an untied one is refused (travel:ground:untied), so the budget is never spent
         [
             new("build-verify", StationKinds.BuildVerify, null, 30),
             new("hotbar", StationKinds.Hotbar, null, 20),
@@ -348,8 +423,46 @@ public static class JourneyPlans
     /// <summary>The one-off tool plans (M5 7 lead): not part of a gate.</summary>
     public static IReadOnlyList<JourneyPlan> Tools { get; } = [MageCorpses];
 
-    /// <summary>The plan named <paramref name="name"/> (<c>mage</c>, <c>melee</c>, <c>archer</c>, or a hero plan; case-insensitive), or null.</summary>
+    /// <summary>
+    /// M6 item 0 a3a (D7) and a3b: the climber's first journey (<c>--scenario=journey --journey=climber</c>, <c>test</c>): Winnie, created by <c>--scenario=climber-create --fresh-character</c>, takes the Training Academy's own skip from its start cell by play (<see cref="AcademyStation"/> on <c>quests/academy-skip.json</c>, M6 0 F7, D37: Jonathan's Exit Token given back, the server's teleport to
+    /// Holtburg; the full route <c>academy</c> waits for item 4's ramps), then does the Pathwarden quest in Holtburg and wears its four pieces. No build-verify (the climber is built by what it earns, never by a grant), no teleport budget and no place of any kind (<see cref="JourneyPlan.CheatFree"/>: a known state that is not the
+    /// Academy's start stops by name); not part of the gate's three plans. The <see cref="AcademyExitScenario"/> bridge stays for the other characters' baselines and is no longer used for Winnie.
+    /// </summary>
+    public static JourneyPlan Climber { get; } = new(
+        "climber",
+        MageTemplate.ClimberName,
+        "test",
+        StationWhere.Holtburg,
+        0,
+        [
+            new("academy", StationKinds.Academy, null, AcademySkipSeconds, new Dictionary<string, string>(StringComparer.Ordinal) { [QuestArgument] = AcademyStation.SkipKey }),
+            new("pathwarden", StationKinds.Pathwarden, null, PathwardenSeconds),
+        ])
+    {
+        CheatFree = true,
+    };
+
+    /// <summary>The skip's expected seconds (Lifestone's own, M6 0 F7): five walks between the start rooms of about 10 s each, the greeter's give, the three pick-ups and wears, Jonathan's talk and give with their settles about 60 s, the server's teleport, and the margin.</summary>
+    public const double AcademySkipSeconds = 150;
+
+    /// <summary>The full route's expected seconds (Lifestone's own): about fifteen walks between rooms of about 10 s each, two kills of a few casts with their loot about 60 s, the talks and gives with their settles about 60 s, two portals about 20 s, and the margin.</summary>
+    public const double AcademySeconds = 400;
+
+    /// <summary>The Pathwarden station's expected seconds (Lifestone's own): the walk to Thorolf and the chest in one cell about 10 s, the talk, the give and the unlock with their settles about 30 s, four pick-ups and four wields about 40 s, and the margin (120 s); M6 item 14: and the stop at the buff bot that now comes before the chest (a cast a line of the bot's profile at a caster's pace, about four seconds each; the autopilot's own stop expects 180 s).</summary>
+    public const double PathwardenSeconds = 300;
+
+    /// <summary>The climber's plans (M6): not part of the gate's three, run by <c>--journey=climber</c>.</summary>
+    public static JourneyPlan ModelClimber { get; } = Climber with { Name = "qwinnie", Character = MageTemplate.ModelClimberName, Account = TestAccounts.Qwinnie };
+
+    /// <summary>The journey plan of a climber (<see cref="Climber"/> or <see cref="ModelClimber"/>).</summary>
+    /// <param name="climber">The climber's name.</param>
+    public static JourneyPlan ClimberFor(string climber) => string.Equals(climber, MageTemplate.ModelClimberName, StringComparison.OrdinalIgnoreCase) ? ModelClimber : Climber;
+
+    /// <summary>The climbers' journeys (<c>--journey=climber</c>, <c>--journey=qwinnie</c>).</summary>
+    public static IReadOnlyList<JourneyPlan> Climbers { get; } = [Climber, ModelClimber];
+
+    /// <summary>The plan named <paramref name="name"/> (<c>mage</c>, <c>melee</c>, <c>archer</c>, a hero plan or <c>climber</c>; case-insensitive), or null.</summary>
     /// <param name="name">The plan's name (<c>--journey=</c>).</param>
     public static JourneyPlan? ForName(string? name) =>
-        All.Concat(Hero).Concat(Tools).FirstOrDefault(p => string.Equals(p.Name, name?.Trim(), StringComparison.OrdinalIgnoreCase));
+        All.Concat(Hero).Concat(Tools).Concat(Climbers).FirstOrDefault(p => string.Equals(p.Name, name?.Trim(), StringComparison.OrdinalIgnoreCase));
 }

@@ -84,4 +84,31 @@ public sealed class FightDebuffsDatTests(DatSetFixture fixture) : IClassFixture<
         Assert.True(magicDefense.TryCalculate(60, 70, out var defence));
         Assert.Equal(19u, defence);
     }
+
+    [RequiresDatsFact]
+    public void The_rows_below_VI_resolve_from_the_dats_SpellTable_with_no_gap_M6_1_f()
+    {
+        var table = SpellTableData.Load(fixture.Dats).Spells;
+        var rows = DebuffRows.FromSpellTable(table, out var missing);
+        Assert.Empty(missing);
+        Assert.Equal(Enum.GetValues<DebuffKind>().Length * 7, rows.All.Count);
+        Assert.Equal(ArenaProfile.ExtraNamed("Fire Vulnerability Other")!.Spells.Take(5).Select(s => s.Id), Enumerable.Range(1, 5).Select(l => rows.Find(DebuffKind.FireVulnerability, l)!.Value.Id));
+        Assert.Equal(ArenaProfile.ExtraNamed("Drain Health Other")!.Spells.Take(5).Select(s => s.Id), Enumerable.Range(1, 5).Select(l => rows.Find(DebuffKind.DrainHealthOther, l)!.Value.Id));
+        Assert.Equal(ArenaProfile.ExtraNamed("Drain Stamina Other")!.Spells.Take(5).Select(s => s.Id), Enumerable.Range(1, 5).Select(l => rows.Find(DebuffKind.DrainStaminaOther, l)!.Value.Id));
+        Assert.Equal(304u, rows.Find(DebuffKind.LightWeaponsIneptitude, 1)!.Value.Id); // the plain line, the world SQL's first
+        Assert.Equal(25u, rows.Find(DebuffKind.Imperil, 1)!.Value.Id);
+        foreach (var row in rows.All.Where(r => r.Level <= 5))
+        {
+            var dat = table[row.Id];
+            Assert.True(dat.Flags.HasFlag(SpellFlags.Resistable), row.Name);
+            Assert.True(row.Power < FightDebuffs.Find(row.Kind, 6)!.Value.Power, row.Name);
+            var meta = row.Kind switch
+            {
+                DebuffKind.HarmOther => SpellType.Boost,
+                DebuffKind.DrainHealthOther or DebuffKind.DrainStaminaOther => SpellType.Transfer,
+                _ => SpellType.Enchantment,
+            };
+            Assert.Equal(meta, dat.MetaSpellType);
+        }
+    }
 }

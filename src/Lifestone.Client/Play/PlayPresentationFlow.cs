@@ -116,6 +116,7 @@ public sealed class PlayPresentationFlow : IDisposable
     private bool _arrived;
     private bool _awaitingPosition;
     private bool _autoEnterDone;
+    private EntryHold? _entryHold; // M6 14 body: one owner of a re-login's entry
     private bool _booted;
     private string? _bootReason;
 
@@ -176,6 +177,25 @@ public sealed class PlayPresentationFlow : IDisposable
         }
     }
 
+    /// <summary>The owner the next entry is held for (<see cref="HoldAutoEnter"/>), or null.</summary>
+    public string? EntryOwner => _entryHold?.Owner;
+
+    /// <summary>
+    /// M6 14 body (live ladder49 01:59:12 UTC): another owner enters the world on the next character list (the autopilot's own reconnect, whose login chooses and enters the character itself): until the world is entered or the hold is
+    /// disposed, the <c>--character</c> auto-enter stands aside, logged once, so one EnterWorld is sent and not two racing (the second was refused "not at the character list (phase InWorld)" and the autopilot counted a good re-login as failed).
+    /// A hold ends by itself once the world is entered (it covers one entry); a newer hold replaces an older one.
+    /// </summary>
+    /// <param name="owner">Who enters (for the log).</param>
+    /// <returns>The hold; disposing it releases it (a no-op once replaced or ended).</returns>
+    public IDisposable HoldAutoEnter(string owner)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+        var hold = new EntryHold(this, owner);
+        _entryHold = hold;
+        _log.Info(LogCategory, $"auto-enter: the next entry is {owner}'s: the --character auto-enter stands aside until the world is entered or the hold is released");
+        return hold;
+    }
+
     /// <inheritdoc/>
     public void Dispose()
     {
@@ -218,6 +238,11 @@ public sealed class PlayPresentationFlow : IDisposable
         else if (e.Phase == SessionPhase.CharacterSelect)
         {
             TryAutoEnter(); // the list (F658) usually arrives just before the phase changes
+        }
+        else if (e.Phase == SessionPhase.InWorld && _entryHold is { } held)
+        {
+            _entryHold = null; // a hold covers one entry
+            _log.Info(LogCategory, $"auto-enter: the world was entered while held for {held.Owner}; the hold ends");
         }
 
         if (!InWorld(e.Previous) || InWorld(e.Phase))
@@ -369,6 +394,11 @@ public sealed class PlayPresentationFlow : IDisposable
         }
 
         _autoEnterDone = true;
+        if (_entryHold is { } hold)
+        {
+            _log.Info(LogCategory, $"auto-enter: stands aside on this character list: {hold.Owner} enters the world (one owner of the entry)");
+            return;
+        }
         CharacterSlot? found = null;
         foreach (var slot in state.Characters.Entries)
         {
@@ -401,5 +431,20 @@ public sealed class PlayPresentationFlow : IDisposable
                 _log.Warn(LogCategory, $"entering the world did not succeed: {outcome.Kind}{(string.IsNullOrEmpty(outcome.Detail) ? string.Empty : " (" + outcome.Detail + ")")}");
             }
         };
+    }
+
+    /// <summary>A hold of the next entry for its owner.</summary>
+    private sealed class EntryHold(PlayPresentationFlow flow, string owner) : IDisposable
+    {
+        public string Owner { get; } = owner;
+
+        public void Dispose()
+        {
+            if (ReferenceEquals(flow._entryHold, this))
+            {
+                flow._entryHold = null;
+                flow._log.Info(LogCategory, $"auto-enter: the hold for {Owner} is released");
+            }
+        }
     }
 }

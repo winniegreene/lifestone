@@ -164,6 +164,8 @@ internal sealed class J1JourneyRig
             Runners = runners,
             Observer = observer ?? NoJourneyObserver.Instance,
             Facts = Facts,
+            // M6 7 AV: the way home reads the plan, so a body on the belt (an outdoor ground hunted from home on foot) would walk; these tests prove the recall, so the context knows the dungeons' grounds only
+            Grounds = [.. Lifestone.Client.Session.Grounds.GroundCatalog.All.Where(g => g.Kind != Lifestone.Client.Session.Grounds.GroundKind.Outdoor)],
         };
     }
 

@@ -36,6 +36,9 @@ public abstract class StationLeg : ScriptLeg
     /// <summary>The reason the last <see cref="TravelTo"/> failed when it was optional, else null (reset at each call).</summary>
     protected string? LastTravelFailure { get; private set; }
 
+    /// <summary>M6 8 G: why the last <see cref="TravelTo"/> was stopped by its <c>stopWhen</c> (the walk ended neither arrived nor failed), or null (reset at each call).</summary>
+    protected string? TravelInterrupted { get; private set; }
+
     /// <summary>
     /// Travels to <paramref name="request"/> through the journey's travel seam and, for a place, waits out the end of the teleport as <see cref="ScriptLeg.PlaceAndSettle"/> does (the teleport seen, Present, the post-teleport LoginComplete
     /// confirmed, a 3 s settle); for a run, a recall or nothing the arrival is authoritative (a 1 s settle). A failed travel is a failed check and ends the leg Failed with the travel's reason.
@@ -43,16 +46,25 @@ public abstract class StationLeg : ScriptLeg
     /// <remarks>
     /// With <paramref name="optional"/> a failed travel is not a failed check and does not throw: it logs a WARN line naming the destination and the travel's reason, sets <see cref="LastTravelFailure"/> (null again at every call) and ends,
     /// so the caller can skip the stop (M5 7: the restock walk to a vendor the physics refused must not fail the whole trip).
+    /// M6 8 G: <paramref name="stopWhen"/>, checked each step of the walk, stops it when it names a reason (the leg is disposed, <see cref="TravelInterrupted"/> says why, nothing else is checked), so the caller can fight back an attacker and walk on (<c>QuestStepLeg.TravelFightingBack</c>); null: never.
     /// </remarks>
-    protected IEnumerable<ActionHandle?> TravelTo(TravelRequest request, string what, bool optional = false)
+    protected IEnumerable<ActionHandle?> TravelTo(TravelRequest request, string what, bool optional = false, Func<string?>? stopWhen = null)
     {
         LastTravelFailure = null;
+        TravelInterrupted = null;
         var mark = S.ActionLog.Total;
         using var leg = Context.Travel.GoTo(S, request, S.Clock.Now);
         Log($"travel to {what}: {request.Purpose}{(request.ObjectGuid == 0 ? string.Empty : $" to object {request.ObjectGuid:X8} within {request.Range:0.0} m")}");
         var status = leg.Step(S, S.Clock.Now);
         while (status == TravelStatus.Running)
         {
+            if (stopWhen?.Invoke() is { } stop)
+            {
+                TravelInterrupted = stop;
+                Log($"travel to {what}: the walk is stopped: {stop}");
+                yield break;
+            }
+
             yield return null;
             status = leg.Step(S, S.Clock.Now);
         }
@@ -150,25 +162,13 @@ public abstract class StationLeg : ScriptLeg
     }
 
     /// <summary>The guids of the main pack's items of that weenie class (ContainerType 0: no side pack, no focus), in the pack's order.</summary>
-    protected List<uint> InPack(uint wcid)
-    {
-        var list = new List<uint>();
-        foreach (var entry in S.State.Self.Inventory.Pack)
-        {
-            if (entry.ContainerType == 0 && S.State.Objects.TryGet(entry.Guid, out var o) && o.Weenie.WeenieClassId == wcid)
-            {
-                list.Add(entry.Guid);
-            }
-        }
-
-        return list;
-    }
+    protected virtual List<uint> InPack(uint wcid) => StationItems.InPackOf(S.State, wcid);
 
     /// <summary>The first Handy Healing Kit in the main pack that has uses left, or 0.</summary>
     protected uint PickKit() => InPack(StationItems.KitWcid).FirstOrDefault(k => S.State.Objects.TryGet(k, out var o) && (o.Weenie.Structure is null or > 0));
 
     /// <summary>The coins the character holds (property 20, CoinValue), or -1 when unknown.</summary>
-    protected long Coins() => S.State.Self.Qualities.TryGetInt(StationItems.CoinProperty, out var value) ? value : -1;
+    protected long Coins() => StationItems.CoinsOf(S.State);
 
     /// <summary>"yes" or "no".</summary>
     protected static string Yes(bool value) => value ? "yes" : "no";
@@ -185,6 +185,24 @@ internal static class StationItems
 
     /// <summary>The CoinValue property.</summary>
     internal const uint CoinProperty = 20;
+
+    /// <summary>The coins the character of <paramref name="state"/> holds (property 20, CoinValue), or -1 when unknown: the one coin read of the stations (<see cref="StationLeg.Coins"/>) and of the vendor counter (M6 16 E5b).</summary>
+    internal static long CoinsOf(GameState state) => state.Self.Qualities.TryGetInt(CoinProperty, out var value) ? value : -1;
+
+    /// <summary>The guids of the main pack's items of that weenie class (ContainerType 0: no side pack, no focus), in the pack's order: the stations' read (<see cref="StationLeg.InPack"/>) and the vendor counter's (M6 16 E5b).</summary>
+    internal static List<uint> InPackOf(GameState state, uint wcid)
+    {
+        var list = new List<uint>();
+        foreach (var entry in state.Self.Inventory.Pack)
+        {
+            if (entry.ContainerType == 0 && state.Objects.TryGet(entry.Guid, out var o) && o.Weenie.WeenieClassId == wcid)
+            {
+                list.Add(entry.Guid);
+            }
+        }
+
+        return list;
+    }
 }
 
 /// <summary>

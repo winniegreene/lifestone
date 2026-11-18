@@ -816,6 +816,80 @@ public static class InboundDispatcher
 
                 return MalformedEvent(context, body, header, handler, "F7B0 GameEvent 0x0021 FriendsListUpdate: not a count of friends and an update type");
 
+            // M6 villa: the housing events.
+
+            case GameEventTypes.HouseProfile:
+                if (HouseCodecs.TryParseHouseProfile(body, out var houseProfile, out var houseProfileReason))
+                {
+                    handler.OnHouseProfile(context, header, houseProfile);
+                    return DecodedEvent(header);
+                }
+
+                return MalformedEvent(context, body, header, handler, "F7B0 GameEvent 0x021D HouseProfile: " + houseProfileReason);
+
+            case GameEventTypes.HouseData:
+                if (HouseCodecs.TryParseHouseData(body, out var houseData, out var houseDataReason))
+                {
+                    handler.OnHouseData(context, header, houseData);
+                    return DecodedEvent(header);
+                }
+
+                return MalformedEvent(context, body, header, handler, "F7B0 GameEvent 0x0225 HouseData: " + houseDataReason);
+
+            case GameEventTypes.HouseStatus:
+                if (HouseCodecs.TryParseHouseStatus(body, out var houseStatus))
+                {
+                    handler.OnHouseStatus(context, header, houseStatus);
+                    return DecodedEvent(header);
+                }
+
+                return MalformedEvent(context, body, header, handler, "F7B0 GameEvent 0x0226 HouseStatus: not exactly one u32 notice");
+
+            case GameEventTypes.UpdateRentTime:
+                if (HouseCodecs.TryParseUpdateRentTime(body, out var rentTime))
+                {
+                    handler.OnUpdateRentTime(context, header, rentTime);
+                    return DecodedEvent(header);
+                }
+
+                return MalformedEvent(context, body, header, handler, "F7B0 GameEvent 0x0227 UpdateRentTime: not exactly one u32 time");
+
+            case GameEventTypes.UpdateRentPayment:
+                if (HouseCodecs.TryParseUpdateRentPayment(body, out var rentPayment, out var rentPaymentReason))
+                {
+                    handler.OnUpdateRentPayment(context, header, rentPayment);
+                    return DecodedEvent(header);
+                }
+
+                return MalformedEvent(context, body, header, handler, "F7B0 GameEvent 0x0228 UpdateRentPayment: " + rentPaymentReason);
+
+            case GameEventTypes.HouseUpdateRestrictions:
+                if (HouseCodecs.TryParseHouseRestrictions(body, out var restrictions, out var restrictionsReason))
+                {
+                    handler.OnHouseRestrictions(context, header, restrictions);
+                    return DecodedEvent(header);
+                }
+
+                return MalformedEvent(context, body, header, handler, "F7B0 GameEvent 0x0248 HouseUpdateRestrictions: " + restrictionsReason);
+
+            case GameEventTypes.HouseTransaction:
+                if (HouseCodecs.TryParseHouseTransaction(body, out var transaction))
+                {
+                    handler.OnHouseTransaction(context, header, transaction);
+                    return DecodedEvent(header);
+                }
+
+                return MalformedEvent(context, body, header, handler, "F7B0 GameEvent 0x0259 HouseTransaction: not exactly one u32 notice");
+
+            case GameEventTypes.AvailableHouses:
+                if (HouseCodecs.TryParseAvailableHouses(body, out var availableHouses, out var availableHousesReason))
+                {
+                    handler.OnAvailableHouses(context, header, availableHouses);
+                    return DecodedEvent(header);
+                }
+
+                return MalformedEvent(context, body, header, handler, "F7B0 GameEvent 0x0271 AvailableHouses: " + availableHousesReason);
+
             default:
                 handler.OnGameEvent(context, header, body[GameEventEnvelope.HeaderSize..]);
                 return new DispatchResult(DispatchOutcome.Unknown, MessageOpcodes.GameEvent, header.EventType);

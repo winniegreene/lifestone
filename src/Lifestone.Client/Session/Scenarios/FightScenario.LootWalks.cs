@@ -64,6 +64,7 @@ public sealed partial class FightScenario
     private uint _walkBackCorpse; // the corpse the walk under way goes back to (0: the walk is the tour's)
     private uint _lootWalkCorpse; // M5 7 P7s (D148): the corpse the fight's own walk goes toward, round a no-go cell ACE's straight approach would cross (0: none)
     private CellFrame _walkBackSpot;
+    private readonly List<(double It, double Me, int Index)> _losSpots = [];
 
     /// <summary>A kill notice of the mage's not yet matched to a corpse: its text and the session clock it came.</summary>
     private sealed record KillClaim(string Text, double At);
@@ -327,11 +328,77 @@ public sealed partial class FightScenario
     }
 
     /// <summary>
+    /// M6 6 B2 (<c>m5-loot-walk-for-los</c>): the most floor spots whose line to a corpse one look sweeps, nearest the corpse first (Lifestone's own bound on the sweeps a look costs, as the self-defence step's
+    /// <see cref="DefendStepLineTests"/>).
+    /// </summary>
+    public const int LootLosLineTests = DefendStepLineTests;
+
+    /// <summary>
+    /// M6 6 B2 (<c>m5-loot-walk-for-los</c>; the self-defence step's sweep, <see cref="DefenceSpot"/>): the spot the loot step's walk for a line goes to, for a corpse at <paramref name="lies"/> with no clear line from
+    /// <paramref name="own"/>: of the floor's room middles (<see cref="IFightWalk.FloorSpots"/>) on a walkable cell off the no-go cells within the loot radius (<c>--fight-loot-radius-m</c>) of both the mage and the corpse, the
+    /// nearest the corpse whose line to it is clear (at most <see cref="LootLosLineTests"/> lines swept). True with the spot and its note; false with why none.
+    /// </summary>
+    private bool LootLosSpot(in CellFrame own, in CellFrame lies, out CellFrame spot, out string note)
+    {
+        spot = default;
+        if (_walk is null)
+        {
+            note = "the fight has no walk (TODO(m3-fight-no-walker))";
+            return false;
+        }
+
+        var spots = _walk.FloorSpots;
+        if (spots.Count == 0)
+        {
+            note = "this walk offers no floor spots (FloorSpots: none)";
+            return false;
+        }
+
+        var radius = LootRadius;
+        var origin = own.ToGlobal();
+        var corpse = lies.ToGlobal();
+        _losSpots.Clear();
+        for (var i = 0; i < spots.Count; i++)
+        {
+            var s = spots[i];
+            var at = s.ToGlobal();
+            var me = at.DistanceTo(origin);
+            var it = at.DistanceTo(corpse);
+            if (me <= radius && it <= radius && _ground.IsWalkable(s.CellId) && (_options.ArenaHere || !_ground.IsNoGo(s.CellId)))
+            {
+                _losSpots.Add((it, me, i));
+            }
+        }
+
+        _losSpots.Sort(static (a, b) => a.It != b.It ? a.It.CompareTo(b.It) : a.Me.CompareTo(b.Me));
+        var swept = 0;
+        foreach (var (it, me, i) in _losSpots)
+        {
+            if (swept >= LootLosLineTests)
+            {
+                break;
+            }
+
+            swept++;
+            var s = spots[i];
+            if (LineIsClearTo(in s, in lies))
+            {
+                spot = s;
+                note = string.Create(CultureInfo.InvariantCulture, $"0x{s.CellId:X8} [{s.Origin.X:0.#} {s.Origin.Y:0.#} {s.Origin.Z:0.#}], {me:0.#} m off, {it:0.#} m from the corpse with a clear line to it ({swept} spot(s) swept of {_losSpots.Count} within the loot radius {radius:0.#} m)");
+                return true;
+            }
+        }
+
+        note = string.Create(CultureInfo.InvariantCulture, $"no floor spot within the loot radius {radius:0.#} m of the mage and the corpse has a clear line to it ({swept} swept of {_losSpots.Count})");
+        return false;
+    }
+
+    /// <summary>
     /// M5 7 P7s (D148, D141; <c>m5-8-loot-no-go-corpse</c>): the loot step's own walk toward a corpse in view whose straight approach would cross a no-go cell (purpose <c>loot</c>): a leg to the corpse's spot planned over the
     /// walkable cells only (<see cref="IFightWalk.BeginLegTo"/>). The Walk phase runs it; its end, its give-up or its drop for an attacker or a heal hands the frame back to the loot step, which looks at the corpse again. True when the
     /// leg began; false with why not.
     /// </summary>
-    private bool BeginLootWalk(IGameSessionView session, double clock, uint corpse, in CellFrame spot, string note, out string why)
+    private bool BeginLootWalk(IGameSessionView session, double clock, uint corpse, in CellFrame spot, string note, string purposeWhy, out string why)
     {
         if (_walk is null)
         {
@@ -353,7 +420,7 @@ public sealed partial class FightScenario
         (_legPurpose, _legNote, _legGuid) = (TourPurpose.None, note, 0);
         _walkBackCorpse = 0;
         _lootWalkCorpse = corpse;
-        _log.Info(LogCategory, $"walking: purpose=loot ({note}); ACE's straight approach would cross a no-go cell, so the fight's own walk goes round over the walkable cells (D141, m5-8-loot-no-go-corpse); {leg}");
+        _log.Info(LogCategory, $"walking: purpose=loot ({note}); {purposeWhy}; {leg}");
         _phase = Phase.Walk;
         why = string.Empty;
         return true;

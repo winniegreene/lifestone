@@ -324,4 +324,24 @@ public sealed class AppraisalTests
         Assert.Equal(258, r.H.State.Appraisals.Received); // the counters count every answer, whatever was dropped
         Assert.Equal(258, r.H.State.Appraisals.Appraised);
     }
+
+    [Fact]
+    public void A_kept_guid_is_never_the_one_the_bound_drops()
+    {
+        // M6 14 (live ladder42 19:51:19 UTC): the worn Chevron Cloak's appraisal was the 257th back and the bound dropped it; a worn piece's appraisal is kept (GameState sets the rule)
+        var r = new WorldActionRig();
+        const uint Cloak = 0x80006435, Base = 0x80020000;
+        r.H.State.Appraisals.Keep = guid => guid == Cloak;
+        Answer(r, Cloak, new AceAppraisal { Success = true, Ints = new Dictionary<uint, int> { [AppraisalIds.ResistMagic] = 9999 } });
+        for (uint i = 0; i < 257; i++)
+        {
+            Answer(r, Base + i, new AceAppraisal { Success = true });
+        }
+
+        Assert.Equal(256, r.H.State.Appraisals.Count);
+        Assert.Equal(9999, Latest(r, Cloak).Int(AppraisalIds.ResistMagic));
+        Assert.False(r.H.State.Appraisals.TryGet(Base, out _)); // the oldest of the others went instead
+        Assert.False(r.H.State.Appraisals.TryGet(Base + 1, out _));
+        Assert.True(r.H.State.Appraisals.TryGet(Base + 2, out _));
+    }
 }

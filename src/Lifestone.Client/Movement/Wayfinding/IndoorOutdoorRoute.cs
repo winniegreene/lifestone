@@ -11,11 +11,11 @@ public enum IndoorOutdoorStatus
     /// <summary>A whole route: the outdoor part to a doorway lane's outer end, the lane, the rooms.</summary>
     Found,
 
-    /// <summary>The outdoor part is a partial route to the edge of the attached tiles (<see cref="NavStatus.Horizon"/>); plan again when more tiles are attached.</summary>
+    /// <summary>
+    /// The outdoor part is a partial route to the edge of the attached tiles (<see cref="NavStatus.Horizon"/>), or (M6 4 W1, <c>m6-walk-goal-tile</c>) the rooms' landblock has
+    /// no attached tile and the outdoor part leads toward the rooms' land point (<see cref="IndoorOutdoorRoute.LandPoint"/>); plan again when more tiles are attached.
+    /// </summary>
     Horizon,
-
-    /// <summary>The rooms' landblock has no attached tile.</summary>
-    NoTile,
 
     /// <summary>No doorway lane of the tile joins a door of the rooms that leads to the goal cell (or the goal cell is not in the rooms).</summary>
     NoDoorway,
@@ -63,9 +63,13 @@ public static class IndoorOutdoorRoute
     /// <summary>The spacing of the points along a lane's centre line, in metres. Not retail: Lifestone's own.</summary>
     public const float LanePointMetres = 1f;
 
+    /// <summary>How near a climb's point, across and in height, a raised start counts as on it (<see cref="DownTheStairs"/>), in metres. Not retail: Lifestone's own (half the Refuge's 6 m walk less a body).</summary>
+    public const float OnStairsMetres = 2.5f;
+
     /// <summary>
     /// Plans from <paramref name="from"/> (outdoors) to <paramref name="to"/> (landblock-local) in <paramref name="toCell"/>, a cell of
-    /// <paramref name="rooms"/>. The tile of the rooms' landblock must be attached to the planner's map.
+    /// <paramref name="rooms"/>. When the tile of the rooms' landblock is not attached (the walk starts past the attached tiles), the plan is a
+    /// horizon toward the rooms' land point (<see cref="PlanTowardRooms"/>, M6 4 W1), and the runner's horizon replan builds the rooms' route once the tile attaches.
     /// </summary>
     /// <param name="planner">The outdoor planner (its map holds the tiles).</param>
     /// <param name="rooms">The landblock's room graph.</param>
@@ -79,7 +83,7 @@ public static class IndoorOutdoorRoute
         ArgumentNullException.ThrowIfNull(rooms);
         if (!planner.Map.TryGetTile(rooms.LandblockId, out var tile))
         {
-            return Failed(IndoorOutdoorStatus.NoTile, null, "no-tile");
+            return PlanTowardRooms(planner, rooms, from, toCell, to, scars);
         }
 
         IndoorOutdoorResult? best = null;
@@ -152,16 +156,94 @@ public static class IndoorOutdoorRoute
     }
 
     /// <summary>
+    /// M6 4 W1 (<c>m6-walk-goal-tile</c>; live, M6 item 1: a walk from Fort Tethana's lifestone in 0x2780 to Zisaha's room in 0x2481 failed <c>no-tile</c> at once): the rooms'
+    /// landblock has no attached tile, so no doorway lane is known. Of the rooms' exits (<see cref="RoomGraph.ExitsToOutside"/>, the same doors the tile's lanes are cut for) whose
+    /// rooms reach the goal, the one with the shortest straight walk (start to its land point, then the rooms) is planned toward: the outdoor planner's route to its land point
+    /// (<see cref="LandPoint"/>, the outer end its lane will have), a horizon route to the attached edge while the point is past it. Always <see cref="IndoorOutdoorStatus.Horizon"/>
+    /// (never an arrival): the result carries <see cref="IndoorOutdoorResult.Outdoor"/> and <see cref="IndoorOutdoorResult.Exit"/>, no lane and nothing inside; the runner plans
+    /// again once the map has changed (<see cref="NavRunner.HorizonReplanMetres"/>), and with the tile attached the plan is <see cref="Plan"/>'s whole route. No retail planner
+    /// exists for this (the player walked it); not retail: Lifestone's own. The physics confirms each route as before.
+    /// </summary>
+    private static IndoorOutdoorResult PlanTowardRooms(PathPlanner planner, RoomGraph rooms, NavPoint from, uint toCell, Vector3 to, NavScars? scars)
+    {
+        var candidates = new List<(float Score, RoomExit Exit, NavPoint Land)>();
+        foreach (var exit in rooms.ExitsToOutside)
+        {
+            var start = exit.Sill - new Vector3(exit.Outward.X * RoomGraph.InsideStartMetres, exit.Outward.Y * RoomGraph.InsideStartMetres, 0f);
+            if (rooms.Plan(exit.CellId, start, toCell, to) is not { } inside)
+            {
+                continue;
+            }
+
+            var land = LandPoint(rooms.LandblockId, exit);
+            var score = Vector2.Distance(from.Global, land.Global) + Vector3.Distance(land.Local, exit.Sill);
+            var at = start;
+            foreach (var w in inside.Waypoints)
+            {
+                score += Vector3.Distance(at, w.Origin);
+                at = w.Origin;
+            }
+
+            candidates.Add((score + Vector3.Distance(at, to), exit, land));
+        }
+
+        if (candidates.Count == 0)
+        {
+            return Failed(IndoorOutdoorStatus.NoDoorway, null, "no-doorway-lane-reaches-the-goal");
+        }
+
+        candidates.Sort((a, b) => a.Score.CompareTo(b.Score));
+        NavPlanResult? last = null;
+        foreach (var (_, exit, land) in candidates)
+        {
+            var outdoor = planner.Plan(from, NavGoal.ToPoint(land), scars);
+            last = outdoor;
+            if (outdoor.Status is NavStatus.Found or NavStatus.Horizon && outdoor.Route is not null)
+            {
+                return new IndoorOutdoorResult(IndoorOutdoorStatus.Horizon, outdoor, null, exit, [], null, [], null);
+            }
+
+            if (outdoor.Status == NavStatus.StartBlocked)
+            {
+                break; // the start, not the exit: every other exit fails the same
+            }
+        }
+
+        return Failed(IndoorOutdoorStatus.OutdoorFailed, last, last!.Reason ?? "outdoor-" + last.Status.ToString().ToLowerInvariant());
+    }
+
+    /// <summary>
+    /// An exit's land point: the outer end its doorway lane has (<see cref="NavBuildOptions.LaneLength"/> out from the sill along the outward direction, at the sill's height),
+    /// in <paramref name="landblockId"/>'s frame. Known from the rooms alone, without the tile (<see cref="PlanTowardRooms"/>).
+    /// </summary>
+    /// <param name="landblockId">The rooms' landblock.</param>
+    /// <param name="exit">The exit.</param>
+    public static NavPoint LandPoint(uint landblockId, RoomExit exit)
+    {
+        ArgumentNullException.ThrowIfNull(exit);
+        var along = exit.Outward * new NavBuildOptions().LaneLength;
+        return new NavPoint(landblockId & 0xFFFF0000u, new Vector3(exit.Sill.X + along.X, exit.Sill.Y + along.Y, exit.Sill.Z));
+    }
+
+    /// <summary>
     /// The lane's centre line from its outer end in to the sill, a point every <see cref="LanePointMetres"/> (only where the lane's node
-    /// under the point is walkable), then the sill itself, as outdoor points: the outer end first. Empty when no centre point is walkable.
+    /// under the point is walkable), then the sill itself, as outdoor points: the outer end first. Empty when no centre point is walkable. A raised door whose stairs turn aside
+    /// walks its <see cref="NavDoorwayLane.Climb"/> instead (M6 7 A).
     /// </summary>
     public static IReadOnlyList<NavPoint> LanePoints(NavTile tile, NavDoorwayLane lane)
     {
         ArgumentNullException.ThrowIfNull(tile);
         ArgumentNullException.ThrowIfNull(lane);
+        var points = new List<NavPoint>();
+        if (lane.Climb is { } climb)
+        {
+            points.AddRange(climb.Select(p => new NavPoint(tile.LandblockId, p)));
+            points.Add(new NavPoint(tile.LandblockId, lane.Sill));
+            return points;
+        }
+
         var members = new HashSet<int>(lane.Nodes);
         var sill = new Vector2(lane.Sill.X, lane.Sill.Y);
-        var points = new List<NavPoint>();
         for (var along = new NavBuildOptions().LaneLength; along > 0.2f; along -= LanePointMetres)
         {
             var at = sill + (lane.Outward * along);
@@ -178,6 +260,70 @@ public static class IndoorOutdoorRoute
         }
 
         return points;
+    }
+
+    /// <summary>
+    /// A start up a raised door's stairs or on its deck (M6 7 A): the walk down the nearest <see cref="NavDoorwayLane.Climb"/>, <paramref name="from"/> first and the lane's outer end last, or null for a start that
+    /// is on neither (more than the step-up over the ground under it is not a place the tile knows: the tile is the ground, and a plan from the node below walks into the stairs). A goal back through that door
+    /// is walked down and up again: correct, not short, and only a replan or a resume on the stairs meets it.
+    /// </summary>
+    /// <param name="map">The map holding the start's tile.</param>
+    /// <param name="from">The body, outdoors.</param>
+    public static IReadOnlyList<NavWaypoint>? DownTheStairs(NavMap map, in CellFrame from)
+    {
+        ArgumentNullException.ThrowIfNull(map);
+        if (!LandDefs.IsOutdoorCell(from.CellId) || !map.TryGetTile(from.CellId & 0xFFFF0000u, out var tile) || tile.DoorwayLanes.TrueForAll(static l => l.Climb is null))
+        {
+            return null;
+        }
+
+        var (x, y) = NavTile.NodeAt(new Vector2(from.Origin.X, from.Origin.Y));
+        if (!NavTile.InBounds(x, y) || from.Origin.Z - tile.Z[NavTile.Index(x, y)] <= new NavBuildOptions().StepUp)
+        {
+            return null;
+        }
+
+        var body = new Vector2(from.Origin.X, from.Origin.Y);
+        IReadOnlyList<Vector3>? best = null;
+        var bestIndex = 0;
+        var bestDistance = OnStairsMetres;
+        foreach (var lane in tile.DoorwayLanes)
+        {
+            if (lane.Climb is not { } climb)
+            {
+                continue;
+            }
+
+            for (var i = 0; i < climb.Count; i++)
+            {
+                var d = Vector2.Distance(body, new Vector2(climb[i].X, climb[i].Y));
+                if (d < bestDistance && MathF.Abs(climb[i].Z - from.Origin.Z) <= OnStairsMetres)
+                {
+                    (best, bestIndex, bestDistance) = (climb, i, d);
+                }
+            }
+        }
+
+        if (best is null)
+        {
+            return null;
+        }
+
+        var points = new List<NavWaypoint> { new(new CellFrame(from.CellId, new AcFrame(from.Origin, Quaternion.Identity)), Doorway: false) };
+        for (var i = bestIndex; i >= 0; i--)
+        {
+            points.Add(new NavWaypoint(NavMap.ToCellFrame(new NavPoint(tile.LandblockId, best[i])), Doorway: false));
+        }
+
+        return points;
+    }
+
+    /// <summary><paramref name="rest"/> planned from the stairs' foot, after the walk <paramref name="down"/> to it (<see cref="DownTheStairs"/>).</summary>
+    public static NavPath AfterStairs(IReadOnlyList<NavWaypoint> down, NavPath rest)
+    {
+        ArgumentNullException.ThrowIfNull(down);
+        ArgumentNullException.ThrowIfNull(rest);
+        return rest.Status == NavPathStatus.Failed ? rest : rest with { Waypoints = [.. down, .. rest.Waypoints.Skip(1)] };
     }
 
     private static IndoorOutdoorResult Failed(IndoorOutdoorStatus status, NavPlanResult? outdoor, string reason) =>

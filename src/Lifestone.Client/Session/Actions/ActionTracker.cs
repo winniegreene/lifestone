@@ -231,6 +231,34 @@ internal abstract class ActionTracker
     /// </summary>
     internal virtual bool ConsumesUseDone => false;
 
+    /// <summary>
+    /// M6 14 recall unblock (m6-owed-usedone): true once a UseDone was given to this tracker (its <see cref="OnUseDone"/> took one). Set by the Action API, never by the tracker: an action that took its UseDone owes none
+    /// when it ends without its outcome (an open whose view closed before its contents arrived), so the next action's UseDone is not dropped for it.
+    /// </summary>
+    internal bool UseDoneTaken { get; set; }
+
+    /// <summary>
+    /// M6 14 recall unblock (the cascade guard, m6-owed-usedone): true once an older action's owed UseDone was paid with a UseDone that came while this tracker waited for its own. That UseDone may have been this one's
+    /// (the owe guessed), so when this tracker ends without one it owes none: one wrong guess never drops the next action's UseDone too.
+    /// </summary>
+    internal bool UseDoneDebtPaid { get; set; }
+
+    /// <summary>True while the tracker still waits for its own UseDone: it ends with one (<see cref="ConsumesUseDone"/>) and has not taken one (<see cref="UseDoneTaken"/>).</summary>
+    internal bool AwaitsUseDone => ConsumesUseDone && !UseDoneTaken;
+
+    /// <summary>
+    /// M6 14 recall unblock (m6-owed-usedone): true when the UseDone arriving now is provably this action's own, because the server has visibly answered it since its send: an open's container view arrived (ACE sends the UseDone right
+    /// behind the 0196), a cast's projectile, enchantment or fizzle came, a drink's potion was spent. ACE answers one player's actions in order and refuses (or queues) a new cast or use while busy, so a UseDone an older action still
+    /// owed would have come before this action began: such a debt is void. Asked only while <see cref="AwaitsUseDone"/>. Default false: nothing proves it.
+    /// </summary>
+    internal virtual bool ClaimsUseDone(ActionApi api) => false;
+
+    /// <summary>
+    /// M6 14 recall unblock: true when a lane hold has passed a bound of its own, shorter than the tracker's timeout (an opened container's hold, <see cref="ActionPolicy.OpenContainerUseDoneSeconds"/> after its view arrived).
+    /// The Action API lets the hold go then, named in the log. Default false: the timeout counted from the send is the only bound.
+    /// </summary>
+    internal virtual bool HoldBoundPassed(double now) => false;
+
     /// <summary>An object's motion was accepted (F74C), the player's own included. Called for every tracker in flight.</summary>
     internal virtual void OnMotion(in ObjectMotionChanged e, ActionApi api)
     {

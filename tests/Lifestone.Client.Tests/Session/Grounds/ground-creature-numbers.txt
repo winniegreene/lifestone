@@ -1,0 +1,330 @@
+[black-spawn-den-aluvian]
+target 1628 Tusker Slave level 80 role Target health 400 defence 219 xp none drain 1
+target 1629 Tusker Guard level 80 role Target health 400 defence 244 xp none drain 1
+target 23 Virindi Servant level 40 role Avoid health 0 defence 0 xp none drain 1
+target 237 Virindi Master level 50 role Avoid health 0 defence 0 xp none drain 1
+target 1609 Drudge Stalker level 50 role Avoid health 0 defence 0 xp none drain 1
+target 1610 Drudge Ravener level 80 role Avoid health 0 defence 0 xp none drain 1
+kind 23 health 125 from the world database's creature table defence 171 drain 1 xp 7000 awareness 18 pinned False run none scale none
+kind 237 health 145 from the world database's creature table defence 191 drain 1 xp 10000 awareness 18 pinned False run none scale none
+kind 1609 health 167 from the world database's creature table defence 163 drain 1 xp 10000 awareness 24 pinned True run none scale none
+kind 1610 health 258 from the world database's creature table defence 211 drain 1 xp 30000 awareness 24 pinned True run none scale none
+kind 1628 health 400 from the world database's creature table defence 219 drain 1 xp 30000 awareness 18 pinned False run none scale none
+kind 1629 health 400 from tusker-armory:approach max_health defence 244 drain 1 xp 30000 awareness 18 pinned False run 230 scale 1
+[black-spawn-den-sho]
+target 1628 Tusker Slave level 80 role Target health 400 defence 219 xp none drain 1
+target 1629 Tusker Guard level 80 role Target health 400 defence 244 xp none drain 1
+target 23 Virindi Servant level 40 role Avoid health 0 defence 0 xp none drain 1
+target 237 Virindi Master level 50 role Avoid health 0 defence 0 xp none drain 1
+target 1609 Drudge Stalker level 50 role Avoid health 0 defence 0 xp none drain 1
+target 1610 Drudge Ravener level 80 role Avoid health 0 defence 0 xp none drain 1
+kind 23 health 125 from the world database's creature table defence 171 drain 1 xp 7000 awareness 18 pinned False run none scale none
+kind 237 health 145 from the world database's creature table defence 191 drain 1 xp 10000 awareness 18 pinned False run none scale none
+kind 1609 health 167 from the world database's creature table defence 163 drain 1 xp 10000 awareness 24 pinned True run none scale none
+kind 1610 health 258 from the world database's creature table defence 211 drain 1 xp 30000 awareness 24 pinned True run none scale none
+kind 1628 health 400 from the world database's creature table defence 219 drain 1 xp 30000 awareness 18 pinned False run none scale none
+kind 1629 health 400 from tusker-armory:approach max_health defence 244 drain 1 xp 30000 awareness 18 pinned False run 230 scale 1
+[cave-of-alabree]
+target 4110 Blood Shreth level 8 role Target health 38 defence 33 xp none drain 1
+target 4111 Hunter Shreth level 15 role Target health 50 defence 63 xp none drain 1
+target 26684 Blood Shrethlet level 7 role Target health 20 defence 33 xp none drain 1
+target 26687 Hunter Shrethlet level 11 role Target health 35 defence 63 xp none drain 1
+kind 4110 health 38 from the world database's creature table defence 33 drain 1 xp 1000 awareness 8 pinned True run none scale none
+kind 4111 health 50 from the world database's creature table defence 63 drain 1 xp 2000 awareness 10 pinned True run none scale none
+kind 26684 health 20 from the world database's creature table defence 33 drain 1 xp 325 awareness 8 pinned True run none scale none
+kind 26687 health 35 from the world database's creature table defence 63 drain 1 xp 649 awareness 10 pinned True run none scale none
+[crater-caves]
+target 199 Magma Golem level 100 role Target health 455 defence 263 xp none drain 1
+target 7126 Cursed Wisp level 80 role Target health 225 defence 285 xp none drain 1
+target 7607 Ember level 80 role Target health 220 defence 243 xp none drain 1
+target 23082 Nubilous Golem level 80 role Target health 275 defence 187 xp none drain 1
+kind 199 health 455 from the world database's creature table defence 263 drain 1 xp 80000 awareness 18 pinned False run none scale none
+kind 7126 health 225 from the world database's creature table defence 285 drain 1 xp 30000 awareness 18 pinned False run none scale none
+kind 7607 health 220 from the world database's creature table defence 243 drain 1 xp 30000 awareness 18 pinned False run none scale none
+kind 23082 health 275 from the world database's creature table defence 187 drain 1 xp 30000 awareness 18 pinned False run none scale none
+[holtburg-outskirts]
+outdoor 2566 Black Rabbit level 4 health 5 drain 1
+outdoor 24937 Chicken level 4 health 3 drain 1
+outdoor 19263 Gnawer Shreth level 8 health 15 drain 1
+outdoor 26686 Gnawer Shrethlet level 2 health 8 drain 1
+outdoor 19261 Creeper Mosswart level 8 health 47 drain 1
+outdoor 19257 Drudge Skulker level 8 health 42 drain 1
+outdoor 19258 Drudge Slinker level 8 health 40 drain 1
+outdoor 19259 Mite Scion level 8 health 25 drain 1
+outdoor 19260 Mite Snippet level 8 health 20 drain 1
+outdoor 19256 Young Banderling level 8 health 43 drain 1
+outdoor 19262 Young Mosswart level 8 health 47 drain 1
+kind 2566 health 5 from the world database's creature table defence 3 drain 1 xp 800 awareness 18 pinned False run none scale none
+kind 19256 health 43 from the world database's creature table defence 12 drain 1 xp 1000 awareness 18 pinned False run none scale none
+kind 19257 health 42 from the world database's creature table defence 9 drain 1 xp 1000 awareness 18 pinned False run none scale none
+kind 19258 health 40 from the world database's creature table defence 13 drain 1 xp 1000 awareness 18 pinned False run none scale none
+kind 19259 health 25 from the world database's creature table defence 38 drain 1 xp 1000 awareness 18 pinned False run none scale none
+kind 19260 health 20 from the world database's creature table defence 36 drain 1 xp 1000 awareness 18 pinned False run none scale none
+kind 19261 health 47 from the world database's creature table defence 44 drain 1 xp 1000 awareness 18 pinned False run none scale none
+kind 19262 health 47 from the world database's creature table defence 44 drain 1 xp 1000 awareness 18 pinned False run none scale none
+kind 19263 health 15 from the world database's creature table defence 12 drain 1 xp 1000 awareness 18 pinned False run none scale none
+kind 24937 health 3 from the world database's creature table defence 5 drain 1 xp 800 awareness 18 pinned False run none scale none
+kind 26686 health 8 from the world database's creature table defence 12 drain 1 xp 35 awareness 18 pinned False run none scale none
+[low-b-belt]
+outdoor 182 Auroch Yearling level 4 health 0 drain 1
+outdoor 26684 Blood Shrethlet level 7 health 0 drain 1
+outdoor 6 Banderling Scout level 8 health 0 drain 1
+outdoor 4110 Blood Shreth level 8 health 0 drain 1
+outdoor 215 Blue Phyntos Wasp level 8 health 0 drain 1
+outdoor 192 Drudge Prowler level 8 health 0 drain 1
+outdoor 1464 Drudge Robber level 8 health 0 drain 1
+outdoor 7 Drudge Skulker level 8 health 0 drain 1
+outdoor 193 Drudge Slinker level 8 health 0 drain 1
+outdoor 940 Drudge Sneaker level 8 health 0 drain 1
+outdoor 7990 Field Ursuin level 8 health 0 drain 1
+outdoor 948 Mosswart Feeder level 8 health 0 drain 1
+outdoor 2612 Outcast Monouga level 8 health 0 drain 1
+outdoor 12017 Red Phyntos Drone level 8 health 0 drain 1
+outdoor 12 Red Phyntos Wasp level 8 health 0 drain 1
+outdoor 223 Reedshark Pup level 8 health 0 drain 1
+outdoor 6535 Small Shadow Child level 8 health 0 drain 1
+outdoor 20 Auroch Bull level 9 health 0 drain 1
+outdoor 181 Auroch Cow level 9 health 0 drain 1
+outdoor 26689 Field Ursuin Cub level 9 health 0 drain 1
+outdoor 26687 Hunter Shrethlet level 11 health 0 drain 1
+outdoor 221 Adult Reedshark level 15 health 0 drain 1
+outdoor 937 Banderling Guard level 15 health 0 drain 1
+outdoor 947 Barker Mosswart level 15 health 0 drain 1
+outdoor 1631 Drudge Servant level 15 health 0 drain 1
+outdoor 1632 Drudge Slave level 15 health 0 drain 1
+outdoor 11989 Drudge Vagabond level 15 health 0 drain 1
+outdoor 4111 Hunter Shreth level 15 health 0 drain 1
+outdoor 1622 Mire Phyntos Wasp level 15 health 0 drain 1
+outdoor 211 Mudlurk Mosswart level 15 health 0 drain 1
+outdoor 12004 Outcast Lord level 15 health 0 drain 1
+outdoor 18 Reedshark Elder level 15 health 0 drain 1
+outdoor 222 Veteran Reedshark level 15 health 0 drain 1
+outdoor 11537 Virtuous Doll level 15 health 0 drain 1
+outdoor 8010 Broken Fragment level 20 health 0 drain 1
+outdoor 946 Mite Squire level 20 health 0 drain 1
+outdoor 233 Tumerok Warrior level 30 health 0 drain 1
+kind 6 health 43 from the world database's creature table defence 27 drain 1 xp 1000 awareness 22 pinned True run none scale none
+kind 7 health 42 from the world database's creature table defence 9 drain 1 xp 1000 awareness 10 pinned True run none scale none
+kind 12 health 35 from the world database's creature table defence 23 drain 1 xp 1000 awareness 10 pinned True run none scale none
+kind 18 health 60 from the world database's creature table defence 48 drain 1 xp 2000 awareness 24 pinned True run none scale none
+kind 20 health 85 from the world database's creature table defence 28 drain 1 xp 420 awareness 22 pinned True run none scale none
+kind 181 health 80 from the world database's creature table defence 28 drain 1 xp 445 awareness 22 pinned True run none scale none
+kind 182 health 55 from the world database's creature table defence 16 drain 1 xp 108 awareness 22 pinned True run none scale none
+kind 192 health 36 from the world database's creature table defence 12 drain 1 xp 1000 awareness 12 pinned True run none scale none
+kind 193 health 40 from the world database's creature table defence 13 drain 1 xp 1000 awareness 10 pinned True run none scale none
+kind 211 health 75 from the world database's creature table defence 68 drain 1 xp 2000 awareness 24 pinned True run none scale none
+kind 215 health 35 from the world database's creature table defence 51 drain 1 xp 1000 awareness 10 pinned True run none scale none
+kind 221 health 60 from the world database's creature table defence 46 drain 1 xp 2000 awareness 22 pinned True run none scale none
+kind 222 health 60 from the world database's creature table defence 66 drain 1 xp 2000 awareness 24 pinned True run none scale none
+kind 223 health 41 from the world database's creature table defence 25 drain 1 xp 1000 awareness 22 pinned True run none scale none
+kind 233 health 103 from the world database's creature table defence 113 drain 1 xp 5000 awareness 15 pinned True run none scale none
+kind 937 health 73 from the world database's creature table defence 56 drain 1 xp 2000 awareness 22 pinned True run none scale none
+kind 940 health 47 from the world database's creature table defence 15 drain 1 xp 1000 awareness 10 pinned True run none scale none
+kind 946 health 85 from the world database's creature table defence 78 drain 1 xp 3500 awareness 18 pinned True run none scale none
+kind 947 health 75 from the world database's creature table defence 79 drain 1 xp 2000 awareness 18 pinned True run none scale none
+kind 948 health 47 from the world database's creature table defence 52 drain 1 xp 1000 awareness 25 pinned True run none scale none
+kind 1464 health 38 from the world database's creature table defence 12 drain 1 xp 1000 awareness 20 pinned True run none scale none
+kind 1622 health 65 from the world database's creature table defence 75 drain 1 xp 2000 awareness 30 pinned True run none scale none
+kind 1631 health 60 from the world database's creature table defence 42 drain 1 xp 2000 awareness 17 pinned True run none scale none
+kind 1632 health 60 from the world database's creature table defence 72 drain 1 xp 2000 awareness 18 pinned True run none scale none
+kind 2612 health 40 from the world database's creature table defence 17 drain 1 xp 1000 awareness 17 pinned True run none scale none
+kind 4110 health 38 from the world database's creature table defence 33 drain 1 xp 1000 awareness 8 pinned True run none scale none
+kind 4111 health 50 from the world database's creature table defence 63 drain 1 xp 2000 awareness 10 pinned True run none scale none
+kind 6535 health 40 from the world database's creature table defence 57 drain 1 xp 1000 awareness 17 pinned True run none scale none
+kind 7990 health 80 from the world database's creature table defence 52 drain 1 xp 1000 awareness 24 pinned True run none scale none
+kind 8010 health 30 from the world database's creature table defence 101 drain 1 xp 3500 awareness 12 pinned True run none scale none
+kind 11537 health 50 from the world database's creature table defence 69 drain 1 xp 2000 awareness 16 pinned True run none scale none
+kind 11989 health 58 from the world database's creature table defence 86 drain 1 xp 2000 awareness 12 pinned True run none scale none
+kind 12004 health 85 from the world database's creature table defence 63 drain 1 xp 2000 awareness 17 pinned True run none scale none
+kind 12017 health 50 from the world database's creature table defence 40 drain 1 xp 1000 awareness 10 pinned True run none scale none
+kind 26684 health 20 from the world database's creature table defence 33 drain 1 xp 325 awareness 8 pinned True run none scale none
+kind 26687 health 35 from the world database's creature table defence 63 drain 1 xp 649 awareness 10 pinned True run none scale none
+kind 26689 health 55 from the world database's creature table defence 52 drain 1 xp 485 awareness 14 pinned True run none scale none
+[low-north-forest-mix]
+outdoor 2612 Outcast Monouga level 8 health 0 drain 1
+outdoor 1756 Shadow Child level 15 health 0 drain 1
+outdoor 1760 Skeleton Warrior level 20 health 0 drain 1
+outdoor 1761 Skeleton Captain level 20 health 0 drain 1
+outdoor 2574 Rough Monouga level 20 health 0 drain 1
+outdoor 11528 Elaniwood Golem level 20 health 0 drain 1
+outdoor 213 Olthoi Nymph level 30 health 0 drain 1
+outdoor 235 Goldenback Tusker level 30 health 0 drain 1
+outdoor 1627 Tusker Crimsonback level 30 health 0 drain 1
+outdoor 1758 Shadow level 30 health 0 drain 1
+outdoor 2575 Crude Monouga level 30 health 0 drain 1
+outdoor 2576 Wild Monouga level 30 health 0 drain 1
+outdoor 194 Copper Golem level 40 health 0 drain 1
+outdoor 1608 Drudge Lurker level 40 health 0 drain 1
+outdoor 1762 Skeleton Lord level 40 health 0 drain 1
+outdoor 22009 Olthoi Drone level 40 health 0 drain 1
+outdoor 24942 Gotrok Lithos level 40 health 0 drain 1
+outdoor 27254 Copper Golem Kingpin level 40 health 0 drain 1
+outdoor 28877 Nasty Scarecrow level 40 health 0 drain 1
+outdoor 3 Olthoi Worker level 50 health 0 drain 1
+outdoor 217 Gold Phyntos Wasp level 50 health 0 drain 1
+outdoor 1609 Drudge Stalker level 50 health 0 drain 1
+outdoor 1989 Shadow Wisp level 50 health 0 drain 1
+outdoor 7128 Sufut Zefir level 50 health 0 drain 1
+outdoor 7978 Scrawed Grievver level 50 health 0 drain 0.85
+outdoor 7979 Virulent Grievver level 50 health 0 drain 0.85
+outdoor 9251 Brutish Monouga level 50 health 0 drain 1
+outdoor 22010 Olthoi Servant level 50 health 0 drain 1
+outdoor 24940 Gotrok Gigas level 50 health 0 drain 1
+outdoor 24959 Olthoi Needler level 50 health 0 drain 1
+outdoor 28878 Naughty Scarecrow level 50 health 0 drain 1
+outdoor 28879 Nefarious Scarecrow level 50 health 0 drain 1
+outdoor 1630 Lich Lord level 60 health 0 drain 1
+outdoor 1757 Shadow Lieutenant level 60 health 0 drain 1
+outdoor 9253 Wily Monouga level 60 health 0 drain 1
+outdoor 34102 Old Zombie level 60 health 0 drain 1
+outdoor 1610 Drudge Ravener level 80 health 0 drain 1
+outdoor 4253 Panumbris Shadow level 80 health 0 drain 1
+kind 3 health 158 from the world database's creature table defence 208 drain 1 xp 10000 awareness 20 pinned True run none scale none
+kind 194 health 150 from the world database's creature table defence 157 drain 1 xp 7000 awareness 25 pinned True run none scale none
+kind 213 health 115 from the world database's creature table defence 170 drain 1 xp 5000 awareness 18 pinned True run none scale none
+kind 217 health 138 from the world database's creature table defence 179 drain 1 xp 10000 awareness 30 pinned True run none scale none
+kind 235 health 130 from the world database's creature table defence 103 drain 1 xp 5000 awareness 25 pinned True run none scale none
+kind 1608 health 117 from the world database's creature table defence 113 drain 1 xp 7000 awareness 24 pinned True run none scale none
+kind 1609 health 167 from the world database's creature table defence 163 drain 1 xp 10000 awareness 24 pinned True run none scale none
+kind 1610 health 258 from the world database's creature table defence 211 drain 1 xp 30000 awareness 24 pinned True run none scale none
+kind 1627 health 110 from the world database's creature table defence 94 drain 1 xp 5000 awareness 24 pinned True run none scale none
+kind 1630 health 235 from the world database's creature table defence 185 drain 1 xp 17500 awareness 18 pinned True run none scale none
+kind 1756 health 75 from the world database's creature table defence 98 drain 1 xp 2000 awareness 17 pinned True run none scale none
+kind 1757 health 185 from the world database's creature table defence 204 drain 1 xp 17500 awareness 25 pinned True run none scale none
+kind 1758 health 115 from the world database's creature table defence 108 drain 1 xp 5000 awareness 30 pinned True run none scale none
+kind 1760 health 95 from the world database's creature table defence 83 drain 1 xp 3500 awareness 24 pinned True run none scale none
+kind 1761 health 95 from the world database's creature table defence 102 drain 1 xp 3500 awareness 24 pinned True run none scale none
+kind 1762 health 108 from the world database's creature table defence 136 drain 1 xp 7000 awareness 16 pinned True run none scale none
+kind 1989 health 120 from the world database's creature table defence 156 drain 1 xp 10000 awareness 35 pinned True run none scale none
+kind 2574 health 115 from the world database's creature table defence 47 drain 1 xp 3500 awareness 21 pinned True run none scale none
+kind 2575 health 125 from the world database's creature table defence 94 drain 1 xp 5000 awareness 23 pinned True run none scale none
+kind 2576 health 130 from the world database's creature table defence 68 drain 1 xp 5000 awareness 24 pinned True run none scale none
+kind 2612 health 40 from the world database's creature table defence 17 drain 1 xp 1000 awareness 17 pinned True run none scale none
+kind 4253 health 255 from the world database's creature table defence 212 drain 1 xp 30000 awareness 28 pinned True run none scale none
+kind 7128 health 90 from the world database's creature table defence 214 drain 1 xp 10000 awareness 25 pinned True run none scale none
+kind 7978 health 140 from the world database's creature table defence 167 drain 0.85 xp 10000 awareness 10 pinned True run none scale none
+kind 7979 health 140 from the world database's creature table defence 227 drain 0.85 xp 10000 awareness 10 pinned True run none scale none
+kind 9251 health 190 from the world database's creature table defence 163 drain 1 xp 10000 awareness 21 pinned True run none scale none
+kind 9253 health 190 from the world database's creature table defence 185 drain 1 xp 17500 awareness 21 pinned True run none scale none
+kind 11528 health 140 from the world database's creature table defence 89 drain 1 xp 3500 awareness 13 pinned True run none scale none
+kind 22009 health 126 from the world database's creature table defence 161 drain 1 xp 7000 awareness 24 pinned True run none scale none
+kind 22010 health 158 from the world database's creature table defence 176 drain 1 xp 10000 awareness 24 pinned True run none scale none
+kind 24940 health 200 from the world database's creature table defence 191 drain 1 xp 10000 awareness 23 pinned True run none scale none
+kind 24942 health 140 from the world database's creature table defence 146 drain 1 xp 7000 awareness 22 pinned True run none scale none
+kind 24959 health 160 from the world database's creature table defence 181 drain 1 xp 10000 awareness 28 pinned True run none scale none
+kind 27254 health 1100 from the world database's creature table defence 134 drain 1 xp 14000 awareness 13 pinned True run none scale none
+kind 28877 health 130 from the world database's creature table defence 150 drain 1 xp 7000 awareness 18 pinned True run none scale none
+kind 28878 health 158 from the world database's creature table defence 184 drain 1 xp 10000 awareness 18 pinned True run none scale none
+kind 28879 health 183 from the world database's creature table defence 206 drain 1 xp 10000 awareness 18 pinned True run none scale none
+kind 34102 health 235 from the world database's creature table defence 214 drain 1 xp 17500 awareness 18 pinned True run none scale none
+[tusker-abode]
+target 22520 Tusker Redeemer level 60 role Target health 250 defence 171 xp none drain 1
+target 22600 Tusker Redeemer level 60 role Target health 250 defence 171 xp none drain 1
+target 22601 Tusker Redeemer level 60 role Target health 250 defence 171 xp none drain 1
+kind 22520 health 250 from the world database's creature table defence 171 drain 1 xp 17500 awareness 18 pinned False run none scale none
+kind 22600 health 250 from the world database's creature table defence 171 drain 1 xp 17500 awareness 18 pinned False run none scale none
+kind 22601 health 250 from the world database's creature table defence 171 drain 1 xp 17500 awareness 18 pinned False run none scale none
+[tusker-armory]
+target 11540 Armored Tusker level 100 role Target health 435 defence 275 xp 80000 drain 0
+target 22611 Armored Tusker level 100 role Target health 435 defence 275 xp 80000 drain 0
+hostile 7184 Silver Tusker health 400 defence 239 xp 30000 awareness 25 resist acid=0.75,bludgeon=0.75,cold=0.75,electric=0.25,fire=1,pierce=1,slash=0.5 run none motion none scale none drain 1
+hostile 11540 Armored Tusker health 435 defence 275 xp 80000 awareness 25 resist acid=0.75,bludgeon=0.75,cold=0.75,electric=0.25,fire=1,pierce=1,slash=0.42 run none motion none scale none drain 0
+hostile 1629 Tusker Guard health 400 defence 244 xp 30000 awareness 25 resist acid=0.75,bludgeon=0.75,cold=0.75,electric=0.25,fire=1,pierce=1,slash=0.5 run none motion none scale none drain 1
+hostile 4244 Stinging Chittick health 490 defence 280 xp 80000 awareness 22 resist acid=1,bludgeon=0.5,cold=0.7,electric=0.65,fire=0.65,pierce=1,slash=0.6 run none motion none scale none drain 1
+hostile 22746 Reedshark Ravager health 375 defence 335 xp 80000 awareness 24 resist acid=0.75,bludgeon=0.6,cold=1,electric=0.75,fire=0.38,pierce=0.75,slash=1 run none motion none scale none drain 1
+kind 1629 health 400 from tusker-armory:approach max_health defence 244 drain 1 xp 30000 awareness 18 pinned False run 230 scale 1
+kind 4244 health 490 from tusker-armory:approach max_health defence 280 drain 1 xp 80000 awareness 18 pinned False run 185 scale 1.2
+kind 7184 health 400 from tusker-armory:approach max_health defence 239 drain 1 xp 30000 awareness 18 pinned False run 250 scale 1.2
+kind 11540 health 435 from tusker-armory:targets max_health defence 275 drain 0 xp 80000 awareness 18 pinned False run 200 scale 1.2
+kind 22611 health 435 from tusker-armory:targets max_health defence 275 drain 0 xp 80000 awareness 18 pinned False run none scale none
+kind 22746 health 375 from tusker-armory:approach max_health defence 335 drain 1 xp 80000 awareness 18 pinned False run 265 scale 2.2
+[tusker-barracks]
+target 1629 Tusker Guard level 80 role Target health 400 defence 244 xp 30000 drain 1
+target 22593 Tusker Guard level 80 role Target health 400 defence 244 xp 30000 drain 1
+hostile 7184 Silver Tusker health 400 defence 239 xp 30000 awareness 25 resist acid=0.75,bludgeon=0.75,cold=0.75,electric=0.25,fire=1,pierce=1,slash=0.5 run 250 motion 0900000C scale 1.2 drain 1
+hostile 11540 Armored Tusker health 435 defence 275 xp 80000 awareness 25 resist acid=0.75,bludgeon=0.75,cold=0.75,electric=0.25,fire=1,pierce=1,slash=0.42 run 200 motion 0900000C scale 1.2 drain 0
+hostile 1629 Tusker Guard health 400 defence 244 xp 30000 awareness 25 resist acid=0.75,bludgeon=0.75,cold=0.75,electric=0.25,fire=1,pierce=1,slash=0.5 run 230 motion 0900000C scale 1 drain 1
+kind 1629 health 400 from tusker-armory:approach max_health defence 244 drain 1 xp 30000 awareness 18 pinned False run 230 scale 1
+kind 7184 health 400 from tusker-armory:approach max_health defence 239 drain 1 xp 30000 awareness 18 pinned False run 250 scale 1.2
+kind 11540 health 435 from tusker-armory:targets max_health defence 275 drain 0 xp 80000 awareness 18 pinned False run 200 scale 1.2
+kind 22593 health 400 from the world database's creature table defence 244 drain 1 xp 30000 awareness 18 pinned False run none scale none
+[tusker-burrow]
+target 236 Female Tusker level 15 role Target health 95 defence 54 xp none drain 1
+target 22589 Female Tusker level 15 role Target health 95 defence 54 xp none drain 1
+kind 236 health 95 from the world database's creature table defence 54 drain 1 xp 2000 awareness 18 pinned False run none scale none
+kind 22589 health 95 from the world database's creature table defence 54 drain 1 xp 2000 awareness 18 pinned False run none scale none
+[tusker-cave]
+target 1627 Tusker Crimsonback level 30 role Target health 110 defence 94 xp none drain 1
+target 22585 Tusker Crimsonback level 30 role Target health 110 defence 94 xp none drain 1
+kind 1627 health 110 from the world database's creature table defence 94 drain 1 xp 5000 awareness 24 pinned True run none scale none
+kind 22585 health 110 from the world database's creature table defence 94 drain 1 xp 5000 awareness 18 pinned False run none scale none
+[tusker-cavern]
+target 235 Goldenback Tusker level 30 role Target health 130 defence 103 xp none drain 1
+target 22591 Goldenback Tusker level 30 role Target health 130 defence 103 xp none drain 1
+kind 235 health 130 from the world database's creature table defence 103 drain 1 xp 5000 awareness 25 pinned True run none scale none
+kind 22591 health 130 from the world database's creature table defence 103 drain 1 xp 5000 awareness 18 pinned False run none scale none
+[tusker-habitat]
+target 22519 Tusker Liberator level 60 role Target health 250 defence 203 xp none drain 1
+target 22595 Tusker Liberator level 60 role Target health 250 defence 203 xp none drain 1
+kind 22519 health 250 from the world database's creature table defence 203 drain 1 xp 17500 awareness 18 pinned False run none scale none
+kind 22595 health 250 from the world database's creature table defence 203 drain 1 xp 17500 awareness 18 pinned False run none scale none
+[tusker-holding]
+target 10810 Rampager level 100 role Target health 435 defence 251 xp 80000 drain 1
+target 16916 Rampager level 100 role Target health 435 defence 251 xp 80000 drain 1
+target 22599 Rampager level 100 role Target health 435 defence 251 xp 80000 drain 1
+hostile 27800 Infected Assailer health 760 defence 302 xp 125000 awareness 25 resist acid=0.6,bludgeon=0.6,cold=0.7,electric=0.2,fire=1,pierce=1,slash=0.5 run 240 motion 0900000C scale 1.5 drain 0.75
+hostile 22053 Assailer health 760 defence 310 xp 125000 awareness 25 resist acid=0.75,bludgeon=0.75,cold=0.75,electric=0.25,fire=1,pierce=1,slash=0.5 run 270 motion 0900000C scale 1.5 drain 0.75
+hostile 10810 Rampager health 435 defence 251 xp 80000 awareness 25 resist acid=0.75,bludgeon=0.75,cold=0.75,electric=0.25,fire=1,pierce=1,slash=0.5 run 260 motion 0900000C scale 1.2 drain 1
+hostile 11540 Armored Tusker health 435 defence 275 xp 80000 awareness 25 resist acid=0.75,bludgeon=0.75,cold=0.75,electric=0.25,fire=1,pierce=1,slash=0.42 run 200 motion 0900000C scale 1.2 drain 0
+hostile 11541 Plated Tusker health 435 defence 321 xp 80000 awareness 25 resist acid=0.75,bludgeon=0.75,cold=0.75,electric=0.25,fire=1,pierce=1,slash=0.42 run 200 motion 0900000C scale 1.2 drain 0
+hostile 22747 Reaper health 517 defence 362 xp 125000 awareness 24 resist acid=0.75,bludgeon=0.6,cold=1,electric=0.75,fire=0.38,pierce=0.75,slash=1 run 335 motion 0900001A scale 2.3 drain 1
+hostile 22506 Iron Spined Chittick health 555 defence 323 xp 125000 awareness 22 resist acid=1,bludgeon=0.5,cold=0.7,electric=0.65,fire=0.65,pierce=1,slash=0.6 run 245 motion 09000079 scale 1.5 drain 1
+hostile 7184 Silver Tusker health 400 defence 239 xp 30000 awareness 25 resist acid=0.75,bludgeon=0.75,cold=0.75,electric=0.25,fire=1,pierce=1,slash=0.5 run 250 motion 0900000C scale 1.2 drain 1
+hostile 4244 Stinging Chittick health 490 defence 280 xp 80000 awareness 22 resist acid=1,bludgeon=0.5,cold=0.7,electric=0.65,fire=0.65,pierce=1,slash=0.6 run 185 motion 09000079 scale 1.2 drain 1
+hostile 22746 Reedshark Ravager health 375 defence 335 xp 80000 awareness 24 resist acid=0.75,bludgeon=0.6,cold=1,electric=0.75,fire=0.38,pierce=0.75,slash=1 run 265 motion 0900001A scale 2.2 drain 1
+hostile 1629 Tusker Guard health 400 defence 244 xp 30000 awareness 25 resist acid=0.75,bludgeon=0.75,cold=0.75,electric=0.25,fire=1,pierce=1,slash=0.5 run 230 motion 0900000C scale 1 drain 1
+kind 1629 health 400 from tusker-armory:approach max_health defence 244 drain 1 xp 30000 awareness 18 pinned False run 230 scale 1
+kind 4244 health 490 from tusker-armory:approach max_health defence 280 drain 1 xp 80000 awareness 18 pinned False run 185 scale 1.2
+kind 7184 health 400 from tusker-armory:approach max_health defence 239 drain 1 xp 30000 awareness 18 pinned False run 250 scale 1.2
+kind 10810 health 435 from tusker-holding:targets max_health defence 251 drain 1 xp 80000 awareness 18 pinned False run 260 scale 1.2
+kind 11540 health 435 from tusker-armory:targets max_health defence 275 drain 0 xp 80000 awareness 18 pinned False run 200 scale 1.2
+kind 11541 health 435 from tusker-holding:approach max_health defence 321 drain 0 xp 80000 awareness 18 pinned False run 200 scale 1.2
+kind 16916 health 435 from tusker-holding:targets max_health defence 251 drain 1 xp 80000 awareness 18 pinned False run none scale none
+kind 22053 health 760 from tusker-holding:approach max_health defence 310 drain 0.75 xp 125000 awareness 18 pinned False run 270 scale 1.5
+kind 22506 health 555 from tusker-holding:approach max_health defence 323 drain 1 xp 125000 awareness 18 pinned False run 245 scale 1.5
+kind 22599 health 435 from tusker-holding:targets max_health defence 251 drain 1 xp 80000 awareness 18 pinned False run none scale none
+kind 22746 health 375 from tusker-armory:approach max_health defence 335 drain 1 xp 80000 awareness 18 pinned False run 265 scale 2.2
+kind 22747 health 517 from tusker-holding:approach max_health defence 362 drain 1 xp 125000 awareness 18 pinned False run 335 scale 2.3
+kind 27800 health 760 from tusker-holding:approach max_health defence 302 drain 0.75 xp 125000 awareness 18 pinned False run 240 scale 1.5
+[tusker-lodge]
+target 11 Male Tusker level 20 role Target health 100 defence 63 xp none drain 1
+target 22597 Male Tusker level 20 role Target health 100 defence 63 xp none drain 1
+kind 11 health 100 from the world database's creature table defence 63 drain 1 xp 3500 awareness 18 pinned False run none scale none
+kind 22597 health 100 from the world database's creature table defence 63 drain 1 xp 3500 awareness 18 pinned False run none scale none
+[tusker-quarters]
+target 1628 Tusker Slave level 80 role Target health 400 defence 219 xp 30000 drain 1
+target 22605 Tusker Slave level 80 role Target health 400 defence 219 xp 30000 drain 1
+kind 1628 health 400 from the world database's creature table defence 219 drain 1 xp 30000 awareness 18 pinned False run none scale none
+kind 22605 health 400 from the world database's creature table defence 219 drain 1 xp 30000 awareness 18 pinned False run none scale none
+[tusker-temple-20-40]
+target 235 Goldenback Tusker level 30 role Target health 130 defence 103 xp none drain 1
+target 1627 Tusker Crimsonback level 30 role Target health 110 defence 94 xp none drain 1
+target 22511 Tusker Minion level 40 role Target health 90 defence 109 xp none drain 1
+target 22512 Tusker Minion level 40 role Target health 90 defence 146 xp none drain 1
+target 22641 Tusker Shrine Statue level 171 role Avoid health 370 defence 0 xp none drain 1
+kind 235 health 130 from the world database's creature table defence 103 drain 1 xp 5000 awareness 25 pinned True run none scale none
+kind 1627 health 110 from the world database's creature table defence 94 drain 1 xp 5000 awareness 24 pinned True run none scale none
+kind 22511 health 90 from the world database's creature table defence 109 drain 1 xp 7000 awareness 18 pinned False run none scale none
+kind 22512 health 90 from the world database's creature table defence 146 drain 1 xp 7000 awareness 18 pinned False run none scale none
+kind 22641 health 370 from the world database's creature table defence 76 drain 1 xp 13410 awareness 18 pinned False run none scale none
+[tusker-temple-fort-tethana]
+target 1628 Tusker Slave level 80 role Target health 400 defence 219 xp none drain 1
+target 1629 Tusker Guard level 80 role Target health 400 defence 244 xp none drain 1
+target 22515 Tusker Worshipper level 80 role Target health 170 defence 239 xp none drain 1
+target 22516 Tusker Worshipper level 80 role Target health 190 defence 268 xp none drain 1
+target 22641 Tusker Shrine Statue level 171 role Avoid health 370 defence 0 xp none drain 1
+kind 1628 health 400 from the world database's creature table defence 219 drain 1 xp 30000 awareness 18 pinned False run none scale none
+kind 1629 health 400 from tusker-armory:approach max_health defence 244 drain 1 xp 30000 awareness 18 pinned False run 230 scale 1
+kind 22515 health 170 from the world database's creature table defence 239 drain 1 xp 30000 awareness 18 pinned False run none scale none
+kind 22516 health 190 from the world database's creature table defence 268 drain 1 xp 30000 awareness 18 pinned False run none scale none
+kind 22641 health 370 from the world database's creature table defence 76 drain 1 xp 13410 awareness 18 pinned False run none scale none

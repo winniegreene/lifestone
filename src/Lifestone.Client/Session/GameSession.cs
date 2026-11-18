@@ -117,6 +117,22 @@ public sealed class GameSession : IGameSessionView, Lifestone.Client.RetailUi.Pa
     /// <inheritdoc/>
     public GameState State { get; }
 
+    /// <inheritdoc/>
+    public LivePositions Live { get; private set; } = LivePositions.ReportsOnly;
+
+    /// <summary>
+    /// M6 item 14 (<c>m6-live-position</c>): gives the session the bodies the screen draws (play mode's avatar set), so <see cref="Live"/> answers from a creature's body when it can be trusted; null takes them away
+    /// (the server's report answers again). A host without bodies never calls it. Logged, so a run's log says which record its fights read.
+    /// </summary>
+    /// <param name="bodies">The bodies, or null.</param>
+    public void UseBodies(ILiveBodies? bodies)
+    {
+        Live = bodies is null ? LivePositions.ReportsOnly : new LivePositions(bodies, Clock, _log);
+        _log.Info(SessionLog.Category, bodies is null
+            ? "live-position: no bodies are drawn; a creature stands where the server last reported it (m6-live-position)"
+            : "live-position: bodies are drawn; a creature stands where its body is, else where the server last reported it (m6-live-position)");
+    }
+
     /// <summary>The client-side cull (M5 item 0 c1): <see cref="ObjectCull.Pending"/> and <see cref="ObjectCull.Culled"/> for the soak line.</summary>
     public ObjectCull Cull => _reducer.Cull;
 
@@ -126,6 +142,16 @@ public sealed class GameSession : IGameSessionView, Lifestone.Client.RetailUi.Pa
     /// <inheritdoc/>
     public IActionApi Actions => _actions;
 
+    /// <summary>The guardian window's panes and buttons (M6 villa): the drawn <c>gmSlumlordUI</c> and the autopilot share it.</summary>
+    public Housing.GuardianWindowModel GuardianWindow => _guardianWindow ??= new Housing.GuardianWindowModel(State, _actions);
+
+    private Housing.GuardianWindowModel? _guardianWindow;
+
+    /// <inheritdoc/>
+    public GuardianWindowView GuardianView => _guardianView ??= new GuardianWindowView(State, GuardianWindow);
+
+    private GuardianWindowView? _guardianView;
+
     /// <inheritdoc/>
     public AttackSequence Attack => _reducer.Attack;
 
@@ -134,6 +160,23 @@ public sealed class GameSession : IGameSessionView, Lifestone.Client.RetailUi.Pa
     {
         get => _actions.RetailCastAnyMode;
         set => _actions.RetailCastAnyMode = value;
+    }
+
+    /// <summary>True for <c>--allow-climber-grant</c> (M6 0 F5, 0-R4): this session may grant or place the climber Winnie (item 8's one Alchemy grant, D34). Default false: the tools refuse it by name.</summary>
+    public bool AllowClimberGrant
+    {
+        get => _actions.AllowClimberGrant;
+        set => _actions.AllowClimberGrant = value;
+    }
+
+    /// <summary>
+    /// True (the default) for <c>--autopilot-player-rules=on</c> (M6 item 15, the owner's order): every spell an automation action casts is on one of the character's spell bars (added as a player adds it, before the cast) and every
+    /// potion or tincture it drinks is on the shortcut bar; a cast or drink that is still on no bar is refused by name. False lifts the whole rule for this session.
+    /// </summary>
+    public bool PlayerRules
+    {
+        get => _actions.PlayerRules.On;
+        set => _actions.PlayerRules.On = value;
     }
 
     /// <inheritdoc/>
@@ -266,6 +309,9 @@ public sealed class GameSession : IGameSessionView, Lifestone.Client.RetailUi.Pa
 
     /// <inheritdoc/>
     public void CloseVendorWindow() => _reducer.CloseOpenVendor("the player closed the vendor window");
+
+    /// <inheritdoc/>
+    public void CloseGuardianWindow() => _reducer.CloseOpenGuardian("the player closed the guardian window");
 
     /// <summary>The Action API (tests, the replayer's action notices, the inspector).</summary>
     internal ActionApi ActionApi => _actions;

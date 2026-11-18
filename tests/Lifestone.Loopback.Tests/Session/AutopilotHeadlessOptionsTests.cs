@@ -33,6 +33,20 @@ public sealed class AutopilotHeadlessOptionsTests
     }
 
     [Fact]
+    public void With_the_level_up_job_the_plan_is_the_jobs_as_the_play_hosts_is_and_the_den_job_is_unchanged()
+    {
+        // M6 16 E0b: the headless host reaches the level up job (HeadlessClimbScenario); its login enters the ladder's character on its test account, the play host's own rule (AutopilotHostLogic.PlanFor).
+        var o = HeadlessOptions.Parse(["--scenario=autopilot", "--autopilot-job=level-up"]);
+        Assert.Empty(o.Errors);
+        Assert.Equal(Lifestone.Client.Session.Autopilot.AutopilotJob.LevelUp, o.Autopilot.Job);
+        Assert.Equal(Lifestone.Client.Session.Autopilot.AutopilotOptions.LadderCharacter, o.Journey!.Character);
+        Assert.Equal("test", o.Session.Account);
+        Assert.Contains("runs the climber plan only", Assert.Single(HeadlessOptions.Parse(["--scenario=autopilot", "--autopilot-job=level-up", "--journey=mage"]).Errors), StringComparison.Ordinal);
+
+        Assert.Equal("BSD Mage", HeadlessOptions.Parse(["--scenario=autopilot", "--autopilot-job=den"]).Journey!.Character);
+    }
+
+    [Fact]
     public void The_autopilot_options_belong_to_the_autopilot_scenario_alone()
     {
         var error = Assert.Single(HeadlessOptions.Parse(["--scenario=journey", "--journey=mage", "--autopilot-minutes=5"]).Errors);

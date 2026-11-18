@@ -1,3 +1,4 @@
+using DatReaderWriter.Enums;
 using Lifestone.Client.Session.Grounds;
 using Lifestone.Data.Magic;
 
@@ -10,7 +11,7 @@ namespace Lifestone.Client.Session.Mage;
 /// spell of the profile needs (the bolt's, a buff's, a mana line's, the fight's extras: the Pyreal, Platinum, Silver and Gold Scarabs) keeps today's stop: the run cannot fight without it. A line a vendor sells keeps its trip and stop.
 /// </summary>
 /// <remarks>
-/// The components are read on the foci formula (<see cref="GearKit.FociFormulaCounts"/>, the formula the mage casts with: BSD Mage holds the Foci of Strife), as <c>FightScenario.WarKitCarries</c> reads them. A spell missing from the
+/// The components are read on the foci formula (<see cref="GearKit.FociFormulaCounts"/>, the formula the mage casts with: BSD Mage holds the Foci of Strife), as <c>FightScenario.WarKitCarries</c> reads them. M6 item 1 g: with an account name a spell of a school whose focus is not held is read on the account's full formula (<see cref="AccountFormula"/>; the hosts pass the login name the server hashes; <c>TODO(m6-account-formula-callers)</c> is closed (M6 1 w), and a host with no login name passes none, so the foci rule applies, <c>TODO(j4-kit-account)</c>). A spell missing from the
 /// table is left out (it cannot be cast either). The travel spells (Lifestone and portal recalls) are not profile lines: a carried line one of them needs would be judged floor-only (<c>TODO(m5-floor-travel-spells)</c>; the den's travel
 /// spells burn the Copper Scarab, which Holtburg sells).
 /// </remarks>
@@ -19,7 +20,9 @@ public static class ComponentFloor
     /// <summary>The floor-only carried lines of <paramref name="ground"/> by weenie class id, each with the names of the war options that need it (in the profile's order); empty with no spell table.</summary>
     /// <param name="ground">The ground (its stock lines and which are carried).</param>
     /// <param name="spells">The SpellTable's spells (their formulas); null or empty: none is floor-only (today's stop for every carried line).</param>
-    public static IReadOnlyDictionary<uint, IReadOnlyList<string>> FloorOnly(HuntingGround ground, IReadOnlyDictionary<uint, SpellInfo>? spells)
+    /// <param name="accountName">M6 item 1 g (closes <c>m6-outskirts-account-formula</c>): the account's name, so a school whose focus is not held is read on the account's full formula (<see cref="AccountFormula"/>); null or empty: every spell on the foci formula (today's rule).</param>
+    /// <param name="holdsFocus">Whether the character holds a school's focus; null: none is held (read only with an <paramref name="accountName"/>).</param>
+    public static IReadOnlyDictionary<uint, IReadOnlyList<string>> FloorOnly(HuntingGround ground, IReadOnlyDictionary<uint, SpellInfo>? spells, string? accountName = null, Func<MagicSchool, bool>? holdsFocus = null)
     {
         ArgumentNullException.ThrowIfNull(ground);
         var result = new Dictionary<uint, IReadOnlyList<string>>();
@@ -65,7 +68,7 @@ public static class ComponentFloor
                 return;
             }
 
-            foreach (var (component, _) in GearKit.FociFormulaCounts(info.Formula))
+            foreach (var (component, _) in SlotsOf(info, accountName, holdsFocus))
             {
                 if (!ComponentWeenies.TryGetByComponent(component, out var weenie))
                 {
@@ -98,12 +101,14 @@ public static class ComponentFloor
     /// <param name="info">The spell.</param>
     /// <param name="counters">The counters (made with the floor-only lines).</param>
     /// <param name="line">The line at its floor: its name, the count held and its stop line.</param>
-    public static bool NeedsLineAtFloor(SpellInfo info, LogisticsCounters counters, out string line)
+    /// <param name="accountName">As <see cref="FloorOnly"/>: the account's name for a school without its focus; null or empty: the foci formula.</param>
+    /// <param name="holdsFocus">As <see cref="FloorOnly"/>.</param>
+    public static bool NeedsLineAtFloor(SpellInfo info, LogisticsCounters counters, out string line, string? accountName = null, Func<MagicSchool, bool>? holdsFocus = null)
     {
         ArgumentNullException.ThrowIfNull(info);
         ArgumentNullException.ThrowIfNull(counters);
         line = string.Empty;
-        foreach (var (component, _) in GearKit.FociFormulaCounts(info.Formula))
+        foreach (var (component, _) in SlotsOf(info, accountName, holdsFocus))
         {
             if (!ComponentWeenies.TryGetByComponent(component, out var weenie))
             {
@@ -122,4 +127,8 @@ public static class ComponentFloor
 
         return false;
     }
+
+    /// <summary>The components a cast of <paramref name="info"/> burns: the foci formula, or with an <paramref name="accountName"/> and no focus of the spell's school (<paramref name="holdsFocus"/>) the account's full formula (<see cref="AccountFormula"/>).</summary>
+    private static Dictionary<uint, int> SlotsOf(SpellInfo info, string? accountName, Func<MagicSchool, bool>? holdsFocus) =>
+        string.IsNullOrEmpty(accountName) ? GearKit.FociFormulaCounts(info.Formula) : AccountFormula.Counts(info, holdsFocus?.Invoke(info.School) ?? false, accountName);
 }

@@ -210,6 +210,61 @@ public sealed class NavMap
         return new CellFrame(LandDefs.LandCoordToCellId(lx, ly), new AcFrame(p.Local, Quaternion.Identity));
     }
 
+    /// <summary>The coarse regions of an attached tile, in the order <see cref="LinksOf"/> numbers them (the world walk's graph, W2). A landblock with no tile has none.</summary>
+    /// <param name="landblockId">The landblock, 0xXXYY0000.</param>
+    public IReadOnlyList<NavRegionRead> RegionsOf(uint landblockId)
+    {
+        int slot = SlotOfBlock((int)(landblockId >> 24), (int)((landblockId >> 16) & 0xFF));
+        if (slot < 0)
+        {
+            return [];
+        }
+
+        var regions = _graphs[slot]!.Regions;
+        var read = new NavRegionRead[regions.Count];
+        for (int i = 0; i < read.Length; i++)
+        {
+            read[i] = new NavRegionRead(regions[i].Cell, regions[i].Count, regions[i].Centroid);
+        }
+
+        return read;
+    }
+
+    /// <summary>The regions a step leads to from one region, inside its tile and across its edges into attached tiles: a drop links one way only (the world walk's graph, W2).</summary>
+    /// <param name="landblockId">The landblock, 0xXXYY0000.</param>
+    /// <param name="region">The region's index in <see cref="RegionsOf"/>.</param>
+    /// <param name="into">Receives each link's landblock and region.</param>
+    public void LinksOf(uint landblockId, int region, List<(uint Landblock, int Region)> into)
+    {
+        ArgumentNullException.ThrowIfNull(into);
+        int slot = SlotOfBlock((int)(landblockId >> 24), (int)((landblockId >> 16) & 0xFF));
+        if (slot < 0)
+        {
+            return;
+        }
+
+        foreach (int packed in _graphs[slot]!.Edges[region])
+        {
+            into.Add((_tiles[packed >> 16]!.LandblockId, packed & 0xFFFF));
+        }
+    }
+
+    /// <summary>The region of a tile's node, numbered as in <see cref="RegionsOf"/>; -1 when the node is in none or the tile is not attached.</summary>
+    /// <param name="landblockId">The landblock, 0xXXYY0000.</param>
+    /// <param name="x">The node's x on its tile.</param>
+    /// <param name="y">The node's y on its tile.</param>
+    public int RegionAt(uint landblockId, int x, int y)
+    {
+        int slot = SlotOfBlock((int)(landblockId >> 24), (int)((landblockId >> 16) & 0xFF));
+        if (slot < 0)
+        {
+            return -1;
+        }
+
+        ushort region = _graphs[slot]!.RegionOf[NavTile.Index(x, y)];
+        return region == NoRegion ? -1 : region;
+    }
+
     /// <summary>The coarse regions of one attached tile's land cell (tests and the audit).</summary>
     internal int RegionsInCell(uint landblockId, int cellX, int cellY)
     {
@@ -238,6 +293,8 @@ public sealed class NavMap
         (uint)bx < LandDefs.BlocksPerSide && (uint)by < LandDefs.BlocksPerSide ? _slotOfBlock[(bx << 8) | by] : -1;
 
     internal NavTile TileOfSlot(int slot) => _tiles[slot]!;
+
+    internal int RegionCountOfSlot(int slot) => _graphs[slot]!.Regions.Count;
 
     internal bool TryNode(Vector2 global, out int node) =>
         TryNodeG((int)MathF.Floor(global.X), (int)MathF.Floor(global.Y), out node);
@@ -369,11 +426,20 @@ public sealed class NavMap
     /// <summary>
     /// The lattice line of sight with the planner's extras: no node flagged with any of <paramref name="avoid"/> (the costed
     /// water or slope the node path kept off), and the live scars (those flagged in <paramref name="scarIgnored"/> skipped:
-    /// the scar the start stands in).
+    /// the scar the start stands in). M6 14 (m6-14-plaza2): the scars are judged by the line's exact distance from each disc's centre, as the runner judges a plan's line against its kept portals
+    /// (<see cref="PortalKeepOff.FirstMeeting(Vector2, float, Vector2, float)"/>), not by the centres of the nodes it crosses, which let a pulled line dip up to half a node's diagonal into a disc (live ladder63, 2026-11-17 18:06:38 UTC).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     internal bool Sight(Vector2 a, Vector2 b, int minClearance, NavFlags avoid, NavScar[] scars, bool[] scarIgnored, int scarCount)
     {
+        for (int k = 0; k < scarCount; k++)
+        {
+            if (!scarIgnored[k] && SegmentDistance2(scars[k].Centre, a, b) <= scars[k].Radius * scars[k].Radius)
+            {
+                return false;
+            }
+        }
+
         float len = Vector2.Distance(a, b);
         int n = Math.Max(1, (int)MathF.Ceiling(len / SightSampleMetres));
         int prev = -1;
@@ -403,14 +469,6 @@ public sealed class NavMap
                 return false;
             }
 
-            for (int k = 0; k < scarCount; k++)
-            {
-                if (!scarIgnored[k] && Vector2.DistanceSquared(new Vector2(gx + 0.5f, gy + 0.5f), scars[k].Centre) <= scars[k].Radius * scars[k].Radius)
-                {
-                    return false;
-                }
-            }
-
             if (prev >= 0)
             {
                 if (!StepRule(Z(prev), tile.Z[i]))
@@ -435,6 +493,15 @@ public sealed class NavMap
         }
 
         return true;
+    }
+
+    /// <summary>The squared distance from <paramref name="p"/> to the segment from <paramref name="a"/> to <paramref name="b"/>.</summary>
+    private static float SegmentDistance2(Vector2 p, Vector2 a, Vector2 b)
+    {
+        var ab = b - a;
+        float len2 = ab.LengthSquared();
+        float t = len2 <= 0f ? 0f : Math.Clamp(Vector2.Dot(p - a, ab) / len2, 0f, 1f);
+        return Vector2.DistanceSquared(p, a + (ab * t));
     }
 
     // ---- the coarse graph ----
@@ -729,6 +796,12 @@ public sealed class NavMap
         public List<List<int>> Edges { get; } = [];
     }
 }
+
+/// <summary>A coarse region as <see cref="NavMap.RegionsOf"/> reads it.</summary>
+/// <param name="Cell">The land cell in its tile, cy x 8 + cx.</param>
+/// <param name="Nodes">The node count.</param>
+/// <param name="Centroid">The nodes' mean centre, global metres.</param>
+public readonly record struct NavRegionRead(int Cell, int Nodes, Vector2 Centroid);
 
 /// <summary>A coarse region: the walkable nodes of one land cell a body can walk between both ways.</summary>
 /// <param name="Cell">The land cell in its tile, cy x 8 + cx.</param>

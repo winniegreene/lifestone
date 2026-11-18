@@ -200,7 +200,7 @@ public sealed class MageLootRulesTests
         Assert.Equal(100, new MageLootThresholds().LoadLinePercent);
 
         var rig = new WorldActionRig();
-        Assert.Equal(GearKit.PackCapacity, MageLootRules.FreeSlots(rig.H.State));
+        Assert.Equal(GearKit.PackCapacity, Lifestone.Client.Session.Quartermaster.PackView.MainPackFree(rig.H.State));
     }
 
     private const uint Jewelry = 0x8;
@@ -217,7 +217,8 @@ public sealed class MageLootRulesTests
         Assert.Equal(4000, thresholds.MinPayout);
         Assert.Equal(150, thresholds.MaxItemBurden);
         Assert.Equal(85, thresholds.LoadLinePercent); // the loot section's load line
-        Assert.Equal(5, thresholds.Buyers.Count);
+        Assert.Equal(6, thresholds.Buyers.Count); // M6 14 grocer: Fispur Ansel the Grocer is the sixth (the scrivener's mask is 0: no buyer)
+        Assert.Equal(0.9, thresholds.BestRate(0x400000)); // the Empty Flask's type, CraftCookingBase: the Grocer's 0.9
         Assert.Equal(0.9, thresholds.BestRate(Jewelry));
         Assert.Equal(5040, thresholds.PayoutOf(Jewelry, 5600)); // ACE: floor(0.9 x 5600 + 0.1)
         var belt = new FightOptions { Loot = true, Ground = "low-b-belt" }.EffectiveLootThresholds;

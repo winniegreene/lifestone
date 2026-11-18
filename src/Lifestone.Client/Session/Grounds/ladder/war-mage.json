@@ -1,0 +1,602 @@
+{
+  "key": "war-mage",
+  "name": "the war mage's ladder: the island road",
+  "sources": {
+    "ladder": "M6 D17: the island road of docs/milestones/m6-the-ladder.md section 5.2 (the strategist's corrected rungs; draft v2's rung descriptions superseded); the bands, hours and rates from cache/m6/m6-strategy.md section 1.2 (computed from section 1.1's model; the low rungs assumed); the elements from cache/m6/level-ladder-note.md sections 7 and 10. Every slot count and level is a DB check in item 0's W0 (D28): a rung's fact is changed here, never in code (D26)",
+    "top_level": "126: the road to 126 is in M6 (D3, decided 2026-11-01; spec section 5.2 row 75-126)",
+    "bands": "the spec section 5.2 bands 1-5, 5-10, 10-15, 15-22, 22-32, 32-45, 45-60, 60-75, 75-126 read 'from level A until level B': each rung's inclusive band is A to B-1 and its move-on level is B; the last band runs to 126 inclusive M6 14 (D135, the owner, 2026-11-13: the optimal climb's bands, cache/m6/optimal-climb/study.md section 2; it reverses the hold until 16 of 2026-11-06, D89): outskirts 5-9, the Burrow 10-14 by the Refuge, the Lodge 15-20, the Cave 21-24, the Abode 25-41, the Quarters 42-64, the Holding 65-126. A band is the latest she moves on (a shut gate may hold her later still); the move-on may take the next rung before its band ($.sources.move_on_rule)",
+    "move_on_rule": "the move-on rule's floor and ceiling (TODO(m6-ladder-move-on): plan data the leveling optimizer seat owns, m6-plan.md section 2.1; neither is a constant): kills_an_hour_floor = half the band's modelled kills/h, rounded down; casts_a_kill_ceiling = twice the band's modelled casts a kill, where the modelled casts a kill is the band's s a kill times 3.4/19.6 (M5's measured den kill: 3.4 attack casts in 19.6 s, strategy section 1.1), rounded to 0.1. Both inputs are the strategy section 1.2 row of the band; a row marked assumed there makes the derived value assumed. What the level up job does when a rung falls under its floor or over its ceiling (move on, step back or report) is slice a4's and the optimizer's. M6 14 (D135; the lead's brief of 2026-11-13: a rung moves on when the next rung's portal admits her and its gate reads open, the bands staying the latest she moves; Autopilot/RungOwner.Ahead): before its band the rung after the band's rung, one rung and never two, is taken when all of these hold: it is a ground rung the fight can hunt; it has a gate (a rung with none is never taken early: unknown never opens a gate); its entry portal and a route of travel-routes.json admit her level (the Town Network's 10, the Facility Hub's 15 to 40, the entries' own: facts of the world); its gate reads open on what is known (the run's live buffs, a start's standing lines); and she is at least the plan's climber of its first level: her base War Magic, no buff, is at least the projection the spell levels are computed on (SpellPlan.ProjectedWarBase) at that level. The bands are the plan's climber's, so the plan's own climber moves on at the band and a stronger character as soon as the portals and the gate let her. Without that last condition the buff bot's lines open every gate and the portals alone would send a climber to the Cave at 15 past the Lodge, the Abode at 21, the Quarters at 30 and the Holding at 60, earlier than the levels the study rates safe and paying. A run on the rung ahead stays there while they hold, its gate read at each way out as every run's ground's is; the floor and the ceiling stay report-only",
+    "spell_level": "each rung's spell_level is computed, never assumed (D4, D41, D26; M6 item 1 a, Mage/SpellPlan.cs, pinned by SpellPlanTests): min is the highest level of the rung's bolt line cast at plan_cast_chance on the climber's projected BASE War Magic at the band's first level, max the same at its last level (the top rung at 126). The projection: War Magic specialised at creation (ACE InitLevel 10, Player_Skills.cs:236 @95ef426d), round((Focus + Self) / 4) over the creation values 100 and 100 plus the planner's ranks, and MageSpendingPlanner.Compute at the level's total experience (the dats' XpTable), MageBuild.Traditional, the spender's shares for her (MageTemplate.SharesFor: MageShares.Climber, M6 item 14: the magic skills of the named list, Focus and Self, Mana Conversion, Max Mana, then Endurance, Max Health and Max Stamina; Max Health and Endurance held to 5% of the experience earned each, every other attribute to 10%), after the climber's health floor (Mage/ClimberHealthRule.cs, M6 7 R; a rung's higher floor lowers the plan, never the ranks she holds, so the skill of a rung's last level stands until the plan passes it), every later magic skill counted trained; no buff (the plan is conservative; the run reads the current skill). ACE's chance is SkillCheck.GetMagicSkillChance (SkillCheck.cs:19-22 @95ef426d, difficulty = the spell's power, Player_Magic.cs:530-536): 43 over the power is 0.9530 and 42 over is 0.9498, so the plan's skill for a level is its power + 43 (II 93, III 143, IV 193, V 243, VI 293, VII 343)",
+    "plan_cast_chance": "0.95: D4 (2026-11-01, the owner: VII when it makes sense, the highest level cast at 95% or better) and D41 (2026-11-02: the plan at 0.95 on the projected base skill, the level up job's fight at 0.95 on the current skill); the owner's decision of 2026-11-06 (M6 7 AK) changes D4 and D41 for buffs: 0.95 stays for combat only, buffs read plan_buff_chance; the den's cast chance (BuffOptions.DefaultCastChance 0.9) is unchanged for BSD Mage. M6 14 (the owner, 2026-11-13: she casts the highest bolt her live skill lands at the plan chance): in the level up job's fight the ladder's cap on her current, buffed War Magic (AutopilotScenario.BoltLevel) governs, and a ground profile's spell_plan row, the projection on the base skill, no longer lowers it (the den-fight spec's max-level sets FightOptions.LiveCap; FightScenario.PlanCap names the row in its log line); BSD Mage's den job and every fight without the ladder's cap keep the row's cap",
+    "vitals": "M6 7 lead, live 2026-11-06 21:15 UTC: mana_loop_under 45, not 30: the loop acts while a stamina drain (10) and the press after it (10) and a bolt can still be paid; at 30 she spent her way to 13, drained, and stood with 3 mana and 91 stamina. M6 7 AN, the owner's direction of 2026-11-06, every ground, not only level 80 (D91's reach widened): drain_under_percent 50: at or below half her health she drains the fullest target in reach, the level by best heal; the model's sweep at a pack of five gave deaths of 43% at 30, 39% at 40, 35% at 50, 44% at 60. mana_loop_under 30 is two bolts of the rung's Flame Bolt II and III (10 and 15 mana); mana_loop_stamina_percent 50: Stamina to Mana I gives 0.45 of her stamina for 10 mana (it nets 2.8 at half a bar of 57, 15.6 at the top), so under half Drain Stamina comes first; stamina_drain_min_give 30: Drain Stamina Other I gives twice 10% of the target's stamina, cap 60 (spell 1249: proportion 0.1, loss -1, cap 60): 58 from a tusker's 290, 16 from an outskirts creature's 80, so the cast pays only from a target holding 150 or more; the target's stamina is read live, never the ground's name; pass_home_over_lines 4: stretch 7's passes cost 42 mana a line (8 casts, 340 mana) on a pool of 194, so four lines are a bar of mana and a fifth needs a rest, and a rest needs her lying down; buff_pass_wait_seconds 900: slice AK's full pass is 18 casts and about 650 base mana on a pool of 154, so about 500 mana by the recharge at the owner's estimate of 0.8 a second overall, 625 s, plus about a minute of casts and a third for fizzles and a rest cut short; past it the pass goes on with what stands, names what is missing, and those lines are not due again for as long: never a fail, never a stop of the run; start_only_lines is the owner's to fill: empty keeps every line up during a fight; M6 14 (m6-banes, the owner's order of 2026-11-12: every armour protection on her armour before the Direlands): the six other armour banes need no entry here: her pass at home casts all eight armour lines, and in a ground one of the six is kept up only where a target deals its damage type (Mage/ArmourBanes.cs, the profiles' damage_types), because the eight come due together: the live log of 2026-11-12 at levels 35 to 37, ten enchantable pieces worn, reads 3.05 s a level IV armour cast and 1 to 90 mana a cast with her Mana Conversion 206 (nine casts, mean 25; the price before conversion is 40 + 8 x 10 = 120, level V 150) on a pool of 323, so a pass of the eight is about 25 s and 200 mana (960 at the worst) at home, where buff_pass_wait_seconds lets her rest for it, and would be 25 s with no bolt under the fight's hard floor; refresh_mana_reserve 60 (M6 7 AZ, live 2026-11-06 23:25 to 23:27 UTC at level 19: a refresh in a lull spent her mana from 200 to 3 and she died in the pass's wait): a stamina drain needs 20 and the press after it 10, the mana loop starts at 45 (mana_loop_under) and a bolt is 10 to 15, so 60 keeps the loop and a drain payable; a refresh in a fight starts no new line below it; M6 8 H (the owner, 2026-11-09: the enemy's stamina feeds her mana, sums in cache/m6/8/drain-sums.md): the climber's loop by the sum (ManaLoopRule.DecideBySum): mana_press_min_bolts 0.5 (a press alone must net half a bolt: it spends about one cast), stamina_drain_min_bolts 1.0 (a drain and its press, two casts, must net a bolt: the sums' line, never on the outskirts and always from the Burrow up), mana_loop_max_attackers 2 (a pair is about 5 s of no damage, at the Lodge about 6 health per attacker, and the pack does not shrink), mana_loop_bolt_first_hits 1 (a pair is about 5 s for at most a bolt's mana, and 56% of the outskirts kills are one bolt), mana_loop_bolts_between 2 (a chain of mana casts must not stall the kill); M6 14 (the owner, 2026-11-13: she never drains stamina and runs low on it, so the loop drains stamina to stay efficient; his standing rules M5 D88, mana to near empty and stamina near full, and 2026-11-09, the target's stamina drained regularly and turned into mana): the live Abode of 2026-11-13 04:09 to 04:30 UTC (level 40, stamina 221, mana 332, Flame Bolt V about 5 mana a cast with her Mana Conversion, Tusker Redeemers holding 480 stamina each) decided 115 times none, 28 presses and 1 drain: the presses came at mana 320 to 325 of 332 and netted 5.6 to 10.6 mana for 3 to 13 stamina each, a drain was valued only by the mana of the press after it, so at near-full mana it never beat a press, and her stamina sat at 84 to 102 of 221: stamina went on top-ups and was never refilled. stamina_keep_percent 80: under it the loop's first move is Drain Stamina Other on the fullest target in reach, valued in stamina (at least stamina_drain_min_give), read whenever she is under the line, her mana full or not; she must still pay a bolt after it (the drain's mana and the bolt's), no bolt may be owed (mana_loop_bolts_between, which a stamina drain owes as a press does) and its target is not the bolt's target when that dies to the next bolt (another is drained, or the line waits a bolt); 80% of 221 is 177, so the cap's 60 from a Redeemer lands whole from 161 down. stamina_drain_max_attackers 4 (the Abode's live hits under the buff bot's 28 lines: Redeemers hit her 1 to 4 points, the largest 10, on 156 health; a live drain took 3.8 s, so four attackers through it are about 16 health at the usual hit and 40 at the largest): more than four keep the bolts first; mana_loop_max_attackers 2 still holds the mana casts. mana_press_fill_percent 90: before a bolt she can pay, the press is the level that nets the most when nothing is cut, and it goes only when the mana she is missing takes at least 90% of its give, so her mana runs down to about the maximum less the give and the press lands whole (the live level I presses at stamina 175 to 213 gave 9 to 28 mana of a give of 45); a bolt she cannot pay is pressed for as before (mana_press_min_bolts holds in both)",
+    "plan_buff_chance": "0.75: the owner's decision of 2026-11-06 (M6 7 AK; it changes D4 and D41 for buffs): 0.75 is the bar during buffing, 0.95 stays for combat. The level a buff is cast at reads the live skill, buffed and under vitae, read again after each landed step (Mage/BuffReach.cs, BuffCycle): 16 over the power is 0.7537 and 15 over is 0.7375 (SkillCheck.cs:19-22 @95ef426d), so level II needs 66, III 116, IV 166",
+    "corpse_coin": "M6 7 AY (the owner's decision of 2026-11-06, Mage/CorpseCoinRule.cs): min_coin 2000: a level's income (the audit's row 28: a death took 1,529 to 4,640 pyreals of a 5,000 to 6,000 purse). coin_on_corpse true (M6 7 finish, the owner's decision of 2026-11-08): retail's rule: the server mod sets ACE's corpse_destroy_pyreals false at every start (server/mod CorpseCoin.cs; @95ef426d WorldObjects/Player_Death.cs:569-578), so half a dead player's coin lies on the corpse. With LIFESTONE_ACE_CORPSE_COIN=ace the server destroys it and this value must go back to false. trip_stall_seconds 90 and trip_stall_metres 10 (M6 8 I, round 1 of 2026-11-09: a corpse worth fetching at level 11 was given up 90 s of walking in, 44,664 pyreals on it): for a corpse she fetches, the trip's limit is no progress, not time: given up when the body has not moved trip_stall_metres in trip_stall_seconds (fights and heal holds are not counted); the body moving 10 m is the progress of AutopilotWatchdogs' trip (M6 4 F1, 4-R7), the 90 s is the old --death-recover-abort-seconds default kept as the stall.",
+    "big_pack": "M6 7 AY (the owner's decision of 2026-11-06, Mage/BigPackRule.cs): awake 5 and deaths 2 are the owner's. reach_m 24: VisualAwarenessRange of weenies 11, 236 and 22597 with mob_awareness_range 1.0: a tusker in her view within 24 m is awake (cache/m6/7/lodge-entry-survey.md section 1); distance is the read, so a creature behind a wall she does not see is not in the object table, and one within 24 m in a cell it cannot see her from would count. mana_grows 20 of her base mana (Self and Max Mana ranks and starts, unbuffed, so a buff never lifts it): about three levels on the plan's spend, 66, 73, 79, 87, 93 ranks of the two at levels 17 to 21 (BigPackRuleTests), so a drop-back at 18 lifts at 21, inside the Lodge's band; the figure is the slice's, for the owner to read",
+    "first_scrolls": "the owner's coin order of 2026-11-06 (M6 7 AK): Armor Self IV and Bludgeoning Protection Self IV come first, before any other level III or IV scroll, with the smallest set that makes them cast at plan_buff_chance on Life 140: Focus Self II and Willpower Self II (+15 each, +7.5 a school by (Focus + Self) / 4), Life Magic Mastery Self III (+20, cast at Creature 123), Life 168, level IV at 0.77. On a short purse she saves for them (LearnNeedKind.Saving); they are paid from the whole purse, not the trip's budget",
+    "rung_gate": "the owner's decision of 2026-11-06 (M6 7 AK): she does not go to the Lodge until she is level 16, Item Enchantment is trained, Impenetrability III and Bludgeon Bane III are learned and landing on the robe and gauntlets, and the full buff pass is up: the bootstrap, the Masteries, the attributes, Armor Self and Bludgeoning Protection at the highest level she can reach (highest 1). The rung move reads this (Mage/RungGateRule.cs); the ladder's move-on level alone no longer sends her. Each condition is logged by name, met or not. The owner's correction of 2026-11-06 (M6 7 AR): the Burrow is a rung again and has its own gate: Armor Self IV and Bludgeoning Protection Self IV with the bootstrap they need (Focus Self II, Willpower Self II, Life Magic Mastery Self III, the first_scrolls), each learned and up, so she does not leave the outskirts until the two lines have landed; Impenetrability III and Bludgeon Bane III join them (the owner, 2026-11-06: level 16, at least level III item spells, before the tuskers; the Burrow's are tuskers too, and the Burrow's minimum kit is the owner's to lower). Gates chain (rung_gates, climbing order; Mage/RungGateRule.Walk): a shut gate holds her on the rung before it, so a shut Lodge gate holds her on the Burrow past its one level, and a shut Burrow gate on the outskirts. On a gate's own ground that gate is not read again M6 7 AX: the Cave has a gate of the same shape, because a Crimsonback (DVal 40, variance 0.75, Strength 200) hits 1.833 times a Male Tusker: 65 is its mean unarmoured hit, its largest 104 and a critical 208, not the 130 of the rule audit, which doubled the mean. The Lodge's lines, with Armor Self V and Bludgeoning Protection V (power 200, Life Magic 216 at the 0.75 buff bar; the Master Scriveners' scrolls, by the Town Network). The numbers: 95 live hits of Male Tuskers at Armor IV, Protection IV, Impenetrability III and Bane III, mean 3.79, largest normal 6, a live critical 12, scaled by 1.833; the model cache/m6/7/ax/fightsim_ax.py, death a fight at health 95 and mana 200 (Crimsonback 110 health, Magic Defense 94): IV and IV: pack of 4 8.5%, pack of 6 84%; V and V: pack of 4 2.2%, pack of 6 19.8%; III and III: pack of 4 54%. The kit decides it, health hardly does (V and V, pack of 4: 3.0% at health 80, 2.5% at 130), so the gate holds no health condition and health stays the rule's (health_hits, want 130, paid by level 29). With the items lapsed the pack of 4 is 99.8%, so Impenetrability and Bane stay. Not cured: a pack of 8 is 97% at V and V; 13 of the Cave's 81 slots stand in packs of 7 or 8, read with no line-of-sight check, so an upper bound: TODO(m6-cave-big-packs). Until M6 14 the level 32 band (the Temple 20-40's) had no gate, so a shut Cave gate did not hold her past 31. M6 14 (the owner, 2026-11-13: the Temple 20-40 leaves the ladder, the Cave to 39, the Abode from 40): the Abode has a gate of the Cave's shape, the same lines at the same levels, so a climber whose lines are down is held in the Cave: a Tusker Redeemer (DVal 50, variance 0.75, Strength 200; the rung's health.hitter) hits 82, 1.26 times a Crimsonback's 65 and 2.28 times a Male Tusker's 36, so the Abode asks no less than the Cave. Whether it asks more (Armor Self VI and Bludgeoning Protection VI, power 250, Life Magic 266 at the 0.75 buff bar) is not modelled: the AX model's rows are the Crimsonback's (TODO(m6-abode-fight-live)). Gates chain: a shut Abode gate holds her at 39, on the Cave (Mage/RungGateRule.Walk), where the Cave's own gate is read in turn unless she stands in the Cave; with the Temple's rung gone the Cave's band covers 32 to 39, so the hole D113 named is closed up to 59. It stays open above: the Quarters' band (60 to 74) and the Holding's have no gate, so a shut Abode gate did not hold her past 59 (m6-gate-past-the-cave, narrowed to the rungs past the Abode; closed by D135 below). M6 14 (D135, the owner, 2026-11-13: the island from 10 and the earlier bands): every rung from the Burrow on has a gate, and a later gate holds every line an earlier one holds, at its level or more, and its skills (a gate that reads open is the only one read, Mage/RungGateRule.Walk; LadderTests pins it). The Lodge's lines rise to the Burrow's (Focus Self II, Willpower Self II, Life Magic Mastery Self III, Armor Self and Bludgeoning Protection at IV or the highest she can reach), so a climber without the buff bot's lines is held outside until her own two IV lines stand, as the hold of 2026-11-06 asked, whatever her level; the Cave and the Abode keep V; the Quarters (from 42) has the Abode's gate; the Holding (from 65) asks Armor Self and Bludgeoning Protection at VII, the bot's level (a Rampager's mean hit, 293, is 3.6 times a Redeemer's and unmeasured, and the bot's power-300 lines are what the study's safe level rests on: cache/m6/optimal-climb/study.md section 4 item 6), so a climber without the bot's lines is held in the Quarters. Where the study's safe level rests on the bot (the Burrow at 10, the Holding at 65) the gate reads the bot's lines live, by the gates' second form. m6-gate-past-the-cave is closed: no band past the outskirts is ungated",
+    "health_hits": "2: N of the health floor (the owner's correction, 2026-11-05; Mage/ClimberHealthRule.cs): the climber's base health before the shares takes two hits of the rung's hardest hitter, a hit being ACE's mean uncritical unarmoured hit (LadderHitter.Hit: DVal x (1 - DVar / 2) x the attribute modifier max(1, 1 + (Strength - 55) x 0.011), @95ef426d WorldObjects/Monster_Melee.cs:385-404, Entity/BaseDamage.cs, Entity/DamageEvent.cs DoCalculateDamage, WorldObjects/SkillFormula.cs:18-23). Why this figure and not the largest hit: it sits where the live hits' tail does: 355 hits of a Female Tusker (hit 34) on a level-61 mage under Armor Self III read p50 8, p90 28, p95 37, p99 48, max 103 (cache/m6/7/live r1c), so one figure is about the 95th percentile of what really lands, armour worn, and the 10% criticals (ACE doubles the largest hit, WorldObject_Weapon.cs:291,356) are what makes the tail. Why two: the hit that lands while a heal winds up, and the next: a mage who can take two can answer the first (the guard's heal, the emergency drain). Payable: with the pay limit each rung's want is reached inside the rung but the Burrow's, whose road is the Goldenback's: level 16 for the Lodge's 72, level 29 for the Cave's 130, level 33 for the Temple's 142, level 42 for the Abode's 164, level 66 for the Quarters' 204 (ClimberHealthRuleTests). What fails otherwise: N = 2 on the largest hit (226 at the Temple) or N = 3 on the mean is never paid at any rung from the Cave on (health 200 prices 48M, 250 prices 684M; level 60 has earned 129M), so the pay limit would take its whole share of every level to the top; N = 1 asks 65 on the Cave, which the shares reach alone by level 26, so the level-30 test character's three-hit death (69 health, 86 in three Crimsonback hits) stands; at N = 2 she holds 132 there M6 7 AY (the owner, 2026-11-06: the rule counts the whole pack, not one attacker): each rung's health.pack is the pack it sends at her, and the want is the hit x (N + (pack - 1) x (N - 1)), Mage/ClimberHealthRule.PackHits: the hardest hitter's two hits and one more from each other attacker in the same window (the swings are not in step; the Lodge's gaps measured 2.1 to 3.4 s). Pack 1 is the rule of before. The hit stays the figure above.",
+    "health_pay_percent": "5 (M6 7 finish, the owner's decision of 2026-11-08, changing D72 and D101; it was 30, for the two stats together): the floor's aim for each of Max Health and Endurance, in percent of the experience earned. Hard limit in stat_cap.",
+    "stat_cap": "M6 7 finish (the owner, 2026-11-08: cap HP and any single attribute closer to 5%, 10% absolute max): aim_percent is what a floor buys up to, max_percent is the most any attribute or Max Health may ever have cost, of the experience earned. grace_xp 277: the price of an attribute's first two ranks: at level 2 (1,000 earned) 10% is 100, under the 110 of a first rank, so the hard limit is at least this; 10% of level 3's total is 277 and it no longer matters. What a capped stat leaves goes to the four magic skills and Max Mana.",
+    "survival": "M6 8 K, the owner's design of 2026-11-09 (one survival layer above every activity); the lines are Lifestone's own, for a live round to read. wait_health_percent 50 is drain_under_percent's line (in a fight she is in danger there, so she does not walk on under it); back_health_percent 80 is the share a fight starts at (JourneyPlans.FightHealthPercent). wait_mana_percent 25 is about one bolt of her first levels (10 to 15 mana on a pool of about 60 at level 6, round 2 of 2026-11-09); back_mana_percent 60 is about two bolts and a heal. wait_stamina_percent 15 is the keeper's attack gate (--vitals-attack-stamina); back_stamina_percent 40 leaves a Stamina to Mana press something to work on. leave_health_percent 50 and leave_mana_percent 15 (under one bolt on the level 6 pool): under both, attacked and with no heal payable she goes home; the vitals guard's own line, raised by the incoming rate, counts as the health line too (round 2 at 20:19:25 UTC: health 18 of 22, nothing payable). start_health_percent 80, start_mana_percent 50 and start_stamina_percent 0 are the needs a fight station starts with (JourneyStations), given to a ladder errand.",
+    "vitals_policy": "M6 14 (m6-vitals-policy; the owner, 2026-11-13: her mana casts by the numbers from her stats and the creature, experience an hour first, fights ending near full without top-ups; the model and its sums: cache/m6/mana/model.md, every formula ACE's at 95ef426d): on true: the climber's mana loop is Vitals/VitalsPolicy.cs, not ManaLoopRule.DecideBySum (whose vitals lines stay for every other path and character). The policy reads her live bars, Mana Conversion, regeneration (the human rows HealthRate 0.3, StaminaRate 3, ManaRate 1 each 5 s heartbeat, her enchantments' multipliers, the combat stance 0.5 for health and stamina: Creature_Vitals.cs:102-236), the fight's measured seconds a kill, attacks and damage a second, the bolt's landed damage and chance, the target's and the fullest creature's health and stamina; it works out one kill's budget of each vital, the floors and the pull's lines, and casts a fill only when its vital runs short over a kill, at the moment its whole give fits, at the level with the fewest seconds a point. What is left are these lines. bolt_first_chance 0.5: a fill waits while the next bolt more likely than not kills (a fill then delays the kill and the drain's source dies with it). health_burst_factor 2: the health floor reads the recent incoming or twice the fight's mean, whichever is more (the Abode of 2026-11-13: mean 1.1 a second over 34 minutes, the retreat's recent read 3.8 to 6.7 with three Redeemers on her). seed_overhead_seconds 6.5 and seed_kills 3: until three kills are measured, a kill is its bolts' seconds and 6.5 s of walking, looting and arrival (the Abode's 20.9 s a kill less 9.2 s of bolts and 4.2 s of fills, rests and buffs, cache/m6/14/live/abode2). cast_seconds_self, _other and _bolt: the mean seconds from the send to the proof of every first-try cast in the live logs of 2026-11-12 and 2026-11-13 (cache/m6/14/live, all runs): Stamina to Mana I 1.74 (1,164 casts), II 1.92 (6), III 2.49 (22), IV 2.94 (16), V 4.13 (1, not used: the step of 0.43 a level from I to IV gives 3.35); Heal Self I 1.50, II 2.03, IV 2.93 (371); Drain Health Other I 2.72 (334), II 3.17 (31), III 3.47 (35), IV 3.54 (17); Drain Stamina Other I 2.70 (37); Flame Bolt I 1.19, III 2.76, IV 3.14 (5,662), V 3.53 (282); the levels with no sample take the step of the levels next to them (+0.4 a level). press_waits_for_best true: a press waits until the cheapest level's whole give fits (the mana runs down about one Stamina to Mana V before it refills, the owner's D88), against the cheapest level whose whole give fits now (false): the simulation of cache/m6/mana/model.md gives up 1.4% of the hour at the Abode at 40, 2.5% at the Holding at 75 and 2.4% for BSD Mage at the den at 80 to keep the mana at about 90% at each pull instead of about 70%; the owner's to set",
+    "caster_score": "M6 14 (m6-caster; the owner, 2026-11-13: a caster like the Fire Baton she saved is wielded and buffed with item magic, more Mana Conversion, melee defence and the like): the caster pick's score (Mage/GearScore.Caster) in one currency, percent of her experience an hour, among the casters whose wield requirements she meets (ACE refuses the wield below them, Player_Inventory.cs:2126-2229 @95ef426d; an activation requirement leaves only the caster's spells off, Player_Inventory.cs:313-335, so its own bonuses still count). damage 0.5: a kill's bolts are about half its seconds (the mana model's Abode at level 45 under the policy: 2.30 bolts at 3.92 s of a 17.4 s kill, cache/m6/mana/model.md) and the bolts a kill go as one over the damage (Vitals/VitalsPolicy.cs BoltsToKill); ACE multiplies a bolt by the caster's ElementalDamageMod plus her Spirit Drinker aura only on the caster's own element (WorldObject_Weapon.cs:382-401, SpellProjectile.cs:460, 557). mana 0.1: the same model's sweep at the Abode, level 40: Mana Conversion 212 to 272 is +5.4% of the hour and 212 to 152 is -7.4%, while her Flame Bolt VI's expected cost (Casting/ManaConversionModel.ExpectedCost) moves by +74% and -48% bolts a mana bar: 12.8 over 121.7, about 0.1 a percent; the caster's ManaConversionMod, times her Hermetic Link aura, multiplies her Mana Conversion in the magic mode (Creature_Magic.cs:48, WorldObject_Weapon.cs:235-263), so the score runs her bolt through the model at both skills. melee_defence 0.02: the caster's WeaponDefense, plus her Defender aura, multiplies her Melee Defense in a combat mode (WorldObject_Weapon.cs:86-129, Player_Combat.cs:246); hers is untrained (about 40, about 80 under the bot's lines) against a Tusker Redeemer's attack of about 230 (Light Weapons 100 plus (Strength 200 + Coordination 190) / 3, weenie 22520 of the world copy), so a +10% caster moves ACE's evade chance (SkillCheck, 0.03) from about 1.1% to 1.4%: a tiebreak. magic_defence 0.02: the Abode's creatures cast nothing (no spell book row of weenies 22520, 22600, 22601), so a caster's magic defence is a tiebreak too. swap_margin 0.1: a candidate beats the wielded caster by a tenth of a percent of the hour or it stays (two moves for noise, and two casters that close would trade places as her Mana Conversion grows)",
+    "wear_score": "M6 14 (m6-armour; the owner, 2026-11-13: she evaluates the armour she finds as possible upgrades for what she wears, especially for minor and major cantrips): the armour and jewellery pick's score (Mage/WearScore.cs) in the caster score's currency, percent of her experience an hour, read as the set she would wear against the set she wears. A cantrip's value is its spell row's (the world's spell table by id: Minor +5, Major +15, Epic +25, Legendary +35 to a skill or an attribute, x1.15 to x1.6 to a regeneration; Mage/WearScore.cs CantripRows), only the strongest of a family counts (ACE keeps the top layer of a spell category, EnchantmentManager.cs:123-175 @95ef426d), and only while it is active on her (the wield and activation requirements met and item mana above 1: Player_Inventory.cs:313-342). War Magic is valued by the caster score's damage weight (0.5) on the landed share of her bolts, ACE's cast chance at the plan bolt's power (SkillCheck.GetMagicSkillChance, factor 0.07) times the resist roll against the ground's Magic Defense (factor 0.03): Major War Magic Aptitude on her War Magic 297 against Flame Bolt VI and a Redeemer's 171 is about +3.2% of her bolts landed, 1.6% of the hour; Mana Conversion by the caster score's mana weight (0.1) on the mana model's bolts a mana bar; Focus and Willpower through ACE's formulas, (Focus + Self) / 4 to each magic skill, / 6 to Mana Conversion, and Self to her maximum mana. life_magic 0.005 a point: her Life casts are her fills, 1.8 s of a 17.4 s kill under the vitals policy (cache/m6/mana/model.md, the Abode at 40), cast at levels I to V whose chance on her Life of about 290 is above 0.99 (power 200: 0.998), so a point moves almost nothing; a Major (15) is 0.075%, under the swap margin alone. creature_enchantment 0.002 and item_enchantment 0.002 a point: under the buff bot's 28 level VII lines her own Creature and Item casts are the caster auras and the eight armour lines at home, out of the kill; a point lifts only their chance at the 0.75 buff bar. mana_pool 0.01 a percent of her maximum mana: the policy presses only when a whole give fits and pulls within one fill of full, so a bigger bar lets a press wait, never adds a bolt a kill: a tiebreak. mana_regen_a_second 0.43 and mana_point_seconds 0.023: her mana regeneration under the bot's Mana Renewal VII is 0.43 a second in every stance and a kill's mana runs short of it (16 spent, 9 regenerated: the model), so a regeneration cantrip saves presses, and a press pays a point in 0.023 s (Stamina to Mana V, 148 mana in 3.4 s): Minor Mana Gain (x1.15) is 100 x 0.43 x 0.15 x 0.023 = 0.15% of the hour. attacks_a_second 0.40 and health_point_seconds 0.018: armour is valued by the damage she takes on her rung: the rung's hardest hitter's mean unarmoured hit (rungs[].health.hitter, LadderHitter.Hit) times her damage factor on the set (ACE: each part's armour, (ArmorLevel + Impenetrability) x clamp(protection + bane, -2, 2) summed over the pieces that cover it plus Armor Self, as 66.67 / (66.67 + armour), weighed by the parts' share of the hits, Mage/ArmorReport.cs) times her protection, at 0.40 attacks a second (the live Abode: 799 hits and 19 evades in 34.1 minutes) and 0.018 s a health point (Drain Health Other III: 82 health in 1.5 s net, the model): the share of the hour her health costs; a set that cuts the factor by a percent saves that share's percent. At the Abode under the gate's lines (Armor Self V, Bludgeoning Protection V, Impenetrability III, Bludgeon Bane III; the bot's VII lines cut the hits further, so this is an upper bound) the share is about 3%, so armour is a small term there and grows with the rung's hitter (the Quarters' Slave 102, the Holding's Rampager 293). burden 0.01 a percent of her capacity: below the loot's load line a heavier piece slows nothing (retail's load modifier is 1 up to a load of 1.0, EncumbranceSystem::LoadMod 11.6096 0x004FD810), it only leaves loot on a corpse, which pays pyreals, not experience: a 900-burden robe (5% of 17,250) costs 0.05%, half the swap margin. The hard stop is not a weight: on a ground with jumps (the Abode's and the Holding's pit) a piece is refused when her load after the swap and the sale, the kept pack and the worn set without the loot, would pass the jump's load line (MageLootRules.JumpLoadLinePercent, 100% of the capacity), because past it the flight falls (LoadMod 2 - load) under the pit's need. swap_margin 0.1: as the caster score's, a piece beats what it displaces by a tenth of a percent of the hour or it stays",
+    "pending": "a ground rung or alternate whose profile is not written is pending with the item that owns it (m6-plan.md section 2: item 3 writes the spine's profiles); the loader fails a pending ground that resolves (stale) and a non-pending one that does not"
+  },
+  "top_level": 126,
+  "plan_cast_chance": 0.95,
+  "plan_buff_chance": 0.75,
+  "vitals": {
+    "drain_under_percent": 50,
+    "mana_loop_under": 45,
+    "mana_loop_stamina_percent": 50,
+    "stamina_drain_min_give": 30,
+    "mana_press_min_bolts": 0.5,
+    "stamina_drain_min_bolts": 1.0,
+    "mana_loop_max_attackers": 2,
+    "mana_loop_bolt_first_hits": 1,
+    "mana_loop_bolts_between": 2,
+    "stamina_keep_percent": 80,
+    "stamina_drain_max_attackers": 4,
+    "mana_press_fill_percent": 90,
+    "buff_pass_wait_seconds": 900,
+    "pass_home_over_lines": 4,
+    "refresh_mana_reserve": 60,
+    "start_only_lines": []
+  },
+  "survival": {
+    "wait_health_percent": 50,
+    "back_health_percent": 80,
+    "wait_mana_percent": 25,
+    "back_mana_percent": 60,
+    "wait_stamina_percent": 15,
+    "back_stamina_percent": 40,
+    "leave_health_percent": 50,
+    "leave_mana_percent": 15,
+    "start_health_percent": 80,
+    "start_mana_percent": 50,
+    "start_stamina_percent": 0
+  },
+  "vitals_policy": {
+    "on": true,
+    "bolt_first_chance": 0.5,
+    "health_burst_factor": 2.0,
+    "seed_overhead_seconds": 6.5,
+    "seed_kills": 3,
+    "cast_seconds_self": [1.74, 1.92, 2.49, 2.94, 3.35, 3.78, 4.21, 4.64],
+    "cast_seconds_other": [2.71, 3.17, 3.47, 3.54, 3.95, 4.35, 4.75, 5.15],
+    "cast_seconds_bolt": [1.19, 2.4, 2.76, 3.14, 3.53, 3.92, 4.31, 4.7],
+    "press_waits_for_best": true
+  },
+  "caster_score": {
+    "damage": 0.5,
+    "mana": 0.1,
+    "melee_defence": 0.02,
+    "magic_defence": 0.02,
+    "swap_margin": 0.1
+  },
+  "wear_score": {
+    "life_magic": 0.005,
+    "creature_enchantment": 0.002,
+    "item_enchantment": 0.002,
+    "mana_pool": 0.01,
+    "mana_regen_a_second": 0.43,
+    "mana_point_seconds": 0.023,
+    "attacks_a_second": 0.40,
+    "health_point_seconds": 0.018,
+    "burden": 0.01,
+    "swap_margin": 0.1
+  },
+  "rung_gates": [
+    {
+      "rung": "burrow",
+      "skills": [32],
+      "lines": [
+        { "line": "Focus Self", "level": 2, "highest": 0 },
+        { "line": "Willpower Self", "level": 2, "highest": 0 },
+        { "line": "Life Magic Mastery Self", "level": 3, "highest": 0 },
+        { "line": "Armor Self", "level": 4, "highest": 0 },
+        { "line": "Bludgeon Protection Self", "level": 4, "highest": 0 },
+        { "line": "Impenetrability", "level": 3, "highest": 0 },
+        { "line": "Bludgeon Bane", "level": 3, "highest": 0 }
+      ]
+    },
+    {
+      "rung": "lodge",
+      "skills": [32],
+      "lines": [
+        { "line": "Focus Self", "level": 2, "highest": 0 },
+        { "line": "Willpower Self", "level": 2, "highest": 0 },
+        { "line": "Creature Enchantment Mastery Self", "level": 1, "highest": 0 },
+        { "line": "Life Magic Mastery Self", "level": 3, "highest": 0 },
+        { "line": "War Magic Mastery Self", "level": 1, "highest": 0 },
+        { "line": "Item Enchantment Mastery Self", "level": 1, "highest": 0 },
+        { "line": "Endurance Self", "level": 1, "highest": 0 },
+        { "line": "Strength Self", "level": 1, "highest": 0 },
+        { "line": "Quickness Self", "level": 1, "highest": 0 },
+        { "line": "Coordination Self", "level": 1, "highest": 0 },
+        { "line": "Armor Self", "level": 4, "highest": 1 },
+        { "line": "Bludgeon Protection Self", "level": 4, "highest": 1 },
+        { "line": "Impenetrability", "level": 3, "highest": 0 },
+        { "line": "Bludgeon Bane", "level": 3, "highest": 0 }
+      ]
+    },
+    {
+      "rung": "cave",
+      "skills": [32],
+      "lines": [
+        { "line": "Focus Self", "level": 2, "highest": 0 },
+        { "line": "Willpower Self", "level": 2, "highest": 0 },
+        { "line": "Creature Enchantment Mastery Self", "level": 1, "highest": 0 },
+        { "line": "Life Magic Mastery Self", "level": 3, "highest": 0 },
+        { "line": "War Magic Mastery Self", "level": 1, "highest": 0 },
+        { "line": "Item Enchantment Mastery Self", "level": 1, "highest": 0 },
+        { "line": "Endurance Self", "level": 1, "highest": 0 },
+        { "line": "Strength Self", "level": 1, "highest": 0 },
+        { "line": "Quickness Self", "level": 1, "highest": 0 },
+        { "line": "Coordination Self", "level": 1, "highest": 0 },
+        { "line": "Armor Self", "level": 5, "highest": 1 },
+        { "line": "Bludgeon Protection Self", "level": 5, "highest": 1 },
+        { "line": "Impenetrability", "level": 3, "highest": 0 },
+        { "line": "Bludgeon Bane", "level": 3, "highest": 0 }
+      ]
+    },
+    {
+      "rung": "abode",
+      "skills": [32],
+      "lines": [
+        { "line": "Focus Self", "level": 2, "highest": 0 },
+        { "line": "Willpower Self", "level": 2, "highest": 0 },
+        { "line": "Creature Enchantment Mastery Self", "level": 1, "highest": 0 },
+        { "line": "Life Magic Mastery Self", "level": 3, "highest": 0 },
+        { "line": "War Magic Mastery Self", "level": 1, "highest": 0 },
+        { "line": "Item Enchantment Mastery Self", "level": 1, "highest": 0 },
+        { "line": "Endurance Self", "level": 1, "highest": 0 },
+        { "line": "Strength Self", "level": 1, "highest": 0 },
+        { "line": "Quickness Self", "level": 1, "highest": 0 },
+        { "line": "Coordination Self", "level": 1, "highest": 0 },
+        { "line": "Armor Self", "level": 5, "highest": 1 },
+        { "line": "Bludgeon Protection Self", "level": 5, "highest": 1 },
+        { "line": "Impenetrability", "level": 3, "highest": 0 },
+        { "line": "Bludgeon Bane", "level": 3, "highest": 0 }
+      ]
+    },
+    {
+      "rung": "quarters",
+      "skills": [32],
+      "lines": [
+        { "line": "Focus Self", "level": 2, "highest": 0 },
+        { "line": "Willpower Self", "level": 2, "highest": 0 },
+        { "line": "Creature Enchantment Mastery Self", "level": 1, "highest": 0 },
+        { "line": "Life Magic Mastery Self", "level": 3, "highest": 0 },
+        { "line": "War Magic Mastery Self", "level": 1, "highest": 0 },
+        { "line": "Item Enchantment Mastery Self", "level": 1, "highest": 0 },
+        { "line": "Endurance Self", "level": 1, "highest": 0 },
+        { "line": "Strength Self", "level": 1, "highest": 0 },
+        { "line": "Quickness Self", "level": 1, "highest": 0 },
+        { "line": "Coordination Self", "level": 1, "highest": 0 },
+        { "line": "Armor Self", "level": 5, "highest": 1 },
+        { "line": "Bludgeon Protection Self", "level": 5, "highest": 1 },
+        { "line": "Impenetrability", "level": 3, "highest": 0 },
+        { "line": "Bludgeon Bane", "level": 3, "highest": 0 }
+      ]
+    },
+    {
+      "rung": "holding",
+      "skills": [32],
+      "lines": [
+        { "line": "Focus Self", "level": 2, "highest": 0 },
+        { "line": "Willpower Self", "level": 2, "highest": 0 },
+        { "line": "Creature Enchantment Mastery Self", "level": 1, "highest": 0 },
+        { "line": "Life Magic Mastery Self", "level": 3, "highest": 0 },
+        { "line": "War Magic Mastery Self", "level": 1, "highest": 0 },
+        { "line": "Item Enchantment Mastery Self", "level": 1, "highest": 0 },
+        { "line": "Endurance Self", "level": 1, "highest": 0 },
+        { "line": "Strength Self", "level": 1, "highest": 0 },
+        { "line": "Quickness Self", "level": 1, "highest": 0 },
+        { "line": "Coordination Self", "level": 1, "highest": 0 },
+        { "line": "Armor Self", "level": 7, "highest": 1 },
+        { "line": "Bludgeon Protection Self", "level": 7, "highest": 1 },
+        { "line": "Impenetrability", "level": 3, "highest": 0 },
+        { "line": "Bludgeon Bane", "level": 3, "highest": 0 }
+      ]
+    }
+  ],
+  "first_scrolls": [
+    { "line": "Focus Self", "level": 2 },
+    { "line": "Willpower Self", "level": 2 },
+    { "line": "Life Magic Mastery Self", "level": 3 },
+    { "line": "Armor Self", "level": 4 },
+    { "line": "Bludgeoning Protection Self", "level": 4 }
+  ],
+  "corpse_coin": {
+    "coin_on_corpse": true,
+    "min_coin": 2000,
+    "min_item_value": 20000,
+    "trip_stall_seconds": 90,
+    "trip_stall_metres": 10
+  },
+  "big_pack": {
+    "awake": 5,
+    "reach_m": 24,
+    "deaths": 2,
+    "mana_grows": 20
+  },
+  "health_hits": 2,
+  "health_pay_percent": 5,
+  "stat_cap": {
+    "aim_percent": 5,
+    "max_percent": 10,
+    "grace_xp": 277
+  },
+  "rungs": [
+    {
+      "key": "academy-and-chest",
+      "name": "the Training Academy and the Pathwarden chest",
+      "kind": "quest",
+      "band": {
+        "from": 1,
+        "to": 4
+      },
+      "ground": null,
+      "quests": [
+        "academy-skip",
+        "pathwarden"
+      ],
+      "landblock": null,
+      "pending": false,
+      "pending_reason": null,
+      "alternates": [],
+      "move_on": {
+        "level": 5,
+        "kills_an_hour_floor": null,
+        "casts_a_kill_ceiling": null
+      },
+      "spell_level": {
+        "min": 1,
+        "max": 1
+      },
+      "element": null,
+      "target_margin": null,
+      "route": "start:character-creation",
+      "health": null,
+      "sources": {
+        "health": "none: a quest rung hunts nothing of its own; the Academy's fights are the quest station's and a level 1-4 mage has too little experience to buy from (level 5's total is 10,248)",
+        "band": "spec section 5.2 row 1-5 and strategy section 1.2 row 1-5: the Training Academy, then the Pathwarden chest (Holtburg), 1 hour, bound by the quest; inclusive 1-4, move on at 5",
+        "ground": "none: a quest rung (spec section 5.5 row 'The Academy and the chest'; ladder note section 7: rung 0 is a quest, not a hunt); the quest keys academy-skip (M6 0 F7, D37: the tutorial's own skip, quests/academy-skip.json; the full route quests/academy.json waits for item 4's ramps) and pathwarden are quest files, resolved against QuestCatalog",
+        "alternates": "none (a quest rung)",
+        "move_on": "level 5: the Training Academy takes a character from 1 to 5 (ladder note section 7; spec section 5.2 row 1-5); no floor or ceiling: a quest rung moves on by level only",
+        "spell_level": "I: by the fizzle rule (D4, D41): the projected base War Magic is 60 at level 1 (I at 0.95; II needs 93) and 76 at level 4 (I at 0.95; II needs 93)",
+        "element": "none: the quest's own fights (spec section 5.2 row 1-5 names no element)",
+        "target_margin": "none: a quest rung hunts nothing of its own (the Academy's fights are the quest station's, and no pick is banded by a margin)",
+        "route": "start:character-creation: the Training Academy quest starts at character creation (ladder note section 7: the quest's summary, 'Starts At: Character Creation')"
+      }
+    },
+    {
+      "key": "outskirts",
+      "name": "Holtburg's outskirts",
+      "kind": "ground",
+      "band": {
+        "from": 5,
+        "to": 9
+      },
+      "ground": "holtburg-outskirts",
+      "quests": [],
+      "landblock": null,
+      "pending": false,
+      "pending_reason": null,
+      "alternates": [],
+      "move_on": {
+        "level": 10,
+        "kills_an_hour_floor": 30,
+        "casts_a_kill_ceiling": 4.9
+      },
+      "spell_level": {
+        "min": 1,
+        "max": 2
+      },
+      "element": "fire",
+      "target_margin": 5,
+      "route": "walk:holtburg",
+      "health": { "hitter": { "name": "Mite Scion", "wcid": 19259, "d_val": 10, "d_var": 0.75, "strength": 20 }, "road_hitter": { "name": "Goldenback Tusker", "wcid": 235, "d_val": 40, "d_var": 0.75, "strength": 220 }, "pack": 1 },
+      "sources": {
+        "health": "the rung's hardest hitter is the Mite Scion: DVal 10, Strength 20, modifier 1 (the attribute modifier floors at 1), hit 7; the other creatures of holtburg-outskirts.json by the same rule: Creeper Mosswart and Young Mosswart 6 at 100 = 6, Young Banderling 5 at 110 = 6, Drudge Skulker 3 at 70 = 3, Drudge Slinker 3 at 60 = 2, Mite Snippet 5 at 20 = 4, Gnawer Shreth 4 at 30 = 3. the world: SELECT d_val FROM weenie_properties_body_part WHERE object_Id=19259 and d_var (the largest part; 0.75) and SELECT init_Level FROM weenie_properties_attribute WHERE object_Id=19259 AND type=1, the pinned ACE-World v0.9.296 dump. Its want of 14 is cheap (a few thousand experience) and comes first. M6 7 AC (the owner raised health as the top issue): the rung runs to 14 and the climber moves on at 15 into the Lodge's Male Tuskers, so the road_hitter field names the NEXT rung's hitter (M6 7 AK: she now moves on at 16, the owner's decision of 2026-11-06, $.rungs outskirts sources.band): the Male Tusker (wcids 11 and 22597) DVal 25, Strength 170, hit 36 (SELECT d_val FROM weenie_properties_body_part WHERE object_Id=11 and d_var; SELECT init_Level FROM weenie_properties_attribute WHERE object_Id=11 AND type=1, the pinned ACE-World v0.9.296 dump): she arrives ready, her want here is the Lodge's 72 under the same 30% pay limit (no island is run: the field is the arrival's hit, not a road) pack 1: M6 7 AY: the outskirts' creatures come one at a time (a generator holds one creature, cache/m6/7/notes.md, the slowdown review). M6 14 (D135, the owner, 2026-11-13: the island from level 10): the next rung is the Burrow at 10 by the Refuge's walk across the island (the Facility Hub's portals open at 15), so the field names that road's hardest hitter, the Burrow's own road_hitter: the Goldenback Tusker (wcid 235) DVal 40, Strength 220, hit 71 (SELECT d_val FROM weenie_properties_body_part WHERE object_Id=235 and d_var; SELECT init_Level FROM weenie_properties_attribute WHERE object_Id=235 AND type=1, the pinned ACE-World v0.9.296 dump): want 142, which the stat cap does not let her buy at these levels; the cap binds, as it did on the Lodge's 72.",
+        "band": "spec section 5.2 row 5-10 and strategy section 1.2 row 5-10: Holtburg's outskirts and the Redoubt, drudges, mites L8, 1,000 XP, 1 hour, 0.09 M XP/h (assumed); inclusive 5-9, move on at 10. M6 7 AC (the lead's proposal to the owner, pending; a data change that reverses cleanly): the band ran 5-14 and the move-on level was 15, the Burrow rung dropped (the Lodge followed at 15 by the hub). The owner's decision of 2026-11-06 (M6 7 AK): she holds outside through level 15 and moves on at 16, the level whose credit trains Item Enchantment, so the robe is buffed before the Lodge: two Lodge fights at level 15 and health 67 to 71 ended in death in about 15 s (three Male Tuskers, hits of 5 to 18, a critical of 36). It overrides 'the Lodge at 15'. The band now runs 5-15, the move-on level 16, and M6 7 AR puts the Burrow after it (its gate, rung_gates, holds her here until the two armor lines stand). The measure: r2b and r3 (cache/m6/7/live) read 53,700 to 72,800 XP/h on this ground (r3: 58 kills in 3,528 s = 61,776; r2b: 42 kills in 2,170 s = 72,792), 1,040 XP a kill, mana_wait_max_s=0, 0 deaths, no island; the Burrow's model at level 10 is 30,500 XP/h (15 kills/h x 2,000, mana 59 a kill at 0.25 a second under Mana Renewal II: cache/m6/7/doc-notes-ab.md), so this ground wins at level 10 by 1.8 to 2.4 times and the island crossing (6 deaths in 13 at level 10) is skipped until the hub's level 15. The band's rate is plan data the leveling optimizer seat owns (m6-plan.md section 2.1, TODO(m6-ladder-move-on)); the owner's call. M6 7 AR: the Burrow is a rung again, so tusk-female's hunt-until ground is a rung's and the fight wants the tusk there (AutopilotQuestRule.Trophies); the pull itself is TODO(m6-tusk-pull), tusker-burrow.json hunt M6 14 (D135, the owner, 2026-11-13, reversing the hold until 16 of 2026-11-06, M6 7 AK and D89: the buff bot's level VII lines, D124-D127, which that hold predates, make the island safe from the Town Network's level 10, cache/m6/optimal-climb/study.md sections 1 and 2): inclusive 5-9, move on at 10, to the Burrow by the Refuge. The Burrow's gate (rung_gates) still holds a climber without the bot's lines here until her own Armor Self IV and Bludgeoning Protection IV stand",
+        "ground": "holtburg-outskirts (M6 item 0, slice belt): the ten nearest dry encounter cells of generator 2007 'Newbie Aluvian Generator' around Holtburg (the pinned world SQL v0.9.296): drudges (Skulker, Slinker), Young Banderlings, Mites (Snippet, Scion) and Mosswarts, Gnawer Shreths included, all level 8, with the Black Rabbit and Chicken of generator 5150 (level 4) when in reach, level_band 4-8, the Holtburg vendors for the full component formula of the account test and the Mana Potion, 10,000 pyreals of coin. It replaces low-b-belt (band 8-20, creatures to level 30, no vendors), which stays the M4 hunters' ground. TODO(m6-outskirts-profile): the Redoubt (the spec's 'outskirts and the Redoubt') and item 3's own pass on the rung are still open",
+        "alternates": "none (the spec section 5.4 lists no alternation for the outskirts)",
+        "move_on": "level 16 (M6 7 AK, the owner's decision of 2026-11-06; M6 7 AC had 15, the spec's band edge was 10): floor 30 = half of the measured 59 kills/h (r3: 58 kills in 3,528 s; r2b read 70), where the strategy's assumed 90 (half 45) was out of reach of the real ground; ceiling 4.9 = 2 x 14 s a kill x 3.4/19.6 (strategy section 1.2 row 5-10) (assumed: the strategy marks it so, unmeasured here); the rule is $.sources.move_on_rule. Report-only (nothing acts on the floor) M6 14 (D135, the owner, 2026-11-13): level 10, where the Town Network's portals to the Refuge and the Facility Hub admit her; the floor and the ceiling are the ground's, unchanged; the next rung may be taken before its band ($.sources.move_on_rule)",
+        "spell_level": "I-II: by the fizzle rule (D4, D41): the projected base War Magic is 81 at level 5 (I at 0.95; II needs 93) and 104 at level 9 (II at 0.95; III needs 143). M6 14 (D135): the band ends at 9 again (it ran to 15, base 139 there; M6 7 AC's band 5-9 had 102 at level 9); the run reads the current skill, which the buff bot's lines lift",
+        "element": "fire: the road's one element (strategy section 0); the outskirts profile's creatures take fire at 1.42 (the drudges, half the mass), 1.0 (banderling, mites, mosswarts) and 0.8 (the Gnawer Shreth), PropertyFloat 67 'ResistFire' of the pinned world SQL v0.9.296, a mean of 1.20 over the band 5-8 (holtburg-outskirts.json sources.outdoor); the rate (0.09 M XP/h) stays assumed. TODO(m6-outskirts-profile): the Redoubt's creatures are not read",
+        "target_margin": "5: the smallest round margin that admits the rung's named targets (the drudges, mites and banderlings of level 8, holtburg-outskirts.json) from the rung's first level 5; above it ACE's creature damage grows with the creature's level while a level-I bolt's does not (M6 item 0 a4, moved from a code constant to this rung by review 0-R5, D26)",
+        "route": "walk:holtburg: the outskirts are Holtburg's (spec section 5.2 row 5-10); the ground's cells lie 0.85 to 1.42 map units (about 200 to 340 m) from the town (holtburg-outskirts.json sources.home)"
+      }
+    },
+    {
+      "key": "burrow",
+      "name": "Tusker Burrow",
+      "kind": "ground",
+      "band": {
+        "from": 10,
+        "to": 14
+      },
+      "ground": "tusker-burrow",
+      "quests": [],
+      "landblock": "0x5748",
+      "pending": false,
+      "pending_reason": null,
+      "alternates": [],
+      "move_on": {
+        "level": 15,
+        "kills_an_hour_floor": 7,
+        "casts_a_kill_ceiling": 4.9
+      },
+      "spell_level": {
+        "min": 2,
+        "max": 2
+      },
+      "element": "fire",
+      "target_margin": 5,
+      "route": "town-network:oolutanga-refuge",
+      "health": { "hitter": { "name": "Female Tusker", "wcid": 236, "d_val": 25, "d_var": 0.75, "strength": 160 }, "road_hitter": { "name": "Goldenback Tusker", "wcid": 235, "d_val": 40, "d_var": 0.75, "strength": 220 }, "pack": 3 },
+      "sources": {
+        "health": "the ground: Female Tusker (wcids 236 and 22589) DVal 25, Strength 160, hit 34. the world: SELECT d_val FROM weenie_properties_body_part WHERE object_Id=236 and d_var (the largest part; 0.75) and SELECT init_Level FROM weenie_properties_attribute WHERE object_Id=236 AND type=1, the pinned ACE-World v0.9.296 dump. From level 15 the hub's portals cut the run to 20.9 m (D70), so the Goldenback of the old level-10 island road binds nothing; road_hitter names the NEXT rung's hitter as the outskirts' does (no road is run): she arrives at the Lodge ready, and the want stays the owner's 72 through this rung pack 3: M6 7 AY: the plain hunt's first groups on the way in: 'awake now: 33 35 42' at route metre 79 (cache/m6/7/burrow-survey/route-wake.txt); the 33 slots outside the keep-out stand in groups of one to four (tusk-survey.md). M6 14 (D135, the owner, 2026-11-13: the island from level 10): the band is 10-14, under the hub's gate of 15, so the rung's route runs the island on foot from Oolutanga's Refuge again (travel-routes.json tusker-burrow by-refuge, 609 m) and road_hitter is that road's hardest, as in M6 7 R: encounter generator 22387 'Tusker Island Low Mix Gen' (levels 8 to 30, travel-routes.json danger_cells) rolls the Goldenback Tusker (wcid 235, DVal 40, Strength 220, hit 71; SELECT d_val FROM weenie_properties_body_part WHERE object_Id=235 and d_var; SELECT init_Level FROM weenie_properties_attribute WHERE object_Id=235 AND type=1, the pinned ACE-World v0.9.296 dump): want 142, which the stat cap does not let her buy inside the band",
+        "band": "spec section 5.2 row 10-15 and strategy section 1.2 row 10-15: Tusker Burrow (0x5748), no gate, 42 Female Tuskers, 5 min, L15 2,000 XP, 1 hour, 0.25 M XP/h (assumed); inclusive 10-14, move on at 15, on the rehearsal's numbers dropped by M6 7 AC. The owner's correction of 2026-11-06 (M6 7 AR): the rung is back, between the outskirts and the Lodge: outskirts to 15, the Burrow from 16 to the level where the Lodge's gate opens, the Lodge after it. AC's numbers no longer hold: they read Flame Bolt II at level 10 with no dance and no armor lines, 15 kills an hour; the mage at 16 has Flame Bolt III, Armor Self IV and Bludgeoning Protection IV. A band is levels, the Lodge's gate is not, so the band is the one level 16 and she stays on it past 16 while rung_gates' Lodge row holds her (Mage/RungGateRule.Walk drops the level to 16): the Lodge's gate alone moves her on M6 14 (D135, the owner, 2026-11-13: the island from level 10, reversing the hold until 16 of 2026-11-06; cache/m6/optimal-climb/study.md section 1): inclusive 10-14, move on at 15. Both Town Network portals toward the island (Oolutanga's Refuge 43002 and the Facility Hub 42851) are MinLevel 10 (travel-routes.json network-to-refuge, network-to-facility-hub) and the hub's tusker portals MinLevel 15, so from 10 to 14 she walks about 610 m from the Refuge to the entry (travel-routes.json tusker-burrow by-refuge). The study's read under the buff bot's lines at 10: health about 40, damage factor 0.12 on the robe, War Magic about 165 buffed (the plan's 110 here and about 60 from the bot), two Flame Bolt III a Female Tusker (95 health, Magic Defense 54); singles and pairs are safe, a group of three needs a heal mid-fight, and with the leather set at 12 to 13 the groups of one to three are routine; reroll 3 read 285k XP/h here at 16. The gate (rung_gates, burrow) is unchanged: without the bot's lines she is held on the outskirts until her own Armor Self IV and Bludgeoning Protection IV stand",
+        "ground": "tusker-burrow (0x5748): M6 3 p1, the profile drafted from the dats and the pinned world SQL v0.9.296 (GroundDraft, lean 0.3 since M6 4 R1): no gate on the entry portal 22663 (item 0's W0 agrees), one 5-minute generator 7924 with 42 slots (37 x Female Tusker 236, 5 x 22589 which holds the Female Tusker Tusk 22423), level 15, 95 health, Magic Defense 54 (ACE's current value; the sheets' 48 is the bare skill row); NoRecall (PortalBitmask 0x31), so no tie record and the home and shops are Holtburg's (D48); the island's shops are TODO(m6-island-vendors). The walk works since M6 4 W4 (the floor crossings and the sill rule): at lean 0.3 the draft reaches all 196 floored cells of the 278 (82 floorless, no pocket), the offline body run arrives on every leg with no rung and no wall frame (TODO(m6-burrow-walk) is closed). M6 7 AR: the south hall (holders in packs of 5 to 9) is out of the plain hunt: tusker-burrow.json hunt.keep_out, its source",
+        "alternates": "none (spec section 5.4)",
+        "move_on": "level 17: the Burrow's one-level band ends here, but she moves only when the Lodge's gate opens (rung_gates, the rule Mage/RungGateRule.Walk); floor 7 = half of the model's 15 kills/h at level 10 (cache/m6/7/doc-notes-ab.md; the strategy's 120 was assumed and out of reach), ceiling 4.9 = 2 x 14 s a kill x 3.4/19.6 (strategy section 1.2 row 10-15) (assumed); report-only; the rule is $.sources.move_on_rule M6 14 (D135, the owner, 2026-11-13): level 15, the hub's portals; the floor and the ceiling unchanged",
+        "spell_level": "II: by the fizzle rule (D4, D41): the projected base War Magic is 110 at level 10 (II at 0.95; III needs 143) and 133 at level 14 (II at 0.95; III needs 143). M6 14 (D135): the band is 10-14 (it was the one level 16, base 144, III). The plan is the base skill's; the level up job's fight casts by the live cap on her current, buffed War Magic (D129): the buff bot's War Magic Mastery VII and its Focus and Willpower lines lift her about 60, about 170 at 10, which lands Flame Bolt III at 0.95 (the study's two bolts a Female Tusker), and tusker-burrow.json's spell_plan rows do not lower it ($.sources.plan_cast_chance)",
+        "element": "fire: tuskers take fire at 1.0 (ladder note section 7, the damage-taken table, row 'tusker dungeons'; section 10's verdict: the tusker dungeons are the spine, on fire); strategy section 0: one element (fire) from 10 to 126",
+        "target_margin": "5: the smallest round margin that admits the rung's named targets from the rung's first level, as the outskirts' 5; the Female Tuskers 236 and 22589 are level 15, under her 16. A dungeon's pick is not banded by this margin (TODO(m6-dungeon-band)): it takes every target of the dungeon at any character level. M6 14 (D135): the band starts at 10: 10 + 5 = 15, the Female Tuskers' level, so 5 stands",
+        "route": "town-network:oolutanga-refuge: every tusker dungeon of the road sits on Aphus Lassel around Oolutanga's Refuge, its own Town Network stop, gate 10 (strategy section 0 and section 3 item 5); from level 15 the hub's portal is the shorter way (D70, travel-routes.json) M6 14 (D135): from 10 to 14 the hub's Burrow portal (MinLevel 15) refuses her, so the route is the Refuge's walk (travel-routes.json by-refuge, about 610 m across the Tusker Island Low Mix camps of levels 8 to 30, which notice her from up to 25 m: danger_cells)"
+      }
+    },
+    {
+      "key": "lodge",
+      "name": "Tusker Lodge",
+      "kind": "ground",
+      "band": {
+        "from": 15,
+        "to": 20
+      },
+      "ground": "tusker-lodge",
+      "quests": [],
+      "landblock": "0x5749",
+      "pending": false,
+      "pending_reason": null,
+      "alternates": [],
+      "move_on": {
+        "level": 21,
+        "kills_an_hour_floor": 75,
+        "casts_a_kill_ceiling": 5.2
+      },
+      "spell_level": {
+        "min": 2,
+        "max": 3
+      },
+      "element": "fire",
+      "target_margin": 5,
+      "route": "town-network:oolutanga-refuge",
+      "health": { "hitter": { "name": "Male Tusker", "wcid": 11, "d_val": 25, "d_var": 0.75, "strength": 170 }, "road_hitter": null, "pack": 3 },
+      "sources": {
+        "health": "Male Tusker (wcids 11 and 22597) DVal 25, Strength 170, hit 36. the world: SELECT d_val FROM weenie_properties_body_part WHERE object_Id=11 and d_var (the largest part; 0.75) and SELECT init_Level FROM weenie_properties_attribute WHERE object_Id=11 AND type=1, the pinned ACE-World v0.9.296 dump. No road hitter: from level 15 the hub's portals cut the run to 11.9 m (D70) pack 3: M6 7 AY: the entry trio wakes together (cache/m6/7/lodge-entry-survey.md section 1, slots 1, 2, 3); deeper the pack that wakes is larger (median 5 over the 57 slots, the same survey section 4) but the halls are 6 m wide and let two or three touch her (section 3), so three stay the swings at once.",
+        "band": "spec section 5.2 row 15-22 and strategy section 1.2 row 15-22: Tusker Lodge (0x5749), gate 5, 57 Male Tuskers, 4 min, L20 3,500 XP, 2 hours, 0.55 M XP/h (assumed); inclusive 16-21, move on at 22. M6 7 AK, the owner's decision of 2026-11-06: from 16, not 15: she holds outside until the level whose credit trains Item Enchantment and enters with the robe buffed (it overrides 'the Lodge at 15'; outskirts sources.band has the two deaths). The owner's correction of 2026-11-06 (M6 7 AR): the Burrow's rung takes level 16, the Lodge's band starts at 17, and the gate (rung_gates) moves her M6 14 (D135, the owner, 2026-11-13: the study's bands; cache/m6/optimal-climb/study.md section 2): inclusive 15-20, move on at 21, by the Facility Hub's portal, which admits her from 15 (11.9 m to the entry); reroll 3 measured 0.545 to 0.834 M XP/h here at 17 to 22. The gate (rung_gates, lodge) now asks no less than the Burrow's, so without the buff bot's lines a climber is held outside until her own IV lines stand",
+        "ground": "tusker-lodge (0x5749): M6 3 p1, the profile drafted from the dats and the pinned world SQL v0.9.296 (GroundDraft, lean 0.3): entry gate MinLevel 5, no max (item 0's W0 agrees), one 4-minute generator 7932 with 57 slots (53 x Male Tusker 11, 4 x 22597 which holds the Male Tusker Tusk 22427), level 20, 100 health, Magic Defense 63; NoRecall, home and shops Holtburg's (D48)",
+        "alternates": "none (spec section 5.4)",
+        "move_on": "level 22: the spec section 5.2 band's upper edge; floor 75 = half of 150 kills/h, ceiling 5.2 = 2 x 15 s a kill x 3.4/19.6 (strategy section 1.2 row 15-22) (assumed: the strategy marks the kills/h assumed); the rule is $.sources.move_on_rule M6 14 (D135, the owner, 2026-11-13): level 21; the floor and the ceiling unchanged",
+        "spell_level": "II-III: by the fizzle rule (D4, D41): the projected base War Magic is 139 at level 15 (II at 0.95; III needs 143) and 164 at level 20 (III at 0.95; IV needs 193). M6 14 (D135): the band is 15-20 (it was 17-21, III-III on 149 and 169); the run reads the current skill, and the buff bot's lines lift it to IV",
+        "element": "fire: tuskers take fire at 1.0 (ladder note section 7, the damage-taken table, row 'tusker dungeons'; section 10's verdict: the tusker dungeons are the spine, on fire); strategy section 0: one element (fire) from 10 to 126",
+        "target_margin": "5: the smallest round margin that admits the rung's named targets from the rung's first level, as the outskirts' 5; 16 (the rung's first level) + 5 = 21, over the level 20 of the Male Tuskers 11 and 22597 (tusker-lodge.json), so a margin of 5 admits both from level 16. A dungeon's pick is not banded by this margin (TODO(m6-dungeon-band)): it takes every target of the dungeon at any character level. M6 14 (D135): 15 + 5 = 20, the Male Tuskers' level: 5 stands",        "route": "town-network:oolutanga-refuge: every tusker dungeon of the road sits on Aphus Lassel around Oolutanga's Refuge, its own Town Network stop, gate 10 (strategy section 0 and section 3 item 5); the walk from the Refuge is item 4's to resolve"
+      }
+    },
+    {
+      "key": "cave",
+      "name": "Tusker Cave",
+      "kind": "ground",
+      "band": {
+        "from": 21,
+        "to": 24
+      },
+      "ground": "tusker-cave",
+      "quests": [],
+      "landblock": "0x5B46",
+      "pending": false,
+      "pending_reason": null,
+      "alternates": [
+        {
+          "ground": "tusker-cavern",
+          "landblock": "0x5C43",
+          "pending": false,
+          "pending_reason": null
+        }
+      ],
+      "move_on": {
+        "level": 25,
+        "kills_an_hour_floor": 112,
+        "casts_a_kill_ceiling": 5.6
+      },
+      "spell_level": {
+        "min": 3,
+        "max": 3
+      },
+      "element": "fire",
+      "target_margin": 10,
+      "route": "town-network:oolutanga-refuge",
+      "health": { "hitter": { "name": "Tusker Crimsonback", "wcid": 1627, "d_val": 40, "d_var": 0.75, "strength": 200 }, "road_hitter": null, "pack": 5 },
+      "sources": {
+        "health": "Tusker Crimsonback (wcids 1627 and 22585) DVal 40, Strength 200, hit 65 (the alternate Tusker Cavern's Goldenback hits 71). the world: SELECT d_val FROM weenie_properties_body_part WHERE object_Id=1627 and d_var (the largest part; 0.75) and SELECT init_Level FROM weenie_properties_attribute WHERE object_Id=1627 AND type=1, the pinned ACE-World v0.9.296 dump. No road hitter: the hub's route (D70) pack 5: M6 7 AY: no survey of the Cave yet (TODO(m6-cave-pack)): the two slots nearest the arrival, both in 0x5B460111, 13 m away, have 3 and 4 Crimsonbacks within 24 m on their floor: SELECT guid, obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE weenie_Class_Id=1627 and the cell in landblock 0x5B46 (distance and height only, no cell visibility: an upper bound; the same read gives the Lodge a median of 7 where the survey's visibility gives 5).",
+        "band": "spec section 5.2 row 22-32 and strategy section 1.2 row 22-32: Tusker Cave (0x5B46), gate 12, 81 Crimsonbacks, 5 min, L30 5,000 XP, 5 hours, 1.2 M XP/h; inclusive 22-31, move on at 32. M6 14 (the owner, 2026-11-13: the Temple 20-40 leaves the ladder: its road killed the climber at 32 (2026-11-12 14:41 UTC) and its kills pay the Cave's; the Cave to 39, the Abode from 40): inclusive 22-39, move on at 40. The Temple 20-40 (its rung was 32-40) is reached by the overland walk from the New Colier Portal, 734 m (walk:new-colier), where a level-34 Scrawed Grievver killed her; the Cave is the Town Network road she takes every day (town-network:oolutanga-refuge). Of its 144 targets 85 are the level-30 Goldenbacks and Crimsonbacks at the Cave's 5,000 a kill and 59 the level-40 Minions at 7,000 (XpOverride, weenie_properties_int type 146 of 235, 1627, 22511 and 22512, a SELECT on the world copy, 2026-11-13), so the Cave holds her until the Abode's Redeemers (17,500 a kill) take her at 40, the first level of their band in the margin of 20 (abode sources.target_margin). The Cave's gate holds her before it (rung_gates) and the Abode's now holds her in it (rung_gates, abode) M6 14 (D135, the owner, 2026-11-13: the study's bands; cache/m6/optimal-climb/study.md sections 2 and 3): inclusive 21-24, move on at 25, where the Abode on Flame Bolt V pays about twice the Cave (the study's 2.3 M XP/h against 1.1; sprint3o read 1.26 M here at 38)",
+        "ground": "tusker-cave (0x5B46): M6 3 p1, the profile drafted from the dats and the pinned world SQL v0.9.296 (GroundDraft), re-drafted in M6 4 R1: entry gate MinLevel 12, no max (item 0's W0 agrees), one 5-minute generator 7924 with 81 slots (77 x Tusker Crimsonback 1627, 4 x 22585 which holds the Tusker Crimsonback Tusk 22421), level 30, 110 health, Magic Defense 94; NoRecall, home and shops Holtburg's (D48). The walk works since M6 4 W4: the room graph joins the doorway 0x5B460113 to 0x5B460114 as a floor crossing (a ramp through a floor hole), so at lean 0.3 the draft reaches 278 of the 404 cells (126 floorless, no pocket), the tour holds 76 cells and the rung hunts all 81 slots (M6 3 F1 had put the rung on the Cavern while the Cave reached 3 cells and no slot: TODO(m6-cave-rung-swap) and TODO(m6-cave-doorway-0113-0114) are closed; item 3's rung-unfightable stop stays for a ground that hunts none)",
+        "alternates": "tusker-cavern (0x5C43, 63 Goldenbacks): strategy section 1.2 row 22-32 and the spec section 5.4 alternations; resolves (M6 3 p3: tusker-cavern.json, gate 15, one 5-minute generator, 59 Goldenback Tusker 235 and 4 of 22591, level 30, health 130, Magic Defense 103; the rung's own spell levels III-IV); M6 4 R1: re-drafted at lean 0.3, the walk reaches 306 cells and all 63 slots (216 cells and 42 slots at item 3's lean 0.9, behind two refused doorways: TODO(m6-cavern-doorway-0207-0206) and TODO(m6-cavern-doorway-020F-020E) are joined by the floor crossings and closed)",
+        "move_on": "level 40 (M6 14, the owner, 2026-11-13: the Temple 20-40 leaves the ladder: its road killed the climber at 32 (2026-11-12 14:41 UTC) and its kills pay the Cave's; the Cave to 39, the Abode from 40; the spec section 5.2 band's upper edge was 32): the floor and ceiling are the Cave's strategy row's, unchanged, since the ground and its kill are the same: floor 112 = half of 224 kills/h, ceiling 5.6 = 2 x 16 s a kill x 3.4/19.6 (strategy section 1.2 row 22-32); the rule is $.sources.move_on_rule M6 14 (D135, the owner, 2026-11-13): level 25; the floor and the ceiling unchanged",
+        "spell_level": "III: by the fizzle rule (D4, D41): the projected base War Magic is 169 at level 21 (III at 0.95; IV needs 193) and 182 at level 24 (III at 0.95; IV needs 193). M6 14 (D135): the band is 21-24 (it was 22-39, III-IV on 173 and 234). The run reads the current skill: the buff bot's lines lift it about 60, so the fight casts IV here (AutopilotScenario.BoltLevel, D129), and tusker-cave.json's spell_plan rows do not lower it",
+        "element": "fire: tuskers take fire at 1.0 (ladder note section 7, the damage-taken table, row 'tusker dungeons'; section 10's verdict: the tusker dungeons are the spine, on fire); strategy section 0: one element (fire) from 10 to 126",
+        "target_margin": "10: the smallest round margin that admits the rung's named targets from the rung's first level, as the outskirts' 5; 22 (the rung's first level) + 8 = 30, the level of the Tusker Crimsonbacks 1627 and 22585 (tusker-cave.json); 8 is rounded up to the next round margin, 10 A dungeon's pick is not banded by this margin (TODO(m6-dungeon-band)): it takes every target of the dungeon at any character level. M6 14 (D135): 21 + 9 = 30, rounded up to 10: 10 stands",        "route": "town-network:oolutanga-refuge: every tusker dungeon of the road sits on Aphus Lassel around Oolutanga's Refuge, its own Town Network stop, gate 10 (strategy section 0 and section 3 item 5); the walk from the Refuge is item 4's to resolve"
+      }
+    },
+    {
+      "key": "abode",
+      "name": "Tusker Abode",
+      "kind": "ground",
+      "band": {
+        "from": 25,
+        "to": 41
+      },
+      "ground": "tusker-abode",
+      "quests": [],
+      "landblock": "0x5C45",
+      "pending": false,
+      "pending_reason": null,
+      "alternates": [
+        {
+          "ground": "tusker-habitat",
+          "landblock": "0x5B47",
+          "pending": false,
+          "pending_reason": null
+        },
+        {
+          "ground": "hills-citadel",
+          "landblock": "0x02F0",
+          "pending": true,
+          "pending_reason": "profile due in item 10; TODO(m6-hills-citadel): not written in item 3 (D13; its placement is the owner's question at item 3's end, item 10 the lead's recommendation, with the lightning line TODO(m6-fight-element-line))"
+        }
+      ],
+      "move_on": {
+        "level": 42,
+        "kills_an_hour_floor": 86,
+        "casts_a_kill_ceiling": 7.3
+      },
+      "spell_level": {
+        "min": 3,
+        "max": 4
+      },
+      "element": "fire",
+      "target_margin": 35,
+      "route": "town-network:oolutanga-refuge",
+      "health": { "hitter": { "name": "Tusker Redeemer", "wcid": 22520, "d_val": 50, "d_var": 0.75, "strength": 200 }, "road_hitter": null, "pack": 1 },
+      "sources": {
+        "health": "Tusker Redeemer (wcids 22520, 22600 and 22601) DVal 50, Strength 200, hit 82 (the alternate Habitat's Liberator DVal 55, hit 90). the world: SELECT d_val FROM weenie_properties_body_part WHERE object_Id=22520 and d_var (the largest part; 0.75) and SELECT init_Level FROM weenie_properties_attribute WHERE object_Id=22520 AND type=1, the pinned ACE-World v0.9.296 dump pack 1: TODO(m6-pack-past-the-cave): no pack is surveyed past the Cave (M6 7 AY), so this rung still counts one attacker.",
+        "band": "spec section 5.2 row 45-60 and strategy section 1.2 row 45-60: Tusker Abode (0x5C45), gate 20, 121 Redeemers, 5 min, L60 17,500 XP, 30 hours, 3.1 M XP/h; inclusive 41-59, move on at 60 (M6 3 F1, 3-R2: the band starts at 41, after the Temple 20-40's cut at 40; the strategy's 45 is moved down). M6 14 (the owner, 2026-11-13: the Temple 20-40 leaves the ladder: its road killed the climber at 32 (2026-11-12 14:41 UTC) and its kills pay the Cave's; the Cave to 39, the Abode from 40): inclusive 40-59, move on at 60: the Abode follows the Cave by the island road she already takes every day (route); its entry gate is MinLevel 20 with no max (sources.ground), so 40 is admitted; the Redeemers are level 60, 250 health, 17,500 a kill, and none casts (tusker-abode.json targets). Its gate (rung_gates, abode) holds her in the Cave while her lines are down M6 14 (D135, the owner, 2026-11-13: the Abode from 25 on Flame Bolt V; cache/m6/optimal-climb/study.md sections 2 and 3): inclusive 25-41, move on at 42. The plan's base War Magic at 25 is 185 (spell_level) and the buff bot's lines lift it about 60, to about 245, over the 243 Flame Bolt V asks at 0.95; abode2's V cycle read 2.29 M XP/h with its trip, abode4, 6 and 7 read 3.18 to 3.60 on VI from 40. Its entry and the hub's portal admit her from 20. The gate (rung_gates, abode) holds a climber whose lines are down in the Cave",
+        "ground": "tusker-abode (0x5C45): M6 3 p2, the profile drafted from the dats and the pinned world SQL v0.9.296 (GroundDraft, lean 0.3): entry gate MinLevel 20, no max (item 0's W0 agrees), PortalBitmask 0x31 (NoRecall: not tieable); one 5-minute generator 7924 with 121 slots (78 x Tusker Redeemer 22600, 39 x 22520, 4 x 22601 which holds the Tusker Redeemer Tusk 22430), level 60, 250 health, Magic Defense 171 (ACE's current value; the sheet and sel-creatures.tsv give the bare skill 155); no creature of the ground casts (no spell_book row), so none is kill-first; NoRecall, home and shops Holtburg's (D48). The walk reaches 305 of the 712 cells and 62 of the 121 slots (M6 14 pits: the upper level's east half on foot, 37 slots, and its west half by a running jump over the pit 0x5C4502A9, 25 slots; the jump needs a level-ground flight of 10.75 m and the climber flies 11.54 m with the buff bot's level VII set, 5.88 m bare): the lower level, with the exit, is reached only by a drop off the brink, one way, so 59 slots stand where no walk reaches (TODO(m6-abode-lower-level); TODO(m6-abode-pockets) is closed, it was this); the spine (spec section 5.4; D17; the Abode holds Redeemers at 60, not Minions at 40: the spec section 5.2's correction)",
+        "alternates": "tusker-habitat (0x5B47, 57 Liberators): strategy section 1.2 row 45-60 and the spec section 5.4 alternations; resolves today (M6 3 p3: tusker-habitat.json, gate 25, one 5-minute generator, 53 Tusker Liberator 22519 and 4 of 22595, level 60, health 250, Magic Defense 203; the rung's own spell level V). M6 14 (the owner, 2026-11-13: the Temple 20-40 leaves the ladder: its road killed the climber at 32 (2026-11-12 14:41 UTC) and its kills pay the Cave's; the Cave to 39, the Abode from 40): Hills Citadel (0x02F0), the pending alternate of the Temple 20-40's rung, moves here with that rung, still pending: the element-per-ground alternation of the 40-55 band (ladder note section 10; D13), which this band now holds; its profile is not written (TODO(m6-hills-citadel), with its lightning line TODO(m6-fight-element-line))",
+        "move_on": "level 60: the spec section 5.2 band's upper edge; floor 86 = half of 172 kills/h, ceiling 7.3 = 2 x 21 s a kill x 3.4/19.6 (strategy section 1.2 row 45-60); the rule is $.sources.move_on_rule M6 14 (D135, the owner, 2026-11-13): level 42; the floor and the ceiling unchanged",
+        "spell_level": "III-IV: by the fizzle rule (D4, D41), moved by M6 3 F1 (3-R2), M6 14 (the band from 40) and D135 (the band 25-41): the projected base War Magic is 185 at level 25 (III at 0.95; IV needs 193) and 241 at level 41 (IV at 0.95; V needs 243). The plan is the base skill's projection; the level up job's fight casts by the live cap, the highest level at 0.95 on her current, buffed War Magic, never under this plan's 3 (AutopilotScenario.BoltLevel; D129): the buff bot's lines lift it about 60, about 245 at 25, Flame Bolt V at 0.95 (the study's Abode on V), and VI from about 40 (War Magic 297 to 301 there, live 2026-11-13); tusker-abode.json's spell_plan rows do not lower it in that fight ($.sources.plan_cast_chance)",
+        "element": "fire: tuskers take fire at 1.0 (ladder note section 7, the damage-taken table, row 'tusker dungeons'; section 10's verdict: the tusker dungeons are the spine, on fire); strategy section 0: one element (fire) from 10 to 126",
+        "target_margin": "35: the smallest round margin that admits the rung's named targets from the rung's first level (M6 3 F1, 3-R2 moved the first level from 45 to 41, M6 14 to 40, D135 to 25): 25 + 35 = 60, the level of the Tusker Redeemers 22520, 22600 and 22601 (tusker-abode.json), a round margin as it stands A dungeon's pick is not banded by this margin (TODO(m6-dungeon-band)): it takes every target of the dungeon at any character level.",        "route": "town-network:oolutanga-refuge: every tusker dungeon of the road sits on Aphus Lassel around Oolutanga's Refuge, its own Town Network stop, gate 10 (strategy section 0 and section 3 item 5); the walk from the Refuge is item 4's to resolve"
+      }
+    },
+    {
+      "key": "quarters",
+      "name": "Tusker Quarters",
+      "kind": "ground",
+      "band": {
+        "from": 42,
+        "to": 64
+      },
+      "ground": "tusker-quarters",
+      "quests": [],
+      "landblock": "0x5B4A",
+      "pending": false,
+      "pending_reason": null,
+      "alternates": [
+        {
+          "ground": "tusker-temple-fort-tethana",
+          "landblock": "0x5C4A",
+          "pending": false,
+          "pending_reason": null
+        },
+        {
+          "ground": "tusker-barracks",
+          "landblock": "0x5A48",
+          "pending": false,
+          "pending_reason": null
+        }
+      ],
+      "move_on": {
+        "level": 65,
+        "kills_an_hour_floor": 80,
+        "casts_a_kill_ceiling": 7.6
+      },
+      "spell_level": {
+        "min": 5,
+        "max": 5
+      },
+      "element": "fire",
+      "target_margin": 40,
+      "route": "town-network:oolutanga-refuge",
+      "health": { "hitter": { "name": "Tusker Slave", "wcid": 1628, "d_val": 60, "d_var": 0.75, "strength": 210 }, "road_hitter": null, "pack": 1 },
+      "sources": {
+        "health": "Tusker Slave (wcids 1628 and 22605) DVal 60, Strength 210, hit 102. the world: SELECT d_val FROM weenie_properties_body_part WHERE object_Id=1628 and d_var (the largest part; 0.75) and SELECT init_Level FROM weenie_properties_attribute WHERE object_Id=1628 AND type=1, the pinned ACE-World v0.9.296 dump pack 1: TODO(m6-pack-past-the-cave): no pack is surveyed past the Cave (M6 7 AY), so this rung still counts one attacker.",
+        "band": "spec section 5.2 row 60-75 and strategy section 1.2 row 60-75: Tusker Quarters (0x5B4A), gate 30, 79 Slaves, 5 min, Slave L80 30,000 XP, 47 hours, 5.0 M XP/h; inclusive 60-74, move on at 75. Not split: the strategy models the whole band at one rate (the Slave's 22 s a kill) and names no level inside it where the Temple 40+ outranks the Quarters, so a split would invent a band edge; the Temple 40+ resolves as the alternate instead A dungeon's pick is not banded by this margin (TODO(m6-dungeon-band)): it takes every target of the dungeon at any character level. M6 14 (D135, the owner, 2026-11-13: the Quarters from about 42; cache/m6/optimal-climb/study.md section 2): inclusive 42-64, move on at 65: the Tusker Slave's 30,000 a kill on 400 health and all 79 slots on foot, about 16% more XP a bolt than the Redeemer's (the study's model: 4.2 M XP/h against the Abode's 3.25 on VI from about 42, where she casts VI under the bot's lines); the hub's portal and the entry admit her from 30. The live point (the trial switch, Qwinnie at level 50, 2026-11-13 17:34-18:05 UTC, cache/m6/14/live/quarters1/step3-levelup.log): 30.7 minutes of fight, 83 kills, 4,553,484 XP/h with about 3 minutes of travel from home, walk_s 188, rest_s 0, no death, 1,201 Slave hits of mean 2.56 and largest 9 under the buff bot's lines, lowest health 71 of 177, four emergency drains in pack dips; her Abode run just before at 49 to 50, with the same fixes, read 3,348,537 XP/h over 305 kills (its last cycle 3,488,445). The Quarters is 30 to 36% faster at 50 and safe, so the crossover lies below 50, and 42 (the study's, where VI comes) stands until a live read at 42 says otherwise. The gate (rung_gates, quarters) is the Abode's",        "ground": "tusker-quarters (0x5B4A): M6 3 p2, the profile drafted from the dats and the pinned world SQL v0.9.296 (GroundDraft, lean 0.9): entry gate MinLevel 30, no max (item 0's W0 agrees), PortalBitmask 0x31 (NoRecall: not tieable); one 5-minute generator 7924 with 79 slots (75 x Tusker Slave 1628, 4 x 22605 which holds the Tusker Slave Tusk 22432), level 80, 400 health, Magic Defense 219 (ACE's current value; the sheet and sel-creatures.tsv give the bare skill 200); no creature of the ground casts, so none is kill-first; NoRecall, home and shops Holtburg's (D48). The doorway lean must be 0.9 (4 of 278 cells below it, all 196 floor cells at 0.9, six storeys, all 79 slots reached); the body run (M6 4 R1, lean 0.3) arrives on every leg with no rung and no wall frame (TODO(m6-quarters-walk) is closed); the spine (spec section 5.4; D17)",
+        "alternates": "tusker-temple-fort-tethana (0x5C4A, M5's Temple 40+ profile, 145 L80 incl. 59 Worshippers): in the same row of the spec section 5.2 and the strategy section 1.2; resolves today. tusker-barracks (0x5A48, 54 Guards): strategy section 1.2 row 60-75 and the spec section 5.4 alternations; resolves today (M6 3 p3: tusker-barracks.json, gate 40, one 5-minute generator, 49 Tusker Guard 1629 and 5 of 22593, level 80, health 400, Magic Defense 244; the rung's own spell levels V-VI; six avoid boxes round its ten Nullify All Magic Other traps)",
+        "move_on": "level 75: the spec section 5.2 band's upper edge; floor 80 = half of 161 kills/h, ceiling 7.6 = 2 x 22 s a kill x 3.4/19.6 (strategy section 1.2 row 60-75); the rule is $.sources.move_on_rule M6 14 (D135, the owner, 2026-11-13): level 65; the floor and the ceiling unchanged",
+        "spell_level": "V: by the fizzle rule (D4, D41): the projected base War Magic is 245 at level 42 (V at 0.95; VI needs 293) and 288 at level 64 (V at 0.95; VI needs 293). M6 14 (D135): the band is 42-64 (it was 60-74, V-VI on 282 and 302); the live cap casts VI from about 40 under the buff bot's lines (D129)",
+        "element": "fire: tuskers take fire at 1.0 (ladder note section 7, the damage-taken table, row 'tusker dungeons'; section 10's verdict: the tusker dungeons are the spine, on fire); strategy section 0: one element (fire) from 10 to 126",
+        "target_margin": "40: the smallest round margin that admits the rung's named targets from the rung's first level, as the outskirts' 5; 42 (the rung's first level) + 38 = 80, the level of the Tusker Slaves 1628 and 22605 (tusker-quarters.json); 38 is rounded up to the next round margin, 40 (M6 14, D135: the band started at 60, with 20) A dungeon's pick is not banded by this margin (TODO(m6-dungeon-band)): it takes every target of the dungeon at any character level.",
+        "route": "town-network:oolutanga-refuge: every tusker dungeon of the road sits on Aphus Lassel around Oolutanga's Refuge, its own Town Network stop, gate 10 (strategy section 0 and section 3 item 5); the walk from the Refuge is item 4's to resolve"
+      }
+    },
+    {
+      "key": "holding",
+      "name": "Tusker Holding",
+      "kind": "ground",
+      "band": {
+        "from": 65,
+        "to": 126
+      },
+      "ground": "tusker-holding",
+      "quests": [],
+      "landblock": "0x5B48",
+      "pending": false,
+      "pending_reason": null,
+      "alternates": [
+        {
+          "ground": "tusker-armory",
+          "landblock": "0x5948",
+          "pending": false,
+          "pending_reason": null
+        },
+        {
+          "ground": "tusker-temple-fort-tethana",
+          "landblock": "0x5C4A",
+          "pending": false,
+          "pending_reason": null
+        },
+        {
+          "ground": "black-spawn-den-aluvian",
+          "landblock": "0x0105",
+          "pending": false,
+          "pending_reason": null
+        },
+        {
+          "ground": "tusker-quarters",
+          "landblock": "0x5B4A",
+          "pending": false,
+          "pending_reason": null
+        }
+      ],
+      "move_on": {
+        "level": 126,
+        "kills_an_hour_floor": 86,
+        "casts_a_kill_ceiling": 7.3
+      },
+      "spell_level": {
+        "min": 5,
+        "max": 7
+      },
+      "element": "fire",
+      "target_margin": 35,
+      "route": "water-run:oolutanga-refuge",
+      "health": null,
+      "sources": {
+        "health": "none, on purpose: the Rampager (wcids 10810, 16916 and 22599; DVal 160, Strength 230, hit 293, want 586) out-hits any health the XpTable can sell: health 250 prices 684M and level 75 has earned 364M, so a floor here would only take the pay limit from the magic at every level. The floor stops at the Quarters' want; its ranks stay and the shares go on",
+        "band": "spec section 5.2 row 75-126 and strategy section 1.2 rows 75-100 and 100-126: Tusker Holding (0x5B48), gate 60, 184 Rampagers, 5 min, L100 80,000 XP, Magic Defense 230, no spells, 14.3 M XP/h; 74 hours to 100, then 100-126 (201 hours den-only equivalent, 100 with the daily round). The move to the Holding is placed at 75; the optimizer may pull it to 65 on the live read (spec section 5.3) M6 14 (D135, the owner, 2026-11-13: the Holding from 65; cache/m6/optimal-climb/study.md section 2): inclusive 65-126: the Rampager's 80,000 a kill on 435 health, about 3.8 Flame Bolt VI a kill (the study's 10 to 11.5 M XP/h against the Quarters' 4.2). Its entry portal is MinLevel 60 (a fact, tusker-holding.json entry); its Tusker's Friend plates are facts the walk keeps clear of (tusker-holding.json no_go, TODO(m6-holding-plates)). Its gate (rung_gates, holding) asks the buff bot's level VII Armor Self and Bludgeoning Protection, so a climber without the bot's lines is held in the Quarters",
+        "ground": "tusker-holding (0x5B48): M6 3 p2, the profile drafted from the dats and the pinned world SQL v0.9.296 (GroundDraft, lean 0.3): entry gate MinLevel 60, no max (item 0's W0 agrees), PortalBitmask 0x31 (NoRecall: not tieable); one 5-minute generator 7924 with 184 slots (136 x Rampager 10810, 44 x 16916, 4 x 22599 which holds the Rampager Tusk 22429), level 100, 435 health, Magic Defense 251 (ACE's current value; the sheets, sel-creatures.tsv and the spec say 230, the bare skill); no creature of the ground casts, so none is kill-first; the 18 Tusker's Friend plates strip buffs (TODO(m6-holding-plates), no hazard field yet). The walk reaches 305 of the 712 cells and 102 of the 184 slots (M6 14 pits; the Abode's layout: the east half on foot, 54 slots, the west half by a running jump over the pit 0x5B4802A9, 48 slots); the lower level and the exit are reached only by a drop off the brink, one way, so 81 slots stand where no walk reaches and one in the pit cell itself (TODO(m6-abode-lower-level); TODO(m6-holding-pockets) is closed). Home, vendors, kit, supplies and the spell plan are the den's, because the Holding's 30-minute read is BSD Mage's (D49: it holds that kit and knows Flame Bolt VI). The spine (spec section 5.4; D17). D3's cut line (m6-plan.md section 3): if week 2 runs over, the Holding's profile and read are cut, M6 ends at 80 with the den as home and M7 opens with the Holding",
+        "alternates": "tusker-armory (0x5948), first (M6 14 armory; the owner, 2026-11-14: try the Tusker Armory as the climber's next ground; cache/m6/next-ground/survey.md sections 3.1 and 4): its 67 Armored Tuskers (level 100, 435 health, Magic Defense 275, fire 1.0, 80,000 experience, melee bludgeon only) behind a 345 m run from the Barracks drop, a quarter of the Holding's. While the Holding is held by its approach (approach-held, approach-costly or approach-abandoned) the way out takes the first alternate whose own approach is recorded, judged on her live state and open, and whose portal and route admit her (RungOwner.TakeAlternate, AlternateRefusal): the Armory, the one alternate that records its approach; the band, the gate (the bot's VII lines), the bolt plan and the target margin stay this rung's, and a check that is not a way out hunts it while the session holds the Holding (approach-session:holding). With the Armory held too she hunts the previous rung's ground, as before. tusker-temple-fort-tethana (0x5C4A) and black-spawn-den-aluvian (0x0105): the den and the Temple as the fallback (strategy section 1.2 row 75-100); both resolve today. tusker-quarters (0x5B4A): if the Holding fails its 30-minute read, the Quarters and the Temple 40+ are the 80-100 ground (spec section 5.3); resolves today (M6 3 p2)",
+        "move_on": "level 126: the top of the ladder, where the climb ends (spec section 5.2 row 75-126); floor 86 = half of 172 kills/h, ceiling 7.3 = 2 x 21 s a kill x 3.4/19.6 (strategy section 1.2 row 75-100); the rule is $.sources.move_on_rule M6 14 (D135, the owner, 2026-11-13): the band starts at 65; the top is unchanged",
+        "spell_level": "V-VII: by the fizzle rule (D4, D41): the projected base War Magic is 290 at level 65 (V at 0.95; VI needs 293) and 344 at level 126 (VII at 0.95). M6 14 (D135): the band starts at 65 (it was 75, VI on 303); under the buff bot's lines the live cap reaches VII at 65 (about 350 over the 343 VII asks), but no scrivener sells VII (the loot's), so the fight casts the VI her book holds (AutopilotScenario.BoltLevel)",
+        "element": "fire: Rampagers take fire at 1.0 (strategy section 0); tuskers fire 1.0 (ladder note section 7)",
+        "target_margin": "35: the smallest round margin that admits the rung's named targets from the rung's first level, as the outskirts' 5; 65 (the rung's first level) + 35 = 100, the level of the Rampagers 10810, 16916 and 22599 (tusker-holding.json); 35 is already a round margin (M6 14, D135: the band started at 75, with 25) A dungeon's pick is not banded by this margin (TODO(m6-dungeon-band)): it takes every target of the dungeon at any character level.",        "route": "water-run:oolutanga-refuge: no portal leads into the Holding; M6 4 closed TODO(m6-island-water-run): every island run plans and arrives on the dats at 4 m (W3, W5; the Refuge to the Holding 2,870 m, 1,083 m of it wading, the sea a wall as retail's CLandCell::find_env_collisions), and from level 60 (the Holding's own gate) the Facility Hub's Barracks portal is the shorter run (travel-routes.json, TravelRoutesTests The_holding_is_the_barracks_drop_from_60_and_the_refuge_otherwise_with_the_entrys_own_gate); the entry is NoRecall (tusker-holding.json entry.tieable is false), so no tie: every trip back is a run again. TODO(m6-holding-tie-first-visit) (item 11, re-scoped: the cost of each trip, as no tie exists)"
+      }
+    }
+  ]
+}

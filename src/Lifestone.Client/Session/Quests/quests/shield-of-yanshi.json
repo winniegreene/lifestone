@@ -1,0 +1,394 @@
+{
+  "key": "shield-of-yanshi",
+  "name": "The Shield of Yanshi (the Underminer Notes and the Swarm Matron's Claw, handed to Royal Guard Adrana in Yanshi)",
+  "giver": {
+    "wcid": 32510,
+    "name": "Royal Guard Adrana"
+  },
+  "start": {
+    "cell": "0xA9B40019",
+    "point": [
+      84.0,
+      7.7,
+      94.0
+    ],
+    "name": "Holtburg's lifestone point"
+  },
+  "steps": [
+    {
+      "kind": "go",
+      "what": "to Royal Guard Adrana in Yanshi",
+      "place": {
+        "cell": "0xB4700019",
+        "point": [
+          80.6359,
+          19.8476,
+          42.005
+        ],
+        "name": "Adrana's place"
+      },
+      "target": {
+        "wcid": 32510,
+        "name": "Royal Guard Adrana"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.2): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x7B47006F: weenie 32510, cell 0xB4700019",
+      "todo": "TODO(m6-yanshi-route): the travel file has no place for Yanshi (hub portal 42847, arrival 0xB46F001E, Ydnew 165 m away, Adrana 88 m), so this go stops go:town-network by name until one is added"
+    },
+    {
+      "kind": "go",
+      "what": "to the Underminer Leader in the Granite Quarry",
+      "place": {
+        "cell": "0xB0700153",
+        "point": [
+          136.887,
+          155.233,
+          4.40708
+        ],
+        "name": "the Underminer Leader's place"
+      },
+      "target": {
+        "wcid": 32513,
+        "name": "Underminer Leader"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.2): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x7B0703EE: weenie 32513, level 160, cell 0xB0700153",
+      "todo": "TODO(m6-offline-fetch-walks): this file is checked offline only (D118), a walk no test has made; M7 walks it"
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Underminer Notes from the Underminer Leader",
+      "place": null,
+      "target": {
+        "wcid": 32513,
+        "name": "Underminer Leader"
+      },
+      "item": {
+        "wcid": 32515,
+        "name": "Underminer Notes"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.2): weenie_properties_create_list row 49807 (object 32513, weenie 32515, destination 9 ContainTreasure, shade 1.0): a sure drop on the corpse; its Quest string underminernotestimer (quest row min_Delta 72000, max_Solves -1) gates the pick-up",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "back to Royal Guard Adrana",
+      "place": {
+        "cell": "0xB4700019",
+        "point": [
+          80.6359,
+          19.8476,
+          42.005
+        ],
+        "name": "Adrana's place"
+      },
+      "target": {
+        "wcid": 32510,
+        "name": "Royal Guard Adrana"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.2): the same row as the first go",
+      "todo": "TODO(m6-offline-fetch-walks): this file is checked offline only (D118), a walk no test has made; M7 walks it"
+    },
+    {
+      "kind": "give",
+      "what": "give Adrana the Underminer Notes",
+      "place": null,
+      "target": {
+        "wcid": 32510,
+        "name": "Royal Guard Adrana"
+      },
+      "item": {
+        "wcid": 32515,
+        "name": "Underminer Notes"
+      },
+      "expect": {
+        "reply": "Unbelievable! Why would people willingly betray their own town to that mad dog Varicci? It is as I feared. Please, enter the Yanshi Lower Undermine portal at the quarry and root out the cause of this trouble. It will not be enough to dispose of the Eaters that await -- you must fight through to the Olthoi Swarm Matron at the center of this plot and destroy her. Bring me the matron's claw, and I will reward you.",
+        "stamp": "yanshimine",
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.2): weenie_properties_emote id 52740 (object 32510, category 6 Give, weenie_Class_Id 32515): Tell, StampQuest yanshimine; no XP",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Yanshi Lower Undermine portal at the quarry",
+      "place": {
+        "cell": "0xB070010C",
+        "point": [
+          72.0,
+          115.0,
+          -1.663
+        ],
+        "name": "in front of the Yanshi Lower Undermine portal"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.2): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z, angles_W, angles_Z FROM landblock_instance WHERE guid = 0x7B0703EF: weenie 32518, cell 0xB070010C; the point is its front side",
+      "todo": "TODO(m6-offline-fetch-walks): this file is checked offline only (D118), a walk no test has made; M7 walks it"
+    },
+    {
+      "kind": "use",
+      "what": "enter the Lower Undermine",
+      "place": {
+        "cell": "0x0046010E",
+        "point": [
+          10,
+          -270,
+          0.005
+        ],
+        "name": "the arrival of the Lower Undermine"
+      },
+      "target": {
+        "wcid": 32518,
+        "name": "Yanshi Lower Undermine"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.2): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM weenie_properties_position WHERE object_Id = 32518 AND position_Type = 2: destination; MinLevel 100, QuestRestriction yanshimine",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Yanshi Upper Undermine portal",
+      "place": {
+        "cell": "0x0046023E",
+        "point": [
+          327.0,
+          -370.0,
+          11.937
+        ],
+        "name": "in front of the Upper Undermine portal"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.2): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z, angles_W, angles_Z FROM landblock_instance WHERE guid = 0x70046017: weenie 32517, cell 0x0046023E; the point is its front side",
+      "todo": "TODO(m6-offline-fetch-walks): this file is checked offline only (D118), a walk no test has made; M7 walks it"
+    },
+    {
+      "kind": "use",
+      "what": "enter the Upper Undermine",
+      "place": {
+        "cell": "0x00460242",
+        "point": [
+          360,
+          -240,
+          12.005
+        ],
+        "name": "the arrival of the Upper Undermine"
+      },
+      "target": {
+        "wcid": 32517,
+        "name": "Yanshi Upper Undermine"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.2): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM weenie_properties_position WHERE object_Id = 32517 AND position_Type = 2: destination; MinLevel 100",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Yanshi Swarm Matron",
+      "place": {
+        "cell": "0x004603D4",
+        "point": [
+          549.93,
+          -36.9689,
+          42
+        ],
+        "name": "the Swarm Matron's place"
+      },
+      "target": {
+        "wcid": 32514,
+        "name": "Yanshi Swarm Matron"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.2): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x70046063: weenie 32514, level 135, cell 0x004603D4",
+      "todo": "TODO(m6-offline-fetch-walks): this file is checked offline only (D118), a walk no test has made; M7 walks it"
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Yanshi Swarm Matron's Claw from the Matron",
+      "place": null,
+      "target": {
+        "wcid": 32514,
+        "name": "Yanshi Swarm Matron"
+      },
+      "item": {
+        "wcid": 32554,
+        "name": "Yanshi Swarm Matron's Claw"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.2): weenie_properties_create_list row 55391 (object 32514, weenie 32554, destination 9, shade 1.0): a sure drop; its Quest string yanshimatronclawtimer (quest row min_Delta 72000, max_Solves -1) gates the pick-up",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Undermine's Surface portal",
+      "place": {
+        "cell": "0x00460103",
+        "point": [
+          3.0,
+          -270.0,
+          -0.063
+        ],
+        "name": "in front of Surface"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.2): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z, angles_W, angles_Z FROM landblock_instance WHERE guid = 0x70046000: weenie 32516, cell 0x00460103; the point is its front side",
+      "todo": "TODO(m6-offline-fetch-walks): this file is checked offline only (D118), a walk no test has made; M7 walks it"
+    },
+    {
+      "kind": "use",
+      "what": "out of the Undermine by Surface",
+      "place": {
+        "cell": "0xB070001F",
+        "point": [
+          84,
+          156,
+          31.006
+        ],
+        "name": "the arrival of Surface"
+      },
+      "target": {
+        "wcid": 32516,
+        "name": "Surface"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.2): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM weenie_properties_position WHERE object_Id = 32516 AND position_Type = 2: destination",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "back to Royal Guard Adrana",
+      "place": {
+        "cell": "0xB4700019",
+        "point": [
+          80.6359,
+          19.8476,
+          42.005
+        ],
+        "name": "Adrana's place"
+      },
+      "target": {
+        "wcid": 32510,
+        "name": "Royal Guard Adrana"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.2): the same row as the first go",
+      "todo": "TODO(m6-offline-fetch-walks): this file is checked offline only (D118), a walk no test has made; M7 walks it"
+    },
+    {
+      "kind": "give",
+      "what": "give Adrana the Yanshi Swarm Matron's Claw",
+      "place": null,
+      "target": {
+        "wcid": 32510,
+        "name": "Royal Guard Adrana"
+      },
+      "item": {
+        "wcid": 32554,
+        "name": "Yanshi Swarm Matron's Claw"
+      },
+      "expect": {
+        "reply": "A crisis narrowly averted! I thank you for your bravery and loyalty to Queen Elysa. Your actions have saved the town. As such, I think it would be appropriate to give you the Shield of Yanshi...",
+        "stamp": "YanshiTunnelsComplete1205",
+        "item": {
+          "wcid": 32511,
+          "name": "Shield of Yanshi"
+        }
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.2): weenie_properties_emote id 52741 (object 32510, category 6 Give, weenie_Class_Id 32554): Tell, AwardXP (type 2) amount_64 58,000,000, Give 32511 x1, StampQuest YanshiTunnelsComplete1205, EraseQuest YanshiTunnelsClaw1205, then the first time only (firstyanshimatronkill) AwardXP 15,000,000 more",
+      "todo": null
+    }
+  ],
+  "done": {
+    "stamp": "YanshiTunnelsComplete1205",
+    "reply": null,
+    "item": {
+      "wcid": 32511,
+      "name": "Shield of Yanshi"
+    }
+  },
+  "timer_seconds": 72000,
+  "level": {
+    "min": 100,
+    "max": null
+  },
+  "experience": {
+    "amount": 58000000,
+    "kind": "fixed",
+    "max": null,
+    "percent": null,
+    "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.2): emote 52741's AwardXP (type 2) amount_64 58,000,000; the 15,000,000 of the first completion is a separate branch (firstyanshimatronkill)"
+  },
+  "sources": [
+    "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.2): offline only (D118): level 100 by both Undermine portals, levels 115 to 160 inside; it does not count toward the six and has no ladder",
+    "timer_seconds 72000: the claw's pick-up quest yanshimatronclawtimer and the done stamp YanshiTunnelsComplete1205 (quest rows min_Delta 72000)",
+    "level: min 100 is the portals 32518 and 32517's MinLevel (weenie_properties_int type 86)",
+    "the Notes' Give and the Claw's Give need no Use of Adrana first: her Use emote is flavour and the YanshiTunnelsClaw1205 stamp only (section 2.2)"
+  ]
+}

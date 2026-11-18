@@ -28,6 +28,7 @@ public sealed class GameFightWalk : IFightWalk
     private readonly RunnerLegs _legs;
     private NavRunner? _runner;
     private RouteConfirmer? _confirmer;
+    private PlateSpellWitness? _plateWitness; // M6 14 holding plates: the check after a jump over plates
     private bool _prepared;
     private bool _disposed;
 
@@ -64,6 +65,9 @@ public sealed class GameFightWalk : IFightWalk
     /// <inheritdoc/>
     int? IFightWalk.LegsRecovered => _legs.Recovered;
 
+    /// <summary>M6 item 0 F2 (a5's note c): the walking seconds of every leg, arrived or cancelled (<c>m6-walk-cancel-seconds</c>), so the play host's fight verdict reads <c>walk_s=</c>.</summary>
+    public double? WalkSecondsTotal => _legs.WalkSecondsTotal;
+
     /// <summary>The runner of the leg walked last, or null before the first leg.</summary>
     public NavRunner? Runner => _runner;
 
@@ -76,7 +80,7 @@ public sealed class GameFightWalk : IFightWalk
         }
 
         _prepared = true;
-        _log.Info(LogCategory, "the game's player is the ground walker; the server's teleport places it");
+        _log.Info(LogCategory, "the game's player is the ground walker (the body the screen draws); the play places it wherever the server has the player, a teleport or none");
     }
 
     /// <inheritdoc/>
@@ -103,6 +107,9 @@ public sealed class GameFightWalk : IFightWalk
 
     /// <inheritdoc/>
     public uint LegGoalCell => _legs.GoalCell;
+
+    /// <inheritdoc/>
+    public bool JumpInFlight => _legs.JumpInFlight;
 
     /// <inheritdoc/>
     public bool BeginLegTo(IGameSessionView session, double now, in CellFrame goal, out string description)
@@ -149,12 +156,18 @@ public sealed class GameFightWalk : IFightWalk
                 new RoomPathSource(_planner),
                 _confirmer,
                 null,
-                new NavRunnerOptions { Name = "ground-walk", ConfirmBudgetMilliseconds = ConfirmBudgetMilliseconds },
+                new NavRunnerOptions { Name = "ground-walk", ConfirmBudgetMilliseconds = ConfirmBudgetMilliseconds, PredictiveSteering = true, PredictiveOutdoors = true },
                 _log,
                 new HostileCreatureFeed(session.State.Objects, session.State.Self.Guid, _log, _setupRadius))
             {
                 Doors = new SessionDoorFeed(session, _log, _setupExtent), // M5 5 d2: a closed door on a leg is opened (purpose=door), not walked into
+                BodyFeed = new NpcBodyFeed(session.State.Objects, session.State.Self.Guid, _log, _setupRadius), // the NPCs' bodies on the plan (M6 4 W2; the fight walks since M6 4 w6a)
             };
+            if (_ground.Plates is { } plates)
+            {
+                _plateWitness = new PlateSpellWitness(session, plates, _log);
+                _runner.JumpWitness = _plateWitness;
+            }
         }
 
         return null;
@@ -331,5 +344,6 @@ public sealed class GameFightWalk : IFightWalk
         Abandon();
         _runner?.Dispose();
         _confirmer?.Dispose();
+        _plateWitness?.Dispose();
     }
 }

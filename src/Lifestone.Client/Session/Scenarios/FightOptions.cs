@@ -43,12 +43,35 @@ public sealed record FightOptions
 
     /// <summary>The hunting ground <see cref="Ground"/> names.</summary>
     /// <exception cref="KeyNotFoundException">No profile has the key (naming the known keys); <see cref="FromArguments"/> reports it as an error first.</exception>
-    public HuntingGround GroundProfile => GroundCatalog.Get(Ground);
+    public HuntingGround GroundProfile => GroundForTest ?? GroundCatalog.Get(Ground);
+
+    /// <summary>A test's altered copy of the ground; null in every run.</summary>
+    internal HuntingGround? GroundForTest { get; init; }
+
+    /// <summary>
+    /// M6 5 q4 (D57): the weenie class ids of the items this fight wants (the den-fight spec's <c>want=</c>): a corpse's item of one is kept aside under every value floor and the heavy rule (the verdict <c>quest: want &lt;wcid&gt;</c>), never sold. Empty by default.
+    /// </summary>
+    public IReadOnlyList<uint> Want { get; init; } = [];
+
+    /// <summary>
+    /// M6 14 want loot: the creatures whose create list can hold a wanted item (<see cref="Want"/>), each with its row's chance (the den-fight spec's <c>carriers=</c>, <see cref="WantCarrier"/>): a corpse of one is walked to and opened
+    /// whatever its distance on the ground. Empty by default; a fight that wants an item with none names <c>TODO(m6-create-list-general-read)</c> once and keeps the loot radius.
+    /// </summary>
+    public IReadOnlyList<WantCarrier> WantCarriers { get; init; } = [];
+
+    /// <summary>M6 7 AY: the fight holds to the ground's first slots: <see cref="Grounds.GroundHunt.DropBack"/> stays out of the hunt (<see cref="Mage.BigPackRule"/>, the den-fight spec's <c>pack-hold=</c>).</summary>
+    public bool PackHold { get; init; }
+
+    /// <summary>M6 5 q4 (D57): the fight's own end (the den-fight spec's <c>until=</c>): an item count held or a chat line seen since the fight began ends it cleanly at the clean minutes' safe point; null (the default) is none.</summary>
+    public FightUntil? Until { get; init; }
+
+    /// <summary>M6 5 q4: why the station's spec arguments could not be read (a malformed <c>ground=</c>, <c>want=</c> or <c>until=</c>), or null; the fight stops at its first step naming it (a loud stop, never a silent guess).</summary>
+    public string? SpecError { get; init; }
 
     /// <summary>The kills that end the fight (<c>--fight-kills</c>; <see cref="UnlimitedKills"/>, 0, is no kill limit).</summary>
     public int Kills { get; init; } = DefaultKills;
 
-    /// <summary>The seconds after which the fight fails loudly (<c>--fight-seconds</c>); with <see cref="Minutes"/> set the failure limit is <see cref="FailSeconds"/>.</summary>
+    /// <summary>The seconds after which the fight fails loudly (<c>--fight-seconds</c>); with <see cref="Minutes"/> set the failure limit is <see cref="FailSeconds"/>. M6 7 D: a fight with its quota met whose <see cref="StoreysMin"/> crossing is owed and progressing goes on past it, at most <see cref="FightScenario.CrossingBudgetTimes"/> times it.</summary>
     public double Seconds { get; init; } = DefaultSeconds;
 
     /// <summary>
@@ -58,6 +81,25 @@ public sealed record FightOptions
 
     /// <summary>The highest Flame Bolt level the fight may choose (<c>--fight-max-level</c>, 1 to 7, default <see cref="DefaultMaxLevel"/>; D26).</summary>
     public int MaxLevel { get; init; } = DefaultMaxLevel;
+
+    /// <summary>
+    /// M6 14 (an owner ruling, 2026-11-13): <see cref="MaxLevel"/> is the level up job's live cap (the ladder's <c>AutopilotScenario.BoltLevel</c>: the highest level at the plan chance on her current, buffed War Magic, never under the rung's plan),
+    /// so the ground's <c>spell_plan</c> row, the projection on the base skill, does not lower it (<see cref="FightScenario.PlanCap(Grounds.HuntingGround, int, FightOptions, out string)"/>; the row is named in the log line). Set by the
+    /// den-fight spec's <see cref="Journey.JourneyPlans.MaxLevelArgument"/> when the command line gave no <c>--fight-max-level</c>. Not a command-line option. False (every other fight, BSD Mage's den job among them): the row caps as before.
+    /// </summary>
+    public bool LiveCap { get; init; }
+
+    /// <summary>
+    /// M6 14 (<c>m6-vitals-policy</c>): the climber's fills go by <see cref="Vitals.VitalsPolicy"/> while the ladder's <c>vitals_policy.on</c> holds (true, the default). Not a command-line option: the ladder's line is the switch; false
+    /// keeps M6 8 H's rule by the sum in this fight (its own tests read it).
+    /// </summary>
+    public bool ManaPolicy { get; init; } = true;
+
+    /// <summary>
+    /// The levels above the character's own that an outdoor ground's pick still takes (M6 0 F5, review 0-R5, D26): the rung's <c>target_margin</c>, passed by the level up job as the station argument <c>target-margin</c>. Not a command-line
+    /// option. Null (a fight with no rung): the pick is not banded by the character's level, and the fight logs TODO(m6-fight-no-target-margin) once.
+    /// </summary>
+    public int? TargetMargin { get; init; }
 
     /// <summary>The default of <c>--fight-storeys-min</c>: 1, the tour leaves a storey only when it has no standing hunted slot (M5 item 2 g6, D40).</summary>
     public const int DefaultStoreysMin = 1;
@@ -150,6 +192,12 @@ public sealed record FightOptions
     public MageLootThresholds LootThresholds { get; init; } = new();
 
     /// <summary>
+    /// M6 14 (<c>m6-lore-cantrips</c>; the owner, 2026-11-14: keep great cantrips on every ground the climber hunts): the keep-aside block the loot runs where the ground's profile has none (<see cref="KeepAsideRule.DefaultFor"/>: the climber's
+    /// <see cref="KeepAsideRule.ClimberDefault"/>); a profile's own block wins. Set by the journey's stations from the plan's character; not on the command line. Null (the default): a ground without the block keeps nothing aside.
+    /// </summary>
+    public GroundKeepAside? KeepAsideDefault { get; init; }
+
+    /// <summary>
     /// The thresholds the loot step runs with (M5 7 F28, D95): <see cref="LootThresholds"/> with the ground's loot setting laid under it. The keep floor is the profile's <c>loot.min_value_per_burden</c> (<see cref="HuntingGround.Loot"/>) unless
     /// <see cref="LootThresholds"/> already sets another floor than the default (an explicit value of the run wins); a ground without the section keeps the default. The sellable item types are the types some vendor of the ground buys
     /// (<see cref="HuntingGround.SellableItemTypes"/>) when the profile has a loot section and the thresholds name none, so a ground that has not been told what its loot is for keeps every type as before.
@@ -161,10 +209,10 @@ public sealed record FightOptions
             var ground = GroundProfile;
             if (ground.Loot is not { } setting)
             {
-                return LootThresholds;
+                return JumpCapped(LootThresholds.KeepAside is null && KeepAsideDefault is { } byDefault ? LootThresholds with { KeepAside = new KeepAsideRule(byDefault) } : LootThresholds, ground); // M6 14 (m6-lore-cantrips): the climber's default
             }
 
-            return LootThresholds with
+            return JumpCapped(LootThresholds with
             {
                 MinValuePerBurden = LootThresholds.MinValuePerBurden == MageLootThresholds.DefaultMinValuePerBurden ? setting.MinValuePerBurden : LootThresholds.MinValuePerBurden,
                 SellableItemTypes = LootThresholds.SellableItemTypes != 0 ? LootThresholds.SellableItemTypes : ground.SellableItemTypes,
@@ -172,9 +220,16 @@ public sealed record FightOptions
                 MaxItemBurden = LootThresholds.MaxItemBurden != 0 ? LootThresholds.MaxItemBurden : setting.MaxItemBurden,
                 Buyers = LootThresholds.Buyers.Count != 0 ? LootThresholds.Buyers : ground.LootBuyers,
                 LoadLinePercent = LootThresholds.LoadLinePercent == MageLootThresholds.DefaultLoadLinePercent && setting.LoadLinePercent > 0 ? setting.LoadLinePercent : LootThresholds.LoadLinePercent,
-                KeepAside = LootThresholds.KeepAside ?? (setting.KeepAside is { } keepAside ? new KeepAsideRule(keepAside) : null), // M5 7 F30 (the owner): the wands and cantrip pieces kept aside and never sold
-            };
+                KeepAside = LootThresholds.KeepAside ?? ((setting.KeepAside ?? KeepAsideDefault) is { } keepAside ? new KeepAsideRule(keepAside) : null), // M5 7 F30 (the owner): the wands and cantrip pieces kept aside and never sold; M6 14 (m6-lore-cantrips): the profile's block, else the climber's default
+            }, ground);
         }
+    }
+
+    /// <summary>M6 14 pit-hold: on a ground with jumps the loot's load line is held to <see cref="MageLootThresholds.JumpLoadLinePercent"/> (100%: past it the load slows her run and lowers her jump, and the jump's need is fixed).</summary>
+    private static MageLootThresholds JumpCapped(MageLootThresholds thresholds, HuntingGround ground)
+    {
+        var line = MageLootThresholds.JumpCapped(thresholds.LoadLinePercent, ground.Jumps.Count > 0);
+        return line == thresholds.LoadLinePercent ? thresholds : thresholds with { LoadLinePercent = line };
     }
 
     /// <summary>
@@ -193,7 +248,7 @@ public sealed record FightOptions
     /// The default of <c>--fight-drain-under</c> (M5 7 F7, the owner's D88: the soak's level-80 mage has no Melee Defense and soaks the damage; when its health runs low it drains its target instead of standing there). Lifestone's own
     /// number: half the health is the line the owner named; the mage is never put in reach of a tusker's burst by waiting for less.
     /// </summary>
-    public const int DefaultDrainUnderPercent = 50;
+    public static int DefaultDrainUnderPercent => Grounds.LadderLoader.WarMage.Vitals.DrainUnderPercent; // M6 7 AN: data, the ladder's vitals.drain_under_percent and its source sentence (every ground, not only level 80)
 
     /// <summary>The default of <c>--fight-drain-until</c> (M5 7 F7, D88): Lifestone's own number, three quarters of the health, the safe line at which the bolts begin again (a gap over <see cref="DefaultDrainUnderPercent"/> so the rule does not flip on every hit).</summary>
     public const int DefaultDrainUntilPercent = 75;
@@ -259,6 +314,18 @@ public sealed record FightOptions
     public bool IgnoreLine { get; init; }
 
     /// <summary>
+    /// M6 14 (<c>m6-life-through</c>, <c>--fight-life-through</c>; default on): an attacker no bolt can reach from where the mage stands (no clear line, or dropped by the shot rule) that is within the life spells' range is
+    /// answered by Drain Health Other or Harm Other in place of the walk (<c>FightScenario.LifeThrough.cs</c>). Off: the walk, the sidestep and the tour's leg, as before.
+    /// </summary>
+    public bool LifeThrough { get; init; } = true;
+
+    /// <summary>
+    /// M6 16 Q6 (<c>--fight-survival-mana</c>; default off): the fight's mana loop and stamina drain take their decision from the survival layer (<see cref="Autopilot.SurvivalRule.DecideFightMana"/>: the press, the stamina drain with its
+    /// target, or nothing; under the vitals policy its fills too) and the fight carries it out. Off: the loop decides by its own rule, as before. Stage 1 of <c>TODO(engine-survival-flip)</c>; the default flips after a live gate.
+    /// </summary>
+    public bool SurvivalMana { get; init; }
+
+    /// <summary>
     /// A spell the fight casts instead of the Flame Bolt line (M4 P5b J7: the hero plan's Cassius' Ring of Fire, 1785); 0 is the Flame Bolt line, the level chosen by the cast chance. The spell must be in the spellbook and reach the cast chance at the buffed War Magic skill, or the fight fails naming it.
     /// </summary>
     public uint SpellId { get; init; }
@@ -296,6 +363,9 @@ public sealed record FightOptions
 
     /// <summary>Every problem found while parsing, one line each.</summary>
     public IReadOnlyList<string> Errors { get; init; } = [];
+
+    /// <summary>M6 7 H: the buff profile the fight's cycles run (<see cref="Journey.JourneyPlan.BuffProfile"/>), or null: each cycle's own choice by the character's name.</summary>
+    public Mage.IBuffProfile? BuffProfile { get; init; }
 
     /// <summary>Parses the options from arguments already split; an option that does not parse is reported in <see cref="Errors"/> and keeps its default.</summary>
     /// <param name="args">The user arguments.</param>
@@ -542,6 +612,12 @@ public sealed record FightOptions
                 case "--fight-ignore-line":
                     o = o with { IgnoreLine = OptionValues.Switch(argument, errors, o.IgnoreLine) };
                     break;
+                case "--fight-life-through":
+                    o = o with { LifeThrough = OptionValues.Switch(argument, errors, o.LifeThrough) };
+                    break;
+                case "--fight-survival-mana":
+                    o = o with { SurvivalMana = OptionValues.Switch(argument, errors, o.SurvivalMana) };
+                    break;
                 default:
                     var mana = o.Mana;
                     if (ManaOrderOptions.Apply(argument, errors, ref mana))
@@ -562,7 +638,7 @@ public sealed record FightOptions
         return o with { Errors = errors };
     }
 
-    /// <summary>Why <paramref name="key"/> is not a ground the fight can run in (no value, no such profile, or not a dungeon), or null when it is one.</summary>
+    /// <summary>Why <paramref name="key"/> is not a ground the fight can run in (no value, no such profile, or neither a dungeon nor an outdoor ground with cells), or null when it is one (M6 item 0 a5: an outdoor ground walks its outdoor cells).</summary>
     /// <param name="key">The key as given.</param>
     public static string? GroundError(string? key)
     {
@@ -577,16 +653,16 @@ public sealed record FightOptions
             return $"'{key}' is not a hunting ground (known: {Known()})";
         }
 
-        return ground.Kind == GroundKind.Dungeon ? null : $"'{key}' is not a dungeon: the fight loop walks a dungeon's storeys";
+        return ground.Kind == GroundKind.Dungeon || ground.IsOutdoorFight() ? null : $"'{key}' is not a dungeon and has no outdoor cells: the fight loop walks a dungeon's storeys or an outdoor ground's cells";
 
-        static string Known() => string.Join(", ", GroundCatalog.All.Where(g => g.Kind == GroundKind.Dungeon).Select(g => g.Key));
+        static string Known() => string.Join(", ", GroundCatalog.All.Where(g => g.Kind == GroundKind.Dungeon || g.IsOutdoorFight()).Select(g => g.Key));
     }
 
     private static bool IsDefaultMana(ManaOrderOptions m) =>
         m.Tries == ManaOrderOptions.DefaultTries && m.TryChance == ManaOrderOptions.DefaultTryChance && m.TrySpacingSeconds == ManaOrderOptions.DefaultTrySpacingSeconds && m.DancePresses == ManaOrderOptions.DefaultDancePresses;
 
     /// <summary>The options as the run logs them, in invariant culture.</summary>
-    public override string ToString() => string.Create(CultureInfo.InvariantCulture, $"kills={(Kills == UnlimitedKills ? "unlimited" : Kills.ToString(CultureInfo.InvariantCulture))} seconds={Seconds}{(Minutes > 0 ? $" minutes={Minutes}" : string.Empty)}{(MaxLevel != DefaultMaxLevel ? $" max_level={MaxLevel}" : string.Empty)}{(StoreysMin != DefaultStoreysMin ? $" storeys_min={StoreysMin}" : string.Empty)}{(OpenerTries != DefaultOpenerTries ? $" opener_tries={OpenerTries}" : string.Empty)}{(DefendForgetSeconds != DefaultDefendForgetSeconds ? $" defend_forget_s={DefendForgetSeconds}" : string.Empty)}{(DefendHoldSeconds != DefaultDefendHoldSeconds ? $" defend_hold_s={DefendHoldSeconds}" : string.Empty)}{(StaminaFullPercent != DefaultStaminaFullPercent ? $" stamina_full={StaminaFullPercent}" : string.Empty)}{(DrainUnderPercent != DefaultDrainUnderPercent ? $" drain_under={DrainUnderPercent}" : string.Empty)}{(DrainUntilPercent != DefaultDrainUntilPercent ? $" drain_until={DrainUntilPercent}" : string.Empty)}{(IsDefaultMana(Mana) ? string.Empty : " " + Mana)}{(IgnoreLine ? " ignore_line=on" : string.Empty)}{(Loot ? " loot=on" : string.Empty)}{(LootRadiusMetres != DefaultLootRadiusMetres ? $" loot_radius_m={LootRadiusMetres}" : string.Empty)}{(LootWalkSeconds != DefaultLootWalkSeconds ? $" loot_walk_s={LootWalkSeconds}" : string.Empty)}{(LootAggroMetres != DefaultLootAggroMetres ? $" loot_aggro_m={LootAggroMetres}" : string.Empty)}{(Ground == DefaultGround ? string.Empty : " ground=" + Ground)}{(SpellId == 0 ? string.Empty : $" spell={SpellId}")}{(ArenaHere ? $" arena=here skill={ArenaSkill}" : string.Empty)}{(Travel is null or PlaceTravel ? string.Empty : " travel=journey")}{(LeaveOnFailure ? string.Empty : " leave_on_failure=no")}{(LeaveAtEnd ? string.Empty : " leave_at_end=no")}");
+    public override string ToString() => string.Create(CultureInfo.InvariantCulture, $"kills={(Kills == UnlimitedKills ? "unlimited" : Kills.ToString(CultureInfo.InvariantCulture))} seconds={Seconds}{(Minutes > 0 ? $" minutes={Minutes}" : string.Empty)}{(MaxLevel != DefaultMaxLevel ? $" max_level={MaxLevel}" : string.Empty)}{(LiveCap ? " live_cap=yes" : string.Empty)}{(StoreysMin != DefaultStoreysMin ? $" storeys_min={StoreysMin}" : string.Empty)}{(OpenerTries != DefaultOpenerTries ? $" opener_tries={OpenerTries}" : string.Empty)}{(DefendForgetSeconds != DefaultDefendForgetSeconds ? $" defend_forget_s={DefendForgetSeconds}" : string.Empty)}{(DefendHoldSeconds != DefaultDefendHoldSeconds ? $" defend_hold_s={DefendHoldSeconds}" : string.Empty)}{(StaminaFullPercent != DefaultStaminaFullPercent ? $" stamina_full={StaminaFullPercent}" : string.Empty)}{(DrainUnderPercent != DefaultDrainUnderPercent ? $" drain_under={DrainUnderPercent}" : string.Empty)}{(DrainUntilPercent != DefaultDrainUntilPercent ? $" drain_until={DrainUntilPercent}" : string.Empty)}{(IsDefaultMana(Mana) ? string.Empty : " " + Mana)}{(IgnoreLine ? " ignore_line=on" : string.Empty)}{(LifeThrough ? string.Empty : " life_through=off")}{(SurvivalMana ? " survival_mana=on" : string.Empty)}{(Loot ? " loot=on" : string.Empty)}{(LootRadiusMetres != DefaultLootRadiusMetres ? $" loot_radius_m={LootRadiusMetres}" : string.Empty)}{(LootWalkSeconds != DefaultLootWalkSeconds ? $" loot_walk_s={LootWalkSeconds}" : string.Empty)}{(LootAggroMetres != DefaultLootAggroMetres ? $" loot_aggro_m={LootAggroMetres}" : string.Empty)}{(Ground == DefaultGround ? string.Empty : " ground=" + Ground)}{(SpellId == 0 ? string.Empty : $" spell={SpellId}")}{(ArenaHere ? $" arena=here skill={ArenaSkill}" : string.Empty)}{(Travel is null or PlaceTravel ? string.Empty : " travel=journey")}{(LeaveOnFailure ? string.Empty : " leave_on_failure=no")}{(LeaveAtEnd ? string.Empty : " leave_at_end=no")}{(Want.Count == 0 ? string.Empty : " want=" + string.Join(',', Want))}{(WantCarriers.Count == 0 ? string.Empty : " carriers=" + WantCarrier.Format(WantCarriers))}{(Until is null ? string.Empty : " until=" + Until)}{(SpecError is null ? string.Empty : " spec_error=" + SpecError)}");
 }
 
 /// <summary>
@@ -608,11 +684,25 @@ public readonly record struct FightStopReason(string Name)
     /// <summary>The forced trip after <c>--autopilot-trip-after-kills</c> kills (D52's live half).</summary>
     public static FightStopReason ForcedTrip { get; } = new("forced-trip");
 
+    /// <summary>M6 5 q4 (D57): the fight's <see cref="FightOptions.Until"/> was met (the quest's hunt-until item held, or its chat line seen).</summary>
+    public static FightStopReason UntilMet { get; } = new("until-met");
+
     /// <summary>The scripted death of the gate (<c>--autopilot-test-death</c>, M4 D37: undress and lie down).</summary>
     public static FightStopReason TestDeath { get; } = new("test-death");
 
     /// <inheritdoc />
     public override string ToString() => Name;
+}
+
+/// <summary>
+/// M6 14 errand lapse (live ladder57, 2026-11-17: the Atlan wand's hunt-until in the Crater Caves ran past the hour of the buff bot's lines; every boon ran out at 10:40:43 UTC and the race was lost at 10:42:05): a station
+/// that steps a fight inside it (the quest station's hunt-until and kill steps) shows that fight, so the autopilot asks it to keep her buff lines as it asks its own fight. Only the fight is shown: the station's other
+/// contracts (its waits, its commits) are its own.
+/// </summary>
+public interface IStationSubFight
+{
+    /// <summary>The fight the station steps now, or null between its fights.</summary>
+    IStoppableFight? SubFight { get; }
 }
 
 /// <summary>
@@ -636,6 +726,19 @@ public interface IStoppableFight
     /// <summary>Asks the fight to end cleanly at its next safe point; the first reason asked for is kept (a later one is logged and ignored).</summary>
     /// <param name="reason">Why.</param>
     void RequestStop(FightStopReason reason);
+
+    /// <summary>
+    /// M6 14 recall unblock (m6-loot-hold; live 2026-11-14 17:27:19 UTC: a corpse opened in the fight's last seconds held the Use lane her trip's recall waited on): from now on the fight opens no corpse. A loot in hand stands down
+    /// (its walk cut, its open view closed), and the queued and put-off corpses are left for the next ground visit. Asked for a fight that stands in for a travel or recovery state (a keeper's fight-back); a stop for a trip or a
+    /// retreat holds it by itself. Idempotent: the first reason is kept. The default does nothing (a fight with no loot).
+    /// </summary>
+    /// <param name="why">Why, for the log.</param>
+    void HoldLoot(string why)
+    {
+    }
+
+    /// <summary>The reason the loot is held (<see cref="HoldLoot"/>), or null while it is not.</summary>
+    string? LootHeld => null;
 }
 
 /// <summary>
@@ -668,6 +771,13 @@ public interface IBuffRefreshFight
     bool LeaveRefreshAsked => false;
 
     /// <summary>
+    /// M6 14 (no line she casts lapses inside a round): the line that ran out in this fight and is still down, the longest down first, with its seconds down at <paramref name="clock"/>; null when none. The fight recasts a lapsed line
+    /// between its casts at once (the hard floor's rule, F25); a line still down after the hard floor's window could not be recast in the field, and the round's trip comes first (the autopilot's rule).
+    /// </summary>
+    /// <param name="clock">The session clock.</param>
+    (string Line, double DownSeconds)? LapsedDown(double clock) => null;
+
+    /// <summary>
     /// D126 (a): asks the fight, before a stop for a trip, to recast every line with less than <paramref name="horizonSeconds"/> left (the trip's expected length plus a margin) and the rest of its batch, between its casts whatever is in
     /// reach; the stop asked after it waits for that (bounded). Arms the fight's own upkeep. A second ask while one is pending does nothing.
     /// </summary>
@@ -676,5 +786,118 @@ public interface IBuffRefreshFight
     /// <param name="detail">Why, for the log.</param>
     void RequestLeaveRefresh(double horizonSeconds, double reachMetres, string detail)
     {
+    }
+}
+
+/// <summary>
+/// M6 5 q4 (D57): the fight's own end condition (<see cref="FightOptions.Until"/>): <c>item:&lt;wcid&gt;x&lt;n&gt;</c> (the pack holds at least n of the weenie) or <c>chat:&lt;text&gt;</c> (a chat line since the fight began contains the text, case-sensitive).
+/// </summary>
+/// <param name="ItemWcid">The item's weenie class id; 0 for a chat until.</param>
+/// <param name="Count">The count that ends the fight (above 0); 0 for a chat until.</param>
+/// <param name="Chat">The chat substring, or null for an item until.</param>
+public sealed record FightUntil(uint ItemWcid, int Count, string? Chat)
+{
+    /// <summary>
+    /// M6 14 combine: the quest's no-roll combine chain from <see cref="ItemWcid"/> (<see cref="Quests.QuestCombineChain"/>, the spec's <c>combine=</c>), the item first; empty for none. With a chain the until counts the item's equivalents
+    /// (<see cref="Quests.QuestCombineChain.Units"/>: 16 motes as motes + 2 x slivers + 4 x nuggets + 8 x bars) and the fight combines its pairs at a safe moment.
+    /// </summary>
+    public IReadOnlyList<uint> Chain { get; init; } = [];
+
+    /// <summary>The spec argument's item form prefix.</summary>
+    public const string ItemPrefix = "item:";
+
+    /// <summary>The spec argument's chat form prefix.</summary>
+    public const string ChatPrefix = "chat:";
+
+    /// <summary>The until the argument's <paramref name="text"/> names, or null with the <paramref name="error"/>.</summary>
+    /// <param name="text">The argument: <c>item:&lt;wcid&gt;x&lt;n&gt;</c> or <c>chat:&lt;text to the end&gt;</c>.</param>
+    /// <param name="error">Why it is malformed.</param>
+    public static FightUntil? Parse(string? text, out string error)
+    {
+        error = string.Empty;
+        if (text is not null && text.StartsWith(ChatPrefix, StringComparison.Ordinal))
+        {
+            var chat = text[ChatPrefix.Length..];
+            if (chat.Length == 0)
+            {
+                error = "until=chat: names no text";
+                return null;
+            }
+
+            return new FightUntil(0, 0, chat);
+        }
+
+        if (text is not null && text.StartsWith(ItemPrefix, StringComparison.Ordinal))
+        {
+            var body = text[ItemPrefix.Length..];
+            var x = body.IndexOf('x', StringComparison.Ordinal);
+            if (x > 0 && uint.TryParse(body.AsSpan(0, x), NumberStyles.None, CultureInfo.InvariantCulture, out var wcid) && wcid > 0
+                && int.TryParse(body.AsSpan(x + 1), NumberStyles.None, CultureInfo.InvariantCulture, out var count) && count > 0)
+            {
+                return new FightUntil(wcid, count, null);
+            }
+        }
+
+        error = $"until='{text}' is neither item:<wcid>x<n> nor chat:<text>";
+        return null;
+    }
+
+    /// <summary>The argument form: <c>item:42x1</c> or <c>chat:text</c>.</summary>
+    public override string ToString() => Chat is not null ? ChatPrefix + Chat : string.Create(CultureInfo.InvariantCulture, $"{ItemPrefix}{ItemWcid}x{Count}");
+}
+
+/// <summary>
+/// M6 14 want loot (live 2026-11-17 04:05, the Atlan wand's 16 Pyreal Motes: 35 golems killed in 15 minutes, none looted beyond the 15 m loot radius): a creature whose create list can hold a wanted item, and the chance a row gives it.
+/// The fact comes from the quest file's hunt-until step (its <c>carriers</c>, each citing the pinned world SQL's <c>weenie_properties_create_list</c> row), passed to the fight as the den-fight spec's <c>carriers=</c>
+/// (TODO(m6-create-list-general-read): the client carries no create lists yet; a general read would take them from the creature table). A corpse of such a creature is walked to and opened whatever its distance on the ground
+/// (<see cref="FightScenario"/>'s loot step), under the fight's own safety rules.
+/// </summary>
+/// <remarks>
+/// ACE's drop (@95ef426d): <c>Creature_Death.GenerateTreasure</c> (<c>WorldObjects/Creature_Death.cs:646-711</c>) rolls the create list's Contain and non-wield Treasure rows through <c>CreateListSelect</c>
+/// (<c>WorldObjects/Creature_Equipment.cs:636-679</c>): a Treasure row with a non-zero shade is one outcome of a set that runs until the shades sum to 1, one roll a set, so the item's shade is its chance a kill (the server
+/// property <c>trophy_drop_rate</c>, 1 on this server, scales it through the modifier path, <c>:681-726</c>).
+/// </remarks>
+/// <param name="Creature">The creature's weenie class id.</param>
+/// <param name="Item">The wanted item's weenie class id.</param>
+/// <param name="Shade">The create-list row's shade: the item's chance a kill (above 0, at most 1).</param>
+/// <param name="ItemName">The wanted item's name (the logs say it).</param>
+public sealed record WantCarrier(uint Creature, uint Item, double Shade, string ItemName)
+{
+    /// <summary>The argument form of one carrier: <c>&lt;creature&gt;:&lt;item&gt;:&lt;shade&gt;:&lt;item name&gt;</c> (the name last, with no comma).</summary>
+    public override string ToString() => string.Create(CultureInfo.InvariantCulture, $"{Creature}:{Item}:{Shade:0.####}:{ItemName}");
+
+    /// <summary>The spec argument of <paramref name="carriers"/>: each one's <see cref="ToString"/>, comma-separated.</summary>
+    /// <param name="carriers">The carriers.</param>
+    public static string Format(IEnumerable<WantCarrier> carriers) => string.Join(",", carriers.Select(c => c.ToString()));
+
+    /// <summary>The carriers the argument's <paramref name="text"/> names, or null with the <paramref name="error"/>.</summary>
+    /// <param name="text">The argument: a comma list of <c>&lt;creature&gt;:&lt;item&gt;:&lt;shade&gt;:&lt;item name&gt;</c>.</param>
+    /// <param name="error">Why it is malformed.</param>
+    public static IReadOnlyList<WantCarrier>? Parse(string? text, out string error)
+    {
+        error = string.Empty;
+        var list = new List<WantCarrier>();
+        foreach (var part in (text ?? string.Empty).Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            var f = part.Split(':', 4);
+            if (f.Length == 4 && uint.TryParse(f[0], NumberStyles.None, CultureInfo.InvariantCulture, out var creature) && creature > 0
+                && uint.TryParse(f[1], NumberStyles.None, CultureInfo.InvariantCulture, out var item) && item > 0
+                && double.TryParse(f[2], NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var shade) && shade is > 0 and <= 1 && f[3].Trim().Length > 0)
+            {
+                list.Add(new WantCarrier(creature, item, shade, f[3].Trim()));
+                continue;
+            }
+
+            error = $"carriers='{text}' is not a comma list of <creature wcid>:<item wcid>:<shade in (0, 1]>:<item name>";
+            return null;
+        }
+
+        if (list.Count == 0)
+        {
+            error = "carriers= names no carrier";
+            return null;
+        }
+
+        return list;
     }
 }

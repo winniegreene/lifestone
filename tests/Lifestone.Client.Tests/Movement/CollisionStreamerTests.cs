@@ -131,6 +131,7 @@ public sealed class CollisionStreamerTests(DatSetFixture fixture, ITestOutputHel
     }
 
     [Fact]
+    [Trait("Tier", "Timing")] // collision-streamer-settle-flake: waits for the streamer's workers to settle within 10 s; the workers starve under load
     public void Collision_the_host_attached_is_neither_rebuilt_nor_replaced_nor_detached()
     {
         foreach (var synchronous in new[] { true, false })

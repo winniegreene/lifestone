@@ -36,6 +36,7 @@ public sealed class CheckBeforeAfterTests
             {
                 Vitals = [new VitalDesc(CastTracker.MaxManaVital, 0, 0, 0, mana)],
                 Skills = [new SkillDesc(ManaConversion, 0, 1, manaConversionClass, 0, 0, 0, 0.0)],
+                Spells = System.Collections.Immutable.ImmutableDictionary<uint, float>.Empty.Add(Bolt, 2f), // M6 15: the caster knows its bolt (the player's rule puts it on a spell bar before the cast)
             });
         r.CombatModeIs(CombatModes.Magic);
         r.Tick();
@@ -264,6 +265,7 @@ public sealed class CheckBeforeAfterTests
         Assert.Equal(ActionReason.Fizzled, ActionReasons.FromCode(0x0402));
         Assert.Equal(ActionReason.TargetGone, ActionReasons.FromCode(0x042C));
         Assert.Equal(ActionReason.OutOfRange, ActionReasons.FromCode(0x0550));
+        Assert.Equal(ActionReason.InTheAir, ActionReasons.FromCode(0x04EB)); // M6 14 airborne: YouCantDoThatWhileInTheAir
         Assert.Equal(ActionReason.None, ActionReasons.FromCode(0x052B));
     }
 }

@@ -61,6 +61,7 @@ internal sealed partial class GameStateReducer
         if (message.Key == LockedProperty)
         {
             target.Locked = message.Value;
+            target.LockedFrom = "property-update";
         }
 
         if (target.IsSelf)

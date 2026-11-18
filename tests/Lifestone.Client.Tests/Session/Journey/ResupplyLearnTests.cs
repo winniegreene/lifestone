@@ -29,7 +29,7 @@ public sealed partial class ResupplyStationTests
     };
 
     /// <summary>ACE's answer to a Use of a scroll the pack holds (Scroll.ActOnUse, Scroll.cs 45-127 @95ef426d): with <paramref name="teach"/> the MagicUpdateSpell, the learn line, the scroll consumed and "The scroll is destroyed.", else the skill refusal; then the UseDone.</summary>
-    private static Action ScrollServer(Home home, bool teach, List<uint> uses)
+    private static Action ScrollServer(Home home, bool teach, List<uint> uses, bool busyFirst = false)
     {
         var seen = 0;
         uint sequence = 40;
@@ -46,6 +46,13 @@ public sealed partial class ResupplyStationTests
                 }
 
                 uses.Add(send.Guid);
+                if (busyFirst && uses.Count == 1)
+                {
+                    home.Vendor.R.WeenieError(0x001D); // live: the error's code alone, no text; the use then completes with nothing read (r3, 07:10:22)
+                    home.Vendor.UseDone();
+                    continue;
+                }
+
                 if (teach)
                 {
                     home.Vendor.R.Raw(AceM3Writers.MagicUpdateSpell(VendorRig.Player, ++sequence, (ushort)SpiritDrinkerIV));
@@ -100,6 +107,25 @@ public sealed partial class ResupplyStationTests
     }
 
     [Fact]
+    public void A_read_ACE_answers_too_busy_is_read_once_more_and_learned_not_refused_for_the_session_M6_7_AA()
+    {
+        // r3: every second scroll of a run of reads met "You're too busy!", waited out its 15 s and was refused for the session: Armor Self II sat in the pack from level 6 on.
+        var home = new Home(Den, 2_000_000, description: LearnMage(itemRanks: 200));
+        var uses = new List<uint>();
+        var memory = new SaleMemory();
+
+        var run = home.Start(new ResupplyOptions(Memory: memory));
+        var status = home.Stations.Run(run, 600, pump: ScrollServer(home, teach: true, uses, busyFirst: true));
+
+        Assert.Equal(ScenarioStatus.Succeeded, status);
+        Assert.Equal(2, uses.Count);
+        Assert.Equal(1, run.Learned);
+        Assert.True(home.Vendor.State.Self.Spellbook.Knows(SpiritDrinkerIV));
+        Assert.Empty(memory.LearnRefused);
+        Assert.True(home.Logged("learn: ACE answered \"You're too busy!\" to the use of Aura of Spirit Drinker Self IV (3256)"));
+    }
+
+    [Fact]
     public void A_school_short_of_ACEs_requirement_buys_no_scroll_and_says_skill_short()
     {
         var home = new Home(Den, 2_000_000, description: LearnMage(itemRanks: 0)); // Item Enchantment 50: IV's power 150 needs 100 (Player.CanReadScroll)
@@ -143,6 +169,21 @@ public sealed partial class ResupplyStationTests
         Assert.Equal(buysBefore, home.Shops.Buys);
         Assert.True(home.Logged("learn: Aura of Spirit Drinker Self IV (3256): refused-before: refused earlier this session (skill-short): not tried again"));
     }
+    /// <summary>
+    /// M6 1 L3 (the live climb, 2026-11-02), the fallback since M6 4 W1: a walk from a room to a room in another landblock that fails as one composed walk (out, outdoors, in) goes out to the
+    /// lifestone, then in again; a room to an outdoor cell, an outdoor cell to a room, and two rooms of one landblock have no way out.
+    /// </summary>
+    [Fact]
+    public void A_walk_between_rooms_of_two_landblocks_goes_out_first_and_the_others_walk_straight()
+    {
+        const uint holtburg = 0xA9B40031; // Holtburg's lifestone cell's landblock (0xA9B4)
+        Assert.True(ResupplyPlanner.NeedsWayOut(0xA9B40111, 0xA9B30102, holtburg)); // the healer's room to the Apprentice Scrivener of Life Magic's (the climb's no-scroll)
+        Assert.False(ResupplyPlanner.NeedsWayOut(0xA9B40111, 0xA9B30035, holtburg)); // a room to an outdoor cell of another landblock: out through a door, then outdoors
+        Assert.False(ResupplyPlanner.NeedsWayOut(0xA9B40031, 0xA9B30102, holtburg)); // the lifestone's outdoor cell to a room: in over the room's landblock
+        Assert.False(ResupplyPlanner.NeedsWayOut(0xA9B40111, 0xA9B4011B, holtburg)); // two rooms of one landblock (the healer to Cindrue)
+        Assert.False(ResupplyPlanner.NeedsWayOut(0x25810144, 0x24810102, 0x27800006)); // Fort Tethana: the lifestone is three landblocks from Zisaha's room, no way out (the composed walk's failure stands)
+    }
+
     /// <summary>
     /// M5 7 P7l (D143): the walk's order when it starts outdoors. Live trip check 3 (2026-10-30 06:13 UTC) walked the shortest walk's order from the lifestone, Renald, Cindrue, Monyra, then the Scrivener of Item Magic outdoors,
     /// and the last leg stuck at the shut door of Archmage Cindrue's entry hall, so the scroll was never bought. From the lifestone (outdoors) the stop outdoors comes first and the stops in buildings keep their order;

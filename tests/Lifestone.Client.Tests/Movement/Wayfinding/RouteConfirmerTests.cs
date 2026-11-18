@@ -7,6 +7,7 @@ using Lifestone.Client.Tests.Session;
 using Lifestone.Data.Animation;
 using Lifestone.Data.Physics;
 using Lifestone.Data.Physics.World;
+using Lifestone.Data.Terrain;
 using Lifestone.Data.World;
 using Lifestone.Data.World.Cells;
 using Xunit.Abstractions;
@@ -24,6 +25,52 @@ public sealed class RouteConfirmerTests(ITestOutputHelper output)
 
     private static NavWaypoint W(float x, float y, float z = 0f) =>
         new(new CellFrame(CellIds.LandCellAt(Block, x, y)!.Value, new AcFrame(new Vector3(x, y, z), Quaternion.Identity)), false);
+
+    [Fact]
+    public void A_path_whose_start_height_lies_under_the_ground_confirms_from_the_real_ground()
+    {
+        var world = WorldOf(Flat(Block));
+        using var confirmer = new RouteConfirmer(world, HumanSetup);
+        var status = confirmer.ConfirmAll([W(60f, 100f, -1f), W(70f, 100f)]);
+        output.WriteLine($"{status}: start lifts {confirmer.StartLifts}, side looks {confirmer.SidesTaken}, {confirmer.Failure}");
+        Assert.True(status == RouteConfirmStatus.Confirmed, confirmer.Failure?.ToString());
+        Assert.Equal(1, confirmer.StartLifts);
+        Assert.Equal(0, confirmer.SidesTaken);
+    }
+
+    [Fact]
+    public void A_hillside_too_steep_to_walk_is_still_refused_after_two_side_looks()
+    {
+        var world = WorldOf(LandblockCollisionBuilder.FromTerrain(TerrainOf(Block, (x, _) => (byte)(x <= 3 ? 0 : (x - 3) * 40)), Heights));
+        using var confirmer = new RouteConfirmer(world, HumanSetup);
+        var status = confirmer.ConfirmAll([W(60f, 100f), W(100f, 100f, 60f)]);
+        output.WriteLine($"{status}: start lifts {confirmer.StartLifts}, side looks {confirmer.SidesTaken}, {confirmer.Failure}");
+        Assert.Equal(RouteConfirmStatus.Failed, status);
+        Assert.Equal("ground", confirmer.Failure!.Value.Probe);
+        Assert.InRange(confirmer.Failure!.Value.ArcMetres, 11f, 16f);
+    }
+
+    [Fact]
+    public void A_path_wading_out_of_flooded_ground_confirms()
+    {
+        var words = new ushort[TerrainConstants.VertexCount];
+        var heights = new byte[TerrainConstants.VertexCount];
+        for (var x = 0; x < TerrainConstants.VerticesPerSide; x++)
+        {
+            for (var y = 0; y < TerrainConstants.VerticesPerSide; y++)
+            {
+                var index = TerrainConstants.VertexIndex(x, y);
+                heights[index] = 1;
+                words[index] = (ushort)((x <= 3 ? 16 : 1) << 2);
+            }
+        }
+
+        var world = WorldOf(LandblockCollisionBuilder.FromTerrain(new LandblockTerrain(Block, words, heights), Heights));
+        using var confirmer = new RouteConfirmer(world, HumanSetup);
+        var status = confirmer.ConfirmAll([W(20f, 100f, 0.1f), W(170f, 100f, 1f)]);
+        output.WriteLine($"water rises {confirmer.WaterRises}, largest steps {confirmer.LargestSteps}");
+        Assert.True(status == RouteConfirmStatus.Confirmed, confirmer.Failure?.ToString());
+    }
 
     [Fact]
     public void A_flat_path_confirms_at_once_and_in_slices_with_a_ground_probe_a_metre_and_a_placement_every_two()
@@ -195,6 +242,45 @@ public sealed class RouteConfirmerTests(ITestOutputHelper output)
             var seen = confirmer.InSight(walker.Position, At(Block, 96f, 96f, 0f), out _);
             Assert.Equal(!needSight || seen ? NavRunState.Arrived : NavRunState.ArrivedWithoutSight, runner.State);
         }
+    }
+
+    [Fact]
+    public void A_replan_that_reproduces_the_refused_path_ends_at_once_by_name()
+    {
+        // M6 7 Q: the source can leave nothing out (the live round's room graph; here the straight line up a cliff), so the same plan came back and the same samples were refused three times: 35.702 m twice in the log.
+        var world = WorldOf(Data.Physics.World.LandblockCollisionBuilder.FromTerrain(S1TileKit.Terrain(Block, (x, _) => x >= 5 ? 40 : 0), Heights));
+        var h = new ActionHarness(offline: true);
+        var weenie = new TestPlayerWeenie();
+        var player = Player(world, At(Block, 80f, 50f, 0f), weenie);
+        var now = world.CurrentTime;
+        using var audit = new MovementAudit(new RecordingMovementSink(), h.R.Bus, () => now, "q-same-plan");
+        var walker = OfflineWalker.FromPhysics(world, player, weenie, NullLogSink.Instance, audit);
+        h.Api.Move.Bind(walker.Controller, walker.Controller.Options.RunByDefault);
+        using var confirmer = new RouteConfirmer(world, HumanSetup);
+        using var runner = new NavRunner(h.Api.Move, new ControllerNavBody(walker.Controller), new F1StraightSource(), confirmer, audit, new NavRunnerOptions { Name = "q-same-plan" });
+        runner.Start(NavGoal.ToPoint(NavPoint.At(Lb, 130f, 50f)), now);
+        for (var i = 0; i < 60 && !runner.IsDone; i++)
+        {
+            now += 1.0 / 60.0;
+            walker.Controller.Tick(now);
+            runner.Step(now);
+            h.Tick(1.0 / 60.0);
+        }
+
+        output.WriteLine($"{runner.State} plans={runner.Plans} refused={runner.ConfirmFailures}; {runner.FailureReason}");
+        Assert.Equal(NavRunState.Blocked, runner.State);
+        Assert.Equal(1, runner.ConfirmFailures);
+        Assert.Equal(2, runner.Plans);
+        Assert.Contains("the replan reproduced it", runner.FailureReason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Two_plans_are_the_same_when_they_walk_the_same_points_in_the_same_cells()
+    {
+        var plan = new[] { W(20f, 20f), W(40f, 20f) };
+        Assert.True(NavRunner.SameWaypoints(plan, [W(20f, 20f), W(40f, 20f)]));
+        Assert.False(NavRunner.SameWaypoints(plan, [W(20f, 20f), W(40f, 21f)]));
+        Assert.False(NavRunner.SameWaypoints(plan, [W(20f, 20f)]));
     }
 
     /// <summary>A path source that walks straight from the body to the goal's point (the room graph's last step into an object's spot).</summary>

@@ -98,6 +98,7 @@ public sealed class GameSkillsTab : IGamePanel, IUiElementListener, IDisposable
     private bool _awaiting;
     private bool _tablesTodoLogged;
     private uint _selectedSkill;
+    private readonly ListPressGuard _pressGuard;
     private uint _dialog;
 
     /// <summary>The tab of <paramref name="host"/>'s skill page (the elements are only looked up; the list builds when the tab first shows).</summary>
@@ -106,6 +107,7 @@ public sealed class GameSkillsTab : IGamePanel, IUiElementListener, IDisposable
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(host);
         _context = context;
+        _pressGuard = new ListPressGuard(context.Manager);
         _element = host.ElementFor(Page)?.GetChildRecursive(ElementId);
         if (_element is null)
         {
@@ -494,6 +496,11 @@ public sealed class GameSkillsTab : IGamePanel, IUiElementListener, IDisposable
 
         if (message.MessageId is UiMessageIds.ListBoxSelection or UiMessageIds.ListBoxReselect && ReferenceEquals(message.Element, _list)) // a click on the selected row again reselects
         {
+            if (_pressGuard.IsRepeatOfPress(message.MessageId))
+            {
+                return UiListenResult.Handled; // the second message of one press (M6 7 S)
+            }
+
             SetSelection(message.Item);
             return UiListenResult.Handled;
         }

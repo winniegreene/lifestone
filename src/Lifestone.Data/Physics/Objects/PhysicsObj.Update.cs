@@ -173,6 +173,8 @@ public sealed partial class PhysicsObj
                         SetFrame(newFrame with { Origin = Position.Frame.Origin });
                         CachedVelocity = Vector3.Zero;
                     }
+
+                    LastTransitionObstacle = ObstacleOf(transition); // Lifestone's diagnostic, as TryTransitionTo's: what stopped the object's own step (the wayfinding's wall touches)
                 }
                 finally
                 {
@@ -467,7 +469,7 @@ public sealed partial class PhysicsObj
     }
 
     /// <summary>
-    /// What stopped the last transition <see cref="TryTransitionTo"/> ran (Lifestone's diagnostic; M5 item 5 F4): the last object that stopped it, else the
+    /// What stopped the last transition <see cref="TryTransitionTo"/> or the object's own step (<see cref="UpdateObjectInternal"/>) ran (Lifestone's diagnostic; M5 item 5 F4): the last object that stopped it, else the
     /// environment (a collision or sliding normal, or a collision with no contact), else a refused step or edge. The transition's records are
     /// reset when the pool hands it out again, so the answer is taken before it goes back. A value; nothing allocates.
     /// </summary>
@@ -479,14 +481,15 @@ public sealed partial class PhysicsObj
         var stepRefused = collisions.StepRefused || collisions.EdgeRefused;
         var cell = Position.CellId;
         var met = collisions.LastCollidedObject ?? (collisions.CollideObjectCount > 0 ? collisions.CollideObjectAt(collisions.CollideObjectCount - 1) : null);
+        var normal = collisions.SlidingNormalValid ? collisions.SlidingNormal : collisions.CollisionNormalValid ? collisions.CollisionNormal : Vector3.Zero;
         if (met is { } obstacle)
         {
-            return new TransitionObstacle(TransitionObstacleKind.Object, obstacle, cell, stepRefused);
+            return new TransitionObstacle(TransitionObstacleKind.Object, obstacle, cell, stepRefused, normal);
         }
 
         if (collisions.CollidedWithEnvironment || collisions.SlidingNormalValid || collisions.CollisionNormalValid)
         {
-            return new TransitionObstacle(TransitionObstacleKind.Environment, null, cell, stepRefused);
+            return new TransitionObstacle(TransitionObstacleKind.Environment, null, cell, stepRefused, normal);
         }
 
         return new TransitionObstacle(stepRefused ? TransitionObstacleKind.Step : TransitionObstacleKind.None, null, cell, stepRefused);

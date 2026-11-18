@@ -377,6 +377,23 @@
           }
         },
         {
+          "id": "0x7F000129",
+          "base": {
+            "layout": "0x21000040",
+            "element": "0x100002C5"
+          },
+          "x": 206,
+          "y": 226,
+          "width": 82,
+          "height": 18,
+          "properties": {
+            "UICore_Text_entry": {
+              "literal": "Jobs"
+            },
+            "UICore_Text_horizontal_justification": 2
+          }
+        },
+        {
           "id": "0x7F000126",
           "base": {
             "layout": "0x21000040",

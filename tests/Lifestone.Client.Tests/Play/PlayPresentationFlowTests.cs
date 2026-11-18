@@ -80,6 +80,52 @@ public sealed class PlayPresentationFlowTests
         Assert.Equal(1, Entered(h, null));
     }
 
+    /// <summary>
+    /// M6 14 body (live ladder49 01:59:12 UTC): the play's <c>--character</c> auto-enter and a login of the same character on the same list race; the login's own EnterWorld meets the session past the character list. The login adopts the
+    /// entry that put its character in the world (it never fails "not at the character list (phase InWorld)"), and the session sends one entry to the server.
+    /// </summary>
+    [Fact]
+    public void A_login_that_meets_the_auto_enter_s_entry_of_its_character_adopts_it_instead_of_failing()
+    {
+        using var h = new LiveHarness();
+        using var world = new FakeWorld();
+        using var flow = new PlayPresentationFlow(h.Session, world, new PlayFlowOptions("amy"), h.Log);
+        var login = new Lifestone.Client.Session.Scenarios.LoginScenario("Amy") { StayInWorld = true };
+        Assert.True(h.RunUntil(() => login.Step(h.Session, h.Session.Clock.Now) != Lifestone.Client.Session.Scenarios.ScenarioStatus.Running || login.Stage == "arriving"));
+
+        Assert.Null(login.Failure);
+        Assert.Equal("arriving", login.Stage);
+        Assert.NotNull(login.Adopted);
+        Assert.Contains("another owner's entry", login.Adopted, StringComparison.Ordinal);
+        Assert.Equal(ScriptedAceSession.Amy, login.EnteredGuid);
+        Assert.Equal(SessionPhase.InWorld, h.State.Phase);
+        Assert.Equal(1, world.Calls.Count(c => c.StartsWith("arriving", StringComparison.Ordinal))); // one entry reached the server and the world
+    }
+
+    /// <summary>
+    /// M6 14 body: one owner of a re-login's entry. The autopilot's reconnect holds the play's auto-enter for its try (<see cref="PlayPresentationFlow.HoldAutoEnter"/> through the session adapter), so on the new connection's character list
+    /// the auto-enter stands aside and only the try's login sends an EnterWorld; the hold ends with the entry.
+    /// </summary>
+    [Fact]
+    public void The_reconnect_s_login_is_the_one_owner_of_the_entry_and_the_auto_enter_stands_aside()
+    {
+        using var h = new LiveHarness();
+        using var world = new FakeWorld();
+        using var flow = new PlayPresentationFlow(h.Session, world, new PlayFlowOptions("amy"), h.Log);
+        var adapter = new Lifestone.Client.Session.Hosting.GameSessionAutopilotSession(h.Session, "Amy", flow.HoldAutoEnter);
+        adapter.Reconnect();
+        Assert.Equal(Lifestone.Client.Session.Hosting.GameSessionAutopilotSession.EntryOwner, flow.EntryOwner);
+        Assert.True(h.RunUntil(() => adapter.StepLogin(h.Session.Clock.Now) == Lifestone.Client.Session.Scenarios.ScenarioStatus.Failed || h.State.Phase == SessionPhase.InWorld));
+        h.Run(1.0);
+
+        Assert.Null(adapter.LoginFailure);
+        Assert.Equal(SessionPhase.InWorld, h.State.Phase);
+        Assert.Equal(1, Entered(h, null)); // one EnterWorld, the login's: none of the flow's, none refused
+        Assert.Null(adapter.LoginNote); // the login entered itself
+        Assert.Contains(h.Log.Entries, l => l.Category == PlayPresentationFlow.LogCategory && l.Message.Contains("stands aside on this character list", StringComparison.Ordinal));
+        Assert.Null(flow.EntryOwner); // the hold covered one entry
+    }
+
     [Theory]
     [InlineData("Zed", "no character")]
     [InlineData("BO", "pending deletion")]

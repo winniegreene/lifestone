@@ -165,7 +165,14 @@ public sealed class LifestoneBindLeg : ScriptLeg
             }
 
             Log($"bind: no caster in hand; wielding the pack's caster 0x{caster:X8} for the magic mode");
-            var wield = S.Actions.Wield(caster, EquipMask.Held, ActionSource.Host);
+            var sent = new Quartermaster.WieldResult();
+            var wield = Quartermaster.Wardrobe.Send(S, new Quartermaster.WieldRequest(caster) { Name = "the pack's caster", Location = (uint)EquipMask.Held, Source = ActionSource.Host }, sent); // M6 16 E5e1: the one wield routine's send; this leg waits for the answer and the caster in hand by one deadline, below
+            if (wield is null)
+            {
+                _tieFailure = $"the pack's caster 0x{caster:X8} was not wielded: {sent.Why}";
+                yield break;
+            }
+
             foreach (var h in Until(() => wield.IsCompleted && CombatModeGuard.Read(S.State).Caster is not null, ModeSeconds))
             {
                 yield return h;
@@ -195,7 +202,7 @@ public sealed class LifestoneBindLeg : ScriptLeg
 
         var mark = _chat.Count;
         var attempt = new CastAttempt(S.Actions, S.State, _sink, _spells);
-        var end = attempt.Start(new CastRequest { Levels = new[] { BindStation.LifestoneTieSpell }, Rules = CastRules.Travel(MaxFizzles), Purpose = "lifestone tie", Target = lifestone, Source = ActionSource.Host }, S.Clock.Now);
+        var end = attempt.Start(new CastRequest { Levels = new[] { BindStation.LifestoneTieSpell }, Rules = CastRules.Travel(MaxFizzles), Purpose = "lifestone tie", Target = lifestone, Source = ActionSource.Automation }, S.Clock.Now); // M6 15: a scripted cast is the automation's, so the player's rule holds for it (the spell is on a spell bar)
         while (end == CastEnd.Running)
         {
             yield return null;

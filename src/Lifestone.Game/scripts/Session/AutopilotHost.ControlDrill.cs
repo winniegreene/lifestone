@@ -2,6 +2,7 @@ using Godot;
 using Lifestone.Client.RetailUi.Chat;
 using Lifestone.Client.RetailUi.Screens;
 using Lifestone.Client.Session.Autopilot;
+using Lifestone.Client.Session.Contracts;
 using Lifestone.Data.World;
 using Lifestone.Game.Core;
 using Lifestone.Game.Diagnostics;
@@ -84,11 +85,17 @@ public sealed partial class AutopilotHost
 }
 
 /// <summary>The chat's /stop and /auto as two delegates (M5 7 D145): the play host's and the login-check leg's own.</summary>
-internal sealed class DialControls(Func<string> stop, Func<string> auto) : IAutopilotChatControls
+internal sealed class DialControls(Func<string> stop, Func<string> auto, Func<AutopilotTask, string>? run = null, Func<string, string, IReadOnlyList<string>?>? command = null) : IAutopilotChatControls
 {
+    /// <inheritdoc/>
+    public IReadOnlyList<string>? Command(string name, string line) => command?.Invoke(name, line);
+
     /// <inheritdoc/>
     public string Stop() => stop();
 
     /// <inheritdoc/>
     public string Auto() => auto();
+
+    /// <inheritdoc/>
+    public string Run(AutopilotTask task) => run?.Invoke(task) ?? "Lifestone: this host cannot choose a task (TODO(m6-chat-task-host)); nothing was started.";
 }

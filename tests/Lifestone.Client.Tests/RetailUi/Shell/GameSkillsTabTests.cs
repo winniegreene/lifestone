@@ -127,6 +127,7 @@ public sealed class GameSkillsTabTests(DatSetFixture fixture, ITestOutputHelper 
     // ------------------------------------------------------------------ construction and the first show
 
     [RequiresLocalDatsFact]
+    [Trait("Tier", "Timing")] // m4-timing-tier-candidates: the skill page's construction-time bound
     public void The_controller_is_built_in_a_staged_unit_and_lists_nothing_until_the_tab_first_shows()
     {
         using var s = Enter();
@@ -334,6 +335,28 @@ public sealed class GameSkillsTabTests(DatSetFixture fixture, ITestOutputHelper 
     // ------------------------------------------------------------------ the buttons
 
     private static bool Ghosted(UiElement? button) => button?.State == UiStateIds.Ghosted;
+
+    [RequiresLocalDatsFact]
+    public void A_mouse_click_on_a_skill_row_selects_it_and_a_second_click_clears_it()
+    {
+        // M6 7 S: one press reached the list twice, so the select was followed at once by a reselect and the tab (which toggles) cleared it: no click selected a row.
+        using var s = Enter(experience: 100_000_000);
+        OpenSkills(s);
+        var list = Assert.IsType<UiListBox>(s.Tab.List);
+        var row = Assert.IsAssignableFrom<UiElement>(s.Tab.RowOf(MeleeDefense));
+        list.ScrollToShow(list.Items.ToList().IndexOf(row));
+        s.Rig.Frame();
+        s.Rig.Frame();
+
+        s.Rig.Click(row);
+        s.Rig.Frame();
+        Assert.Equal(MeleeDefense, s.Tab.SelectedSkill);
+        Assert.False(Ghosted(s.Tab.RaiseButton));
+
+        s.Rig.Click(row);
+        s.Rig.Frame();
+        Assert.Equal(0u, s.Tab.SelectedSkill);
+    }
 
     [RequiresLocalDatsFact]
     public void The_raise_button_spends_one_ranks_experience_through_RaiseSkill()

@@ -26,6 +26,7 @@ public static class ShellFramesPlan
         "08-logout-confirmation", // the logout confirmation over the shell
         "09-shell-automation-inspector", // G7 lane B: the automation inspector over the shell, listing the run's own actions
         "10-shell-tools-panel", // G7 lane A: the tools panel over the shell, after Places, Where am I and Add XP
+        "11-shell-automation-menu", // M6 6 MD2 (L1): the automation menu over the shell (a Lifestone placeholder window), its rows from the play host's job source
     ];
 
     /// <summary>The file name of the frame called <paramref name="name"/> (an entry of <see cref="FrameNames"/>).</summary>

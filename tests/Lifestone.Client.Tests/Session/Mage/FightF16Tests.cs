@@ -76,6 +76,25 @@ public sealed class FightF16Tests
     }
 
     [Fact]
+    public void Set_aside_after_failed_casts_the_emergency_still_says_it_holds_so_a_health_drink_can_go_M6_8()
+    {
+        var e = new FightEmergency(60, 85, 10);
+        Assert.True(e.Wanted(50, 190, 2.3, 0)); // under the line
+        Assert.False(e.AsideNow(0));
+        var aside = false;
+        for (var i = 0; i < FightEmergency.MaxFailsInARow; i++)
+        {
+            aside = e.Ended(landed: false, resisted: false, 2, 1);
+        }
+
+        Assert.True(aside);
+        Assert.False(e.Wanted(50, 190, 2.3, 2)); // no cast is tried
+        Assert.True(e.AsideNow(2)); // but it holds: the fight asks for a health drink
+        Assert.False(e.AsideNow(1 + FightEmergency.AsideSeconds)); // the set-aside is over: the casts again
+        Assert.True(e.Wanted(190, 190, 2.3, 3) is false && !e.AsideNow(3)); // healed over the safe line: nothing holds
+    }
+
+    [Fact]
     public void The_fullest_tusker_is_picked_and_the_nearest_among_equals_and_a_blocked_one_is_skipped()
     {
         float[] health = [0.3f, 1.0f, 0.6f, 1.0f];

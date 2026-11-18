@@ -138,6 +138,92 @@ public sealed class GroundDraftTownSqlTests
         return GroundDraft.World(WorldSqlDump.Read(reader, wanted), 0x0105, arrival, home);
     }
 
+    /// <summary>M6 3 a1: the excerpt with the entry portal's MaxLevel and a NoRecall PortalBitmask (0x31, the Tusker Burrow's), and the Bard's stat rows (the Imp has none).</summary>
+    private static readonly string StatsExcerpt = Excerpt.Replace("INSERT INTO `weenie_properties_int` VALUES (1,60,86,20),", "INSERT INTO `weenie_properties_int` VALUES (1,60,86,20),(20,60,87,40),(21,60,111,49),", StringComparison.Ordinal) + "\n" + """
+        CREATE TABLE `weenie_properties_attribute` (
+          `id` int(10) unsigned NOT NULL,
+          `object_Id` int(10) unsigned NOT NULL,
+          `type` smallint(5) unsigned NOT NULL,
+          `init_Level` int(10) unsigned NOT NULL,
+          `level_From_C_P` int(10) unsigned NOT NULL,
+          `c_P_Spent` int(10) unsigned NOT NULL
+        ) ENGINE=InnoDB;
+        INSERT INTO `weenie_properties_attribute` VALUES (1,8,1,60,0,0),(2,8,2,40,1,0),(3,8,3,50,0,0),(4,8,4,45,0,0),(5,8,5,30,0,0),(6,8,6,40,0,0),(7,9,1,10,0,0);
+        CREATE TABLE `weenie_properties_attribute_2nd` (
+          `id` int(10) unsigned NOT NULL,
+          `object_Id` int(10) unsigned NOT NULL,
+          `type` smallint(5) unsigned NOT NULL,
+          `init_Level` int(10) unsigned NOT NULL,
+          `level_From_C_P` int(10) unsigned NOT NULL,
+          `c_P_Spent` int(10) unsigned NOT NULL,
+          `current_Level` int(10) unsigned NOT NULL
+        ) ENGINE=InnoDB;
+        INSERT INTO `weenie_properties_attribute_2nd` VALUES (1,8,1,50,5,0,12),(2,8,3,99,0,0,99);
+        CREATE TABLE `weenie_properties_skill` (
+          `id` int(10) unsigned NOT NULL,
+          `object_Id` int(10) unsigned NOT NULL,
+          `type` smallint(5) unsigned NOT NULL,
+          `level_From_P_P` smallint(5) unsigned NOT NULL,
+          `s_a_c` int(10) unsigned NOT NULL,
+          `p_p` int(10) unsigned NOT NULL,
+          `init_Level` int(10) unsigned NOT NULL,
+          `resistance_At_Last_Check` int(10) unsigned NOT NULL,
+          `last_Used_Time` double NOT NULL
+        ) ENGINE=InnoDB;
+        INSERT INTO `weenie_properties_skill` VALUES (1,8,15,2,2,0,10,0,0),(2,9,15,0,1,0,30,0,0);
+        CREATE TABLE `weenie_properties_body_part` (
+          `id` int(10) unsigned NOT NULL,
+          `object_Id` int(10) unsigned NOT NULL,
+          `key` smallint(5) unsigned NOT NULL,
+          `d_Type` int(10) NOT NULL,
+          `d_Val` int(10) NOT NULL,
+          `d_Var` float NOT NULL
+        ) ENGINE=InnoDB;
+        INSERT INTO `weenie_properties_body_part` VALUES (1,8,0,4,10,0.5),(2,8,1,1,5,0.5),(3,8,2,64,0,0),(4,9,0,16,0,0);
+        """;
+
+    [Fact]
+    public void The_entry_s_gate_and_tie_rule_and_the_creatures_stats_come_from_their_rows_and_a_missing_row_is_a_named_note_M6_3_a1()
+    {
+        var wanted = new Dictionary<string, Func<SqlRow, bool>>(GroundDraft.WorldTables(0x0105)) { ["landblock_instance"] = _ => true };
+        using var reader = new StringReader(StatsExcerpt);
+        var world = GroundDraft.World(WorldSqlDump.Read(reader, wanted), 0x0105, null);
+
+        // The entry: MinLevel 20, MaxLevel 40, PortalBitmask 0x31 carries NoRecall (0x20), so the portal cannot be tied (ACE's Portal.NoTie).
+        var entry = Assert.Single(world.Entries);
+        Assert.Equal(((int?)20, (int?)40, (int?)0x31, false), (entry.MinLevel, entry.MaxLevel, entry.PortalBitmask, entry.Tieable));
+        Assert.True(World(null).Entries[0].Tieable); // no bitmask row: Unrestricted
+
+        // The Bard: attributes init + ranks (Endurance 40 + 1); health 50 + 5 + round(41 / 2 = 20.5, half up) = 76 (the row's current_Level 12 is not ACE's); Magic Defense, trained: 10 + 2 + (30 + 40) / 7 = 22;
+        // the damage types of the parts with a d_Val, 4 | 1 (the 64 part has none). The Imp has one attribute row, an untrained skill and no attack part: each a named note, no value.
+        var bard = world.Creatures.Single(c => c.Wcid == 8);
+        Assert.Equal(new GroundAttributes(60, 41, 45, 50, 30, 40), bard.Attributes);
+        Assert.Equal(((int?)76, (int?)22, (uint?)5u), (bard.MaxHealth, bard.MagicDefense, bard.DamageTypes));
+        var imp = world.Creatures.Single(c => c.Wcid == 9);
+        Assert.Equal(((GroundAttributes?)null, (int?)null, (int?)null, (uint?)null), (imp.Attributes, imp.MaxHealth, imp.MagicDefense, imp.DamageTypes));
+        foreach (var name in new[] { "TODO(ground-draft-attributes): creature 9", "TODO(ground-draft-health): creature 9", "TODO(ground-draft-magic-defense): creature 9", "TODO(ground-draft-damage-types): creature 9" })
+        {
+            Assert.Contains(world.Notes, n => n.StartsWith(name, StringComparison.Ordinal));
+        }
+
+        Assert.Single(world.Notes, n => n.StartsWith("TODO(f11-swing-seconds):", StringComparison.Ordinal)); // the swing is never drafted, named once
+    }
+
+    [Fact]
+    public void The_front_point_is_three_metres_along_the_portal_s_facing_with_the_z_to_the_centimetre()
+    {
+        // Tusker Temple's portal row (the pinned dump's guid 0x72A80000): w 0.999794, z -0.02029 is a yaw of -2.32 degrees, so +Y turned by it is (+0.0406, +0.9992); the profile's hand-derived point.
+        var portal = new DraftPlace(0x72A80000, 22696, 0x2A800013, new Vector3(57.7292f, 64.9681f, 70.005f)) { HeadingW = 0.999794f, HeadingZ = -0.02029f };
+        var (cell, front) = GroundDraft.FrontOf(portal);
+        Assert.Equal(0x2A800013u, cell);
+        Assert.Equal(57.8509, front.X, 0.0001);
+        Assert.Equal(67.9656, front.Y, 0.0001);
+        Assert.Equal(70.01f, front.Z);
+        var (east, eastPoint) = GroundDraft.FrontOf(new DraftPlace(1, 1, 0x2A800001, new Vector3(22f, 1f, 0f)) { HeadingW = MathF.Cos(-MathF.PI / 4), HeadingZ = MathF.Sin(-MathF.PI / 4) }); // facing east (yaw -90 degrees)
+        Assert.Equal(25f, eastPoint.X, 0.001f);
+        Assert.Equal(0x2A800009u, east); // x 25 lies in the next column of outdoor cells
+    }
+
     [Fact]
     public void The_entry_portals_are_the_weenies_whose_destination_lies_in_the_landblock_and_the_arrival_is_the_first_s_unless_named()
     {
@@ -217,7 +303,24 @@ public sealed class GroundDraftTownTests(DatSetFixture fixture, ITestOutputHelpe
 {
     private const string DenKey = "black-spawn-den-aluvian";
 
-    private static DraftWorld DraftOf(HuntingGround ground, ushort? home) => PinnedWorldSql.Draft(Assert.Single(ground.Landblocks), ground.Arrival.Cell, home);
+    /// <summary>M6 item 14: the den of the entrance at 60.0S 57.6W (landblock 0x0103), the Aluvian den's copy (<c>DenCopyDatTests</c>, <c>DenCopySqlTests</c>): every rule that is the den's here is its too.</summary>
+    private const string ShoDenKey = "black-spawn-den-sho";
+
+    private static bool IsDen(string key) => key is DenKey or ShoDenKey;
+
+    /// <summary>M6 3 p1 (D48): the four spine tusker grounds are hunted from Holtburg like the den (the island has no lifestone and the first three portals are NoRecall), so their homes and stops are Holtburg's hand-set standing points.</summary>
+    private static readonly string[] SpineKeys = ["tusker-burrow", "tusker-lodge", "tusker-cave", "tusker-temple-20-40", "tusker-cavern", "tusker-habitat", "tusker-barracks", "tusker-abode", "tusker-quarters", "tusker-holding", "tusker-armory"]; // M6 3 p3: and the three alternates (Cavern, Habitat, Barracks); M6 14 armory: and the Armory
+
+    private static bool HoltburgHomed(string key) => IsDen(key) || SpineKeys.Contains(key) || key == AlabreeKey || key == CraterCavesKey;
+
+    /// <summary>M6 8 B1: the Crater Caves are hunted from Holtburg (the climber's lifestone), though Crater Lake Village's Life Stone stands 495 m from the portal: the home is the hand-set standing point, as the spine's.</summary>
+    private const string CraterCavesKey = "crater-caves";
+
+    /// <summary>M6 5 q6b: the Cave of Alabree is hunted from Holtburg, whose own lifestone it is nearest: its home is the hand-set standing point, as the spine's.</summary>
+    private const string AlabreeKey = "cave-of-alabree";
+
+    /// <summary>The draft of the ground's town half. M6 8 B1: the Crater Caves' arrival (0x019A02D6, the room the portal's point stands in) is not the row's stale Destination (0x019A02CA), which is what the draft's lookup asks for.</summary>
+    private static DraftWorld DraftOf(HuntingGround ground, ushort? home) => PinnedWorldSql.Draft(Assert.Single(ground.Landblocks), ground.Key == CraterCavesKey ? 0x019A02CAu : ground.Arrival.Cell, home);
 
     /// <summary>The profile's own town: the draft's town half taking the lifestone of the profile's home landblock.</summary>
     private static DraftWorld OwnTownOf(HuntingGround ground) => DraftOf(ground, (ushort)(ground.Home.LifestoneCell >> 16));
@@ -233,16 +336,23 @@ public sealed class GroundDraftTownTests(DatSetFixture fixture, ITestOutputHelpe
         output.WriteLine(string.Join("\n", world.Notes));
 
         // The entry portal: the weenie whose Destination is the profile's arrival; its instance, the cell by the outdoor-cell rule, the global tie and recall spells.
-        Assert.Contains(world.Entries, e => e.Cell == ground.Arrival.Cell);
-        Assert.NotNull(ground.Portal);
+        Assert.Contains(world.Entries, e => e.Cell == (key == CraterCavesKey ? 0x019A02CAu : ground.Arrival.Cell));
         Assert.NotNull(town.Portal);
-        Assert.Equal((ground.Portal.Guid, ground.Portal.Cell), (town.Portal.Guid, town.Portal.Cell));
-        Assert.Equal(((uint)GroundDraft.PrimaryPortalTieSpell, (uint)GroundDraft.PrimaryPortalRecallSpell), (ground.Portal.TieSpell, ground.Portal.RecallSpell));
+        if (ground.Portal is null)
+        {
+            Assert.False(ground.Entry!.Tieable); // a NoRecall entry portal has no tie record (M6 3 a1)
+            Assert.Equal((ground.Entry.Guid, ground.Entry.Cell), (town.Portal.Guid, town.Portal.Cell));
+        }
+        else
+        {
+            Assert.Equal((ground.Portal.Guid, ground.Portal.Cell), (town.Portal.Guid, town.Portal.Cell));
+            Assert.Equal(((uint)GroundDraft.PrimaryPortalTieSpell, (uint)GroundDraft.PrimaryPortalRecallSpell), (ground.Portal.TieSpell, ground.Portal.RecallSpell));
+        }
 
         // The home: the lifestone's cell. The den's hand-set point is a standing point measured beside Holtburg's lifestone (session.md section 41), not the instance's own point 5 m away; Tusker Temple's is the instance's.
         var lifestone = town.Lifestone!.Place;
         Assert.Equal(ground.Home.LifestoneCell, lifestone.Cell);
-        if (key == DenKey)
+        if (HoltburgHomed(key))
         {
             Assert.NotEqual(ground.Home.LifestonePoint, lifestone.Point);
             Assert.InRange(Vector3.Distance(ground.Home.LifestonePoint, lifestone.Point), 0f, 6f);
@@ -259,10 +369,10 @@ public sealed class GroundDraftTownTests(DatSetFixture fixture, ITestOutputHelpe
             var draft = Assert.Single(town.Vendors, v => v.Place.Guid == vendor.Guid);
             var learnOnly = vendor.BuysItemTypes == 0 && ground.Learn.Any(l => l.VendorWcid == vendor.Wcid); // M5 7 P7j: a learn list's vendor buys nothing here (no trip sells to her): the profile's mask is 0, not the draft's
             Assert.Equal((vendor.Wcid, vendor.Name, vendor.Cell, vendor.Point, learnOnly ? draft.BuysItemTypes : vendor.BuysItemTypes), (draft.Place.Wcid, draft.Name, draft.Place.Cell, draft.Place.Point, draft.BuysItemTypes));
-            Assert.Equal(key == DenKey && vendor.Wcid == 718 ? 0xA9B4013Fu : key == DenKey && vendor.Wcid == 2304 ? 0xA9B40117u : vendor.Cell, vendor.StopCell);
+            Assert.Equal(HoltburgHomed(key) && vendor.Wcid == 718 ? 0xA9B4013Fu : HoltburgHomed(key) && vendor.Wcid == 2304 ? 0xA9B40117u : vendor.Cell, vendor.StopCell);
             foreach (var ware in vendor.Sells)
             {
-                var shop = Assert.Single(draft.Wares, w => w.Wcid == ware.Wcid);
+                var shop = Assert.Single(draft.Wares.Distinct(), w => w.Wcid == ware.Wcid); // M6 8 D: Fort Tethana's Yoshi Deshi lists each pack twice in his CreateList (the same row, the same price)
                 var note = ground.Supplies.Purse.Notes.FirstOrDefault(n => n.Wcid == ware.Wcid);
                 var price = note is null ? shop.Price : (int)Math.Ceiling((note.Value * (double)Lifestone.Client.Session.Contracts.VendorStock.PromissoryNoteSellRate) - 0.1); // M5 7 G1: a trade note is sold at ACE's 1.15 times its face, not the vendor's rate (Vendor.cs 577-585 @95ef426d)
                 Assert.Equal((ware.Name, ware.Price), (shop.Name, price));
@@ -280,12 +390,12 @@ public sealed class GroundDraftTownTests(DatSetFixture fixture, ITestOutputHelpe
         var world = DraftOf(ground, null);
         var home = world.Town!.Lifestone!;
         output.WriteLine($"{key}: the nearest lifestone 0x{home.Place.Guid:X8} in 0x{home.Place.Cell:X8} is {home.Metres:0} m from the portal; the profile's home is 0x{ground.Home.LifestoneCell:X8} ({ground.Home.Town})");
-        if (key == DenKey)
+        if (HoltburgHomed(key))
         {
             // The den's hand-set home is Holtburg, where the ground's characters live and shop (the project's town since M4): the character recalls home, shops, and returns by Primary Portal Recall tied to the den's
             // portal. The den portal stands in landblock 0x1B90, 28 km from Holtburg; the lifestone nearest it, 2.9 km away, is another town's. The command's 'home' (a landblock) drafts Holtburg's town, as the theory above does.
-            Assert.NotEqual(ground.Home.LifestoneCell >> 16, home.Place.Cell >> 16);
-            Assert.True(home.Metres > 1000, $"the lifestone nearest the den's portal is {home.Metres:0} m away");
+            Assert.True(!IsDen(key) || ground.Home.LifestoneCell >> 16 != home.Place.Cell >> 16); // the spine grounds' nearest lifestone may be Holtburg's (the Temple 20-40's, 4.4 km)
+            Assert.True(home.Metres > 1000 || key == AlabreeKey || key == CraterCavesKey, $"the lifestone nearest the den's portal is {home.Metres:0} m away"); // M6 5 q6b: the Cave of Alabree's portal stands 355 m from Holtburg's lifestone, which is its home
         }
         else
         {
@@ -309,35 +419,35 @@ public sealed class GroundDraftTownTests(DatSetFixture fixture, ITestOutputHelpe
             Assert.Equal(GroundRole.Avoid, ground.RoleOf(e.Wcid));
             Assert.All(e.Cells, c => Assert.True(ground.IsNoGo(c), $"{key}: the exit creature {e.Wcid}'s cell 0x{c:X8} is no-go"));
         });
-        if (key == DenKey)
+        if (key is DenKey or ShoDenKey or "tusker-burrow" or "tusker-lodge" or "tusker-cave" or "tusker-cavern" or "tusker-habitat" or "tusker-barracks" or "tusker-abode" or "tusker-quarters" or "tusker-holding" or "tusker-armory" or AlabreeKey or CraterCavesKey)
         {
             Assert.Empty(world.EmoteExits);
         }
         else
         {
             var statue = Assert.Single(world.EmoteExits);
-            Assert.Equal((22641u, "Use", 2936u, "Entrance to Tusker Island", "0x5C4A017F"), (statue.Wcid, statue.CategoryName, statue.Spell, statue.SpellName, string.Join(",", statue.Cells.Select(c => $"0x{c:X8}"))));
+            Assert.Equal((22641u, "Use", 2936u, "Entrance to Tusker Island", key == "tusker-temple-20-40" ? "0x5D43017F" : "0x5C4A017F"), (statue.Wcid, statue.CategoryName, statue.Spell, statue.SpellName, string.Join(",", statue.Cells.Select(c => $"0x{c:X8}"))));
         }
 
         // The level band is the targets' levels only (not every slot's creature), inside the slot creatures' range.
         var targets = ground.Targets.Where(t => t.Role == GroundRole.Target).Select(t => t.Level).ToArray();
         Assert.Equal(ground.LevelBand, GroundDraft.LevelBandOf(targets));
-        var slotLevels = world.Creatures.Where(c => c.Level is not null).Select(c => c.Level!.Value).ToArray();
+        var slotLevels = world.Creatures.Where(c => c.Level is not null).Select(c => c.Level!.Value).Concat(key == AlabreeKey ? [8, 15] : []).ToArray(); // M6 5 q6b: the placed Blood Shreth (8) and Hunter Shreth (15) the draft drops (TODO(ground-draft-link-generator))
         Assert.InRange(ground.LevelBand.Min, slotLevels.Min(), slotLevels.Max());
         Assert.InRange(ground.LevelBand.Max, slotLevels.Min(), slotLevels.Max());
 
         // The proposed roles: every profile target is a proposed target. Tusker Temple's roles are the proposal's; the den's avoided classes (the Virindi and the Drudges) are its design's, set by hand.
-        Assert.All(ground.Targets.Where(t => t.Role == GroundRole.Target), t => Assert.Equal(GroundRole.Target, GroundDraft.ProposedRole(world, t.Wcid)));
+        Assert.All(ground.Targets.Where(t => t.Role == GroundRole.Target && !(key == AlabreeKey && t.Wcid is 4110 or 4111)), t => Assert.Equal(GroundRole.Target, GroundDraft.ProposedRole(world, t.Wcid)));
         var proposed = GroundDraft.LevelBandOf(world.Creatures.Where(c => c.Level is not null && GroundDraft.ProposedRole(world, c.Wcid) == GroundRole.Target).Select(c => c.Level!.Value));
-        if (key == DenKey)
+        if (IsDen(key))
         {
             Assert.Equal(new LevelBand(40, 80), proposed);
             Assert.Equal(new LevelBand(80, 80), ground.LevelBand);
         }
         else
         {
-            Assert.Equal(ground.Targets.Select(t => (t.Wcid, t.Role)).Order(), world.Creatures.Select(c => (c.Wcid, GroundDraft.ProposedRole(world, c.Wcid))).Order());
-            Assert.Equal(ground.LevelBand, proposed);
+            Assert.Equal(ground.Targets.Where(t => key != AlabreeKey || t.Wcid is not (4110 or 4111)).Select(t => (t.Wcid, t.Role)).Order(), world.Creatures.Select(c => (c.Wcid, GroundDraft.ProposedRole(world, c.Wcid))).Order());
+            Assert.Equal(key == AlabreeKey ? new LevelBand(7, 11) : ground.LevelBand, proposed); // M6 5 q6b: the draft's band lacks the placed Shreths (8, 15), TODO(ground-draft-link-generator)
         }
     }
 
@@ -352,9 +462,12 @@ public sealed class GroundDraftTownTests(DatSetFixture fixture, ITestOutputHelpe
         var cells = GroundDraft.Cells(all, world.Arrival!.Cell, ground.Walk.DoorwayLean);
         using var json = JsonDocument.Parse(GroundDraft.Json("draft", all, cells, world));
         var root = json.RootElement;
-        Assert.Equal($"0x{ground.Arrival.Cell:X8}", root.GetProperty("arrival").GetProperty("cell").GetString());
-        Assert.Equal($"0x{ground.Portal!.Guid:X8}", root.GetProperty("portal").GetProperty("guid").GetString());
-        Assert.Equal($"0x{ground.Portal.Cell:X8}", root.GetProperty("portal").GetProperty("cell").GetString());
+        Assert.Equal($"0x{(key == CraterCavesKey ? 0x019A02CAu : ground.Arrival.Cell):X8}", root.GetProperty("arrival").GetProperty("cell").GetString()); // M6 8 B1: the Crater Caves name the room the point stands in (DraftOf)
+        if (ground.Portal is { } tie) // a NoRecall entry has no tie record to compare
+        {
+            Assert.Equal($"0x{tie.Guid:X8}", root.GetProperty("portal").GetProperty("guid").GetString());
+            Assert.Equal($"0x{tie.Cell:X8}", root.GetProperty("portal").GetProperty("cell").GetString());
+        }
         Assert.Equal($"0x{ground.Home.LifestoneCell:X8}", root.GetProperty("home").GetProperty("lifestone_cell").GetString());
         Assert.StartsWith(GroundDraft.HandSet, root.GetProperty("home").GetProperty("town").GetString(), StringComparison.Ordinal); // the town's name is by hand
         var drafted = root.GetProperty("vendors").EnumerateArray().Select(v => v.GetProperty("guid").GetString()).ToArray();
@@ -364,11 +477,82 @@ public sealed class GroundDraftTownTests(DatSetFixture fixture, ITestOutputHelpe
         output.WriteLine($"{key}: the draft json carries the portal, the home and {drafted.Length} vendors");
     }
 
+    [RequiresWorldSqlDumpFact]
+    public void The_temple_s_entry_exit_and_target_stats_are_the_pinned_sql_s_M6_3_a1()
+    {
+        const string temple = "tusker-temple-fort-tethana";
+        var ground = GroundCatalog.Get(temple);
+        var world = OwnTownOf(ground);
+        output.WriteLine(string.Join("\n", world.Notes));
+
+        // The entry: portal 22696's gate (MinLevel 40, no MaxLevel) and its PortalBitmask 1 (Unrestricted, no NoRecall), so it can be tied; the place and front point are the draft's.
+        var entry = Assert.Single(world.Entries, e => e.Wcid == 22696);
+        Assert.Equal(((int?)40, (int?)null, (int?)1, true), (entry.MinLevel, entry.MaxLevel, entry.PortalBitmask, entry.Tieable));
+        var portal = world.Town!.Portal!;
+        var (frontCell, front) = GroundDraft.FrontOf(portal);
+        front = new Vector3(MathF.Round(front.X, 4), MathF.Round(front.Y, 4), MathF.Round(front.Z, 4)); // the draft writes four places
+        Assert.Equal(new GroundEntry(entry.Wcid, portal.Guid, portal.Cell, portal.Point, frontCell, front, entry.MinLevel, entry.MaxLevel, entry.Tieable), ground.Entry);
+        Assert.Equal((ground.Portal!.FrontCell, ground.Portal.Front), (frontCell, front)); // the hand-derived tie point is the draft's rule
+
+        // The exit: no exit portal in 0x5C4A (the statue's Use emote is avoided), so the ground is left by recall.
+        Assert.Empty(world.Exits);
+        Assert.Equal(GroundExitKind.Recall, ground.Exit!.Kind);
+
+        // The stats: every profile target's equal the draft's; the Tusker Slave's by value.
+        var slave = world.Creatures.Single(c => c.Wcid == 1628);
+        Assert.Equal(((int?)400, (int?)219, (uint?)4u, new GroundAttributes(210, 300, 200, 180, 70, 60)), (slave.MaxHealth, slave.MagicDefense, slave.DamageTypes, slave.Attributes));
+        foreach (var t in ground.Targets)
+        {
+            var c = world.Creatures.Single(x => x.Wcid == t.Wcid);
+            Assert.Equal((c.MaxHealth ?? 0, c.MagicDefense ?? 0, c.DamageTypes ?? 0u, c.Attributes), (t.MaxHealth, t.MagicDefence, t.DamageTypes, t.Attributes));
+        }
+    }
+
+    [RequiresWorldSqlDumpFact]
+    public void The_den_s_health_measures_against_ace_s_max_value_M6_3_a1()
+    {
+        // M6 3 a2: the den's profile carries ACE's current values (the Guard's row says current_Level 260, ACE spawns it at MaxValue 400: Creature.cs:132-135 @95ef426d), so the profile and the draft agree on health and Magic Defense.
+        var den = GroundCatalog.Get("black-spawn-den-aluvian");
+        var world = DraftOf(den, (ushort)(den.Home.LifestoneCell >> 16));
+        foreach (var wcid in new uint[] { 1628, 1629 })
+        {
+            var profile = den.Targets.Single(t => t.Wcid == wcid);
+            var drafted = world.Creatures.Single(c => c.Wcid == wcid);
+            Assert.Equal(((int?)profile.MaxHealth, (int?)profile.MagicDefence), (drafted.MaxHealth, drafted.MagicDefense));
+        }
+
+        Assert.Equal((400, 244), (den.Targets.Single(t => t.Wcid == 1629).MaxHealth, den.Targets.Single(t => t.Wcid == 1629).MagicDefence));
+    }
+
+    [RequiresDatsFact]
+    public void The_draft_s_magic_defense_formula_is_the_skill_table_s_M6_3_a1()
+    {
+        var skill = Lifestone.Data.CharacterCreation.SkillTableData.Load(fixture.Dats).Skills.Single(s => s.Id == GroundDraft.MagicDefenseSkill);
+        Assert.Equal("Magic Defense", skill.Name);
+        Assert.Equal(GroundDraft.MagicDefenseFormula, skill.Formula);
+    }
+
     [RequiresDatsFact]
     public void Spell_2936_the_statue_casts_is_a_portal_sending_spell_in_the_dats()
     {
         var spell = Lifestone.Data.Magic.SpellTableData.Load(fixture.Dats).Spells[2936];
         Assert.Equal("Entrance to Tusker Island", spell.Name);
         Assert.Contains("Portal", spell.MetaSpellType.ToString(), StringComparison.Ordinal);
+    }
+}
+
+/// <summary>M6 3 a1: a fact that needs the dats and the pinned world SQL dump (the theory's rule, <see cref="RequiresWorldSqlDumpTheoryAttribute"/>): skipped, with the reason, otherwise.</summary>
+internal sealed class RequiresWorldSqlDumpFactAttribute : FactAttribute
+{
+    public RequiresWorldSqlDumpFactAttribute()
+    {
+        if (!Lifestone.Data.Dat.DatSet.Exists())
+        {
+            Skip = "needs the retail dats";
+        }
+        else if (PinnedWorldSql.Zip() is null)
+        {
+            Skip = "needs the pinned world SQL dump under server/runtime/downloads of the main checkout";
+        }
     }
 }

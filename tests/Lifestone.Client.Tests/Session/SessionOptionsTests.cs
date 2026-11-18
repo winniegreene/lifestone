@@ -32,7 +32,7 @@ public sealed class SessionOptionsTests
         var o = SessionOptions.Parse(
         [
             "--play", "--account=test", "--character=Lifestone Smoke", "--server=127.0.0.1:9100", "--record-session=cache/runs",
-            "--session-budget-ms=3.5", "--retail-net", "--vsync=off",
+            "--session-budget-ms=3.5", "--retail-net", "--allow-climber-grant", "--vsync=off",
         ]);
         Assert.Empty(o.Errors);
         Assert.True(o.Play);
@@ -43,6 +43,9 @@ public sealed class SessionOptionsTests
         Assert.Equal("cache/runs", o.RecordDirectory);
         Assert.Equal(3.5, o.BudgetMs);
         Assert.True(o.RetailNet);
+        Assert.True(o.AllowClimberGrant);
+        Assert.False(SessionOptions.Parse([]).AllowClimberGrant); // M6 0 F5: off unless named
+        Assert.True(o.PlayerRules); // M6 15: on unless turned off
 
         var plain = SessionOptions.Parse(["--record-session", "--server=[::1]:9000", "--play=off"]);
         Assert.Empty(plain.Errors);
@@ -121,7 +124,7 @@ public sealed class SessionOptionsTests
     public void The_session_group_is_registered_for_the_main_scene_and_the_headless_host()
     {
         var registry = OptionCatalog.Registry;
-        string[] names = ["--play", "--account", "--character", "--server", "--record-session", "--session-budget-ms", "--retail-net"];
+        string[] names = ["--play", "--account", "--character", "--server", "--record-session", "--session-budget-ms", "--retail-net", "--allow-climber-grant", "--live-raise-check"];
         foreach (var name in names)
         {
             Assert.Equal("Session", registry.FeatureOf(name));

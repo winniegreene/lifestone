@@ -326,6 +326,7 @@ public partial class LivingStaticsSystem : Node
 
     public override void _Process(double delta)
     {
+        using var framePhase = Lifestone.Game.Diagnostics.FramePhases.World(); // M6 16 Eperf2: this call's share of a long frame
         // Steady-state frame times for the exit summary (on/off comparisons, docs/objects.md §3): from frame 600 on.
         if (++_frame > SteadyAfterFrames && _frameTimes.Count < 200_000)
         {

@@ -81,6 +81,33 @@ public sealed class MoveIntents : IRunByDefaultSource
     /// <summary>M5 7 P7p: how the bound controller's last server MoveTo ended (<see cref="IPlayerMovementIntents.LastServerMoveToEnd"/>), or null.</summary>
     public string? LastServerMoveToEnd => _controller?.LastServerMoveToEnd;
 
+    /// <summary>M6 14: whether the server's MoveTo or TurnTo of the bound player is under way now (<see cref="IPlayerMovementIntents.ServerMoving"/>); null when nothing is bound or the body cannot tell.</summary>
+    public bool? ServerMoving => _controller?.ServerMoving;
+
+    /// <summary>M6 14: what the bound controller believes the player is doing, in one line for a log (<see cref="IPlayerMovementIntents.MotionText"/>), or null.</summary>
+    public string? MotionText => _controller?.MotionText;
+
+    /// <summary>
+    /// M6 14 airborne: true while the bound controller's body is in the air (<see cref="IPlayerMovementIntents.InTheAir"/>: placed and off walkable ground, the body the screen draws); false when it stands, and while nothing is bound.
+    /// The cast's check before (<see cref="Casting.CastAttempt"/>): ACE refuses a cast in the air with 0x04EB (<c>Player_Magic.cs</c>:105-109 @95ef426d).
+    /// </summary>
+    public bool InTheAir => _controller?.InTheAir == true;
+
+    /// <summary>The motion command <see cref="EndServerMove"/> taps: TurnRight (a turn moves the player nowhere).</summary>
+    public const uint EndServerMoveCommand = Lifestone.Data.Animation.MotionCommands.TurnRight;
+
+    /// <summary>
+    /// M6 14: ends the server's walk of the player (an out-of-range Use's MoveTo) the way a person at the keys ends it: a movement key. The press takes control back from the server (retail
+    /// <c>CommandInterpreter::TakeControlFromServer</c>, 11.6096 0x006B4210: the player stops completely, which cancels its MoveTo with 0x36 ActionCancelled) and sends a MoveToState; ACE ends its walk-to chain on any
+    /// MoveToState (<c>GameActionMoveToState.cs:22-26</c> @95ef426d: <c>StopExistingMoveToChains</c>), and the chain's next poll answers the Use that began the walk with a UseDone and no effect (<c>Player_Move.cs:99-107</c>,
+    /// <c>Player_Use.cs:223-241</c>). The key is <see cref="EndServerMoveCommand"/>, pressed and released as two intents queued together: both reach the controller in the same tick when the lane's rate allows, with no physics
+    /// step between them, so the heading does not change. Each is an action like any other (audit-logged, the kill switch and dry run apply); the caller reads their outcomes and <see cref="ServerMoving"/> after.
+    /// </summary>
+    /// <param name="source">Who asked (normally <see cref="ActionSource.Automation"/>).</param>
+    /// <returns>The press's and the release's handles.</returns>
+    public (ActionHandle Press, ActionHandle Release) EndServerMove(ActionSource source) =>
+        (Command(EndServerMoveCommand, start: true, source), Command(EndServerMoveCommand, start: false, source));
+
     /// <summary>
     /// The bound player's run-by-default option (<see cref="MovementOptions.RunByDefault"/>): true when an unheld run key
     /// runs and a held one walks. False while nothing is bound (read <see cref="IsBound"/> first).
@@ -150,6 +177,43 @@ public sealed class MoveIntents : IRunByDefaultSource
         }
 
         Bind(null, false);
+        return true;
+    }
+
+    /// <summary>
+    /// M6 14 motes (live 2026-11-17 00:07:58: the Atlan wand's fight in the Crater Caves, a ground other than the journey's, walked its own offline walker, bound it over the play host's controller and unbound it at the end, so the next
+    /// journey leg found no controller and failed <c>NotImplemented</c>): binds <paramref name="controller"/> over whatever is bound now, and returns the lease that gives the movement back (<see cref="Release"/>).
+    /// </summary>
+    /// <param name="controller">The scenario's own controller.</param>
+    /// <param name="runByDefault">As <see cref="Bind"/>.</param>
+    /// <returns>The lease: the controller bound and the one (with its run-by-default) it was bound over.</returns>
+    public MoveLease BindOver(IPlayerMovementIntents controller, bool runByDefault)
+    {
+        ArgumentNullException.ThrowIfNull(controller);
+        var lease = new MoveLease(controller, ReferenceEquals(_controller, controller) ? null : _controller, RunByDefault);
+        Bind(controller, runByDefault);
+        return lease;
+    }
+
+    /// <summary>
+    /// Ends <paramref name="lease"/>: when its controller is still the bound one, the controller it was bound over is bound again (none: unbound, as <see cref="Unbind(IPlayerMovementIntents)"/>). A controller bound since (a host's new
+    /// rig after a login) is left alone. Returns whether the lease's controller was bound.
+    /// </summary>
+    /// <param name="lease">The lease <see cref="BindOver"/> returned.</param>
+    public bool Release(MoveLease lease)
+    {
+        ArgumentNullException.ThrowIfNull(lease);
+        if (!ReferenceEquals(_controller, lease.Controller))
+        {
+            return false;
+        }
+
+        Bind(lease.Before, lease.Before is not null && lease.BeforeRunByDefault);
+        if (lease.Before is not null)
+        {
+            _api.Log.Info(SessionLog.Category, "movement intents: the controller bound before the scenario's own is bound again");
+        }
+
         return true;
     }
 
@@ -300,3 +364,9 @@ public sealed class MoveIntents : IRunByDefaultSource
         return _api.Accept(tracker, early);
     }
 }
+
+/// <summary>M6 14 motes: a scenario's own controller bound over another (<see cref="MoveIntents.BindOver"/>); <see cref="MoveIntents.Release"/> binds <see cref="Before"/> again.</summary>
+/// <param name="Controller">The scenario's controller.</param>
+/// <param name="Before">The controller bound before it (the play host's), or null when none was.</param>
+/// <param name="BeforeRunByDefault">The run-by-default it was bound with.</param>
+public sealed record MoveLease(IPlayerMovementIntents Controller, IPlayerMovementIntents? Before, bool BeforeRunByDefault);

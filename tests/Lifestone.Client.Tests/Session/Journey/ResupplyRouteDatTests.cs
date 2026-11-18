@@ -34,22 +34,21 @@ public sealed class ResupplyRouteDatTests(DatSetFixture fixture, ITestOutputHelp
     /// <summary>The metres of floor all round a stop point (the human body's radius is 0.48 m).</summary>
     private const float Clearance = 0.5f;
 
-    /// <summary>The vendors the planner finds no route to, by ground and name, with the planner's reason (the gaps this test found on 2026-10-27).</summary>
-    private static readonly Dictionary<string, string> Gaps = new()
-    {
-        // TODO(m6-ground-live-facts): Fort Tethana's profile vendors in landblock 0x2581 (z 220) have no outdoor route from the lifestone (0x27800006, z 144) over the attached tiles; unverified live, an M6 fact.
-        [Temple + "/Shopkeeper Yoshi Deshi"] = "no-path",
-        [Temple + "/Blacksmith Magarith"] = "no-path",
-    };
+    /// <summary>
+    /// The vendors the planner finds no route to, by ground and name, with the planner's reason. Empty since M6 4 w6a: Fort Tethana's two vendors in landblock 0x2581 (Shopkeeper Yoshi Deshi,
+    /// Blacksmith Magarith; the gaps this test found on 2026-10-27, <c>no-path</c>) are reached through the fort's gate, whose two passage nodes the gatehouse's building stamp no longer blocks
+    /// (the body stands there clear of the shell's physics). Live the gate's door opens only by its lever (<c>TODO(door-lever)</c>), and the walk is unverified live (<c>TODO(m6-ground-live-facts)</c>).
+    /// </summary>
+    private static readonly Dictionary<string, string> Gaps = [];
 
     [RequiresDatsFact]
     public void The_dens_vendors_are_reached_from_the_lifestone_at_their_stop_points_Cindrue_in_her_entry_hall() => Check(Den);
 
     [RequiresDatsFact]
-    public void Fort_Tethanas_vendors_are_reached_from_its_lifestone_but_the_two_in_landblock_0x2581_have_no_route() => Check(Temple);
+    public void Fort_Tethanas_vendors_are_reached_from_its_lifestone_the_two_in_landblock_0x2581_through_the_forts_gate() => Check(Temple);
 
     [RequiresDatsFact]
-    public void Cindrues_entry_hall_is_the_nearest_room_of_her_building_that_routes_and_her_own_cell_still_has_none()
+    public void Cindrues_entry_hall_is_the_nearest_room_of_her_building_that_routes_and_her_own_cell_routes_by_her_stair()
     {
         var ground = GroundCatalog.Get(Den);
         var cindrue = ground.Vendors.First(v => v.Name == "Archmage Cindrue");
@@ -72,10 +71,13 @@ public sealed class ResupplyRouteDatTests(DatSetFixture fixture, ITestOutputHelp
         Assert.Equal(cindrue.StopCell, nearest.MinBy(kv => kv.Value).Key); // the hall under her floor, not the doorway rooms off it
         Assert.InRange(Vector3.Distance(cindrue.StopPoint!.Value, cindrue.Point), 0f, nearest[cindrue.StopCell] + 0.1f);
 
-        // Her own cell is still a step the room graph refuses (TODO(room-steps)): the reason her stop is a room in front of her. When the graph learns the steps this row fails and her stop moves back to 0xA9B4011B.
+        // Her own cell was a step the room graph refused (TODO(room-steps)): the reason her stop is a room in front of her. Since M6 4 W6b the graph walks the stair from the
+        // hall up to it (CellRoutePlanner.StairOf; the body climbs it in IslandDungeonWalkDatTests.Cindrues_stair_...), so her own cell routes: her stop may move back to
+        // 0xA9B4011B (item 3's profile, the lead's call; the hall stays a stop that routes).
         var own = planner.SourceFor(home.CellId, cindrue.Cell, map).Plan(home, NavGoal.ToPoint(new NavPoint(cindrue.Cell & 0xFFFF0000u, cindrue.Point), cindrue.Cell), new NavScars());
-        Assert.Equal(NavPathStatus.Failed, own.Status);
-        Assert.Equal("no-doorway-lane-reaches-the-goal", own.Reason);
+        output.WriteLine($"Cindrue's own cell 0x{cindrue.Cell:X8}: {own.Status} {Metres(own):F1} m {own.Reason}");
+        Assert.Equal(NavPathStatus.Found, own.Status);
+        Assert.Equal(cindrue.Cell, own.Waypoints[^1].At.CellId);
     }
 
     /// <summary>

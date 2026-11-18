@@ -1,5 +1,7 @@
+using DatReaderWriter.Enums;
 using Lifestone.Client.Session.Casting;
 using Lifestone.Client.Session.Mage;
+using Lifestone.Data.Magic;
 using Xunit.Abstractions;
 
 namespace Lifestone.Client.Tests.Session.Mage;
@@ -281,5 +283,101 @@ public sealed class FightDebuffsTests(ITestOutputHelper output)
             output.WriteLine($"{spell.Name,-36} L{spell.Level} id {spell.Id,4} land {v.Landing:P1} saved {v.SavedSeconds,6:F2} s cost {v.CostSeconds,5:F2} s (mana {v.ManaCost:F1}) net {v.NetSeconds,6:F2} s dmg {v.ExpectedDamage:F1} heal {v.ExpectedHeal:F1} sta {v.ExpectedStamina:F1} {(v.HasValue ? string.Empty : "NO VALUE: " + v.Why)}");
             Assert.InRange(v.Landing, 0.9, 1.0);
         }
+    }
+
+    // --- M6 1 f: the debuffs below VI -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+    /// <summary>A SpellTable holding the Fire Vulnerability Other I to V of the dat's ids, Light Weapon Ineptitude Other I twice (the plain one and a quest copy), and nothing else of levels I to V.</summary>
+    private static Dictionary<uint, SpellInfo> LowTable()
+    {
+        var table = new Dictionary<uint, SpellInfo>();
+        foreach (var spell in ArenaProfile.ExtraNamed("Fire Vulnerability Other")!.Spells.Take(5))
+        {
+            table[spell.Id] = WorldActionRig.Spell(spell.Id, SpellType.Enchantment) with { Name = spell.Name, School = MagicSchool.LifeMagic, Power = spell.Power, BaseMana = 10 + (uint)spell.Position, Duration = spell.DurationSeconds };
+        }
+
+        table[352] = WorldActionRig.Spell(352, SpellType.Enchantment) with { Name = "Light Weapon Ineptitude Other I", School = MagicSchool.CreatureEnchantment, Power = 25 };
+        table[304] = WorldActionRig.Spell(304, SpellType.Enchantment) with { Name = "Light Weapon Ineptitude Other I", School = MagicSchool.CreatureEnchantment, Power = 25 };
+        table[9999] = WorldActionRig.Spell(9999, SpellType.Enchantment) with { Name = "Weakness Other II", School = MagicSchool.LifeMagic, Power = 75 }; // the wrong school: not the Creature line
+        return table;
+    }
+
+    [Fact]
+    public void Levels_I_to_V_have_the_world_databases_effect_for_every_kind_and_grow_toward_VI()
+    {
+        foreach (var kind in Enum.GetValues<DebuffKind>())
+        {
+            var effects = Enumerable.Range(1, 5).Select(l => FightDebuffs.EffectOf(kind, l)).ToList();
+            Assert.All(effects, e => Assert.NotNull(e));
+            var six = FightDebuffs.Find(kind, 6)!.Value;
+            var strength = effects.Select(e => kind switch
+            {
+                DebuffKind.HarmOther => -e!.Value.Boost,
+                DebuffKind.DrainHealthOther or DebuffKind.DrainStaminaOther => e!.Value.Proportion,
+                DebuffKind.Exhaustion => -e!.Value.Magnitude,
+                _ => Math.Abs(e!.Value.Magnitude),
+            }).Append(kind switch
+            {
+                DebuffKind.HarmOther => -six.Boost,
+                DebuffKind.DrainHealthOther or DebuffKind.DrainStaminaOther => six.Proportion,
+                DebuffKind.Exhaustion => -six.Magnitude,
+                _ => Math.Abs(six.Magnitude),
+            }).ToList();
+            for (var i = 1; i < strength.Count; i++)
+            {
+                Assert.True(strength[i] >= strength[i - 1], $"{kind}: level {i + 1} is weaker than level {i}");
+            }
+        }
+
+        Assert.Equal(1.5, FightDebuffs.EffectOf(DebuffKind.FireVulnerability, 3)!.Value.Magnitude); // spell 1105 stat_Mod_Val
+        Assert.Equal(-100, FightDebuffs.EffectOf(DebuffKind.Imperil, 4)!.Value.Magnitude); // spell 1325
+        Assert.Equal((-1, 60), (FightDebuffs.EffectOf(DebuffKind.DrainHealthOther, 1)!.Value.LossPercent, FightDebuffs.EffectOf(DebuffKind.DrainHealthOther, 1)!.Value.TransferCap)); // spell 1237
+        Assert.Null(FightDebuffs.EffectOf(DebuffKind.Weakness, 6)); // VI and VII are the Spells rows
+    }
+
+    [Fact]
+    public void The_rows_below_VI_come_from_the_SpellTable_by_line_and_school_the_lowest_id_of_a_name_and_the_gaps_are_named()
+    {
+        var rows = DebuffRows.FromSpellTable(LowTable(), out var missing);
+
+        var fire3 = rows.Find(DebuffKind.FireVulnerability, 3)!.Value;
+        Assert.Equal((1105u, "Fire Vulnerability Other III", DebuffSchool.LifeMagic, 125u, 13u, 120.0, 1.5), (fire3.Id, fire3.Name, fire3.School, fire3.Power, fire3.BaseMana, fire3.DurationSeconds, fire3.Magnitude));
+        Assert.Equal(304u, rows.Find(DebuffKind.LightWeaponsIneptitude, 1)!.Value.Id); // the plain one, not the quest copy 352
+        Assert.Null(rows.Find(DebuffKind.Weakness, 2)); // a Life spell of the Creature line's name is not the line's
+        Assert.Contains("Weakness Other II: not in the SpellTable", missing);
+        Assert.Equal((16 * 5) - 6, missing.Count); // FV I-V and LWI I are held
+        Assert.Equal(FightDebuffs.Find(DebuffKind.Weakness, 6), rows.Find(DebuffKind.Weakness, 6)); // VI and VII unchanged
+        Assert.Equal(FightDebuffs.Find(DebuffKind.FireVulnerability, 7), rows.Find(DebuffKind.FireVulnerability, 7));
+        Assert.Equal(fire3, rows.Named("Fire Vulnerability Other III"));
+        Assert.Null(DebuffRows.Standard.Find(DebuffKind.FireVulnerability, 3));
+        Assert.Null(rows.Find(DebuffKind.FireVulnerability, 0));
+        Assert.Null(rows.Find(DebuffKind.FireVulnerability, 8));
+    }
+
+    [Fact]
+    public void Fire_Vulnerability_III_pays_against_a_level_20_band_target_and_I_does_less()
+    {
+        var rows = DebuffRows.FromSpellTable(LowTable(), out _);
+        var target = new DebuffTarget { RemainingHealth = 250, MaxHealth = 250, MagicDefense = 60, IncomingDamagePerSecond = 5 };
+        var caster = new DebuffCaster { LifeSkill = 150, WarSkill = 160, ManaConversion = 60, SecondsPerMana = 0.2, SecondsPerHealth = 0.1, DebuffCastSeconds = 2.0, WarMeanDamage = 46, WarCastSeconds = 2.9, WarBaseMana = 15, WarPower = 125 };
+        var three = FightDebuffs.Evaluate(rows.Find(DebuffKind.FireVulnerability, 3)!.Value, in target, in caster);
+        var one = FightDebuffs.Evaluate(rows.Find(DebuffKind.FireVulnerability, 1)!.Value, in target, in caster);
+        output.WriteLine($"III net {three.NetSeconds:F2} s, I net {one.NetSeconds:F2} s");
+        Assert.True(three.Pays);
+        Assert.True(three.SavedSeconds > one.SavedSeconds);
+        Assert.InRange(three.Landing, 0.9, 1.0); // ACE's resist: SkillCheck.GetSkillChance of Life Magic against the target's Magic Defense (WorldObject_Magic.cs:104-113, 165-168)
+    }
+
+    [Fact]
+    public void Every_kind_has_a_value_rule_and_a_kind_outside_the_enum_fails_loudly_f11_unknown_kind()
+    {
+        foreach (var kind in Enum.GetValues<DebuffKind>())
+        {
+            var v = FightDebuffs.Evaluate(Spell(kind), Slave(), Mage());
+            Assert.DoesNotContain("TODO(f11-unknown-kind)", v.Why, StringComparison.Ordinal);
+        }
+
+        var stray = Spell(DebuffKind.Weakness) with { Kind = (DebuffKind)200 };
+        Assert.Throws<ArgumentOutOfRangeException>(() => FightDebuffs.Evaluate(stray, Slave(), Mage()));
     }
 }

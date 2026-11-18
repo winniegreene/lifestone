@@ -18,6 +18,13 @@ public sealed class TripLoopGuard
     /// <summary>The trips in a row so far that sold and bought nothing.</summary>
     public int Idle => _idle;
 
+    /// <summary>The guard's state, for a re-seat to carry.</summary>
+    public (int Idle, long HoldUntilKills, int Holds) State => (_idle, _holdUntilKills, Holds);
+
+    /// <summary>Takes the guard's state from the scenario a re-seat replaced.</summary>
+    /// <param name="state">The state.</param>
+    public void Restore((int Idle, long HoldUntilKills, int Holds) state) => (_idle, _holdUntilKills, Holds) = state;
+
     /// <summary>The trips the guard held back (each hold is one).</summary>
     public int Holds { get; private set; }
 

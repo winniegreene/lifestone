@@ -50,6 +50,10 @@ namespace Lifestone.Client.RetailUi.Panels;
 /// next spell, Insert and PgUp open the previous and next tab, and with Ctrl the first and last of each.
 /// </para>
 /// <para>
+/// <b>The automation's casts</b> (M6 item 15, the player's rules): when an automation cast goes out the Action API publishes <see cref="SpellBarCast"/> and the window shows it as a person's cast shows (<see cref="ShowCastFromBar"/>):
+/// the spell's tab opens and the spell is selected, so the name text and the cast button name it.
+/// </para>
+/// <para>
 /// <b>The drag</b> (M5 6 s1). Retail's drop handler is <c>gmSpellcastingUI::HandleDropRelease</c> (11.6096 0x004C8520): a spell dropped on a cell of the open tab's list goes in at that cell (<c>AddSpellShortcut</c> 0x004C7F10 over
 /// <c>SpellCastSubMenu::AddFavorite</c> 0x004C7C50), on the window's background at the end of the open tab, on a tab at the end of that tab; <c>SpellCastSubMenu::OnItemListDragOver</c> (0x004C6580) accepts a drop that carries a
 /// spell id only. <c>AddFavorite</c> first takes a spell the bar holds off it (<c>RemoveSpellFromMenu</c> 0x004C74E0, <c>RemoveSpellFromPlayerModule</c> 0x004C7000: RemoveSpellFavorite) and moves the position one left when the old
@@ -126,6 +130,7 @@ public sealed class GameSpellcastingPanel : UiElement, IUiDragSourceOwner
     private IDisposable? _bookSubscription;
     private IDisposable? _modeSubscription;
     private IDisposable? _qualitySubscription;
+    private IDisposable? _barCastSubscription;
     private readonly int[] _builtKnown = new int[TabCount];
     private HashSet<uint>? _unknownNamed; // the favourites a loaded table lacked, each named once (allocated at a build, an event)
     private bool _awaitingTable;
@@ -211,6 +216,9 @@ public sealed class GameSpellcastingPanel : UiElement, IUiDragSourceOwner
     /// <summary>How many casts were asked of the Action API.</summary>
     public int Casts { get; private set; }
 
+    /// <summary>M6 item 15: how many automation casts the window showed (<see cref="ShowCastFromBar"/>).</summary>
+    public int BarCastsShown { get; private set; }
+
     /// <summary>The last cast the window asked for, or null.</summary>
     public ActionHandle? LastCast { get; private set; }
 
@@ -291,6 +299,7 @@ public sealed class GameSpellcastingPanel : UiElement, IUiDragSourceOwner
         _modeSubscription = context.Session.Events.Subscribe<CombatModeChanged>(OnCombatModeChanged);
         _qualitySubscription = context.Session.Events.Subscribe<QualitiesChanged>(OnQualitiesChanged);
         _bookSubscription = context.Session.Events.Subscribe<SpellbookChanged>(OnSpellbookChanged);
+        _barCastSubscription = context.Session.Events.Subscribe<SpellBarCast>(OnSpellBarCast);
         for (var i = 0; i < TabCount; i++)
         {
             if (_lists[i] is null)
@@ -391,6 +400,36 @@ public sealed class GameSpellcastingPanel : UiElement, IUiDragSourceOwner
         Casts++;
         LastCast = session.Actions.Cast(spellId, target, ActionSource.Ui);
         return LastCast;
+    }
+
+    /// <summary>
+    /// M6 item 15: the automation cast <paramref name="spellId"/> from bar <paramref name="bar"/> (<see cref="SpellBarCast"/>). The window takes the state a person's own cast of that spell leaves: the bar's tab is the open tab
+    /// (<see cref="OpenTabByClick"/>, as a click on the tab) and the spell is the selected one (<see cref="SelectSpell"/>, as the double click that casts it selects it first). Nothing is cast here: the automation's cast is already
+    /// on its way. A hidden window (the mode is not Magic yet) opens the tab and keeps the selection for when it shows. Returns true when the tab is open and the spell is the tab's selected one.
+    /// </summary>
+    public bool ShowCastFromBar(int bar, uint spellId)
+    {
+        if (_context is null || spellId == 0 || !OpenTabByClick(bar))
+        {
+            return false;
+        }
+
+        BarCastsShown++;
+        if (!Visible)
+        {
+            _selected[bar] = spellId; // checked against the tab's cells when the window shows (ApplySelection)
+            return true;
+        }
+
+        Refresh();
+        if (_awaitingTable)
+        {
+            _selected[bar] = spellId; // the tab is built when the SpellTable arrives, and the selection is checked then
+            return true;
+        }
+
+        SelectSpell(spellId);
+        return _selected[bar] == spellId;
     }
 
     /// <summary><c>RecvNotice_CastQuickslotSpell</c> (11.6096 0x004C84A0): the open tab's spell in cell <paramref name="slot"/> is selected and cast (<see cref="CastSelected"/>), as a double click on it; an empty slot does nothing.</summary>
@@ -549,7 +588,8 @@ public sealed class GameSpellcastingPanel : UiElement, IUiDragSourceOwner
         _bookSubscription?.Dispose();
         _modeSubscription?.Dispose();
         _qualitySubscription?.Dispose();
-        _bookSubscription = _modeSubscription = _qualitySubscription = null;
+        _barCastSubscription?.Dispose();
+        _bookSubscription = _modeSubscription = _qualitySubscription = _barCastSubscription = null;
         base.OnDeleting();
     }
 
@@ -707,6 +747,8 @@ public sealed class GameSpellcastingPanel : UiElement, IUiDragSourceOwner
             SetCombatMode(context.Session.State.Self.Qualities.CombatMode); // the description may carry the mode
         }
     }
+
+    private void OnSpellBarCast(in SpellBarCast cast) => ShowCastFromBar(cast.Bar, cast.SpellId);
 
     private void OnSpellbookChanged(in SpellbookChanged change)
     {

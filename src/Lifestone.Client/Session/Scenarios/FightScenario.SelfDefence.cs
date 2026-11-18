@@ -19,13 +19,17 @@ namespace Lifestone.Client.Session.Scenarios;
 /// <c>WorldObject_Magic.cs</c> 199: "You resist the spell cast by &lt;source&gt;"; 1429: "&lt;source&gt; casts &lt;spell&gt; on you"), published as <see cref="ChatReceived"/>. ACE also sets the player's CurrentAttacker
 /// (a private update carrying the attacker's guid, not decoded: <c>TODO(m3-autotarget-attacker-id)</c>), so every notice names the attacker, never gives its guid: the attacker is the nearest living creature of that name in
 /// the object table, as the auto-target resolves it (<see cref="WorldObjectTable.NearestLivingCreatureNamed"/>).</para>
-/// <para><b>Walking.</b> The fight walks only when no attacker can be cast at from where the player stands (out of range or no clear line, the same line rule as the pick), by the walk it already has; the walk has no leg toward
-/// a given creature (<c>TODO(m5-defend-walk-to)</c>), so that walk is the tour's next leg, dropped the moment an attacker is in range with a clear line. An attacker in a no-go cell is cast at from where the player stands when a
-/// line exists, else the fight holds (nothing is walked into a no-go cell) and logs it once.</para>
+/// <para><b>Walking.</b> The fight walks only when no attacker can be cast at from where the player stands (out of range or no clear line, the same line rule as the pick), by the walk it already has. M6 6 B2
+/// (<c>m5-defend-walk-to</c>): the walk goes toward the nearest such attacker: a leg (<see cref="IFightWalk.BeginLegTo"/>) to the spot nearest the mage on the straight line to it (<see cref="IFightWalk.CellsOnLine"/>, the floor's
+/// room middles in those cells, <see cref="IFightWalk.FloorSpots"/>) that is within the cast range of it with a clear line, at most <see cref="MaxDefenceWalksTo"/> legs an attacker. A walk that cannot trace the line or offers no
+/// spots (a named refusal, <c>no-planner:&lt;walk&gt;</c>), no such spot, a leg that cannot be planned, or the bound spent fall back to today's walk, the tour's next leg, each named. Either walk is dropped the moment an attacker
+/// is in range with a clear line. An attacker in a no-go cell is cast at from where the player stands when a line exists, else the fight holds (nothing is walked into a no-go cell) and logs it once.</para>
 /// <para><b>M5 7 P7s (D148, D88 meets the no-go map; <c>m5-8-no-go-attacker</c>).</b> The long run's 19:42 UTC: a Virindi Servant shot from inside the den's no-go cell 0x01050244 and the fight held still with no line. Now, before
 /// it holds, the fight steps: a short leg (<see cref="IFightWalk.BeginLegTo"/>, over the walkable cells only) to the nearest room middle of the floor (<see cref="IFightWalk.FloorSpots"/>) within <see cref="DefendStepMaxMetres"/>
 /// that has a clear line to the attacker within the cast range, else to the nearest one out of its reach. At most <see cref="MaxDefenceSteps"/> steps an attacker, each decision logged; past them, or with no such spot, the hold
 /// and its bound stand as before.</para>
+/// <para><b>M6 14 (<c>m6-life-through</c>, the owner's rule of 2026-11-12).</b> Before any of the walks, the step and the hold: an attacker no bolt reaches from here that stands within the life spells' range is cast at where
+/// she stands, with Drain Health Other or Harm Other (<see cref="DefenceMove.Life"/>; <c>FightScenario.LifeThrough.cs</c>): ACE asks no line of a spell with no projectile.</para>
 /// </remarks>
 public sealed partial class FightScenario
 {
@@ -46,6 +50,12 @@ public sealed partial class FightScenario
 
         /// <summary>M5 7 P7s (D148): that attacker stands in a no-go cell with no line from here: the player steps to a spot with a line to it, or out of its reach.</summary>
         Step,
+
+        /// <summary>
+        /// M6 14 (<c>m6-life-through</c>): no attacker can be cast at with a bolt from here, and the nearest stands within the life spells' range with a spell to cast at it: it is fought through the obstacle, in place
+        /// of the walk, the step and the hold (<c>FightScenario.LifeThrough.cs</c>).
+        /// </summary>
+        Life,
     }
 
     /// <summary>M5 7 P7s (D148): the steps the fight takes for one attacker in a no-go cell before it holds (Lifestone's own bound: a step that found no line, and one more from there).</summary>
@@ -57,14 +67,76 @@ public sealed partial class FightScenario
     /// <summary>M5 7 P7s (D148): the most spots whose line to the attacker one step decision sweeps, nearest first (Lifestone's own bound on the sweeps a decision costs).</summary>
     public const int DefendStepLineTests = 24;
 
+    /// <summary>
+    /// M6 6 B2 (<c>m5-defend-walk-to</c>): the legs the fight walks toward one attacker out of range or line before it falls back to the tour's next leg (Lifestone's own bound, as <see cref="MaxDefenceSteps"/>: a leg that did not
+    /// bring a line, and one more from there).
+    /// </summary>
+    public const int MaxDefenceWalksTo = 2;
+
+    /// <summary>How a melee or missile blow that landed is heard (<see cref="Attacker.Heard"/>).</summary>
+    private const string HeardDamage = "damage notice";
+
+    /// <summary>How a melee or missile blow that was evaded is heard (<see cref="Attacker.Heard"/>).</summary>
+    private const string HeardEvasion = "evasion notice";
+
+    /// <summary>
+    /// M6 14 (the struck proof): how long after a creature's blow it is taken to stand at the mage whatever the line test says (Lifestone's own: a Tusker Crimsonback's blows came 4 s apart in the Cave's log of 2026-11-12, and
+    /// one blow missed in between keeps the proof).
+    /// </summary>
+    public const double StruckProofSeconds = 6;
+
+    /// <summary>
+    /// M6 14 (the struck proof): the farthest its last known position may lie from the mage when a blow first proves a creature is at her (Lifestone's own: a melee blow lands from the two bodies' radii plus ACE's 0.75 m,
+    /// <c>Monster_Navigation.cs:28,189</c>, and the known position is as old as her last steps; an archer's arrow from farther off proves nothing about where it stands).
+    /// </summary>
+    public const double StruckProofMetres = 8;
+
     /// <summary>A creature that attacked the player, and when it last did.</summary>
-    private sealed class Attacker(uint guid, string name, double lastAt)
+    private sealed class Attacker(uint guid, string name, double lastAt, string heard)
     {
+        /// <summary>M6 14: the session clock of its last melee or missile blow (landed or evaded); NaN: none yet.</summary>
+        public double StruckAt { get; set; } = double.NaN;
+
+        /// <summary>M6 14: true while its blows prove it stands at the mage: a blow came with its known position within <see cref="StruckProofMetres"/>, and the blows since came no more than <see cref="StruckProofSeconds"/> apart.</summary>
+        public bool StruckClose { get; set; }
+
+        /// <summary>M6 14: true once the struck proof was logged for this attacker.</summary>
+        public bool StruckLogged { get; set; }
+
+        /// <summary>M6 14 (the swing order): the session clock of the last swing order of this creature's that named the mage; NaN: none yet.</summary>
+        public double SwingAt { get; set; } = double.NaN;
+
+        /// <summary>M6 14 (<c>m6-live-position</c>): the session clock of the last far-blow line for this attacker (the measure's rate).</summary>
+        public double FarBlowLoggedAt { get; set; } = double.NegativeInfinity;
+
+        /// <summary>M6 14: true once the proof's standing down for the shot rule's drop was logged for this attacker.</summary>
+        public bool StruckVoidLogged { get; set; }
+
         public uint Guid { get; } = guid;
 
         public string Name { get; } = name;
 
         public double LastAt { get; set; } = lastAt;
+
+        /// <summary>M6 6 B2 (<c>m5-attacker-reach</c>): how the last attack was heard (a damage or evasion notice: melee or missile; a spell line: magic), the input a reach read would key on.</summary>
+        public string Heard { get; set; } = heard;
+
+        /// <summary>
+        /// M6 6 B2 (<c>m5-attacker-reach</c>): how far the creature attacks from, in metres; NaN while unread, and <see cref="ReachOf"/> stands the mage's cast range in for it. ACE works it out per attack on the server
+        /// (<c>Monster_Combat.cs:165-215</c> @95ef426d, <c>GetMaxRange</c>: a spell's <c>BaseRangeConstant + skill * BaseRangeMod</c> capped at the outdoor radar range, <c>Monster_Magic.cs:113-124</c>; a missile weapon's
+        /// <c>MaximumVelocity^2 * 0.102</c> capped at 77.7 m, <c>Creature_Missile.cs:406-425</c>; melee <c>MaxMeleeRange</c> 0.75 m, <c>Monster_Navigation.cs:28</c>); the client sees neither the creature's spell nor its skill nor its
+        /// launcher, so nothing sets it yet (<c>TODO(m5-attacker-reach)</c>).
+        /// </summary>
+        public double ReachMetres { get; set; } = double.NaN;
+
+        /// <summary>M6 6 B2 (<c>m5-defend-walk-to</c>): the legs walked (or tried) toward this attacker (at most <see cref="MaxDefenceWalksTo"/>).</summary>
+        public int WalksTo { get; set; }
+
+        /// <summary>M6 6 B2: true once the fall back to the tour's leg after the bound was logged for this attacker.</summary>
+        public bool WalkToBoundLogged { get; set; }
+
+        /// <summary>M6 7 D: true once the owed crossing's leg was logged taking the place of a walk toward this attacker.</summary>
+        public bool CrossingLogged { get; set; }
 
         public bool HoldLogged { get; set; }
 
@@ -79,6 +151,10 @@ public sealed partial class FightScenario
     private CellFrame _defenceSpot;
     private string _defenceSpotNote = string.Empty;
     private bool _stepSpotsTodoLogged;
+    private bool _reachTodoLogged;
+    private readonly List<uint> _walkToCells = [];
+    private CellFrame _walkToSpot;
+    private string _walkToNote = string.Empty;
 
     private readonly List<Attacker> _attackers = [];
     private readonly List<uint> _defenceLogged = [];
@@ -86,6 +162,7 @@ public sealed partial class FightScenario
     private readonly List<string> _defenceUnseen = [];
     private IDisposable? _defenceCombatSubscription;
     private IDisposable? _defenceChatSubscription;
+    private IDisposable? _defenceMotionSubscription;
     private uint _defendingGuid;
     private int _defended;
 
@@ -102,14 +179,19 @@ public sealed partial class FightScenario
             return; // --fight-defend-forget-s 0: self-defence off
         }
 
+        SubscribeThreats(session); // M6 14 tactics: the attackers' measured rates for the target switch (FightScenario.TargetSwitch.cs)
         _defenceCombatSubscription = session.Events.Subscribe<CombatEvent>(OnDefenceCombat);
         _defenceChatSubscription = session.Events.Subscribe<ChatReceived>(OnDefenceChat);
+        _defenceMotionSubscription = session.Events.Subscribe<ObjectMotionChanged>(OnDefenceMotion);
     }
 
     private void DisposeDefence()
     {
+        DisposeThreats();
         _defenceCombatSubscription?.Dispose();
         _defenceChatSubscription?.Dispose();
+        _defenceMotionSubscription?.Dispose();
+        _defenceMotionSubscription = null;
         _defenceCombatSubscription = null;
         _defenceChatSubscription = null;
     }
@@ -119,10 +201,10 @@ public sealed partial class FightScenario
         switch (e.Kind)
         {
             case CombatEventKind.DefenseHit:
-                NoteAttacker(e.Who, "damage notice");
+                NoteAttacker(e.Who, HeardDamage);
                 break;
             case CombatEventKind.DefenseEvaded:
-                NoteAttacker(e.Who, "evasion notice");
+                NoteAttacker(e.Who, HeardEvasion);
                 break;
         }
     }
@@ -208,6 +290,93 @@ public sealed partial class FightScenario
 
     private static readonly string[] Prefixes = ["Critical hit! ", "Overpower! ", "Sneak Attack! "];
 
+    /// <summary>How a melee swing the server's order names is heard (<see cref="Attacker.Heard"/>).</summary>
+    private const string HeardSwing = "swing order";
+
+    /// <summary>M6 14 (the swing order): how long after a creature's swing order a blow notice of its name is taken for its blow (Lifestone's own: a swing's strikes land within its animation).</summary>
+    public const double SwingBlowSeconds = 3;
+
+    /// <summary>The swing orders that named the mage (report-only count).</summary>
+    public int SwingOrders { get; private set; }
+
+    /// <summary>The blow notices resolved to the creature whose swing order had just come, in place of the nearest of that name (report-only count).</summary>
+    public int SwingBlows { get; private set; }
+
+    /// <summary>
+    /// M6 14 (the swing order; the owner, 2026-11-12: use the information the server gives; the wire trace of the same day: 106 of 106 melee swings in five and a half minutes carried it). Each melee swing a
+    /// creature makes is broadcast as a motion with the StickToObject flag and the guid of what it swings at (ACE <c>Monster_Melee.cs</c> <c>DoSwingMotion</c>: <c>motion.MotionFlags |= MotionFlags.StickToObject;
+    /// motion.TargetGuid = target.Guid</c>, and <c>PhysicsObj.stick_to_object</c> at line 71). So the server says, swing by swing, WHICH creature attacks her (the message's own guid) and that it is stuck to
+    /// her (within the two bodies' reach). The damage and evasion notices name the attacker by name alone, and the fight took "the nearest living creature of that name", a guess among tuskers of one name.
+    /// A swing order that names the mage makes its creature an attacker by guid, proven close (<see cref="Attacker.StruckClose"/>); a blow notice within <see cref="SwingBlowSeconds"/> of it is its blow.
+    /// </summary>
+    private void OnDefenceMotion(in ObjectMotionChanged e)
+    {
+        if (e.IsSelf || _view is null || Stage != "fight" || e.Motion.StickyGuid is not { } stuck || stuck != _view.State.Self.Guid || stuck == 0)
+        {
+            return;
+        }
+
+        var guid = e.Guid;
+        if (_killed.Contains(guid) || _defenceDropped.Contains(guid) || !_view.State.Objects.TryGet(guid, out var o) || (o.ItemType & WarCreatureItemType) == 0)
+        {
+            return;
+        }
+
+        var now = _view.Clock.Now;
+        SwingOrders++;
+        Attacker? swinger = null;
+        foreach (var known in _attackers)
+        {
+            if (known.Guid == guid)
+            {
+                swinger = known;
+                break;
+            }
+        }
+
+        if (swinger is null)
+        {
+            swinger = new Attacker(guid, o.Name ?? "creature", now, HeardSwing);
+            _attackers.Add(swinger);
+            if (!_defenceLogged.Contains(guid))
+            {
+                _defenceLogged.Add(guid);
+                _log.Info(LogCategory, $"self-defence: {swinger.Name} 0x{guid:X8} swings at the mage (the server's swing order names her as the object it is stuck to; Monster_Melee.cs DoSwingMotion): it is an attacker by its own guid, at her; fighting it before the targets (m6-swing-order)");
+            }
+        }
+
+        (swinger.LastAt, swinger.Heard, swinger.SwingAt, swinger.StruckAt, swinger.StruckClose) = (now, HeardSwing, now, now, true);
+    }
+
+    /// <summary>The attacker of <paramref name="name"/> whose swing order came last, within <see cref="SwingBlowSeconds"/>; null when none did.</summary>
+    private Attacker? SwingerNamed(string name, double now)
+    {
+        Attacker? best = null;
+        foreach (var a in _attackers)
+        {
+            if (now - a.SwingAt <= SwingBlowSeconds && string.Equals(a.Name, name, StringComparison.Ordinal) && (best is null || a.SwingAt > best.SwingAt))
+            {
+                best = a;
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>True when <paramref name="guid"/> is one of the creatures that attacked the player and are still fought.</summary>
+    private bool IsAttacker(uint guid)
+    {
+        foreach (var a in _attackers)
+        {
+            if (a.Guid == guid)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>A creature of <paramref name="name"/> attacked the player: it becomes (or stays) an attacker the fight fights before its targets.</summary>
     private void NoteAttacker(string name, string how)
     {
@@ -216,13 +385,23 @@ public sealed partial class FightScenario
             return;
         }
 
+        if (how is HeardDamage or HeardEvasion && SwingerNamed(name, _view.Clock.Now) is { } swinger)
+        {
+            // M6 14: the server's swing order named the creature that swung; the notice's name is matched to it, not to the nearest of that name.
+            SwingBlows++;
+            swinger.LastAt = _view.Clock.Now;
+            NoteStruck(swinger, how, swinger.LastAt, in at);
+            swinger.StruckClose = true; // stuck to her by the server's own order
+            return;
+        }
+
         var objects = _view.State.Objects;
-        if (objects.NearestLivingCreatureNamed(name, at, _view.State.Self.Guid, out var dropped) && _defenceDropped.Contains(dropped))
+        if (objects.NearestLivingCreatureNamed(name, at, _view.State.Self.Guid, out var dropped, _view.Live) && _defenceDropped.Contains(dropped))
         {
             return; // dropped after its hold bound (7-F5): the profile's targets stay
         }
 
-        if (!objects.NearestLivingCreatureNamed(name, at, _view.State.Self.Guid, out var guid) || _killed.Contains(guid))
+        if (!objects.NearestLivingCreatureNamed(name, at, _view.State.Self.Guid, out var guid, _view.Live) || _killed.Contains(guid))
         {
             if (!_defenceUnseen.Contains(name))
             {
@@ -239,16 +418,94 @@ public sealed partial class FightScenario
             if (known.Guid == guid)
             {
                 known.LastAt = now;
+                known.Heard = how;
+                NoteStruck(known, how, now, in at);
                 return;
             }
         }
 
-        _attackers.Add(new Attacker(guid, name, now));
+        var added = new Attacker(guid, name, now, how);
+        NoteStruck(added, how, now, in at);
+        _attackers.Add(added);
         if (!_defenceLogged.Contains(guid))
         {
             _defenceLogged.Add(guid);
             _log.Info(LogCategory, $"self-defence: {name} 0x{guid:X8} attacked ({how}); fighting it before the targets");
         }
+    }
+
+    /// <summary>The attackers the struck proof let the fight cast at with no line by the test (<see cref="StruckProof"/>; report-only count).</summary>
+    public int StruckProofs { get; private set; }
+
+    /// <summary>The attackers whose struck proof stood down because the shot rule had dropped them (report-only count).</summary>
+    public int StruckProofsVoid { get; private set; }
+
+    /// <summary>
+    /// M6 14 (the struck proof), at each blow: a melee or missile blow (landed or evaded) whose attacker's known position is within <see cref="StruckProofMetres"/> of the mage proves it stands at her; later blows keep the
+    /// proof while they come no more than <see cref="StruckProofSeconds"/> apart, wherever its known position has been left behind (see <see cref="StruckProof"/>). A spell line proves nothing about where its caster stands.
+    /// </summary>
+    private void NoteStruck(Attacker a, string how, double now, in CellFrame mage)
+    {
+        if (how is not (HeardDamage or HeardEvasion))
+        {
+            return;
+        }
+
+        if (double.IsNaN(a.StruckAt) || now - a.StruckAt > StruckProofSeconds)
+        {
+            a.StruckClose = false; // a gap: the next blow proves it again, by where it is known to stand
+        }
+
+        a.StruckAt = now;
+        LivePositionBlow(a, now, in mage); // M6 14 (m6-live-position): report-only
+        if (!a.StruckClose && _view!.State.Objects.TryGet(a.Guid, out var o) && StandsAt(_view, o) is { } it && it.ToGlobal().DistanceTo(mage.ToGlobal()) <= StruckProofMetres)
+        {
+            a.StruckClose = true;
+        }
+    }
+
+    /// <summary>
+    /// M6 14 (the struck proof; the Cave's stalls of 2026-11-12: 85 times in two and a half hours an attacker "had no line", 40 of them in her own cell, and she walked a tour leg of up to 17 s while it went on hitting her).
+    /// The position the client knows for a creature is the server's last UpdatePosition, and a monster in melee that follows her sends none: ACE moves a sticky monster with the broadcast off
+    /// (<c>Monster_Tick.cs:118-119</c>, <c>UpdatePosition(false)</c>; one more at its first swing, <c>Monster_Melee.cs:342-346</c>), where retail's client moves it itself. So after her own steps (a corpse's walk, a leg) the
+    /// tusker on her is known where it stood before, often round the tunnel's bend, and the line test, right about that spot, is wrong about the creature. A blow is the better witness: an attacker whose blow came within
+    /// <see cref="StruckProofSeconds"/> and that <see cref="NoteStruck"/> found close is cast at with no line by the test. A bolt that does meet a wall is bounded as any other (three misses and the block, the shot rule).
+    /// <c>TODO(m6-sticky-position)</c>, answered by <c>m6-live-position</c> (<see cref="StandsAt"/>): the client does move a sticky creature's body with her as retail does, and the fight now reads that body where the
+    /// session draws bodies, so the line test judges the creature where it is drawn. The proof stays for what the body cannot answer: a host that draws no bodies (the headless runner), a creature whose body the seam
+    /// refuses (<see cref="LivePositions"/>' fall backs), and the seconds in which the body itself has walked back to the server's stale position (when a stick ends with that position still queued, retail's
+    /// interpolation returns the body to it until the next swing: <c>TODO(m6-sticky-walk-back)</c>, measured offline in <c>AvatarStickyFollowTests</c>). At a blow the body is in its stick, beside her, so
+    /// <see cref="NoteStruck"/> reads it close and the proof spans that gap.
+    /// </summary>
+    private bool StruckProof(Attacker a, double clock, double distance, in CellFrame here, in CellFrame it)
+    {
+        if (!a.StruckClose || double.IsNaN(a.StruckAt) || clock - a.StruckAt > StruckProofSeconds)
+        {
+            return false;
+        }
+
+        if (Shots.IsDropped(a.Guid, clock))
+        {
+            // Live 2026-11-12 13:00 to 13:07 UTC, the Cave: the proof named a tusker 2.5 m off by its record whose bolts came to nothing (a ledge between them, or another tusker of the same name was the one striking);
+            // the shot rule dropped it after two wasted casts, the close-attacker rule took the drop back at once, and she cast at it for minutes with three kills in seven. The shot rule's drop outranks the proof:
+            // while it stands the proof does not, and the line test decides as before.
+            if (!a.StruckVoidLogged)
+            {
+                a.StruckVoidLogged = true;
+                StruckProofsVoid++;
+                _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"self-defence: the struck proof of {a.Name} 0x{a.Guid:X8} stands down: the shot rule dropped it (its casts came to nothing), so a blow no longer proves a bolt reaches it; the line test decides until the drop ends (m6-struck-proof-void)"));
+            }
+
+            return false;
+        }
+
+        if (!a.StruckLogged)
+        {
+            a.StruckLogged = true;
+            StruckProofs++;
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"self-defence: {a.Name} 0x{a.Guid:X8} struck the mage {clock - a.StruckAt:0.0} s ago ({a.Heard}): it stands at her, whatever the line test says of its last known position (0x{it.CellId:X8} [{it.Origin.X:0.#} {it.Origin.Y:0.#} {it.Origin.Z:0.#}], {distance:0.#} m from her at 0x{here.CellId:X8} [{here.Origin.X:0.#} {here.Origin.Y:0.#} {here.Origin.Z:0.#}]; a monster in melee follows her with no position sent, Monster_Tick.cs:118-119); it is cast at (m6-struck-proof, TODO(m6-sticky-position))"));
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -293,13 +550,13 @@ public sealed partial class FightScenario
                 continue;
             }
 
-            if (!objects.TryGet(a.Guid, out var o) || o.Position is not { } p)
+            if (!objects.TryGet(a.Guid, out var o) || StandsAt(session, o) is not { } p)
             {
                 continue; // no position to judge by yet
             }
 
             var distance = p.ToGlobal().DistanceTo(origin);
-            if (distance <= _range && (_options.IgnoreLine || LineIsClear(session, in here, a.Guid)))
+            if (distance <= _range && (_options.IgnoreLine || LineIsClear(session, in here, a.Guid) || StruckProof(a, clock, distance, in here, in p)))
             {
                 a.HoldSince = double.NaN;
                 if (distance < castDistance)
@@ -325,6 +582,12 @@ public sealed partial class FightScenario
         }
 
         guid = other.Guid;
+        if (announce && LifeThroughPlans(session, clock, in here, other.Guid))
+        {
+            other.HoldSince = double.NaN;
+            return DefenceMove.Life; // M6 14 (m6-life-through): before the walk, the step and the hold: a life spell needs no line
+        }
+
         if (_options.ArenaHere || !_ground.IsNoGo(otherCell))
         {
             other.HoldSince = double.NaN;
@@ -428,13 +691,14 @@ public sealed partial class FightScenario
             }
         }
 
+        var reach = ReachOf(who, out var reachNote);
         foreach (var (me, away, i) in _stepSpots)
         {
-            if (away > _range)
+            if (away > reach)
             {
                 var s = spots[i];
                 spot = s;
-                note = string.Create(CultureInfo.InvariantCulture, $"a step out of the reach of {who.Name} 0x{who.Guid:X8} in the no-go cell 0x{cell:X8}: 0x{s.CellId:X8} [{s.Origin.X:0.#} {s.Origin.Y:0.#} {s.Origin.Z:0.#}], {me:0.#} m off, {away:0.#} m from it, past its reach (the mage's cast range {_range:0.#} m stands in, TODO(m5-attacker-reach); none of the {swept} spot(s) swept within {DefendStepMaxMetres:0} m has a line to it; step {who.Steps} of {MaxDefenceSteps})");
+                note = string.Create(CultureInfo.InvariantCulture, $"a step out of the reach of {who.Name} 0x{who.Guid:X8} in the no-go cell 0x{cell:X8}: 0x{s.CellId:X8} [{s.Origin.X:0.#} {s.Origin.Y:0.#} {s.Origin.Z:0.#}], {me:0.#} m off, {away:0.#} m from it, past its reach ({reachNote}; none of the {swept} spot(s) swept within {DefendStepMaxMetres:0} m has a line to it; step {who.Steps} of {MaxDefenceSteps})");
                 _log.Info(LogCategory, $"self-defence: {who.Name} 0x{who.Guid:X8} stands in the no-go cell 0x{cell:X8} with no line from here; {note}");
                 return true;
             }
@@ -467,6 +731,249 @@ public sealed partial class FightScenario
         _log.Info(LogCategory, $"walking: purpose=self-defence ({_defenceSpotNote}); D88: never hold still while it shoots; {leg}");
         _phase = Phase.Walk;
         return ScenarioStatus.Running;
+    }
+
+    /// <summary>
+    /// M6 6 B2 (<c>m5-attacker-reach</c>): how far <paramref name="who"/> attacks from: its <see cref="Attacker.ReachMetres"/> once read, else the mage's own cast range stands in (the source is not read: the TODO is logged once
+    /// a fight, with how the attack was heard). <paramref name="note"/> says which, for the line that uses it.
+    /// </summary>
+    private double ReachOf(Attacker who, out string note)
+    {
+        if (!double.IsNaN(who.ReachMetres))
+        {
+            note = string.Create(CultureInfo.InvariantCulture, $"its reach {who.ReachMetres:0.#} m");
+            return who.ReachMetres;
+        }
+
+        note = string.Create(CultureInfo.InvariantCulture, $"the mage's cast range {_range:0.#} m stands in, TODO(m5-attacker-reach)");
+        if (!_reachTodoLogged)
+        {
+            _reachTodoLogged = true;
+            _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"self-defence: TODO(m5-attacker-reach): the reach of {who.Name} 0x{who.Guid:X8} (heard by {who.Heard}) is not read (ACE works it out per attack on the server, Monster_Combat.cs:165-215 @95ef426d: the spell's range, the launcher's, or melee's 0.75 m); the mage's cast range {_range:0.#} m stands in"));
+        }
+
+        return _range;
+    }
+
+    /// <summary>
+    /// M6 6 B2 (<c>m5-defend-walk-to</c>, D88): the pick's walk arm. No attacker can be cast at from here and the nearest (<paramref name="guid"/>) is not in a no-go cell: a leg toward it, to the spot <see cref="WalkToSpot"/> chose
+    /// (purpose <c>self-defence</c>, named), dropped the moment an attacker is in range with a clear line (<see cref="DefenceDropsWalk"/>). A refusal, no spot, a leg that cannot be planned, or <see cref="MaxDefenceWalksTo"/>
+    /// legs spent on this attacker fall back to today's walk, the tour's next leg, named and logged.
+    /// </summary>
+    private ScenarioStatus StartDefenceWalk(IGameSessionView session, double clock, uint guid)
+    {
+        Attacker? who = null;
+        foreach (var a in _attackers)
+        {
+            if (a.Guid == guid)
+            {
+                who = a;
+                break;
+            }
+        }
+
+        if (who is not null && CrossingOwed(session, clock, out var storeyOwed))
+        {
+            // M6 7 D (m6-gate-den-storey-race): a leg back toward an attacker behind the mage would give up the crossing's ground; the tour's leg goes on, and the walk phase drops it the moment this attacker has a line (D88 holds).
+            if (!who.CrossingLogged)
+            {
+                who.CrossingLogged = true;
+                _log.Info(LogCategory, $"self-defence: no walk toward {who.Name} 0x{guid:X8} (no shot from here): the tour owes storey '{_ground.Storeys[storeyOwed].Name}', its leg keeps the ground the crossing has made; the attacker is cast at as soon as it has a line");
+            }
+
+            return StartWalk(session, clock, SelfDefenceNoLine);
+        }
+
+        string why;
+        if (who is null || _walk is null || session.State.Self.Position is not { } here || !session.State.Objects.TryGet(guid, out var o) || StandsAt(session, o) is not { } it)
+        {
+            why = _walk is null ? "the fight has no walk" : "the attacker or the mage has no position";
+        }
+        else if (who.WalksTo >= MaxDefenceWalksTo)
+        {
+            if (who.WalkToBoundLogged)
+            {
+                return StartWalk(session, clock, SelfDefenceNoLine);
+            }
+
+            who.WalkToBoundLogged = true;
+            why = string.Create(CultureInfo.InvariantCulture, $"{who.WalksTo} leg(s) toward it brought no shot (the bound {MaxDefenceWalksTo}, FightScenario.MaxDefenceWalksTo)");
+        }
+        else
+        {
+            who.WalksTo++;
+            why = WalkToSpot(who, in here, in it) ?? string.Empty;
+            if (why.Length != 0)
+            {
+                var none = SidestepSpot(who, in here, in it); // M6 14: an attacker at her with something between them: a step to the side for a line, before the tour's leg
+                why = none is null ? string.Empty : why + "; " + none;
+            }
+
+            if (why.Length == 0)
+            {
+                if (_walk.BeginLegTo(session, clock, in _walkToSpot, out var leg))
+                {
+                    _walks++;
+                    NoteLegFrom(session); // M5 7 P7i
+                    _missesInARow = 0;
+                    _target = 0;
+                    _holdingLogged = false;
+                    (_legPurpose, _legNote, _legGuid) = (TourPurpose.None, _walkToNote, 0);
+                    _walkBackCorpse = 0;
+                    _lootWalkCorpse = 0;
+                    _log.Info(LogCategory, $"walking: purpose=self-defence ({_walkToNote}); D88: an attacker out of range or line is walked toward; {leg}");
+                    _phase = Phase.Walk;
+                    return ScenarioStatus.Running;
+                }
+
+                why = "the leg could not be planned: " + leg;
+            }
+        }
+
+        var name = who is null ? string.Create(CultureInfo.InvariantCulture, $"0x{guid:X8}") : string.Create(CultureInfo.InvariantCulture, $"{who.Name} 0x{guid:X8}");
+        _log.Info(LogCategory, $"self-defence: the walk toward {name} falls back to the tour's next leg (as before m5-defend-walk-to): {why}");
+        return StartWalk(session, clock, SelfDefenceNoLine);
+    }
+
+    /// <summary>
+    /// M6 6 B2 (<c>m5-defend-walk-to</c>): the spot a walk toward <paramref name="who"/> (at <paramref name="it"/>) goes to. The cells of the straight line from the mage to it (<see cref="IFightWalk.CellsOnLine"/>) are taken in order
+    /// from the mage, and in each the floor's room middles (<see cref="IFightWalk.FloorSpots"/>) on a walkable cell off the no-go cells; the first within the cast range of it whose line to it is clear (at most
+    /// <see cref="DefendStepLineTests"/> lines swept) is the last spot, coming from the attacker, with range and a line: the shortest walk that lets the bolt fly. Null with <see cref="_walkToSpot"/> and its note set; else why none.
+    /// </summary>
+    private string? WalkToSpot(Attacker who, in CellFrame here, in CellFrame it)
+    {
+        var trace = _walk!.CellsOnLine(in here, in it, _walkToCells);
+        if (trace == LineTrace.NotTraced)
+        {
+            return "this walk cannot trace the line to it (CellsOnLine: not traced)";
+        }
+
+        var spots = _walk.FloorSpots;
+        if (spots.Count == 0)
+        {
+            return "this walk offers no floor spots (FloorSpots: none; TODO(m5-defend-step-spots))";
+        }
+
+        var origin = here.ToGlobal();
+        var target = it.ToGlobal();
+        var swept = 0;
+        foreach (var cell in _walkToCells)
+        {
+            if (!_ground.IsWalkable(cell) || (!_options.ArenaHere && _ground.IsNoGo(cell)))
+            {
+                continue;
+            }
+
+            for (var i = 0; i < spots.Count; i++)
+            {
+                var s = spots[i];
+                if (s.CellId != cell)
+                {
+                    continue;
+                }
+
+                var away = s.ToGlobal().DistanceTo(target);
+                if (away > _range)
+                {
+                    continue;
+                }
+
+                if (swept >= DefendStepLineTests)
+                {
+                    return string.Create(CultureInfo.InvariantCulture, $"no spot on the line had a clear line to it within the {DefendStepLineTests} lines swept (FightScenario.DefendStepLineTests)");
+                }
+
+                swept++;
+                if (!_options.IgnoreLine && !LineIsClearTo(in s, in it))
+                {
+                    continue;
+                }
+
+                var reach = ReachOf(who, out var reachNote);
+                var me = s.ToGlobal().DistanceTo(origin);
+                _walkToSpot = s;
+                _walkToNote = string.Create(CultureInfo.InvariantCulture, $"a walk toward {who.Name} 0x{who.Guid:X8} at 0x{it.CellId:X8}, {target.DistanceTo(origin):0.#} m off with no shot from here: to 0x{s.CellId:X8} [{s.Origin.X:0.#} {s.Origin.Y:0.#} {s.Origin.Z:0.#}], {me:0.#} m off on the line to it, {away:0.#} m from it with a clear line (the cast range {_range:0.#} m; {(away > reach ? "out of" : "within")} its reach, {reachNote}; leg {who.WalksTo} of {MaxDefenceWalksTo})");
+                _log.Info(LogCategory, $"self-defence: {_walkToNote}");
+                return null;
+            }
+        }
+
+        var stopped = trace == LineTrace.Stopped ? string.Create(CultureInfo.InvariantCulture, $" (the sweep stopped at 0x{(_walkToCells.Count > 0 ? _walkToCells[^1] : here.CellId):X8}: the cells past it are not known)") : string.Empty;
+        return string.Create(CultureInfo.InvariantCulture, $"no floor spot in the {_walkToCells.Count} cell(s) on the line to it is within the cast range {_range:0.#} m with a clear line ({swept} line(s) swept){stopped}");
+    }
+
+    /// <summary>M6 14 (the sidestep): the farthest an attacker may stand, by the position the fight takes it at, for a sidestep to be tried (Lifestone's own: melee's reach and a body's width; farther off, the walk toward it is the answer).</summary>
+    public const double SidestepReachMetres = 6;
+
+    /// <summary>M6 14 (the sidestep): the directions round the mage a sidestep probes at each radius (Lifestone's own: every 45 degrees).</summary>
+    public const int SidestepDirections = 8;
+
+    private static readonly float[] SidestepRadii = [2f, 3.5f, 5f];
+
+    /// <summary>The sidesteps the fight began (report-only count).</summary>
+    public int Sidesteps { get; private set; }
+
+    /// <summary>
+    /// M6 14 (the sidestep; live 2026-11-12 13:00 UTC, the Cave, as the owner saw it: a tusker stood on the other side of a torch; its blows reached her, ACE's melee asks no line, and every bolt of hers met the torch).
+    /// The walk toward an attacker knows the rooms' middles alone (<see cref="WalkToSpot"/>), and with none of them giving a line the fight took the tour's next leg, tens of metres off, while it went on hitting her.
+    /// A player takes two steps to the side. With the attacker within <see cref="SidestepReachMetres"/>, the points round her at 2, 3.5 and 5 m, <see cref="SidestepDirections"/> to a ring, nearest ring first, are
+    /// probed: the straight step to the point must be clear and its cells known (<see cref="IFightWalk.CellsOnLine"/>, traced whole), the point's cell walkable and off the no-go cells, and the line from the point
+    /// to the attacker clear and in the cast range. The first such point is the leg's goal (the walk phase drops the leg the moment the attacker has a line, <see cref="DefenceDropsWalk"/>). It counts as one of the
+    /// attacker's <see cref="MaxDefenceWalksTo"/> legs. Null with <see cref="_walkToSpot"/> and its note set; else why none.
+    /// </summary>
+    private string? SidestepSpot(Attacker who, in CellFrame here, in CellFrame it)
+    {
+        var origin = here.ToGlobal();
+        var target = it.ToGlobal();
+        var off = target.DistanceTo(origin);
+        if (off > SidestepReachMetres)
+        {
+            return string.Create(CultureInfo.InvariantCulture, $"no sidestep: it stands {off:0.#} m off, past the sidestep's reach {SidestepReachMetres:0.#} m");
+        }
+
+        var probed = 0;
+        var lines = 0;
+        foreach (var radius in SidestepRadii)
+        {
+            for (var k = 0; k < SidestepDirections; k++)
+            {
+                var angle = k * 2 * Math.PI / SidestepDirections;
+                var at = here.Frame.Origin + new System.Numerics.Vector3((float)(Math.Cos(angle) * radius), (float)(Math.Sin(angle) * radius), 0f);
+                var spot = new CellFrame(here.CellId, here.Frame with { Origin = at });
+                probed++;
+                if (_walk!.CellsOnLine(in here, in spot, _walkToCells) != LineTrace.Traced)
+                {
+                    continue; // something stands in the step's own way, or its cells are not known
+                }
+
+                var cell = _walkToCells.Count > 0 ? _walkToCells[^1] : here.CellId;
+                if (!_ground.IsWalkable(cell) || (!_options.ArenaHere && _ground.IsNoGo(cell)))
+                {
+                    continue;
+                }
+
+                spot = new CellFrame(cell, spot.Frame);
+                var away = spot.ToGlobal().DistanceTo(target);
+                if (away > _range)
+                {
+                    continue;
+                }
+
+                lines++;
+                if (!_options.IgnoreLine && !LineIsClearTo(in spot, in it))
+                {
+                    continue;
+                }
+
+                Sidesteps++;
+                _walkToSpot = spot;
+                _walkToNote = string.Create(CultureInfo.InvariantCulture, $"a sidestep for a line to {who.Name} 0x{who.Guid:X8}, {off:0.#} m off with something between them: to 0x{cell:X8} [{at.X:0.#} {at.Y:0.#} {at.Z:0.#}], {radius:0.#} m to the side, {away:0.#} m from it with a clear line ({probed} point(s) probed, {lines} line(s) swept; leg {who.WalksTo} of {MaxDefenceWalksTo}; m6-sidestep)");
+                _log.Info(LogCategory, $"self-defence: {_walkToNote}");
+                return null;
+            }
+        }
+
+        return string.Create(CultureInfo.InvariantCulture, $"no sidestep: none of the {probed} point(s) within {SidestepRadii[^1]:0.#} m round her has a clear step to it and a clear line from it ({lines} line(s) swept; m6-sidestep)");
     }
 
     /// <summary>The walk phase's check: an attacker now in range with a clear line drops the walk, so the next frame's pick casts at it.</summary>
@@ -513,6 +1020,7 @@ public sealed partial class FightScenario
     /// <summary>Forgets the logged attackers whose object has left the table (the list stays as long as the creatures in view; the hours-long fight does not grow it).</summary>
     private void PruneDefence(WorldObjectTable objects)
     {
+        PruneLifeThrough(objects); // M6 14
         for (var i = _defenceDropped.Count - 1; i >= 0; i--)
         {
             if (!objects.TryGet(_defenceDropped[i], out _))

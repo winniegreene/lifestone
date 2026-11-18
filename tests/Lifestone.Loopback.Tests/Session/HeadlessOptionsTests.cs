@@ -58,7 +58,7 @@ public sealed class HeadlessOptionsTests
     }
 
     [Theory]
-    [InlineData("--scenario=walk", "--scenario: 'walk' is not one of login, holtburg-laps, academy-exit, mage-build, fighter-build, gear, buff, fight, death-and-regear, hunt, wayfind, journey, autopilot")]
+    [InlineData("--scenario=walk", "--scenario: 'walk' is not one of login, holtburg-laps, academy-exit, mage-build, fighter-build, gear, buff, fight, death-and-regear, hunt, wayfind, journey, autopilot, climber-create, villa-proof")]
     [InlineData("--laps=0", "--laps: '0' is not 1 to 1000")]
     [InlineData("--laps=many", "--laps: 'many' is not an integer")]
     [InlineData("--quit-after=-5", "--quit-after: '-5' is not a positive number of seconds")]

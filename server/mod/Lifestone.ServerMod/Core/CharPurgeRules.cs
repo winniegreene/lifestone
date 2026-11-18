@@ -67,10 +67,10 @@ internal sealed record CharPurgeDecision(ToolError? Refusal, AccountCharacter? T
 internal static class CharPurgeRules
 {
     /// <summary>The graduated test characters, which stay as the baseline and are never purged (m2-log-in §7 decision 13; "BSD Mage", the M3 mage, from m3-plan D11; "Holtburg Hunter", the M4 fighter, from m4-plan D1; "Holtburg Brawler" and "Holtburg Archer", the M4 melee and archer lanes' fighters, from m4-plan D31).</summary>
-    public static IReadOnlyList<string> Graduated { get; } = ["Lifestone Smoke", "Lifestone Loopback", "BSD Mage", "Holtburg Hunter", "Holtburg Brawler", "Holtburg Archer", "Lifestone Tools"];
+    public static IReadOnlyList<string> Graduated { get; } = ["Lifestone Smoke", "Lifestone Loopback", "BSD Mage", "Holtburg Hunter", "Holtburg Brawler", "Holtburg Archer", "Lifestone Tools", "Winnie", "Qwinnie"];
 
     /// <summary>The graduated journey characters the live gate re-creates (m4-plan D44: BSD Mage on test, Holtburg Brawler on test-melee, Holtburg Archer on test-archer): an old copy of one is purged once its new copy is on the account (D45).</summary>
-    public static IReadOnlyList<string> Recreated { get; } = ["BSD Mage", "Holtburg Brawler", "Holtburg Archer"];
+    public static IReadOnlyList<string> Recreated { get; } = ["BSD Mage", "Holtburg Brawler", "Holtburg Archer", "Winnie", "Qwinnie"];
 
     /// <summary>The refusals that need no database read: a graduated name, then the caller's own character; null when neither applies, and for a <see cref="Recreated"/> name (D45: the account's rows decide).</summary>
     public static ToolError? EarlyRefusal(CharPurgeRequest request, string callerName)

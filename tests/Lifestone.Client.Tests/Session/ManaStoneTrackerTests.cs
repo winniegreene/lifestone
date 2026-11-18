@@ -125,6 +125,32 @@ public sealed class ManaStoneTrackerTests
     }
 
     [Fact]
+    public void M6_14_automation_never_sends_a_stone_not_known_to_hold_mana_onto_a_worn_item()
+    {
+        // An empty stone used on an item drains and destroys it, a worn one too (ManaStone.cs:84-113): the refill's last guard is the action's own before-check.
+        var r = Rig();
+        r.Server((p, s) => AceM3Writers.WieldObject(p, s, Bow, 0x00400000));
+
+        var unread = r.Api.UseManaStone(Stone, Bow, ActionSource.Automation); // no appraisal of the stone is held
+        r.Tick();
+        Assert.Equal((ActionOutcomeKind.Refused, ActionReason.ContraryResult), (unread.Outcome!.Value.Kind, unread.Outcome.Value.Reason));
+        Assert.Contains("an empty stone would drain and destroy it, so automation does not send it", unread.Outcome.Value.Detail, StringComparison.Ordinal);
+        Assert.Empty(r.H.Net.Of(FakeSendKind.UseWithTarget));
+
+        var onPlayer = r.Api.UseManaStone(Stone, Player, ActionSource.Automation); // on the player an empty stone does nothing (ActionCancelled): sent
+        r.Tick();
+        Assert.Single(r.H.Net.Of(FakeSendKind.UseWithTarget));
+        r.UseDone(0x36);
+        r.Tick();
+        Assert.NotNull(onPlayer.Outcome);
+
+        var own = r.Api.UseManaStone(Stone, Bow); // the player's own use is the player's to make
+        r.Tick();
+        Assert.Equal(2, r.H.Net.Of(FakeSendKind.UseWithTarget).Count());
+        Assert.Equal(ActionStatus.Sent, own.Status);
+    }
+
+    [Fact]
     public void A_silent_UseDone_0_is_nothing_happened_and_a_stone_or_target_of_0_is_refused_at_once()
     {
         var r = Rig();

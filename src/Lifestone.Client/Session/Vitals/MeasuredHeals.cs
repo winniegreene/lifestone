@@ -208,9 +208,65 @@ public sealed class MeasuredHeals
     /// <param name="seed">The seed.</param>
     public double Seconds(string spell, double seed) => _seconds.TryGetValue(spell, out var m) && m.Count > 0 ? m.Value : seed;
 
+    private readonly Dictionary<string, (int Tries, int Landed)> _tries = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// M6 14 the losing race (live 2026-11-15 04:12:43 to 04:13:27 UTC: five of the guard's sixteen drains at the Assailer were resisted): one cast of <paramref name="spell"/> ended, landed or not (a resist, a fizzle and a refusal are
+    /// tries that gave nothing).
+    /// </summary>
+    /// <param name="spell">The spell's name.</param>
+    /// <param name="landed">True when it landed.</param>
+    public void NoteTry(string spell, bool landed) => NoteTry(spell, null, landed);
+
+    /// <summary>M6 14 the losing race (live 06:17:09.9 and 06:17:13.4 UTC: two drains in a row resisted by an Infected Assailer): one cast of <paramref name="spell"/> at a creature named <paramref name="target"/> (null: a self cast) ended.</summary>
+    /// <param name="spell">The spell's name.</param>
+    /// <param name="target">The target kind's name, or null.</param>
+    /// <param name="landed">True when it landed.</param>
+    public void NoteTry(string spell, string? target, bool landed)
+    {
+        var key = Key(spell, target);
+        var (tries, hits) = _tries.TryGetValue(key, out var t) ? t : (0, 0);
+        _tries[key] = (tries + 1, hits + (landed ? 1 : 0));
+    }
+
+    /// <summary>
+    /// M6 14 the losing race: the share of <paramref name="spell"/>'s casts that land, measured where it can be: the landed casts plus the modelled chance (<paramref name="seed"/>, its weight one cast) over the tries plus one, so one early
+    /// resist does not read as never and the measure takes over as the casts add up; the seed with no try measured.
+    /// </summary>
+    /// <param name="spell">The spell's name.</param>
+    /// <param name="seed">The modelled chance (the cast chance times the target's pass chance).</param>
+    public double LandShare(string spell, double seed) => LandShare(spell, null, seed);
+
+    /// <summary>The share of <paramref name="spell"/>'s casts at <paramref name="target"/> (a kind, or null: a self cast) that land, as <see cref="LandShare(string, double)"/> reads it: the kind's Magic Defense is in the seed, its resists in the measure.</summary>
+    /// <param name="spell">The spell's name.</param>
+    /// <param name="target">The target kind's name, or null.</param>
+    /// <param name="seed">The modelled chance.</param>
+    public double LandShare(string spell, string? target, double seed)
+    {
+        var s = Math.Clamp(seed, 0, 1);
+        return _tries.TryGetValue(Key(spell, target), out var t) && t.Tries > 0 ? (t.Landed + s) / (t.Tries + 1.0) : s;
+    }
+
+    /// <summary>The casts of <paramref name="spell"/> (at <paramref name="target"/>) measured and how many landed.</summary>
+    /// <param name="spell">The spell's name.</param>
+    /// <param name="target">The target kind's name, or null.</param>
+    public (int Tries, int Landed) TriesOf(string spell, string? target = null) => _tries.TryGetValue(Key(spell, target), out var t) ? t : (0, 0);
+
     /// <summary>The seed seconds of a drain level (1 to 7) from <see cref="DrainSecondsSeed"/>.</summary>
     /// <param name="level">The level.</param>
     public static double DrainSeed(int level) => DrainSecondsSeed[Math.Clamp(level, 1, DrainSecondsSeed.Length) - 1];
+
+    /// <summary>
+    /// M6 14 tactics: Heal Self's cast seconds by level I to VII before one is measured, ACE's own (fight-sim <c>cast</c> on the climber at level 80, 2026-11-17: the windup, the MagicSelfHeart gesture and the return to ready at
+    /// the server's speed): I 1.48, II 2.02, III 2.49, IV 2.92, V 3.32, VI 3.26. Level VII was not in her book to time: its seed stays the drain table's 3.6 (<c>TODO(m6-heal-self-vii-seconds)</c>). Until now Heal Self took the
+    /// drain's seed of its level (<see cref="DrainSecondsSeed"/>, Lifestone's own), 3.0 s at VI: the live 08:33:08 pick rated it on a cast 0.26 s short of ACE's. The measured mean replaces the seed once a cast has landed
+    /// (live 3.17 s at VI, the proof's wait in it).
+    /// </summary>
+    public static readonly double[] SelfSecondsSeed = [1.48, 2.02, 2.49, 2.92, 3.32, 3.26, 3.6];
+
+    /// <summary>The seed seconds of a Heal Self level (1 to 7) from <see cref="SelfSecondsSeed"/>.</summary>
+    /// <param name="level">The level.</param>
+    public static double SelfSecondsSeedOf(int level) => SelfSecondsSeed[Math.Clamp(level, 1, SelfSecondsSeed.Length) - 1];
 
     /// <summary>The seed of a Heal Self level (1 to 7) before a measure, from <see cref="SelfHealSeed"/>; 0 outside.</summary>
     /// <param name="level">The level, 1 to 7.</param>

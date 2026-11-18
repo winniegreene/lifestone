@@ -59,6 +59,37 @@ public sealed class WorldSendTests
         Assert.Equal(new[] { 0x7A9B4002u }, rig.ServerSession.UsedObjects);
     }
 
+    /// <summary>
+    /// M6 14: a direct talk (GameAction 0x0032) goes out on the weenie queue as ACE reads it (the message, then the id), and ACE's two answers come back decoded: for a creature on the landblock (here
+    /// the player itself) the F7E0 confirmation line and, the creature being a player, its tell; for any other id WeenieError 0x052B.
+    /// </summary>
+    [Fact]
+    public void A_direct_talk_reaches_the_server_by_id_and_its_answers_come_back()
+    {
+        using var rig = new SessionRig();
+        rig.ToWorld();
+        rig.Session.SendLoginComplete();
+        rig.RunFor(TimeSpan.FromMilliseconds(100));
+        var before = rig.Sink.Dispatched.Count(d => d.Opcode == MessageOpcodes.ServerMessage);
+
+        var known = rig.Session.SendTalkDirect(SessionRig.HeroGuid, "to myself");
+        var unknown = rig.Session.SendTalkDirect(0x7A9B4F14, "tusker");
+        Assert.True(rig.RunUntil(() => rig.Sink.DecodedEvents.Count(e => e.Event is TellEvent or WeenieErrorEvent) >= 2, TimeSpan.FromSeconds(1)));
+
+        var sent = rig.Tap.Messages.Where(m => m.Direction == MessageDirection.Outbound && BitConverter.ToUInt32(m.Body) == MessageOpcodes.GameAction && BitConverter.ToUInt32(m.Body, 8) == GameActionTypes.TalkDirect).ToList();
+        Assert.Equal(2, sent.Count);
+        Assert.All(sent, a => Assert.Equal(MessageQueue.Weenie, a.Queue));
+        Assert.Equal([known.MessageSequence, unknown.MessageSequence], sent.Select(a => a.Sequence));
+        var handled = rig.ServerSession.HandledMessages.Where(m => BitConverter.ToUInt32(m) == MessageOpcodes.GameAction && BitConverter.ToUInt32(m, 8) == GameActionTypes.TalkDirect).ToList();
+        Assert.Equal([("to myself", SessionRig.HeroGuid, 0), ("tusker", 0x7A9B4F14u, 0)], handled.Select(m => AceClientReaders.ReadTalkDirect(m)).Select(r => (r.Text, r.Target, r.Unread)));
+
+        Assert.Equal(before + 1, rig.Sink.Dispatched.Count(d => d.Opcode == MessageOpcodes.ServerMessage));
+        var events = rig.Sink.DecodedEvents.Select(e => e.Event).ToList();
+        Assert.Contains(new TellEvent("to myself", "Hero", SessionRig.HeroGuid, SessionRig.HeroGuid, 3, 0), events);
+        Assert.Contains(new WeenieErrorEvent(0x052B, null), events);
+        Assert.Empty(rig.Sink.Malformed);
+    }
+
     [Fact]
     public void The_servers_answers_come_back_decoded()
     {
@@ -265,6 +296,7 @@ public sealed class WorldSendTests
             () => rig.Session.SendQueryHealth(1),
             () => rig.Session.SendTalk("hi"),
             () => rig.Session.SendTell("Hero", "hi"),
+            () => rig.Session.SendTalkDirect(SessionRig.HeroGuid, "hi"),
         ];
 
         Assert.All(sends, s => Assert.Contains("InWorld", Assert.Throws<InvalidOperationException>(s).Message, StringComparison.Ordinal));
@@ -282,6 +314,8 @@ public sealed class WorldSendTests
         Assert.Throws<ArgumentException>(() => rig.Session.SendTell("Héro", "hi"));
         Assert.Throws<ArgumentException>(() => rig.Session.SendTell("Hero", "naïve"));
         Assert.Throws<ArgumentException>(() => rig.Session.SendTell(string.Empty, "hi"));
+        Assert.Throws<ArgumentException>(() => rig.Session.SendTalkDirect(0, "hi"));
+        Assert.Throws<ArgumentException>(() => rig.Session.SendTalkDirect(SessionRig.HeroGuid, "na\u00EFve"));
         Assert.Throws<ArgumentException>(() => rig.Session.SendTalk("日本"));
         Assert.DoesNotContain(MessageOpcodes.GameAction, rig.Tap.OutboundOpcodes);
 

@@ -23,6 +23,9 @@ public enum LootDecision
 
     /// <summary>Taking the item would carry the burden over the limit.</summary>
     Burden,
+
+    /// <summary>M6 7 AH: the item's slot is already filled by the replacement the death handler bought and wore: it stays on the corpse (<c>take-back: left</c>), is not a skip and not a loss.</summary>
+    Replaced,
 }
 
 /// <summary>
@@ -144,6 +147,7 @@ public class LootRules
         LootDecision.Value => "value",
         LootDecision.Type => "type",
         LootDecision.Burden => "burden",
+        LootDecision.Replaced => "replaced",
         _ => "unknown",
     };
 

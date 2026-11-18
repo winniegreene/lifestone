@@ -1,0 +1,78 @@
+{
+  "key": "minor-smoldering-stone",
+  "name": "The Minor Smoldering Stone (the stone from the cave south-west of the Yinar drop)",
+  "giver": null,
+  "start": {
+    "cell": "0xA9B40019",
+    "point": [
+      84.0,
+      7.7,
+      94.0
+    ],
+    "name": "Holtburg's lifestone point"
+  },
+  "steps": [
+    {
+      "kind": "go",
+      "what": "to the Minor Smoldering Stone",
+      "place": {
+        "cell": "0xA66C0100",
+        "point": [
+          83.5479,
+          141.65,
+          16.8029
+        ],
+        "name": "where the Minor Smoldering Stone lies"
+      },
+      "target": {
+        "wcid": 6320,
+        "name": "Minor Smoldering Stone"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.3): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x7A66C000: weenie 6320, cell 0xA66C0100; by the Town Network and the Yinar Portal (travel-routes.json network-to-samsur, samsur-to-yinar; the walk from the Yinar drop is The_run_from_the_yinar_drop_reaches_the_minor_smoldering_stones_cave); no level gate on any portal of the route, no door in the landblock. M6 14 the element line: four Gouts (21164, level 50) stand within 1.0, 1.6, 7.5 and 7.4 m of the stone, three more at the cave's mouth (generator guid 0x7A66C00D), ResistFire 0 and ResistCold 0.65: her fight-back casts the line of her book that hits a Gout hardest (BoltElement; fight-sim matchup 21164 (Qwinnie, level 78, 2026-11-16): Frost Bolt I, which she knows, 6.63 casts and 10.1 s a kill)",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Minor Smoldering Stone from the floor",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 6320,
+        "name": "Minor Smoldering Stone"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch.md section 2.3): the item's own Quest string smolderingstoneminor (quest row 1352: min_Delta 3600, max_Solves -1) gates the pick-up for one hour (ACE Player_Inventory.cs:1249-1262 @95ef426d); refused, the run stops pick-up:too-recent; a Textbook (wcid 6407) lies 4.3 m away and is not this step's",
+      "todo": null
+    }
+  ],
+  "done": {
+    "stamp": null,
+    "reply": null,
+    "item": {
+      "wcid": 6320,
+      "name": "Minor Smoldering Stone"
+    }
+  },
+  "timer_seconds": 3600,
+  "sources": [
+    "cache/m6/8/facts-fetch.md section 2.3: nobody starts it and nobody takes it; the stone is used on an Atlan Wand (the atlan-wand file's step)",
+    "timer_seconds 3600: the pinned world SQL quest row smolderingstoneminor (id 1352): min_Delta 3600, max_Solves -1; the ladder band runs it once (D118)",
+    "level: none in the file: no portal of the route has a level gate",
+    "ladder: from 45, before 126, once (cache/m6/8/brief-b2b.md, D118); she has Lifestone Recall by then, so the errand's way home is the recall (the travel file has no way home from Yinar)"
+  ],
+  "ladder": {
+    "from_level": 75,
+    "before_level": 126,
+    "once": true
+  }
+}

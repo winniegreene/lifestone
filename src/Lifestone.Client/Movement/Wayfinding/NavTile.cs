@@ -26,6 +26,13 @@ public enum NavFlags : byte
 
     /// <summary>Blocked by a building's shell (with <see cref="Blocked"/>); <see cref="NavTile.Owner"/> names it.</summary>
     Building = 1 << 5,
+
+    /// <summary>
+    /// Open, but part of the node's square lies on a too-steep land triangle: where land triangles meet at a corner, a sliver of a steep one can cut into ground
+    /// the node centres call walkable, and the body cannot step down onto it however thin it is. The planner costs it, and its straightened route never
+    /// crosses one the node path kept off. Lifestone's.
+    /// </summary>
+    SteepEdge = 1 << 6,
 }
 
 /// <summary>What blocks a node: the "Blocked, nearest object" a stuck run names.</summary>
@@ -42,8 +49,11 @@ public readonly record struct NavObstacle(uint Id, Vector3 Origin, string Kind);
 /// <param name="EntryCellId">The EnvCell behind the portal.</param>
 /// <param name="Sill">The portal's centre on its sill, landblock-local.</param>
 /// <param name="Outward">The unit horizontal direction from the portal out of the building.</param>
-/// <param name="Nodes">The lane's node indices (<see cref="NavTile.Index"/>), sill end first.</param>
-public sealed record NavDoorwayLane(int BuildingIndex, uint EntryCellId, Vector3 Sill, Vector2 Outward, IReadOnlyList<int> Nodes);
+/// <param name="Nodes">The lane's node indices (<see cref="NavTile.Index"/>), sill end first; a raised door's <paramref name="Climb"/> has only the ones on the ground past the stairs' foot (the tile is the ground).</param>
+/// <param name="Climb">
+/// A raised door whose stairs turn aside from the lane's line (<see cref="LaneStairs"/>, M6 7 A): the walk from the outer end on the ground in to just past the sill, landblock-local at the floors' heights; null for the straight lane.
+/// </param>
+public sealed record NavDoorwayLane(int BuildingIndex, uint EntryCellId, Vector3 Sill, Vector2 Outward, IReadOnlyList<int> Nodes, IReadOnlyList<Vector3>? Climb = null);
 
 /// <summary>
 /// One landblock's walk map for the wayfinder (P5a, design 3.1): <see cref="Size"/> x <see cref="Size"/> nodes at

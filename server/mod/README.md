@@ -227,6 +227,44 @@ Then a background thread turns ACE's first-account Admin auto-promotion off as s
 logs the ready line once the world is open and `@lifestone` is registered. The sentinel Admin account that setup
 creates (owner decision D11) keeps ACE from setting the flag in the first place; the mod is the second lock.
 
+## The arrival guard (a server glitch fix, on by default)
+
+ACE unloads a landblock five minutes after its last `SetActive`, removing every object on it, players too, and only a
+player's own heartbeat calls `SetActive`, about every 5 s. So a player who lands in a block near the end of its five
+minutes can be left on no landblock: no physics, no heartbeat, nothing she sends answered, until she logs off. A corpse
+run lands in that window by its own length (gate A's climb, twice in 21 arrivals).
+
+Once the world is open, `ArrivalGuard` runs a zero-delay `DelayAction` each pass of ACE's world loop, after the action
+queue and before the landblocks' tick, and calls the public `Landblock.SetActive` once when a player first appears in a
+block. It patches nothing. That closes the race for a portal, a death's respawn and a login. A recall by spell teleports
+from inside a block's tick, so there the race shrinks to one tick and is not gone: the mod logs a player left on no
+landblock, and the client's re-login recovers it.
+
+Set `LIFESTONE_ACE_UNLOAD_RACE=ace` in the server's environment to restore ACE's own timing.
+
+## The coin on a corpse
+
+Retail left half of a dead player's pyreals on the corpse. ACE's server property `corpse_destroy_pyreals` (default
+true) destroys them. Once the world is open, `CorpseCoin` sets it false through ACE's public `PropertyManager.ModifyBool`,
+logs one `Lifestone corpse coin:` line with the old and new values, and withholds the ready line if ACE refuses. ACE's
+own five-minute worker saves the value, so the mod itself opens no database connection.
+
+Set `LIFESTONE_ACE_CORPSE_COIN=ace` in the server's environment to restore ACE's destroy. The mod sets the property on
+every start, either way, because ACE keeps the saved value.
+
+## A house needs no account age
+
+Retail refused any dwelling but an apartment to an account younger than 15 days, and ACE keeps that rule behind its
+server property `house_15day_account` (default true). The owner turned it off on 2026-11-16: in this single-player
+world with fresh test accounts the wait guards nothing. Once the world is open, `HouseAccountAge` sets it false the
+same way as the corpse coin (ACE's `PropertyManager.ModifyBool`, one `Lifestone house account age:` line, the ready
+line withheld if ACE refuses, no database connection). With it false, ACE clears a young character's back-dated
+house purchase time at its next login, so the house panel and the 30-day re-purchase cooldown (`house_30day_cooldown`,
+left on) stop reading the account's age.
+
+Set `LIFESTONE_ACE_HOUSE_ACCOUNT_AGE=ace` in the server's environment to restore the 15 days. The mod sets the
+property on every start, either way.
+
 ## ACE log lines
 
 ```text
@@ -236,6 +274,7 @@ Lifestone: ACE's first-account Admin auto-promotion is off; new accounts get Def
 Lifestone mod ready: @lifestone on 127.0.0.1:9000; wire 1; mod 0.1.0; ACE 95ef426d; auto-promotion off
 Lifestone tool: account=<a> character=<c> verb=<v> id=<id> args=<raw text, at most 200 characters> -> ok|<code>
 Lifestone console: <the reply's two lines joined by " | ">
+Lifestone arrival guard: on|off ...; <name> arrived in 0x<block>: kept active; <name> is on no landblock ...
 ```
 
 `server\start-server.ps1` waits for the ready line and fails at once on the refusal line or on any of ACE's own

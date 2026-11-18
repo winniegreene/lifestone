@@ -456,7 +456,7 @@ internal sealed class BuyTracker(VendorTradeHandle handle, uint vendor, IReadOnl
             return Refuse(ActionReason.NotEnoughCoin, "not enough pyreals: the buy costs " + ActionText.Count(price) + " at the 0062's rates and the player holds " + ActionText.Count(coins));
         }
 
-        if (slots > 0 && FreeSlots(api.State) is { } free && slots > free)
+        if (slots > 0 && Quartermaster.PackView.AllPacksLessFociFree(api.State) is { } free && slots > free)
         {
             return Refuse(ActionReason.NoFreeSlot, "not enough pack space: the buy needs " + ActionText.Count(slots) + " slot(s) and the packs have " + ActionText.Count(free) + " free");
         }
@@ -474,39 +474,6 @@ internal sealed class BuyTracker(VendorTradeHandle handle, uint vendor, IReadOnl
         1 => (int)Math.Min(int.MaxValue, amount),
         _ => 1,
     };
-
-    /// <summary>
-    /// The packs' free slots as ACE counts them (<c>Container.GetFreeInventorySlots</c>, <c>Container.cs</c> 214-225 @95ef426d): the main pack's capacity less its items, plus each side pack's capacity less its items;
-    /// a foci takes a main pack slot. An upper bound when the model misses an item; null when the inventory is not known or a side pack's capacity is not.
-    /// </summary>
-    internal static int? FreeSlots(GameState state)
-    {
-        var inventory = state.Self.Inventory;
-        if (!inventory.IsKnown)
-        {
-            return null;
-        }
-
-        var capacity = state.Objects.TryGet(state.Self.Guid, out var self) && self.Weenie.ItemsCapacity is > 0 ? self.Weenie.ItemsCapacity.Value : PlayerPackCapacity;
-        var free = capacity - inventory.Pack.Count;
-        foreach (var pack in inventory.SidePacks)
-        {
-            if (pack.ContainerType != 1)
-            {
-                free--; // a foci sits in a main pack slot
-                continue;
-            }
-
-            if (!state.Objects.TryGet(pack.Guid, out var side) || side.Weenie.ItemsCapacity is not > 0)
-            {
-                return null;
-            }
-
-            free += side.Weenie.ItemsCapacity.Value - inventory.ItemsIn(pack.Guid).Count;
-        }
-
-        return free;
-    }
 
     /// <inheritdoc/>
     protected override string Verb => "buy";

@@ -313,6 +313,102 @@ public sealed class ActionTrackersTests
         Assert.DoesNotContain(h.Log.Lines, l => l.Contains("psst", StringComparison.Ordinal) && l.Contains("action #", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// M6 14: a direct talk (GameAction 0x0032) is confirmed by ACE's own line for it, <c>You tell NAME, "TEXT"</c> of chat type OutgoingTell (GameActionTalkDirect.cs 29): a line of another type, or an
+    /// OutgoingTell line with another text, is not it. The summary and the log name the target and the length, never the text.
+    /// </summary>
+    [Fact]
+    public void TalkDirect_completes_on_the_confirmation_line_that_holds_its_text()
+    {
+        const uint bot = 0x7A9B4F14;
+        var h = new ActionHarness();
+        h.Present();
+        var talk = h.Api.TalkDirect(bot, "tusker", ActionSource.Automation);
+        h.Tick();
+        var send = Assert.Single(h.Net.Of(FakeSendKind.TalkDirect));
+        Assert.Equal((bot, "tusker"), (send.Guid, send.Text));
+        Assert.Equal(ActionStatus.Sent, talk.Status);
+
+        h.ServerMessage("You tell Koji the Enchanter, \"tusker\"");       // the right text, not an OutgoingTell line
+        h.ServerMessage("You tell Koji the Enchanter, \"help\"", 0x04);   // an OutgoingTell line for another text
+        h.R.Reducer.OnTell(h.R.Context, h.Header, new TellEvent("tusker", "Koji the Enchanter", bot, ActionHarness.Amy, 3, 0)); // a tell is not the confirmation
+        h.Tick();
+        Assert.Null(talk.Outcome);
+
+        h.ServerMessage("You tell Koji the Enchanter, \"tusker\"", 0x04);
+        h.Tick();
+        Assert.Equal(new ActionOutcome(ActionOutcomeKind.Confirmed), talk.Outcome);
+        Assert.Equal(ActionKind.TalkDirect, talk.Kind);
+        Assert.Equal("TalkDirect target=0x7A9B4F14 chars=6", talk.Summary);
+        Assert.Contains(h.Log.Lines, l => l.Contains("action #" + talk.Id + " TalkDirect (Automation) Confirmed: TalkDirect target=0x7A9B4F14 chars=6", StringComparison.Ordinal));
+        Assert.DoesNotContain(h.Log.Lines, l => l.Contains("tusker", StringComparison.Ordinal) && l.Contains("action #", StringComparison.Ordinal));
+        var entry = h.ActionLog[h.ActionLog.Count - 1];
+        Assert.Equal((ActionKind.TalkDirect, ActionSource.Automation, "TalkDirect target=0x7A9B4F14 chars=6", ActionOutcomeKind.Confirmed), (entry.Kind, entry.Source, entry.Summary, entry.Outcome.Kind));
+    }
+
+    /// <summary>M6 14: ACE answers a direct talk to an id that is no creature on the landblock with WeenieError CharacterNotAvailable (GameActionTalkDirect.cs 21-27): a server error that names the id.</summary>
+    [Fact]
+    public void TalkDirect_fails_by_name_on_the_server_s_refusal()
+    {
+        var h = new ActionHarness();
+        h.Present();
+        var talk = h.Api.TalkDirect(0x7A9B4F14, "tusker", ActionSource.Automation);
+        h.Tick();
+
+        h.R.Reducer.OnWeenieError(h.R.Context, h.Header, new WeenieErrorEvent(0x052B, null));
+        h.Tick();
+        Assert.Equal(ActionOutcomeKind.ServerError, talk.Outcome!.Value.Kind);
+        Assert.Equal(0x052Bu, talk.Outcome.Value.Code);
+        Assert.Equal("no creature with the id 0x7A9B4F14 is on the landblock (WeenieError 0x052B)", talk.Outcome.Value.Detail);
+        Assert.Contains(h.Log.Lines, l => l.Contains("TalkDirect (Automation) ServerError: TalkDirect target=0x7A9B4F14 chars=6: no creature with the id 0x7A9B4F14", StringComparison.Ordinal));
+    }
+
+    /// <summary>M6 14: with neither answer the direct talk ends at the policy's limit (5 s from the send, the tell's), with a warning that names the target; the text is in no line.</summary>
+    [Fact]
+    public void TalkDirect_times_out_at_the_policy_s_limit_and_says_which_target()
+    {
+        Assert.Equal(5.0, Lifestone.Client.Session.Actions.ActionPolicy.TalkDirectSeconds);
+        var h = new ActionHarness();
+        h.Present();
+        var talk = h.Api.TalkDirect(0x7A9B4F14, "tusker", ActionSource.Automation);
+        h.Tick();
+        h.Tick(4.9);
+        Assert.Null(talk.Outcome);
+
+        h.Tick(0.2);
+        Assert.Equal(new ActionOutcome(ActionOutcomeKind.TimedOut, 0, "no confirmation within 5 s"), talk.Outcome);
+        Assert.Contains(h.Log.Lines, l => l.Contains("direct talk: neither the confirmation line nor WeenieError 0x052B came for 0x7A9B4F14", StringComparison.Ordinal));
+        Assert.Contains(h.Log.Lines, l => l.Contains("TalkDirect (Automation) TimedOut: TalkDirect target=0x7A9B4F14 chars=6: no confirmation within 5 s", StringComparison.Ordinal));
+        Assert.DoesNotContain(h.Log.Lines, l => l.Contains("tusker", StringComparison.Ordinal));
+    }
+
+    /// <summary>M6 14: no target and no text are refused at once and nothing is sent; so is a direct talk outside the world.</summary>
+    [Fact]
+    public void TalkDirect_is_refused_at_once_without_a_target_a_text_or_a_world()
+    {
+        var h = new ActionHarness();
+        h.Present();
+        Assert.Equal(new ActionOutcome(ActionOutcomeKind.Refused, 0, "no one to tell"), h.Api.TalkDirect(0, "tusker", ActionSource.Automation).Outcome);
+        Assert.Equal(new ActionOutcome(ActionOutcomeKind.Refused, 0, "nothing to tell"), h.Api.TalkDirect(0x7A9B4F14, string.Empty, ActionSource.Automation).Outcome);
+        h.Tick();
+        Assert.Empty(h.Net.Of(FakeSendKind.TalkDirect));
+
+        // A dry run names what would go out: the action, the target and the length.
+        h.Api.DryRun = true;
+        Assert.Equal(
+            new ActionOutcome(ActionOutcomeKind.DryRun, 0, "would send GameAction 0x0032 TalkDirect target=0x7A9B4F14 (6 characters)"),
+            h.Api.TalkDirect(0x7A9B4F14, "tusker", ActionSource.Automation).Outcome);
+        h.Tick();
+        Assert.Empty(h.Net.Of(FakeSendKind.TalkDirect));
+
+        var outside = new ActionHarness();
+        outside.AtCharacterSelect();
+        var early = outside.Api.TalkDirect(0x7A9B4F14, "tusker", ActionSource.Automation);
+        outside.Tick();
+        Assert.Equal(ActionOutcomeKind.Refused, early.Outcome!.Value.Kind);
+        Assert.Empty(outside.Net.Of(FakeSendKind.TalkDirect));
+    }
+
     [Fact]
     public void LogOff_adds_chat_line_and_completes_on_character_list()
     {

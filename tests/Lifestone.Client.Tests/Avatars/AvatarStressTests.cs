@@ -51,6 +51,7 @@ public sealed class AvatarStressTests(ITestOutputHelper output)
     }
 
     [Fact]
+    [Trait("Tier", "Timing")] // m4-timing-tier-candidates: a per-frame wall-clock bound over 150 avatars
     public void Timing_of_150_walking_avatars()
     {
         var set = new AvatarSet(AvatarRig.Sources());

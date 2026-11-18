@@ -671,7 +671,7 @@ public sealed class GameInventoryPageTests(DatSetFixture fixture, ITestOutputHel
     [RequiresLocalDatsFact]
     public void A_near_full_sack_draws_its_23_items_in_order_and_one_empty_cell_for_its_free_slot_from_its_first_row()
     {
-        // m5-8-pack-window-contents (the owner's second screenshot): "Contents of Sack" showed 11 items then 7 empty cells while the Sack held 23 of 24. The list kept the layout's 102 cells for a 24-slot sack and kept the
+        // m5-8-pack-window-contents (the owner's second screenshot): the Contents of Sack window showed 11 items then 7 empty cells while the Sack held 23 of 24. The list kept the layout's 102 cells for a 24-slot sack and kept the
         // backpack's scroll when the sack opened, so the first two rows (the newest loot, put at slot 0) were scrolled off. Retail sizes the list to the container (ItemList_UpdateContainerListSize) and shows its first row
         // when it opens one (ItemList_OpenContainer's ScrollToShow(0)).
         using var g = Enter(populate: false);
@@ -911,6 +911,7 @@ public sealed class GameInventoryPageTests(DatSetFixture fixture, ITestOutputHel
     }
 
     [RequiresLocalDatsFact]
+    [Trait("Tier", "Timing")] // m4-timing-tier-candidates: an 8 ms wall-clock bound
     public void The_controllers_construction_is_one_small_unit_under_eight_milliseconds()
     {
         using var g = Enter(populate: false);

@@ -189,7 +189,12 @@ public sealed partial class FightScenarioTests
             r.Frame(scenario);
         }
 
-        // The rig's ACE finished its walk and opened the corpse after the put-off (nothing cancels the Use), so the retry found it already open (nothing was sent again) and looted it.
+        // No movement controller is bound in this rig, so no key could end the walk (M6 14: named, m6-loot-walk-cut-refused; with one bound the walk ends, FightScenarioTests.LootWalkCut.cs). The rig's ACE finished its walk and
+        // opened the corpse after the put-off, so the retry found it already open (nothing was sent again) and looted it.
+        Assert.Equal(1, LinesWith(r, "can not be ended: no movement controller is bound, so no key can be pressed"));
+        Assert.Equal(1, LinesWith(r, "(m6-loot-walk-cut-refused)"));
+        Assert.Equal(0, scenario.LootWalkCuts);
+        Assert.Equal(1, scenario.LootWalkCutsUnseen);
         Assert.Contains(r.Log.Lines, l => l.Contains("put off ", StringComparison.Ordinal) && l.Contains("is retried: no target in reach and nothing in the way", StringComparison.Ordinal));
         Assert.Equal([CorpseA], r.Closed);
         Assert.EndsWith(" corpses_opened=1 loot_left_aggro=1 loot_left_decayed=0 worth_a_look=0 stack_merges=0 loot_busy_waits=0 loot_left_busy=0", scenario.LootFields(), StringComparison.Ordinal);

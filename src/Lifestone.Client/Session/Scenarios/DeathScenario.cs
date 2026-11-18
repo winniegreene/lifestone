@@ -38,7 +38,7 @@ namespace Lifestone.Client.Session.Scenarios;
 /// away from the lifestone the bind used (or, when the run did not bind, with no lifestone near: <c>respawn=elsewhere</c>, the arrival cell named) and a death handler step that fails (its failure is named).</para>
 /// <para>Per-step code allocates nothing but log lines on events: the handlers are subscribed once and the health share is formatted only when it crosses a 10% step.</para>
 /// </remarks>
-public sealed partial class DeathScenario : IScenario, IDisposable
+public sealed partial class DeathScenario : IScenario, IDisposable, Journey.IStationHeld
 {
     /// <summary>The scenario's token (<c>--scenario=death-and-regear</c>).</summary>
     public const string ScenarioName = "death-and-regear";
@@ -74,6 +74,13 @@ public sealed partial class DeathScenario : IScenario, IDisposable
 
     /// <summary>Seconds the scenario waits after the arrival is present for ACE's 3 s of vitals (@95ef426d <c>Player_Death.cs</c> 262-282) and for the arrival's objects.</summary>
     public const double VitalsSeconds = 5;
+
+    /// <summary>
+    /// M6 6 C1 (<c>m6-gate-respawn-lifestone-race</c>): how long past <see cref="VitalsSeconds"/> the respawn is re-read each frame while no lifestone object stands within <see cref="DeathLegVerdict.LifestoneRadiusMetres"/> of the arrival,
+    /// in seconds (Lifestone's own tuning, not a world fact): the lifestone's CreateObject comes with the arrival landblock's objects, and on M6's gate round 3 it had not landed when the one read was taken; ten seconds is twice the vitals wait,
+    /// long past any create the arrival's landblock sends, and short against the handler's own minute for the arrival. Past it the respawn fails by name as before.
+    /// </summary>
+    public const double RespawnClassifySeconds = 10;
 
     /// <summary>The seconds <see cref="DeathOptions.StopAfterHits"/> waits after the first 0x01B2 with the health share under 100%, so the health updates and the health share are logged.</summary>
     public const double StopAfterHitsSeconds = 3;
@@ -131,6 +138,10 @@ public sealed partial class DeathScenario : IScenario, IDisposable
     private double _stageStart;
     private double _settleUntil = double.NaN;
     private double _vitalsUntil = double.NaN;
+    private double _classifyFrom = double.NaN; // M6 6 C1: the first respawn read that found no lifestone object (the re-reads' start)
+    private CellFrame? _homeLifestone; // M6 6 C1: the home lifestone point a tied journey's respawn is classified against (no bind in this run)
+    private string? _homeAgainst;
+    private bool _bindPointMissingLogged; // M6 6 FXD1: the "bound but no point" warning, once
     private double _useAt = double.NaN;
     private double _stopAt = double.NaN;
     private uint _bindError;
@@ -142,6 +153,8 @@ public sealed partial class DeathScenario : IScenario, IDisposable
     private DeathLegMeasures? _frozen;
     private bool _enteredHere;
     private readonly GroundExit _exit;
+    private bool _observedEntry; // M6 7 U: the run entered at the respawn of a death it did not script (BeginAfterRespawn)
+    private bool _enteredAgain; // M6 7 AG: that entry found the body away from the respawn: a cut's second entry, no respawn to run
     private readonly SeamLeg _seam;
     private bool _failLeave;
     private float _stopWithin;
@@ -174,7 +187,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
     /// <param name="fight">M4 3.1 d1: the fight's options for the fight stage, or null for <see cref="FightOptions"/> with <see cref="DeathOptions.FightKills"/> and <see cref="DeathOptions.FightSeconds"/>.</param>
     /// <param name="fightFactory">M4 3.1 d1: how the composed inner fight scenario is made (default <see cref="DefaultFightLeg"/>, the real <see cref="FightScenario"/>); the tests give a scripted one.</param>
     public DeathScenario(IReadOnlyDictionary<uint, SpellInfo> spells, string account, DeathOptions death, IFightWalk? walk, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, DeathStages stages = DeathStages.All, IApproachWalk? approach = null, BuffOptions? buff = null, FightOptions? fight = null, FightLegFactory? fightFactory = null)
-        : this(GearKit.Build(spells ?? throw new ArgumentNullException(nameof(spells)), account, ground: fight?.GroundProfile), spells, death, walk, log, arrivalSeconds, endSession, stages, approach, buff, fight, fightFactory)
+        : this(GearKit.BuildFor(spells ?? throw new ArgumentNullException(nameof(spells)), account, fight?.GroundProfile), spells, death, walk, log, arrivalSeconds, endSession, stages, approach, (buff ?? new BuffOptions()) with { AccountName = account }, fight, fightFactory) // M6 1 w: the gear's first cast and the composed fight (the handler's buff options) read the account's formula
     {
     }
 
@@ -212,7 +225,14 @@ public sealed partial class DeathScenario : IScenario, IDisposable
             _fightOptions = _fightOptions with { Travel = travel, PlacePurpose = TravelPurpose.Ground, LeaveOnFailure = death.LeaveOnFailure, LeaveAtEnd = death.LeaveOnFailure };
         }
         _fightFactory = fightFactory ?? DefaultFightLeg;
-        _gear = (stages & DeathStages.Gear) != 0 ? new GearScenario(kit, log, arrivalSeconds, endSession: false, cast: false, spells) { NoGrant = true } : null;
+        if (kit.Items.Count == 0 && (_stages & DeathStages.Gear) != 0)
+        {
+            // M6 0 F3 (closes TODO(m6-death-outdoor-kit)): a character whose profile has no kit has no gear stage (nothing to verify); what a death takes and gives back is the worn set's (the handler's WornRestorer).
+            _stages &= ~DeathStages.Gear;
+            log.Info(LogCategory, "the profile has no kit: no gear stage; the items back after a death are the worn set's (TODO(m6-death-outdoor-kit) closed)");
+        }
+
+        _gear = (_stages & DeathStages.Gear) != 0 ? new GearScenario(kit, log, arrivalSeconds, endSession: false, cast: false, spells) { NoGrant = true, Account = _buffOptions.AccountName } : null; // M6 1 w
         _exit = new GroundExit(_ground, log, LogCategory, travel);
         _holtburg = _exit.Destination;
     }
@@ -248,8 +268,11 @@ public sealed partial class DeathScenario : IScenario, IDisposable
     /// <summary>The position the lifestone had when the bind used it, or null.</summary>
     public CellFrame? LifestonePosition => _lifestonePosition;
 
-    /// <summary>The position of the lifestone this run bound at, or null when the run did not bind (the bind stage was off or has not taken): what <c>respawn=</c> is classified against.</summary>
-    public CellFrame? BoundLifestone => _bound ? _lifestonePosition : null;
+    /// <summary>
+    /// The position of the lifestone this run bound at, or null when the run did not bind (the bind stage was off or has not taken): what <c>respawn=</c> is classified against (and the handler's respawn). M6 6 C1, FXD1 (6-D5): a run that
+    /// did not bind but whose journey's bind station bound gives that lifestone's position here once the respawn is read (<see cref="JourneyBindPoint"/>, <see cref="JourneyFacts.BoundAt"/>).
+    /// </summary>
+    public CellFrame? BoundLifestone => _bound ? _lifestonePosition : _homeLifestone;
 
     /// <summary>True when the re-gear left the wand and the five pieces wielded (<c>gear_restored=yes</c>).</summary>
     public bool GearRestored => _gearRestored;
@@ -324,7 +347,10 @@ public sealed partial class DeathScenario : IScenario, IDisposable
         var measures = _frozen is { } frozen
             ? frozen with { DeathFrameMaxMs = deathFrameMaxMs, FightFrameMaxMs = fightFrameMaxMs }
             : MeasuresNow(deathFrameMaxMs, fightFrameMaxMs);
-        return DeathLegVerdict.Compose(Failure, in measures, (_stages & DeathStages.Death) != 0);
+
+        // M6 7 U (r1f-climb, verdict ok=false hits_taken=0 after a Female Tusker's one blow): the death's judged fields (D33 to D36) are the scripted death's. A death the run only observed is printed and not judged: a killing blow sends the death
+        // message and no hit notice (@95ef426d Player_Combat.cs 526-527 return before the DefenderNotification of 542), so one blow reads hits_taken=0 on a real death. A failure still fails it.
+        return DeathLegVerdict.Compose(Failure, in measures, (_stages & DeathStages.Death) != 0 && !_observedEntry);
     }
 
     private DeathLegMeasures MeasuresNow(double? deathFrameMaxMs, double? fightFrameMaxMs)
@@ -591,7 +617,11 @@ public sealed partial class DeathScenario : IScenario, IDisposable
         }
 
         _disposed = true;
-        _tally.Dispose();
+        if (!_observedEntry)
+        {
+            _tally.Dispose(); // M6 7 AG: an observed tally is the autopilot's, running since its start: a cut's second entry and the deaths during it read it (it would stop here, and a second death or an attack would go unseen)
+        }
+
         _movedSubscription?.Dispose();
         _chatSubscription?.Dispose();
         _qualitiesSubscription?.Dispose();
@@ -680,20 +710,61 @@ public sealed partial class DeathScenario : IScenario, IDisposable
         _selfTeleports = observed.DeathTeleports; // the teleports the observed tally already saw were the player's own positions too
         _deathStart = double.IsNaN(observed.LastCorpseAt) ? clock : observed.LastCorpseAt;
         _deathEnd = clock;
+        _observedEntry = true;
         _pending = null;
+        if (LeftTheRespawn(session, observed, out var metres))
+        {
+            return EnterAgain(session, clock, observed, metres);
+        }
+
         _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"death: entered after a death the autopilot did not script (m5-autopilot-death-unscripted): victim notices {observed.VictimNotices}, deaths {observed.Deaths}, corpse 0x{observed.LastCorpseGuid:X8}, death teleports {observed.DeathTeleports}; no walk, no undress, no lie-down: the respawn, then the handler's order"));
         Enter("respawn", clock);
         return ScenarioStatus.Running;
     }
 
-    /// <summary>M4 P5b: a <see cref="DeathOptions.StartAt"/> that is not one of the linear stages (gear, bind, den, death), or one the stage mask leaves out, is refused loudly; null when it is fine or not given.</summary>
+    /// <summary>
+    /// M6 7 AG (gate m6-7-g: a watchdog's cut 9.7 m from the corpse, then the respawn's 5 s wait and a <c>respawn: lifestone</c> line with the body in the den, 2.3 m from a Tusker Guard): true when the tally's death has its arrival and the living body now
+    /// stands past <see cref="DeathLegVerdict.LifestoneRadiusMetres"/> of it: this death's respawn is over (a cut's second entry). A body at the arrival, one still dead or in portal space, or a death with no arrival yet takes the respawn as before.
+    /// </summary>
+    private static bool LeftTheRespawn(IGameSessionView session, DeathTally observed, out double metres)
+    {
+        metres = 0;
+        var self = session.State.Self;
+        if (!observed.HasArrival || self.Travel != SelfTravel.Present || self.Position is not { } here || !self.Qualities.TryGetVitalLevels(1, out var health, out _) || health == 0)
+        {
+            return false;
+        }
+
+        var arrival = new CellFrame(observed.ArrivalCell, observed.ArrivalFrame);
+        metres = arrival.ToGlobal().DistanceTo(here.ToGlobal());
+        return metres > DeathLegVerdict.LifestoneRadiusMetres;
+    }
+
+    /// <summary>
+    /// M6 7 AG: a cut's second entry: nothing of the respawn runs again (no arrival wait, no vitals wait, no classification: the object table no longer holds the lifestone, so an unbound run would fail <c>respawn=elsewhere</c>). The first entry judged it lifestone or the
+    /// station would have failed there. No death is counted here: the tally's deaths are the server's (0x02CD). The handler takes its order from the rearm, from where the body stands.
+    /// </summary>
+    private ScenarioStatus EnterAgain(IGameSessionView session, double clock, DeathTally observed, double metres)
+    {
+        _enteredAgain = true;
+        _respawn = DeathRespawn.Lifestone;
+        _respawnCell = observed.ArrivalCell;
+        _ = observed.SampleVitalsAfterArrival(); // an observed tally the first entry did not read (a scripted death's station has its own): the share printed in vitals_pct= is the body's now
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"death: entered again after a cut: the body stands in cell 0x{session.State.Self.Position!.Value.CellId:X8}, {metres:0} m from the respawn's arrival in cell 0x{observed.ArrivalCell:X8}: the respawn is not run again and no death is counted (victim notices {observed.VictimNotices}, deaths {observed.Deaths}, corpse 0x{observed.LastCorpseGuid:X8}); the handler's order from the rearm"));
+        return BeginPost(session, clock);
+    }
+
+    /// <summary>
+    /// M4 P5b: a <see cref="DeathOptions.StartAt"/> that is not one of the linear stages (gear, bind, den, death), or one the stage mask leaves out, is refused loudly; null when it is fine or not given. M6 6 C1 (<c>m4-death-start-at</c> closed):
+    /// the stages after the death (the corpse, the rebuff, the fight) are not startable by design: a death handled elsewhere enters at the respawn with its tally (<see cref="JourneyFacts.ObservedDeath"/>, <see cref="BeginAfterRespawn"/>).
+    /// </summary>
     private string? StartAtProblem() =>
         _options.StartAt switch
         {
             null => null,
             DeathStages.Gear or DeathStages.Bind or DeathStages.Den or DeathStages.Death when (_stages & _options.StartAt.Value) != 0 => null,
             DeathStages.Gear or DeathStages.Bind or DeathStages.Den or DeathStages.Death => $"start_at: the stage {_options.StartAt.Value.ToString().ToLowerInvariant()} is not in this run's stages ({_stages.ToString().ToLowerInvariant()})",
-            _ => $"start_at: {_options.StartAt.Value.ToString().ToLowerInvariant()} is not a stage a run can begin at (gear, bind, den, death); TODO(m4-death-start-at)",
+            _ => $"start_at: {_options.StartAt.Value.ToString().ToLowerInvariant()} is not a stage a run can begin at (gear, bind, den, death): the stages after the death (the corpse among them) are not startable, by design; a death handled elsewhere enters at the respawn through JourneyFacts.ObservedDeath (m4-death-start-at, closed M6 6 C1)",
         };
 
     // ------------------------------------------------------------------------------------------------ the spell bars
@@ -1218,6 +1289,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
         if (_tally.DeathTeleports > _deathTeleportBase && _selfTeleports > _selfBase && session.State.Self.Travel == SelfTravel.Present)
         {
             _vitalsUntil = clock + VitalsSeconds;
+            _classifyFrom = double.NaN; // M6 6 C1: each arrival's re-reads start afresh
             Enter(next, clock);
             return ScenarioStatus.Running;
         }
@@ -1240,8 +1312,35 @@ public sealed partial class DeathScenario : IScenario, IDisposable
             return ScenarioStatus.Running;
         }
 
+        if (!_bound && _homeLifestone is null)
+        {
+            _homeLifestone = JourneyBindPoint(out _homeAgainst);
+        }
+
         var bound = BoundLifestone;
+        var against = _bound && bound is { } ownBind ? "the lifestone the bind used in cell 0x" + ownBind.CellId.ToString("X8", CultureInfo.InvariantCulture) : _homeAgainst ?? "any lifestone object: this run did not bind and no tie is known";
         var respawn = DeathLegVerdict.ClassifyRespawn(_tally, session.State.Objects, bound);
+        if (respawn == DeathRespawn.Elsewhere && bound is null && !_diedEarly)
+        {
+            // M6 6 C1 (m6-gate-respawn-lifestone-race): the object rule read before the lifestone's CreateObject landed: re-read each frame for at most RespawnClassifySeconds, then fail by name as before.
+            if (double.IsNaN(_classifyFrom))
+            {
+                _classifyFrom = clock;
+                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"respawn: no lifestone object within {DeathLegVerdict.LifestoneRadiusMetres:0} m of the arrival in cell 0x{_tally.ArrivalCell:X8} yet ({against}): re-read each frame for at most {RespawnClassifySeconds:0} s (its create may not have landed)"));
+            }
+
+            if (clock - _classifyFrom < RespawnClassifySeconds)
+            {
+                return ScenarioStatus.Running;
+            }
+        }
+
+        if (!double.IsNaN(_classifyFrom))
+        {
+            var arrival = _vitalsUntil - VitalsSeconds;
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"respawn: classified after {clock - arrival:0.0} s ({respawn.ToString().ToLowerInvariant()}; {clock - _classifyFrom:0.0} s of re-reads past the {VitalsSeconds:0} s vitals wait, at most {RespawnClassifySeconds:0})"));
+        }
+
         _respawn = respawn; // the verdict keeps this classification and this arrival: a later re-measure never replaces it (the tally's arrival can be overwritten by a later position; after the log off the object table is empty)
         _respawnCell = _tally.ArrivalCell;
         _ = _tally.SampleVitalsAfterArrival(); // M4 2.2 fix R1: the judged vitals are each vital's value at the END of this wait (ACE's 75% comes 3 s after the teleport, after any regeneration or drain tick), not the first update
@@ -1249,7 +1348,7 @@ public sealed partial class DeathScenario : IScenario, IDisposable
             LogCategory,
             string.Create(
                 CultureInfo.InvariantCulture,
-                $"respawn: {respawn.ToString().ToLowerInvariant()} (arrival cell 0x{_tally.ArrivalCell:X8}, classified against {(bound is { } b ? "the lifestone the bind used in cell 0x" + b.CellId.ToString("X8", CultureInfo.InvariantCulture) : "any lifestone object: this run did not bind")}, vitae {_tally.VitaePercent}%, {VitalsText(_tally)}, corpses {_tally.CorpsesSeen}, purges {_tally.Purges}, protected {_tally.ProtectedHits})"));
+                $"respawn: {respawn.ToString().ToLowerInvariant()} (arrival cell 0x{_tally.ArrivalCell:X8}, classified against {against}, vitae {_tally.VitaePercent}%, {VitalsText(_tally)}, corpses {_tally.CorpsesSeen}, purges {_tally.Purges}, protected {_tally.ProtectedHits})"));
         if (_diedEarly)
         {
             _log.Info(LogCategory, "respawn: " + respawn.ToString().ToLowerInvariant() + " (report-only under StopAfterHits)");
@@ -1258,10 +1357,35 @@ public sealed partial class DeathScenario : IScenario, IDisposable
 
         if (respawn != DeathRespawn.Lifestone)
         {
-            return Fail(session, string.Create(CultureInfo.InvariantCulture, $"respawn: respawn={respawn.ToString().ToLowerInvariant()}: the player arrived in cell 0x{_tally.ArrivalCell:X8} {(bound is { } at ? "more than " + DeathLegVerdict.LifestoneRadiusMetres.ToString("0", CultureInfo.InvariantCulture) + " m from the lifestone the bind used (cell 0x" + at.CellId.ToString("X8", CultureInfo.InvariantCulture) + ")" : "with no lifestone object within " + DeathLegVerdict.LifestoneRadiusMetres.ToString("0", CultureInfo.InvariantCulture) + " m")} (the bind to Holtburg's lifestone did not hold, D34)"));
+            return Fail(session, string.Create(CultureInfo.InvariantCulture, $"respawn: respawn={respawn.ToString().ToLowerInvariant()}: the player arrived in cell 0x{_tally.ArrivalCell:X8} {(bound is { } at ? "more than " + DeathLegVerdict.LifestoneRadiusMetres.ToString("0", CultureInfo.InvariantCulture) + " m from " + (_bound ? "the lifestone the bind used" : "the lifestone the journey's bind station used") + " (cell 0x" + at.CellId.ToString("X8", CultureInfo.InvariantCulture) + ")" : "with no lifestone object within " + DeathLegVerdict.LifestoneRadiusMetres.ToString("0", CultureInfo.InvariantCulture) + " m after " + RespawnClassifySeconds.ToString("0", CultureInfo.InvariantCulture) + " s of re-reads")} (the bind did not hold, D34)"));
         }
 
         return BeginPost(session, clock); // M4 3.1 d1: the measures freeze here, then the stages after the respawn in their order (DeathScenario.Order.cs)
+    }
+
+    /// <summary>
+    /// M6 6 C1 (<c>m6-gate-respawn-lifestone-race</c>, a), FXD1 (6-D5): with no bind in this run but the journey's bind station having bound (<see cref="JourneyFacts.BoundAt"/>: the lifestone it used, recorded at the Use, ACE's Sanctuary,
+    /// @95ef426d <c>Lifestone.cs</c>:44-76, the respawn point of <c>Player_Death.cs</c>:250), the respawn is classified against that lifestone, never against whatever lifestone object the table holds yet. No place is assumed: the fact is where
+    /// the bind took. A Lifestone Tie is no evidence (it sets LinkedLifestone for Lifestone Recall and does not change where death sends one, <c>WorldObject_Magic.cs</c>:966-975), and neither is <see cref="JourneyFacts.Bound"/> without its point
+    /// (logged; the object rule classifies). Null (and <paramref name="against"/> null) otherwise.
+    /// </summary>
+    private CellFrame? JourneyBindPoint(out string? against)
+    {
+        against = null;
+        var facts = _options.Facts ?? _options.Journey?.Facts;
+        if (facts?.BoundAt is not { } at)
+        {
+            if (facts is { Bound: true } && !_bindPointMissingLogged)
+            {
+                _bindPointMissingLogged = true;
+                _log.Warn(LogCategory, "respawn: the journey's facts say a bind ran but hold no point for it (JourneyFacts.BoundAt unset): the object rule classifies");
+            }
+
+            return null;
+        }
+
+        against = string.Create(CultureInfo.InvariantCulture, $"the lifestone the journey's bind station used in cell 0x{at.CellId:X8} (JourneyFacts.BoundAt, ACE's Sanctuary)");
+        return at;
     }
 
     // ------------------------------------------------------------------------------------------------ the end
@@ -1274,10 +1398,20 @@ public sealed partial class DeathScenario : IScenario, IDisposable
         return AfterMeasures(session, clock);
     }
 
+    /// <summary>
+    /// M6 7 U (r1f-climb: <c>stage leave-den</c> from the ground the climb wanted): true for an embedded run with no fight of its own (a journey's station, <see cref="DeathOptions.LeaveOnFailure"/> false, and <see cref="DeathOptions.Fight"/> off: the
+    /// autopilot's station): the run's next move is its caller's known state, so the station ends where the handler ended and never walks home; a log off is not coming. Every other run leaves as before.
+    /// </summary>
+    private bool CallerDecides => !_options.LeaveOnFailure && !_options.Fight;
+
     /// <summary>After the freeze: out of the den, then the end (M5 3 d2: the vitae stage is removed, D51).</summary>
     private ScenarioStatus AfterMeasures(IGameSessionView session, double clock)
     {
-        if (_exit.Begin(session, clock, _selfTeleports))
+        if (!_exit.Begun && CallerDecides && GroundExit.InGround(session, _ground))
+        {
+            _log.Info(LogCategory, $"no leave of {_ground.Name}: the body stands on it and the caller's known state takes the next move (M6 7 U)");
+        }
+        else if (_exit.Begin(session, clock, _selfTeleports))
         {
             Enter("leave-den", clock);
             return ScenarioStatus.Running;

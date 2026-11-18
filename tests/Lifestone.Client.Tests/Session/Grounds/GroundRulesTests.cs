@@ -190,6 +190,28 @@ public sealed class GroundRulesTests(DatSetFixture fixture, ITestOutputHelper ou
         Assert.Equal($"the walk entered the no-go cell 0x01050341 of {den.Name} (TODO(m3-fight-left-floor) if this is a planner or physics gap)", walk.Failure);
     }
 
+    /// <summary>
+    /// M6 4 w6a (W2's note): the fight walks build their own runners, and like the journey hosts' they carry the NPC body feed, so a leg plans round a standing NPC
+    /// instead of sticking against her (<c>NpcBodyTests</c>); the game's fight walk's runner gets it at its first leg.
+    /// </summary>
+    [RequiresDatsFact]
+    public void The_game_fight_walks_runner_plans_round_the_npcs_bodies()
+    {
+        var dats = fixture.Dats;
+        var den = DenGround.Profile;
+        var world = new PhysicsWorld();
+        world.Attach(new LandblockCollisionBuilder(dats, new PhysicsGeometryLibrary(dats)).Build(GroundRooms.CoordOf(den)));
+        var rig = new J1JourneyRig(J1JourneyRig.DenCell);
+        var walker = OfflineWalker.Create(dats, world, NullLogSink.Instance, new OfflinePlayerWeenie(FighterRunSkill), sink: new RecordingMovementSink());
+        world.UseTime(0.0);
+        Assert.Equal(Data.Physics.Objects.SetPositionError.OK, walker.Physics.SetPositionSimple(den.Arrival.Frame, sliding: true));
+        using var walk = new GameFightWalk(new RoutePlayHost(() => walker, () => 0), GroundRooms.Load(dats, den), den, NullLogSink.Instance);
+        walk.Prepare(rig.View, rig.Now);
+        Assert.True(walk.BeginLeg(rig.View, rig.Now, out _), walk.Failure);
+        Assert.IsType<NpcBodyFeed>(walk.Runner!.BodyFeed);
+        Assert.IsType<SessionDoorFeed>(walk.Runner.Doors);
+    }
+
     [RequiresDatsFact]
     public void Entering_a_no_go_cell_stops_the_game_walk_naming_the_cell_and_the_ground()
     {

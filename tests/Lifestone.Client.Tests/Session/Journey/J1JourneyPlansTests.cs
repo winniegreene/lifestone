@@ -79,7 +79,7 @@ public sealed class J1JourneyPlansTests
     [Fact]
     public void Every_kind_is_in_the_lanes_table_names_are_unique_and_ForName_finds_each_plan()
     {
-        Assert.Equal(22, StationKinds.All.Count); // 18, the hero plans' hotbar and corpses (the M4 hero video), and M5 item 3's resupply and logistics
+        Assert.Equal(27, StationKinds.All.Count); // 18, the hero plans' hotbar and corpses (the M4 hero video), and M5 item 3's resupply and logistics, and M6's pathwarden, academy, buy-trip, rung-change and quest (item 5)
         foreach (var plan in JourneyPlans.All)
         {
             Assert.All(plan.Stations, s => Assert.Contains(s.Kind, StationKinds.All));

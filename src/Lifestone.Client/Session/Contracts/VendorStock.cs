@@ -237,8 +237,15 @@ public sealed class VendorStock
             return SaleRefusal.Retained;
         }
 
-        return item.Weenie.WeenieClassId is BreadWcid or ArrowWcid ? SaleRefusal.UnsellableWeenie : SaleRefusal.None;
+        return UnsellableClass(item.Weenie.WeenieClassId) ? SaleRefusal.UnsellableWeenie : SaleRefusal.None;
     }
+
+    /// <summary>
+    /// True for a weenie class ACE answers "is unsellable" whatever the vendor's mask (<see cref="BreadWcid"/>, <see cref="ArrowWcid"/>: IsSellable 0 in the world database, see <see cref="Unsellable"/>). The class list's one
+    /// statement: the rule book's guard <c>unsellable-class</c> reads it (M6 16 E5c2).
+    /// </summary>
+    /// <param name="wcid">The weenie class id.</param>
+    public static bool UnsellableClass(uint wcid) => wcid is BreadWcid or ArrowWcid;
 
     /// <summary>What one created stack of Value <paramref name="stackValue"/> and ItemType <paramref name="itemType"/> costs: <c>max(1, ceil(SellPrice x Value - 0.1))</c> in ACE's float arithmetic.</summary>
     public uint PriceOfStack(uint stackValue, uint itemType = 0)

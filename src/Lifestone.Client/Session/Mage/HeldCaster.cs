@@ -30,7 +30,7 @@ public static class HeldCaster
             return kit.Guid;
         }
 
-        var main = layout.FreeSlots(PackJob.Main);
+        var main = layout.FreeIn(PackJob.Main);
         var kitWhy = layout.PackOf(PackJob.Kit) is { } full ? string.Create(CultureInfo.InvariantCulture, $"the kit pack 0x{full.Guid:X8} is full ({full.Capacity} of {full.Capacity})") : "no kit pack";
         if (main > 0)
         {
@@ -82,7 +82,7 @@ public static class HeldCaster
             return best;
         }
 
-        var usable = casters.Where(c => c.Appraisal is { IsNotFound: false } a && SelfEquipJudge.Unmet(a, skills) is null)
+        var usable = casters.Where(c => c.Appraisal is { IsNotFound: false } a && SelfEquipJudge.WieldUnmet(a, skills) is null && !judge.HeldBack.IsHeldBack(c.Guid, out _)) // M6 14 (m6-caster): an unmet activation requirement leaves only its spells off; (m6-caster-spend): a caster held back for the run is not wielded again
             .OrderByDescending(c => judge.WarFactor(c.Appraisal)).ThenByDescending(c => SelfEquipJudge.ManaConversion(c.Appraisal)).ThenBy(c => c.Guid).FirstOrDefault();
         if (usable is not null)
         {

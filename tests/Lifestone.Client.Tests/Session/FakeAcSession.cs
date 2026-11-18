@@ -56,9 +56,14 @@ internal enum FakeSendKind
     SetCharacterOptions,
     TeleToLifestone,
     TeleToMarketPlace,
+    BuyHouse,
+    RentHouse,
+    HouseQuery,
+    TeleToHouse,
     Emote,
     SetAfkMode,
     SetAfkMessage,
+    TalkDirect,
 }
 
 /// <summary>One recorded send of a <see cref="FakeAcSession"/> (a struct, so recording into a sized list allocates nothing).</summary>
@@ -294,6 +299,20 @@ internal sealed class FakeAcSession : IAcSession
     public OutboundTicket SendTeleToMarketPlace() => Send(new FakeSend(FakeSendKind.TeleToMarketPlace));
 
     /// <inheritdoc/>
+    public OutboundTicket SendBuyHouse(uint guardian, IReadOnlyList<uint> items) =>
+        Send(new FakeSend(FakeSendKind.BuyHouse, guardian, Items: [.. items.Select(static i => (i, 0u))]));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendRentHouse(uint guardian, IReadOnlyList<uint> items) =>
+        Send(new FakeSend(FakeSendKind.RentHouse, guardian, Items: [.. items.Select(static i => (i, 0u))]));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendHouseQuery() => Send(new FakeSend(FakeSendKind.HouseQuery));
+
+    /// <inheritdoc/>
+    public OutboundTicket SendTeleToHouse() => Send(new FakeSend(FakeSendKind.TeleToHouse));
+
+    /// <inheritdoc/>
     public OutboundTicket SendEmote(ReadOnlySpan<char> text) => Send(new FakeSend(FakeSendKind.Emote, Text: text.ToString()));
 
     /// <inheritdoc/>
@@ -325,6 +344,13 @@ internal sealed class FakeAcSession : IAcSession
     {
         Check();
         return Record(new FakeSend(FakeSendKind.Tell, Text: text.ToString(), Target: target.ToString()));
+    }
+
+    /// <inheritdoc/>
+    public OutboundTicket SendTalkDirect(uint target, ReadOnlySpan<char> text)
+    {
+        Check();
+        return Record(new FakeSend(FakeSendKind.TalkDirect, target, Text: text.ToString()));
     }
 
     /// <inheritdoc/>

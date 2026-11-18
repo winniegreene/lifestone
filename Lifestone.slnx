@@ -5,6 +5,7 @@
     <Project Path="src/Lifestone.Game/Lifestone.Game.csproj" />
     <Project Path="src/Lifestone.Headless/Lifestone.Headless.csproj" />
     <Project Path="src/Lifestone.Net/Lifestone.Net.csproj" />
+    <Project Path="src/Lifestone.WorldWalk/Lifestone.WorldWalk.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Lifestone.Client.Tests/Lifestone.Client.Tests.csproj" />

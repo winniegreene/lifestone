@@ -246,6 +246,33 @@ public sealed class ChatCommandsTests
     // ------------------------------------------------------------------ recalls
 
     [Theory]
+    [InlineData("/house recall")]
+    [InlineData("/hou recall")]
+    [InlineData("/HOUSE Recall")]
+    public void M6_villa_house_recall_asks_for_the_house_recall_from_the_Ui(string line)
+    {
+        var (commands, recorder) = Make();
+        var result = commands.Run(line);
+        var call = Assert.Single(recorder.Calls);
+        Assert.Equal("RecallHouse", call.Name);
+        Assert.Equal(ActionSource.Ui, call.Source);
+        Assert.Equal(ActionKind.RecallHouse, result.Handle!.Kind);
+        Assert.Contains("house recall did not happen", result.FailurePrefix, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("/house")]
+    [InlineData("/house guest add Someone")]
+    public void M6_villa_the_other_house_subcommands_say_they_are_not_built_and_send_nothing(string line)
+    {
+        var (commands, recorder) = Make();
+        var result = commands.Run(line);
+        Assert.Empty(recorder.Calls);
+        Assert.Equal("chat:cmd:house", result.TodoKey);
+        Assert.Contains("TODO(villa-house-subcommands)", result.TodoMessage, StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData("/lifestone")]
     [InlineData("/lif")]
     [InlineData("/ls")]
@@ -313,7 +340,7 @@ public sealed class ChatCommandsTests
     [Theory]
     [InlineData("/help", "help")]
     [InlineData("/Friends", "friends")]
-    [InlineData("/house", "house")]
+    [InlineData("/hslist", "hslist")]
     public void A_retail_client_command_that_is_not_built_is_answered_by_name_with_a_todo_and_not_sent(string line, string name)
     {
         var (commands, recorder) = Make();
@@ -423,6 +450,12 @@ public sealed class ChatCommandsTests
             Calls.Add("auto");
             return "auto line";
         }
+
+        public string Run(AutopilotTask task)
+        {
+            Calls.Add("run:" + task.Name);
+            return "run line " + task.Name;
+        }
     }
 
     [Theory]
@@ -446,6 +479,78 @@ public sealed class ChatCommandsTests
         Assert.Equal(new ChatCommandLine(ChatTextTypes.System, answer), Assert.Single(result.Lines));
         Assert.Equal([call], controls.Calls);
         Assert.Null(result.TodoKey);
+    }
+
+    [Theory]
+    [InlineData("/auto level-up", "run:job")]
+    [InlineData("/AUTO Level-Up", "run:job")]
+    [InlineData("/auto errand", "run:errand")]
+    [InlineData("/auto quest holtburg-sword", "run:quest:holtburg-sword")]
+    [InlineData("/auto quest:holtburg-sword", "run:quest:holtburg-sword")]
+    public void M6_6_MD1_auto_with_a_task_chooses_it_through_the_controls_and_sends_nothing(string line, string call)
+    {
+        var (commands, recorder) = Make();
+        var controls = new Controls();
+        commands.Autopilot = controls;
+        var result = commands.Run(line);
+        Assert.Empty(recorder.Calls);
+        Assert.Null(result.Handle);
+        Assert.True(result.ClientHandled);
+        Assert.Equal([call], controls.Calls);
+        Assert.Equal("run line " + call[4..], Assert.Single(result.Lines).Text);
+    }
+
+    [Theory]
+    [InlineData("/auto banana")]
+    [InlineData("/auto quest")] // no key
+    [InlineData("/auto quest a b")]
+    [InlineData("/auto errand now")]
+    [InlineData("/auto level-up please")]
+    public void M6_6_MD1_auto_with_an_unknown_argument_answers_its_usage_and_starts_nothing(string line)
+    {
+        var (commands, recorder) = Make();
+        var controls = new Controls();
+        commands.Autopilot = controls;
+        var result = commands.Run(line);
+        Assert.Empty(recorder.Calls);
+        Assert.Empty(controls.Calls);
+        Assert.Null(result.Handle);
+        Assert.True(result.ClientHandled);
+        var text = Assert.Single(result.Lines).Text;
+        Assert.Contains("/auto [level-up | level-up quest <key> | quest <key> | errand]", text, StringComparison.Ordinal); // M6 14: the start quest joins the usage
+        Assert.Contains("nothing was started", text, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("/auto quest:")]
+    [InlineData("/auto quest:Upper")] // the key is the quest file's name in lower case
+    public void M6_6_MD1_auto_with_a_bad_quest_key_names_it_and_starts_nothing(string line)
+    {
+        var (commands, _) = Make();
+        var controls = new Controls();
+        commands.Autopilot = controls;
+        var result = commands.Run(line);
+        Assert.Empty(controls.Calls);
+        Assert.True(result.ClientHandled);
+        Assert.Contains("names no quest key", Assert.Single(result.Lines).Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void M6_6_MD1_a_refusal_from_the_controls_is_the_chat_line_and_auto_with_a_task_without_an_autopilot_says_so()
+    {
+        var (commands, _) = Make();
+        Assert.Equal(ChatCommands.NoAutopilotLine, Assert.Single(commands.Run("/auto errand").Lines).Text);
+        commands.Autopilot = new Refusing();
+        Assert.Equal("refused: nothing was started", Assert.Single(commands.Run("/auto quest:x").Lines).Text);
+    }
+
+    private sealed class Refusing : IAutopilotChatControls
+    {
+        public string Stop() => "stop";
+
+        public string Auto() => "auto";
+
+        public string Run(AutopilotTask task) => "refused: nothing was started";
     }
 
     [Theory]
@@ -520,6 +625,7 @@ public sealed class ChatCommandsTests
                 nameof(IActionApi.SetAfk) => (ActionKind.SetAfk, [Text(arguments[0]), Text(arguments[1])]),
                 nameof(IActionApi.RecallLifestone) => (ActionKind.RecallLifestone, []),
                 nameof(IActionApi.RecallMarketplace) => (ActionKind.RecallMarketplace, []),
+                nameof(IActionApi.RecallHouse) => (ActionKind.RecallHouse, []), // M6 villa
                 _ => null,
             };
             if (recorded is not { } call)

@@ -1,3 +1,5 @@
+using System.Numerics;
+using Lifestone.Client.Avatars;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Movement.Wayfinding;
 using Lifestone.Client.Session.Contracts;
@@ -61,6 +63,13 @@ public interface IJourneyLegBody
     /// (every door then assumes <see cref="DoorCrossings.UnknownRadiusMetres"/>, logged once). The two hosts return <c>DoorCrossings.SetupExtents(dats)</c> here (<c>TODO(door-extent-host)</c> is closed).
     /// </summary>
     Func<uint, float?>? SetupExtent => null;
+
+    /// <summary>
+    /// M6 14 hub plan: runs work on one of the host's workers and gives its task, or null for a host that plans on its own thread alone (the headless host: its steps are not frames anyone sees). The Godot host gives its
+    /// worker pool, and a leg in the rooms of one landblock first works its rooms out there (<see cref="JourneyLegPlanner.RoomsWarmUp"/>), so its plans on the game's thread hold no frame (live 2026-11-16 16:54:52 UTC:
+    /// the first walk in the Town Network held the game's frames 12 s).
+    /// </summary>
+    Func<Action, Task>? OffThread => null;
 }
 
 /// <summary>
@@ -78,13 +87,116 @@ public interface IJourneyLegBody
 /// <param name="log">The log.</param>
 public sealed class JourneyRunLeg(JourneyLegPlanner planner, IJourneyLegBody body, TravelRequest request, string name, double startedAt, ILogSink log) : ITravelLeg
 {
+    /// <summary>How far from the straight line to the goal a portal is carried on the run's list (M6 7 AI), in metres: a landblock; a route wanders less than that off its line. Not retail: Lifestone's own.</summary>
+    private const float KeepOffReachMetres = 192f;
+
+    /// <summary>
+    /// M6 item 14 (<c>m6-vendor-portal-keep-off</c>; live 2026-11-13: the first walk from Uziz's Network drop to its archmage ran into the Haven Residential Halls Portal, which stands outdoors on the way and is in no travel record;
+    /// it took the body on touch and the stop, the rung change and the run ended): the portals a walk to a shopkeeper keeps clear of when its request names none: every portal object the client holds a place for
+    /// (<see cref="WorldContentCensus.Classify"/>: the Portal bit of the object's description, what the client draws), read when the leg plans. A portal within the clearance of the walk's own end is left out, so an end beside a
+    /// portal is never refused (as <c>RungPortal.KeepOffTheOthers</c> leaves the walk's own portal out). Null when no such portal is held. The rule itself is <see cref="PortalKeepOff"/>'s: a plan that cannot keep clear fails by name.
+    /// Every walk now keeps these too (<see cref="LegKeepOff"/>, M6 14 m6-14-plaza: closes <c>TODO(m6-live-portal-keep-off-all)</c>).
+    /// </summary>
+    /// <param name="session">The session (its objects).</param>
+    /// <param name="goal">The walk's end, global metres.</param>
+    internal static PortalKeepOff? LivePortals(IGameSessionView session, Vector2 goal)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        List<KeptPortal>? held = null;
+        foreach (var o in session.State.Objects.All)
+        {
+            if (o.IsSelf || o.Position is not { } p || WorldContentCensus.Classify(o.Weenie) != WorldContentKind.Portal)
+            {
+                continue;
+            }
+
+            var at = new NavPoint(p.CellId & 0xFFFF0000u, p.Frame.Origin).Global;
+            if (Vector2.Distance(at, goal) <= PortalKeepOff.ClearanceMetres)
+            {
+                continue;
+            }
+
+            (held ??= []).Add(new KeptPortal(o.Name, at, p.Frame.Origin.Z, (p.CellId & 0xFFFF) < 0x100));
+        }
+
+        return held is null ? null : new PortalKeepOff(held);
+    }
+
+    /// <summary>
+    /// M6 14 (m6-14-plaza; live ladder62, 2026-11-17 16:29:41 UTC: the walk to the Yinar Portal's front kept off its own portal alone, the plaza's other eighteen being in no travel record, and Sand's Edge Portal took her): the list every walk keeps,
+    /// whatever its purpose. The request's own list first (a hop's: its own portal and the others, <see cref="RungPortal.KeepOffForFront"/>), then every portal the travel data and the world know (<see cref="RungPortal.AllKnown"/>, the placed
+    /// portals of <see cref="Lifestone.Client.Session.Travel.WorldPortals"/>) and every portal object the client holds (<see cref="LivePortals"/>: a portal no file places). A portal already on the request's list (within 0.5 m) is not added twice, and one the request did not
+    /// name that stands within the clearance of the walk's end is left out, so an end beside a portal (a seek's own portal, a front 3 m off it) is never refused. Null when no portal is near (the runner's <see cref="PortalKeepOff.Near"/> trims the rest).
+    /// </summary>
+    /// <param name="session">The session (its objects).</param>
+    /// <param name="request">The leg's request (its list, or none).</param>
+    /// <param name="from">The walk's start, global metres.</param>
+    /// <param name="goal">The walk's end, global metres.</param>
+    internal static PortalKeepOff? LegKeepOff(IGameSessionView session, TravelRequest request, Vector2 from, Vector2 goal)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var kept = new List<KeptPortal>(request.KeepOff?.Near(from, goal, KeepOffReachMetres).Portals ?? []);
+        var live = LivePortals(session, goal)?.Portals ?? [];
+        foreach (var p in RungPortal.AllKnown.Concat(live))
+        {
+            if (SegmentMetres(p.Global, from, goal) > KeepOffReachMetres || Vector2.Distance(p.Global, goal) <= PortalKeepOff.ClearanceMetres || kept.Exists(q => Vector2.Distance(q.Global, p.Global) <= SamePortalMetres))
+            {
+                continue;
+            }
+
+            kept.Add(p);
+        }
+
+        return kept.Count == 0 ? null
+            : request.KeepOff is { } own ? new PortalKeepOff(kept, own.Clearance, own.OwnClearance)
+            : new PortalKeepOff(kept);
+    }
+
+    private static float SegmentMetres(Vector2 p, Vector2 a, Vector2 b)
+    {
+        var ab = b - a;
+        var length2 = ab.LengthSquared();
+        return Vector2.Distance(p, a + (ab * (length2 <= 1e-8f ? 0f : Math.Clamp(Vector2.Dot(p - a, ab) / length2, 0f, 1f))));
+    }
+
+    /// <summary>How near two records of a portal stand to be the same object (<c>RungPortal</c>'s rule), in metres. Not retail: Lifestone's own.</summary>
+    private const float SamePortalMetres = 0.5f;
+
     private NavRunner? _runner;
     private TravelStatus _status = TravelStatus.Running;
     private double _nextCorridor;
     private int _moves;
     private uint _startCell;
+    private HashSet<(string Name, Vector2 At)>? _unkeptNamed;
+    private Vector2 _goalGlobal;
+
+    /// <summary>
+    /// M6 14 (m6-14-plaza): the list is made when the leg plans (<see cref="LegKeepOff"/>); a portal object the client comes to hold later on the way, which no file places (a summoned portal), is not on it: named once by a warning,
+    /// <c>TODO(m6-live-portal-mid-run)</c>, never a silent miss (the runner has no replan for a changed list).
+    /// </summary>
+    private void NoteUnkeptLivePortal(IGameSessionView session)
+    {
+        if (_runner?.KeepOff is not { } keep || LivePortals(session, _goalGlobal) is not { } live)
+        {
+            return;
+        }
+
+        foreach (var p in live.Portals)
+        {
+            if (keep.Portals.Any(q => Vector2.Distance(q.Global, p.Global) <= SamePortalMetres) || Vector2.Distance(p.Global, NavMap.FromCellFrame(body.Position).Global) > KeepOffReachMetres || !(_unkeptNamed ??= []).Add((p.Name, p.Global)))
+            {
+                continue;
+            }
+
+            log.Warn(body.LogCategory, "TODO(m6-live-portal-mid-run): a portal the client came to hold on the way is not on the leg's list (it was made when the leg planned; no file places this portal)", new LogField("leg", name), new LogField("portal", p.Name), new LogField("at", p.Global));
+        }
+    }
     private RaisedStart? _stepOff;
     private bool _stepOffTried;
+    private Task? _warm;
+    private bool _warmTried;
+    private bool _warmed;
+    private double _warmStarted;
 
     /// <inheritdoc />
     public TravelMeans Means => TravelMeans.Run;
@@ -148,11 +260,17 @@ public sealed class JourneyRunLeg(JourneyLegPlanner planner, IJourneyLegBody bod
 
             var goal = planner.GoalOf(session, request);
             var from = body.Position;
+            if (WarmUp(session, from, goal) is { } warming)
+            {
+                return warming;
+            }
+
             _startCell = from.CellId;
             INavPathSource source;
             try
             {
-                source = planner.SourceFor(from.CellId, JourneyLegPlanner.GoalCellOf(goal), body.Map, out var why);
+                var why = "the authored way of " + request.Way?.Count + " points (M6 8 B1)";
+                source = request.Way is { Count: > 0 } way ? new AuthoredWaySource(way) : planner.SourceFor(from.CellId, JourneyLegPlanner.GoalCellOf(goal), body.Map, out why);
                 log.Info(body.LogCategory, "the leg's path source", new LogField("leg", name), new LogField("from", $"0x{from.CellId:X8}"),
                     new LogField("to", $"0x{JourneyLegPlanner.GoalCellOf(goal):X8}"), new LogField("rooms", source is INavRoomSource r ? $"0x{r.Rooms.LandblockId >> 16:X4}" : null), new LogField("why", why));
             }
@@ -163,7 +281,7 @@ public sealed class JourneyRunLeg(JourneyLegPlanner planner, IJourneyLegBody bod
 
             // FC-a2: a body raised on a counter in a building (ACE's walk-to-use carried it up) steps down to the room's floor first, once per leg; the plan is made again from the floor. Not in the den
             // (its room source): a dungeon's ramps are not counters.
-            if (!_stepOffTried && source is IndoorOutdoorPathSource && RaisedStart.FloorBelow(source.Plan(from, goal, new NavScars()), from, out var next) is { } floor)
+            if (!_stepOffTried && source is IndoorOutdoorPathSource indoors && RaisedStart.FloorBelow(indoors.Plan(from, goal, new NavScars()), from, out var next, indoors.Rooms.RoomFloorUnder(from.CellId, from.Origin + new Vector3(0f, 0f, RaisedStart.FloorToleranceMetres))) is { } floor)
             {
                 _stepOffTried = true;
                 _moves = body.Moves;
@@ -173,9 +291,22 @@ public sealed class JourneyRunLeg(JourneyLegPlanner planner, IJourneyLegBody bod
 
             _runner = body.NewRunner(session, source, "journey-" + name);
             _runner.Doors = new SessionDoorFeed(session, log, body.SetupExtent); // M5 item 5, d1: a closed door on the route is opened (purpose=door), not walked through
+            _runner.UseTarget = request.Use; // the hub walk: hand over to the server's walk-to-use once the line is clear
+            // M6 14 (m6-14-plaza): every walk keeps clear of every portal near its line: the request's list, the known and placed portals, and the ones the client holds (LegKeepOff)
+            _goalGlobal = goal.Point.Global;
+            if (LegKeepOff(session, request, NavMap.FromCellFrame(from).Global, goal.Point.Global) is { } keep)
+            {
+                _runner.KeepOff = keep.Near(NavMap.FromCellFrame(from).Global, goal.Point.Global, KeepOffReachMetres); // M6 7 AI
+                log.Info(body.LogCategory, "the leg keeps clear of portals", new LogField("leg", name), new LogField("portals", _runner.KeepOff.Portals.Count), new LogField("of", keep.Portals.Count), new LogField("clearance_m", keep.Clearance), new LogField("near", string.Join(", ", _runner.KeepOff.Portals.Select(p => p.Name))));
+            }
+
             _moves = body.Moves;
             _runner.Start(goal, now);
             log.Info(body.LogCategory, "a leg on foot begins", JourneyLegPlanner.BeginFields(name, request, goal, from.CellId));
+            if (_warmed)
+            {
+                return TravelStatus.Running; // M6 14 hub plan: the runner's first plan in the next frame, not in this one with the source's
+            }
         }
 
         if (body.Moves != _moves || !body.Placed)
@@ -187,6 +318,7 @@ public sealed class JourneyRunLeg(JourneyLegPlanner planner, IJourneyLegBody bod
         {
             _nextCorridor = session.Clock.Now + body.CorridorSeconds;
             body.FollowRoute(_runner);
+            NoteUnkeptLivePortal(session);
         }
 
         var state = _runner.Step(now);
@@ -226,6 +358,56 @@ public sealed class JourneyRunLeg(JourneyLegPlanner planner, IJourneyLegBody bod
 
         _stepOff?.Release();
         _runner?.Dispose(); // no key stays held
+    }
+
+    /// <summary>
+    /// M6 14 hub plan, before the leg plans: with a host that has workers (<see cref="IJourneyLegBody.OffThread"/>) and a leg in the rooms of one landblock (<see cref="JourneyLegPlanner.RoomsWarmUp"/>), the rooms are worked out
+    /// on a worker first, once a leg, while the game's frames go on; the leg plans when the work is done (Running until then). Check after: a server move of the player while the worker ran fails the leg
+    /// <c>travel:run:moved</c>, as under a run; a worker that failed is logged loudly and the leg plans on the game's thread as before. Null: plan now.
+    /// </summary>
+    private TravelStatus? WarmUp(IGameSessionView session, in CellFrame from, NavGoal goal)
+    {
+        if (_warm is { } warm)
+        {
+            if (!warm.IsCompleted)
+            {
+                return TravelStatus.Running;
+            }
+
+            _warm = null;
+            var ms = new LogField("ms", (session.Clock.Now - _warmStarted) * 1000.0); // the session's clock
+            if (warm.Exception?.GetBaseException() is { } error)
+            {
+                log.Warn(body.LogCategory, "the leg's rooms could not be worked out on a worker: the leg plans them on the game's thread", new LogField("leg", name), ms, new LogField("error", error.Message));
+            }
+            else
+            {
+                log.Info(body.LogCategory, "the leg's rooms were worked out on a worker", new LogField("leg", name), ms);
+            }
+
+            return body.Moves != _moves || !body.Placed ? Fail("travel:run:moved: the server moved the player while the leg's rooms were worked out") : null;
+        }
+
+        if (_warmTried || request.Way is { Count: > 0 } || body.OffThread is not { } offThread)
+        {
+            return null;
+        }
+
+        _warmTried = true;
+        var keep = LegKeepOff(session, request, NavMap.FromCellFrame(from).Global, goal.Point.Global)?
+            .Near(NavMap.FromCellFrame(from).Global, goal.Point.Global, KeepOffReachMetres).WithOwnClearance(PortalKeepOff.OwnReach(NavRunner.StopMetres(goal.StopTolerance))); // the list the runner will keep (ResolveKeepOff)
+        if (planner.RoomsWarmUp(from, goal, keep) is not { } work)
+        {
+            return null;
+        }
+
+        _moves = body.Moves;
+        _warmed = true;
+        _warmStarted = session.Clock.Now;
+        _warm = offThread(work);
+        log.Info(body.LogCategory, "the leg's rooms are worked out on a worker before it plans", new LogField("leg", name), new LogField("from", $"0x{from.CellId:X8}"),
+            new LogField("to", $"0x{JourneyLegPlanner.GoalCellOf(goal):X8}"), new LogField("rooms", $"0x{from.CellId >> 16:X4}"), new LogField("kept_portals", keep?.Portals.Count ?? 0));
+        return TravelStatus.Running;
     }
 
     private TravelStatus Fail(string why)

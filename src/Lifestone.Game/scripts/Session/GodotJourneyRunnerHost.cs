@@ -78,7 +78,7 @@ public sealed class GodotJourneyRunnerHost : IJourneyRunnerHost, IJourneyWalks, 
         (_mode, _workers, _den, _ground, _log) = (mode, services.Workers, den, ground, log);
         _setupRadius = HostileCreatureFeed.SetupRadii(dats); // each creature's own radius for the runner's creature layer (nav-creature-radius-host)
         _setupExtent = DoorCrossings.SetupExtents(dats); // M5 5 d2 (closes TODO(door-extent-host)): built once per host, every leg's door feed and the fight walk read the doors' own sizes
-        _planner = new JourneyLegPlanner(dats, services.CellStructures, g => g.Key == _ground.Key ? _den?.Result ?? throw new InvalidOperationException("the journey built no room graph for its ground (TODO(m4-journey-den-graph): the plan has no dungeon station)") : null, ground: _ground); // M5 3 p1: the journey's own ground (2-R12)
+        _planner = new JourneyLegPlanner(dats, services.CellStructures, g => g.Key == _ground.Key && _den is { } built ? built.Result : null, ground: _ground); // M5 3 p1: the journey's own ground (2-R12); M6 14 body: any other ground's graph (or the journey ground's with no den station) is built from the dats at its first use
         _body = new LegBody(this);
         _tours = new JourneyGroundTours(log, LogCategory);
     }
@@ -118,11 +118,37 @@ public sealed class GodotJourneyRunnerHost : IJourneyRunnerHost, IJourneyWalks, 
 
     /// <inheritdoc />
     /// <remarks>
-    /// The M3 Godot fight leg's walk over the player (<see cref="GameFightWalk"/>), on the ground's graph built on the loading worker; null (the station's own fallback) when the plan has no dungeon station or the fight's ground is not the one the worker built.
+    /// The M3 Godot fight leg's walk over the player (<see cref="GameFightWalk"/>) for ANY ground (M6 14 body, live ladder49 01:58:53 UTC: the quest's mote hunt in the Crater Caves got the offline walker, which moved the server player 40.7 m
+    /// from the drawn body): the journey's own ground walks on the graph its loading worker built; any other ground (a quest's hunt-until ground, a rung's) on the leg planner's graph of it, built from the dats at its first use and kept.
+    /// Null, logged, only when the journey ground's worker failed or has not finished: the station's choice then gives the fight no walk (never the offline walker under the drawn body, <see cref="FightWalkChoice"/>).
     /// M5 7 P7v: every walk takes the ground's one tour for the journey (<see cref="JourneyGroundTours"/>), so the death station's wait and the corpse trip's fight know the den fight's kills and their due times.
     /// </remarks>
-    public IFightWalk? FightWalk(JourneyContext context, HuntingGround ground) =>
-        _den is { IsCompletedSuccessfully: true } den && ground.Key == _ground.Key ? new GameFightWalk(new RoutePlayHost(() => _mode.Rig?.Controller.Walker, () => _mode.MovementGate?.Held ?? 0), den.Result, ground, _log, _setupRadius, _tours.For(ground, () => GroundTour.For(ground, den.Result, _log)), _setupExtent) : null;
+    public IFightWalk? FightWalk(JourneyContext context, HuntingGround ground)
+    {
+        RoomGraph graph;
+        if (ground.Key == _ground.Key && _den is { } den)
+        {
+            if (!den.IsCompletedSuccessfully)
+            {
+                _log.Warn(LogCategory, $"fight walk: the room graph of ground {ground.Key} is not built ({(den.IsFaulted ? "its worker failed: " + (den.Exception?.GetBaseException().Message ?? "unknown") : "its worker has not finished")}): no walk over the player (TODO({FightWalkChoice.NoDrawnWalkTodo}))");
+                return null;
+            }
+
+            graph = den.Result;
+        }
+        else
+        {
+            var started = System.Diagnostics.Stopwatch.GetTimestamp();
+            graph = _planner.GroundGraph(ground);
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"fight walk: ground {ground.Key} is not the journey's {_ground.Key}: its room graph is the leg planner's (built from the dats at its first use, kept) ms={System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:0.0}"));
+        }
+
+        return new GameFightWalk(new RoutePlayHost(() => _mode.Rig?.Controller.Walker, () => _mode.MovementGate?.Held ?? 0), graph, ground, _log, _setupRadius, _tours.For(ground, () => GroundTour.For(ground, graph, _log)), _setupExtent);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>True: the walker is the play's player, the body the screen draws (M6 14 body).</remarks>
+    public bool DrawsBody => true;
 
     /// <inheritdoc />
     /// <remarks>The play's hook-sound router, counted as the retired login-buff leg did (<c>AudioService.ReadSources</c>'s server count); null when the router does not count sounded voices.</remarks>
@@ -172,6 +198,12 @@ public sealed class GodotJourneyRunnerHost : IJourneyRunnerHost, IJourneyWalks, 
 
         public Func<uint, float?>? SetupExtent => host._setupExtent;
 
+        public Func<Action, Task>? OffThread => work => host._workers.RunSync(_ =>
+        {
+            work();
+            return true;
+        }); // M6 14 hub plan: a leg's rooms are worked out on the game's workers, not in a frame
+
         public NavMap? Map => host._map;
 
         public CellFrame Position => Walker!.Position;
@@ -213,9 +245,12 @@ public sealed class GodotJourneyRunnerHost : IJourneyRunnerHost, IJourneyWalks, 
                 source,
                 host._confirmer,
                 null,
-                new NavRunnerOptions { Name = name, ConfirmBudgetMilliseconds = ConfirmBudgetMilliseconds },
+                new NavRunnerOptions { Name = name, ConfirmBudgetMilliseconds = ConfirmBudgetMilliseconds, PredictiveSteering = true, PredictiveOutdoors = true },
                 host._log,
-                new HostileCreatureFeed(session.State.Objects, session.State.Self.Guid, host._log, host._setupRadius)); // the run's creature layer (nav-creature-avoid), each creature's own radius
+                new HostileCreatureFeed(session.State.Objects, session.State.Self.Guid, host._log, host._setupRadius)) // the run's creature layer (nav-creature-avoid), each creature's own radius
+            {
+                BodyFeed = new NpcBodyFeed(session.State.Objects, session.State.Self.Guid, host._log, host._setupRadius), // the NPCs' bodies on the plan (M6 4 W2, m6-npc-in-door-lane)
+            };
         }
 
         public void FollowRoute(NavRunner runner)

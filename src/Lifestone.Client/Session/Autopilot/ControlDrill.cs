@@ -34,7 +34,7 @@ public interface IControlDrillHands
 /// each saving a frame:
 /// <list type="bullet">
 /// <item><description><b>a</b>, mid-fight: Move Forward held 1 s does nothing (the lock swallowed it), the notice shows in the chat, the autopilot still runs with the keys locked.</description></item>
-/// <item><description><b>b1</b>, mid-fight: <c>/stop</c>; he stops where he stands (no teleport: the body moved at most <see cref="InPlaceMetres"/>), nothing is held or queued, the keys are unlocked. <b>b2</b>: Move Forward held 1 s moves him
+/// <item><description><b>b1</b>, mid-fight: <c>/stop</c>; it stops where it stands (no teleport: the body moved at most <see cref="InPlaceMetres"/>), nothing is held or queued, the keys are unlocked. <b>b2</b>: Move Forward held 1 s moves it
 /// (at least <see cref="MovedMetres"/>).</description></item>
 /// <item><description><b>c1</b>, stopped: a bad state made through the person's own paths: walked about <see cref="OffSpotMetres"/> off the spot, the stance set to peace and the wielded caster moved into a side pack (the actions a person's
 /// key and drag send). <b>c2</b>: <c>/auto</c>, then at the next kill: running, the keys locked, the stance magic and a caster wielded; the chat lines that appeared are logged.</description></item>
@@ -62,13 +62,13 @@ public sealed class ControlDrill
     /// <summary>At most this far, in metres, the body moves after a /stop and still stopped "in place" (a step in flight finishes; a teleport is far more).</summary>
     public const double InPlaceMetres = 3;
 
-    /// <summary>At least this far, in metres, Move Forward held 1 s must move him after a /stop.</summary>
+    /// <summary>At least this far, in metres, Move Forward held 1 s must move it after a /stop.</summary>
     public const double MovedMetres = 1;
 
-    /// <summary>How far step c walks him off the spot, in metres (the owner's figure: about 10 m).</summary>
+    /// <summary>How far step c walks it off the spot, in metres (the owner's figure: about 10 m).</summary>
     public const double OffSpotMetres = 10;
 
-    /// <summary>The longest walk off the spot, in seconds (a wall may stop him: the distance reached is logged).</summary>
+    /// <summary>The longest walk off the spot, in seconds (a wall may stop it: the distance reached is logged).</summary>
     public const double OffSpotWalkSeconds = 8;
 
     /// <summary>The pause between d's /stop and its /auto, in seconds (the owner's figure: about 5 s).</summary>

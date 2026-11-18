@@ -92,7 +92,7 @@ public sealed partial class FightLegRunner : Node
     private FightOptions _options = new();
     private HuntingGround _ground = null!;
     private double _wholeSeconds = WholeCheckSeconds;
-    private Task<(SpellTableData Table, GearKit Kit, RoomGraph Planner, double BuildMilliseconds, double PlannerMilliseconds)>? _loading;
+    private Task<(SpellTableData Table, GearKit Kit, RoomGraph Planner, double BuildMilliseconds, double PlannerMilliseconds, BuffOptions Buff)>? _loading;
     private FightScenario? _scenario;
     private string? _optionError;
     private ActionHandle? _pending;
@@ -174,7 +174,8 @@ public sealed partial class FightLegRunner : Node
             {
                 var table = SpellTableData.Load(dats);
                 var built = System.Diagnostics.Stopwatch.GetTimestamp();
-                var kit = GearKit.Build(table.Spells, LoginName(key), ground: ground); // M5 3 w1 (D46): the kit of the leg's --fight-ground (the vendor robe and wand, the four foci, the ground's stock), not the default alone
+                var login = LoginName(key);
+                var kit = GearKit.Build(table.Spells, login, ground: ground); // M5 3 w1 (D46): the kit of the leg's --fight-ground (the vendor robe and wand, the four foci, the ground's stock), not the default alone
                 var buildMs = System.Diagnostics.Stopwatch.GetElapsedTime(built).TotalMilliseconds;
                 var planning = System.Diagnostics.Stopwatch.GetTimestamp();
                 var planner = GroundRooms.Load(dats, ground);
@@ -182,7 +183,7 @@ public sealed partial class FightLegRunner : Node
                 var warm = System.Diagnostics.Stopwatch.GetTimestamp();
                 var prepared = PrepareFightMethods();
                 Log.Info(LogCategory, "fight: the fight's methods were prepared on the loading worker", ("methods", prepared), ("ms", System.Diagnostics.Stopwatch.GetElapsedTime(warm).TotalMilliseconds));
-                return (table, kit, planner, buildMs, plannerMs);
+                return (table, kit, planner, buildMs, plannerMs, new BuffOptions { AccountName = login }); // M6 1 w: the account's formula for the fight's floors (the carrier is the buff options, never printed)
             },
             CancellationToken.None,
             TaskCreationOptions.LongRunning,
@@ -495,10 +496,10 @@ public sealed partial class FightLegRunner : Node
 
     private void BeginScenario(IGameSessionView session)
     {
-        var (table, kit, planner, buildMilliseconds, plannerMilliseconds) = _loading!.Result;
+        var (table, kit, planner, buildMilliseconds, plannerMilliseconds, buff) = _loading!.Result;
         Log.Info(LogCategory, "fight: the gear kit and the den's floor were built on the loading worker, off the game thread", ("build_ms", buildMilliseconds), ("planner_ms", plannerMilliseconds), ("floor_cells", planner.Cells.Cells.Count));
         var walk = new GameFightWalk(_walkHost, planner, _ground, GodotLogSink.Instance, _setupRadius, GroundTour.For(_ground, planner, GodotLogSink.Instance), _setupExtent);
-        _scenario = new FightScenario(kit, table.Spells, new BuffOptions(), _options, walk, GodotLogSink.Instance, LoginScenario.DefaultArrivalSeconds, endSession: false, FightStages.All);
+        _scenario = new FightScenario(kit, table.Spells, buff, _options, walk, GodotLogSink.Instance, LoginScenario.DefaultArrivalSeconds, endSession: false, FightStages.All);
         _avatars = _mode.Avatars;
         if (_avatars is { } avatars)
         {

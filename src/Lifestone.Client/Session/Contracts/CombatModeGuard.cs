@@ -179,6 +179,7 @@ public static class CombatModeGuard
     /// <param name="mode">The mode asked for (<see cref="CombatModes"/>).</param>
     /// <param name="wielded">What <see cref="Read"/> found.</param>
     /// <returns>The text.</returns>
+    /// <exception cref="ArgumentException"><paramref name="problem"/> is <see cref="CombatModeProblem.None"/> (no refusal) or a value with no arm: a named, loud failure (<c>TODO(combat-mode-guard-problem)</c>), never a silent default text.</exception>
     public static string Describe(CombatModeProblem problem, int mode, in WieldedWeapons wielded)
     {
         var item = Culprit(problem, in wielded);
@@ -191,7 +192,8 @@ public static class CombatModeGuard
             CombatModeProblem.MeleeWithLauncher => "the melee combat mode is refused: the player wields " + name + ", a missile launcher (ACE would answer ActionCancelled and put the player back in peace)",
             CombatModeProblem.MagicWithoutCaster => "the magic combat mode is refused: the player wields " + name + ", not a caster (a wand, a staff or an orb)",
             CombatModeProblem.MissileWithoutLauncher => "the missile combat mode is refused: the player wields " + name + ", not a missile launcher (a bow, a crossbow or an atlatl)",
-            _ => "TODO(combat-mode-guard-problem): no text for " + problem,
+            CombatModeProblem.None => throw new ArgumentException("TODO(combat-mode-guard-problem): Describe was asked for the text of CombatModeProblem.None, which is no refusal", nameof(problem)),
+            _ => throw new ArgumentOutOfRangeException(nameof(problem), problem, "TODO(combat-mode-guard-problem): CombatModeProblem " + problem + " has no refusal text; add its arm to CombatModeGuard.Describe"),
         };
     }
 }

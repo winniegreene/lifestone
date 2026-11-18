@@ -53,6 +53,51 @@ public sealed partial class FightScenario
 /// </summary>
 internal static class FightHealPick
 {
+    /// <summary>
+    /// M6 7 AA: the share of the blows falling due that are taken to spare the mage while a heal winds up, in <see cref="SaveChance"/> (Lifestone's own, not a retail or ACE figure: nothing here measures a creature's misses; it only orders a slow cast under a quick one).
+    /// </summary>
+    public const double BlowSpares = 0.5;
+
+    /// <summary>The blows that fall due within <paramref name="seconds"/> at the recent hits' interval.</summary>
+    /// <param name="read">The recent hits (they go on).</param>
+    /// <param name="seconds">The cast's seconds.</param>
+    public static int BlowsDuring(in IncomingRead read, double seconds)
+    {
+        var due = Math.Max(0, read.IntervalSeconds - read.SinceLastHit);
+        return seconds < due ? 0 : 1 + (int)Math.Floor((seconds - due) / read.IntervalSeconds);
+    }
+
+    /// <summary>
+    /// M6 7 AA: with the blows outrunning her, the chance one cast saves the mage: 0 when its heal does not lift her over the biggest hit, else the chance it lands (a target's resist is in a drain's) times <see cref="BlowSpares"/> for each blow due before it lands past those
+    /// her health takes at the biggest hit.
+    /// </summary>
+    /// <param name="c">The candidate.</param>
+    /// <param name="read">The recent hits.</param>
+    /// <param name="health">The health left.</param>
+    public static double SaveChance(in HealCandidate c, in IncomingRead read, double health)
+    {
+        var taken = (int)Math.Ceiling(health / Math.Max(1, read.BiggestHit)) - 1; // the blows she lives through
+        return health + c.Heal <= read.BiggestHit ? 0 : Math.Clamp(c.Chance, 0, 1) * Math.Pow(BlowSpares, Math.Max(0, BlowsDuring(in read, c.CastSeconds) - taken));
+    }
+
+    /// <summary>
+    /// M6 7 AA (r3c: at 5 health of 44, biggest hit 9, a hit every 0.8 s, Drain Health Other I on a full tusker scored 14.5 health a second to Heal Self I's 5.9 and she died in its wind-up): <see cref="HealPick.PerSecond"/> is what a heal is worth over a fight; when the mage is not expected to live through the drain's cast
+    /// (<see cref="IncomingRead.Survives"/>; the next hit killing is its sharpest case) that is the wrong question, as a big heal that is resisted or lands too late is worth nothing. True when Heal Self saves her at all and at least as surely as the drain (a tie goes to Heal Self, as
+    /// in <see cref="HealPick.Choose"/>). The caller asks this only then: at any other health the drain's value stands, and no level enters here: a den drain is scored on its own chance, seconds and heal.
+    /// </summary>
+    /// <param name="self">Heal Self.</param>
+    /// <param name="drain">The drain the pick chose.</param>
+    /// <param name="read">The recent hits.</param>
+    /// <param name="health">The health left.</param>
+    /// <param name="selfSave">Heal Self's chance.</param>
+    /// <param name="drainSave">The drain's chance.</param>
+    public static bool HealSelfSavesSurer(in HealCandidate self, in HealCandidate drain, in IncomingRead read, double health, out double selfSave, out double drainSave)
+    {
+        selfSave = SaveChance(in self, in read, health);
+        drainSave = SaveChance(in drain, in read, health);
+        return selfSave > 0 && selfSave >= drainSave;
+    }
+
     /// <summary>The level (1 to 7) of the Heal Self <paramref name="healId"/>, or 1 when it is none of them.</summary>
     /// <param name="healId">The Heal Self spell id.</param>
     public static int HealSelfLevel(uint healId)
@@ -87,13 +132,14 @@ internal static class FightHealPick
 
         var level = HealSelfLevel(drain.HealId);
         var heal = Math.Min(missing, heals.Expected(drain.HealName, null, MeasuredHeals.SelfSeed(level)));
-        var seconds = double.IsNaN(measuredSeconds) ? MeasuredHeals.DrainSeed(level) : measuredSeconds;
+        var seconds = double.IsNaN(measuredSeconds) ? heals.Seconds(drain.HealName, MeasuredHeals.SelfSecondsSeedOf(level)) : measuredSeconds; // M6 14 tactics: its own measured seconds, else ACE's for its level (not the drain's seed)
         self = new HealCandidate(drain.HealName, 0, heal, 0, GearCasts.Chance(life, drain.HealPower), drain.HealCeiling, seconds);
         return true;
     }
 
     /// <summary>
-    /// One drain level on a target as a candidate: ACE's formula for the target's known health (<see cref="BuffStatMods.Transfer"/>), scaled by the spell's measured ratio and cut to the missing health; the damage it does to the target is
+    /// One drain level on a target as a candidate: ACE's formula for the target's known health (<see cref="BuffStatMods.Transfer"/>) at its kind's drain resistance
+    /// (<see cref="DrainSituation.TargetDrainResist"/>: 0 expects nothing, so Heal Self wins), scaled by the spell's measured ratio and cut to the missing health; the damage it does to the target is
     /// the source change scaled the same; the chance is the cast chance times the chance the target does not resist; its mana and its seconds (the measured seconds of the level, else the seed). <paramref name="formula"/> is the formula's heal before the ratio.
     /// </summary>
     /// <param name="level">The drain level.</param>
@@ -105,7 +151,7 @@ internal static class FightHealPick
     {
         var missing = s.HealthMax > s.Health ? s.HealthMax - s.Health : 0u;
         var row = level.Row;
-        BuffStatMods.Transfer(in row, s.TargetHealth, missing, out var taken, out var given);
+        BuffStatMods.Transfer(in row, s.TargetHealth, missing, out var taken, out var given, (float)s.TargetDrainResist); // M6 14 drain resistance: the kind's share, before the cap
         formula = given;
         var heal = Math.Min(missing, heals.ExpectedFromRatio(level.Info.Name, given));
         var scale = given > 0 ? heal / given : 0;

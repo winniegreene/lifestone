@@ -40,6 +40,8 @@ public sealed class SessionContractTests
 
         nameof(VendorOpened), nameof(VendorStockChanged), nameof(VendorClosed), nameof(CoinValueChanged), // M4 3.2 lane s1 (VendorEvents.cs)
         nameof(ConfirmationRequested), nameof(ConfirmationClosed), nameof(ObjectPropertyChanged), // M5 6 w2 (WorldEvents.cs)
+        nameof(GuardianOpened), nameof(GuardianProfileChanged), nameof(GuardianClosed), nameof(HouseInfoChanged), nameof(HouseRestrictionsChanged), nameof(AvailableHousesReceived), // M6 villa (HouseState.cs)
+        nameof(SpellBarCast), nameof(ShortcutUsed), // M6 15: the automation's cast, by the spell bar it is cast from (MagicEvents.cs), and its drink, by the shortcut slot (ShortcutBar.cs)
     ];
 
     private static Type[] ClientTypes => typeof(IGameSessionView).Assembly.GetTypes();

@@ -6,6 +6,7 @@ using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Scenarios;
+using Lifestone.Client.Session.Threat;
 using Lifestone.Data.Animation;
 using Lifestone.Data.Magic;
 
@@ -76,7 +77,7 @@ public readonly record struct VitalsNeeds(int MinHealthPercent = 0, int MinStami
 /// <para><b>The verdict</b> (<see cref="VerdictFields"/>, report-only in its first gate): <c>vitals_min=h/s/m heals= kits= potions= rests= rest_s= transfers=</c>, and, once the keeper cast, the cast policy's
 /// <c>mana_tries= mana_refusals= mana_landed= busy= resists= proved=</c>, and where a dance ran <c>mana_presses= dances= dances_landed=</c>.</para>
 /// </remarks>
-public sealed class VitalsKeeper
+public sealed partial class VitalsKeeper
 {
     /// <summary>The log category.</summary>
     public const string LogCategory = "vitals";
@@ -121,6 +122,15 @@ public sealed class VitalsKeeper
 
     /// <summary>MotionCommand Sitting (client <c>MotionCommandTable</c>, the emote key 0x10000096 in <c>MovementBindings.EmoteCommandOf</c>; ACE <c>MotionCommand.cs</c> 25-27).</summary>
     public const uint SitCommand = 0x41000013;
+
+    /// <summary>M6 7 AN: the reach within which a creature keeps her on her feet at rest, in metres (as the grounds' <c>pull_aggro_metres</c>).</summary>
+    public const float QuietMetres = 24;
+
+    /// <summary>M6 7 AN: how long a hit keeps her from lying down again, in seconds (Lifestone's own: as the fight's rest aside).</summary>
+    public const double StandAfterHitSeconds = 30;
+
+    /// <summary>M6 7 AO: how many times a posture may go away after its echo in one pass of the keeper before she rests on her feet (Lifestone's own: no silent loop).</summary>
+    public const int MaxPostureLost = 2;
 
     /// <summary>MotionCommand Sleeping, the lie-down emote (the key 0x10000097; ACE <c>MotionCommand.cs</c> 25-27).</summary>
     public const uint LieCommand = 0x41000014;
@@ -168,7 +178,20 @@ public sealed class VitalsKeeper
     private bool _healActive;
     private bool _staminaActive;
     private bool _enteredMagic;
+    private bool _halted; // M6 7 BD: Halt stopped the pass; no new action is decided until the next NeedsFor
     private bool _postureFailed;
+    private bool _stanceSynced;
+    private bool _quietNoted;
+    private bool _postureEchoed;
+    private double _postureSentAt;
+    private int _postureLost;
+    private uint _lieHealth;
+    private double _standUntil = double.NegativeInfinity;
+    private uint _restHealth;
+    private uint _restStamina;
+    private uint _restLastStamina;
+    private uint _restSpent;
+    private uint _restMana;
     private string? _castOff;
     private string? _kitOff;
     private bool _kitAside;
@@ -234,6 +257,7 @@ public sealed class VitalsKeeper
         Cast,
         Mode,
         Posture,
+        Stance,
         Stand,
     }
 
@@ -251,6 +275,12 @@ public sealed class VitalsKeeper
         Stamina,
         Mana,
     }
+
+    /// <summary>
+    /// M6 1 h2 (closes <c>m6-account-formula-callers</c> for the vitals side): the account's name as the server stores it (the login name, not the secrets key), or null: the keeper's level floor then applies only to a pack that holds the Life Magic focus
+    /// (the foci formula). With it a Life Magic cast of a pack without the focus is judged on the account's full formula (<see cref="AccountFormula"/>); hashed there, never logged or printed.
+    /// </summary>
+    public string? AccountName { get; set; }
 
     /// <summary>Where the keeper stands.</summary>
     public VitalsKeeperState State { get; private set; }
@@ -352,8 +382,11 @@ public sealed class VitalsKeeper
         Needs = needs;
         Why = null;
         _actions = 0;
+        _postureFailed = false; // M6 7 AO: a posture that failed is named and tried again once a pass, never in a loop
+        _postureLost = 0;
         _healActive = false;
         _staminaActive = false;
+        _halted = false;
         _kitAside = false;
         _potionAside = false;
         _manaPotionAside = false;
@@ -397,6 +430,7 @@ public sealed class VitalsKeeper
     public VitalsKeeperState Step(double now)
     {
         _now = now;
+        SampleRestStamina();
         if (_pending != Pending.None && !Settle(now))
         {
             return State;
@@ -411,6 +445,12 @@ public sealed class VitalsKeeper
         if (_swapPhase != SwapPhase.None)
         {
             return StepSwap(now);
+        }
+
+        if (_halted && PostureDown && _pending == Pending.None)
+        {
+            StandFirst(); // M6 7 BD: a posture taken while the pass was being halted: she stands, as the halt asked
+            return State;
         }
 
         if (State is not (VitalsKeeperState.Working or VitalsKeeperState.Resting) || now < _busyUntil)
@@ -583,6 +623,7 @@ public sealed class VitalsKeeper
             Profile = fighter ? ManaProfile.Fighter : ManaProfile.Mage,
             FighterGatePercent = staminaUntil,
             FighterTransfersLeft = FighterTransferCap - _passTransfers,
+            BestNetPress = CharacterPolicy.For(_session.State.Self.Name).ManaBySum, // the owner's ruling, 2026-11-08: pick by the sum: live, the keeper pressed II for 30 stamina into 30 mana
         };
         var decision = ManaOrder.Decide(input, _danceLevels.AsSpan(0, count), _options.Mana);
         if (fighter && potions == 0 && !_fighterOrderNoted)
@@ -614,7 +655,8 @@ public sealed class VitalsKeeper
                         _passTransfers++;
                     }
 
-                    return Cast(VitalsLine.StaminaToManaSelf, info, at + "; " + decision.Reason, dance: true);
+                    var press = input.BestNetPress ? string.Create(CultureInfo.InvariantCulture, $"; level by the sum: {info.Name} nets {ManaOrder.NetYield(in _danceLevels[decision.DanceIndex], s, mc, m):0.#} at stamina {s}") : string.Empty;
+                    return Cast(VitalsLine.StaminaToManaSelf, info, at + "; " + decision.Reason + press, dance: true);
                 }
 
                 break;
@@ -641,7 +683,7 @@ public sealed class VitalsKeeper
     /// </summary>
     private IReadOnlyDictionary<uint, int>? FloorFor(VitalsLine line)
     {
-        var held = LevelFloor.HeldFor(_session.State, DatReaderWriter.Enums.MagicSchool.LifeMagic);
+        var held = LevelFloor.HeldForAccount(_session.State, DatReaderWriter.Enums.MagicSchool.LifeMagic, AccountName);
         if (held is null)
         {
             return null;
@@ -650,7 +692,7 @@ public sealed class VitalsKeeper
         var ids = VitalsMeans.IdsOf(line);
         for (var i = 0; i < ids.Count; i++)
         {
-            if (_spells.TryGetValue(ids[i], out var info) && LevelFloor.ShortOf(held, info, out var need) && _floorNoted.Add(info.Id))
+            if (_spells.TryGetValue(ids[i], out var info) && LevelFloor.ShortOf(held, info, out var need, AccountName) && _floorNoted.Add(info.Id))
             {
                 _log.Warn(LogCategory, "vitals: " + info.Name + " needs " + need + "; skipped (the level floor)");
             }
@@ -675,7 +717,7 @@ public sealed class VitalsKeeper
                 continue;
             }
 
-            if (held is not null && LevelFloor.ShortOf(held, info, out _))
+            if (held is not null && LevelFloor.ShortOf(held, info, out _, AccountName))
             {
                 continue; // M5 4 G1: the level floor: a level whose foci-formula scarab the pack lacks is not pressed (named once by FloorFor); the keeper rests for the mana instead
             }
@@ -701,6 +743,44 @@ public sealed class VitalsKeeper
 
         return count;
     }
+
+    /// <summary>
+    /// M6 7 BD (live, 2026-11-07 03:34:49 to 03:37:53 UTC: a trip's keeper's pass danced and rested through 56 hits with no bolt cast, to her death): the pass stops at once, by name, because the fight comes first (M5 D88). Check before: a pass
+    /// is running (<see cref="VitalsKeeperState.Working"/> or <see cref="VitalsKeeperState.Resting"/>). The act: the rest ends, a posture stands up, a caster swapped in goes back out, and <see cref="State"/> is <see cref="VitalsKeeperState.Idle"/>: no
+    /// new action is decided. An action in flight is not cancelled: the host keeps stepping until <see cref="Halting"/> is false (the check after). The next <see cref="NeedsFor"/> starts a new pass. False when no pass was running.
+    /// </summary>
+    /// <param name="now">The session clock's time.</param>
+    /// <param name="why">The reason, logged once.</param>
+    public bool Halt(double now, string why)
+    {
+        if (State is not (VitalsKeeperState.Working or VitalsKeeperState.Resting))
+        {
+            return false;
+        }
+
+        _now = now;
+        EndRest(now);
+        _halted = true;
+        _enteredMagic = false;
+        _log.Info(LogCategory, $"vitals: pass halted: {why}; {Shares()}; posture {(PostureDown ? "down, she stands" : "standing")}{(_pending == Pending.None ? string.Empty : "; the action in flight ends first")}");
+        if (PostureDown && _pending == Pending.None && !_session.Actions.KillSwitch)
+        {
+            StandFirst();
+        }
+
+        if (_swappedIn && _swap is not null && _swapPhase == SwapPhase.None && !_session.Actions.KillSwitch)
+        {
+            _log.Info(LogCategory, "vitals: caster swap out as the pass is halted (the weapon back in hand)");
+            _swapPhase = SwapPhase.Out;
+            _swap.Begin(SwapDirection.Out, now);
+        }
+
+        State = VitalsKeeperState.Idle;
+        return true;
+    }
+
+    /// <summary>M6 7 BD: true while a <see cref="Halt"/> has not finished: an action in flight, a swap, or a posture still down. The host steps the keeper until it is false.</summary>
+    public bool Halting => _halted && (Busy || PostureDown);
 
     /// <summary>
     /// The hunt's question before an attack: false under <c>--vitals-attack-stamina</c> (15%) of stamina, or with the vitals unknown, with the reason in <paramref name="why"/>.
@@ -788,7 +868,15 @@ public sealed class VitalsKeeper
 
         RefreshHealingSkill(now);
         var kit = VitalsMeans.FindKit(_session.State, _scratch, out var kitGuid, out var kitUses) && _kitOff is null && !_kitAside;
-        var potion = VitalsMeans.FindPotions(_session.State, _scratch, out var potionGuid, out var potions) && !_potionAside;
+        // M6 14 T: every health drink she may hold, none that would overflow, the biggest that fits. With none that fits, M4's rule stands for the Potion of Healing (from RecoveryRules.PotionMinMissing: its last 10 points may
+        // overflow, where the other way is a regeneration wait of up to 300 s that ends in a failure).
+        var fits = HealthDrinks.Find(_session.State, _scratch, hMax > h ? hMax - h : 0, out var potionGuid, out var drink, out var potions, out _);
+        if (!fits && VitalsMeans.FindPotions(_session.State, _scratch, out potionGuid, out potions))
+        {
+            (fits, drink) = (true, HealthDrinks.All[HealthDrinks.IndexOf(FighterKit.PotionWcid)]);
+        }
+
+        var potion = fits && !_potionAside;
         var combat = _session.State.Self.Qualities.CombatMode is not (0 or CombatModes.NonCombat);
         var input = new RecoveryInput(h, hMax, _healActive, kit ? kitUses : 0, potion ? potions : 0, _lostRolls, 0, _healing, _specialised, combat);
         var decision = RecoveryRules.Decide(in input, _recovery, out var chance);
@@ -826,7 +914,7 @@ public sealed class VitalsKeeper
                     return State;
                 }
 
-                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vitals: potion 0x{potionGuid:X8} ({potions} held) at {at}"));
+                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vitals: potion 0x{potionGuid:X8} ({drink.Name}, +{drink.Boost}, {potions} held) at {at}"));
                 return Send(Pending.Potion, _session.Actions.Drink(potionGuid, ActionSource.Automation));
             case RecoveryDecision.KitLastResort:
                 return UseKit(kitGuid, kitUses, chance, at + " (the last resort)");
@@ -897,7 +985,7 @@ public sealed class VitalsKeeper
             return false;
         }
 
-        info = VitalsMeans.Pick(state.Self.Qualities, state.Self.Spellbook, _spells, line, _options.CastChance, out _, FloorFor(line));
+        info = VitalsMeans.Pick(state.Self.Qualities, state.Self.Spellbook, _spells, line, _options.CastChance, out _, FloorFor(line), AccountName);
         if (info is null)
         {
             return false;
@@ -1056,7 +1144,34 @@ public sealed class VitalsKeeper
             _rest = vital;
             _restStart = now;
             Rests++;
+            _stanceSynced = false;
+            _quietNoted = false; // named once a rest
+            var vitals = _session.State.Self.Qualities;
+            vitals.TryGetVitalLevels(MageTemplate.MaxHealth, out _restHealth, out _);
+            vitals.TryGetVitalLevels(MageTemplate.MaxStamina, out _restStamina, out _);
+            vitals.TryGetVitalLevels(MageTemplate.MaxMana, out _restMana, out _);
+            _restLastStamina = _restStamina;
+            _restSpent = 0;
             _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vitals: rest for {NameOf(vital)} at {why}; posture {_options.Posture.ToString().ToLowerInvariant()}, cap {_options.RestCapSeconds:0} s"));
+        }
+
+        // M6 7 AN (M5 D88): a hit while she lies down stands her at once; the rest goes on standing for StandAfterHitSeconds and the guards answer the attacker. M6 7 AO: read against the last health seen, not the rest's start: a hit after the regeneration counts too
+        if (PostureDown && _session.State.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxHealth, out var healthNow, out _))
+        {
+            if (healthNow < _lieHealth)
+            {
+                _standUntil = now + StandAfterHitSeconds;
+                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vitals: the health fell from {_lieHealth} to {healthNow} at rest: she stands (M5 D88)"));
+                StandFirst();
+                return State;
+            }
+
+            _lieHealth = healthNow;
+        }
+
+        if (PostureDown && !PostureHolds(now))
+        {
+            return State;
         }
 
         if (now - _restStart > _options.RestCapSeconds)
@@ -1076,10 +1191,16 @@ public sealed class VitalsKeeper
             return Send(Pending.Mode, _session.Actions.SetCombatMode(CombatMode.NonCombat, ActionSource.Automation));
         }
 
-        if (_options.Posture != RestPosture.Stand && !PostureDown && !_postureFailed)
+        if (_options.Posture != RestPosture.Stand && !PostureDown && !_postureFailed && now >= _standUntil && !CreatureAwakeNear())
         {
+            if (!_stanceSynced)
+            {
+                // M6 7 AN: the walker's stance first: retail refuses Sleeping outside non-combat (CMotionInterp::DoMotion 11.6096 0x00529930; DeathScenario's finding)
+                return Send(Pending.Stance, _session.Actions.Move.Command(CombatStances.NonCombat, true, ActionSource.Automation));
+            }
+
             var command = _options.Posture == RestPosture.Sit ? SitCommand : LieCommand;
-            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vitals: {(_options.Posture == RestPosture.Sit ? "sitting" : "lying")} down (0x{command:X8}, the emote key pressed and released)"));
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vitals: {(_options.Posture == RestPosture.Sit ? "sitting" : "lying")} down (0x{command:X8}, the emote key pressed and released): check before: peace, the walker's stance synced, nothing that can attack within {QuietMetres:0} m"));
             _posturePress = _session.Actions.Move.Command(command, true, ActionSource.Automation);
             return Send(Pending.Posture, _session.Actions.Move.Command(command, false, ActionSource.Automation));
         }
@@ -1088,13 +1209,113 @@ public sealed class VitalsKeeper
         return State;
     }
 
+    /// <summary>
+    /// M6 7 AW (live, stretch 12: "stamina 27 -> 43 (0.08 a second)" over 209 s, three Stamina to Mana presses inside it that cost 44, 22 and 44): the rest's own rate is what it gained, with the stamina the presses spent during it added back: (43 - 27 + 110) / 209 = 0.6, ACE's standing rate.
+    /// The net rate alone says nothing of the rest: a rest that pays for presses looks like no rest.
+    /// </summary>
+    /// <param name="start">The stamina when the rest began.</param>
+    /// <param name="end">The stamina when it ended.</param>
+    /// <param name="spent">The stamina spent during it.</param>
+    /// <param name="seconds">Its seconds.</param>
+    public static double GainedPerSecond(uint start, uint end, uint spent, double seconds) => seconds > 0 ? ((double)end - start + spent) / seconds : 0;
+
+    /// <summary>M6 7 AW: every frame of a rest: a drop of the stamina is a press's cost.</summary>
+    private void SampleRestStamina()
+    {
+        if (_rest == Rest.None || !_session.State.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxStamina, out var stamina, out _))
+        {
+            return;
+        }
+
+        if (stamina < _restLastStamina)
+        {
+            _restSpent += _restLastStamina - stamina;
+        }
+
+        _restLastStamina = stamina;
+    }
+
     private void EndRest(double now)
     {
         if (_rest != Rest.None)
         {
-            RestSeconds += Math.Max(0, now - _restStart);
+            var seconds = Math.Max(0, now - _restStart);
+            RestSeconds += seconds;
             _rest = Rest.None;
+            if (seconds > 0)
+            {
+                // M6 7 AN: the posture and the rate reached, so ACE's multipliers are read against live numbers (lying 1.8 stamina a second, standing 0.6, before Rejuvenation)
+                var q = _session.State.Self.Qualities;
+                q.TryGetVitalLevels(MageTemplate.MaxStamina, out var stamina, out _);
+                q.TryGetVitalLevels(MageTemplate.MaxMana, out var mana, out _);
+                SampleRestStamina();
+                var posture = PostureDown && _postureEchoed ? _options.Posture : RestPosture.Stand; // M6 7 AO: the posture the server's motion showed, not the one asked
+                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vitals: rest ended: posture {posture.ToString().ToLowerInvariant()} (the server's motion {RestEcho.Read(_session.State)}), {seconds:0.#} s, stamina {_restStamina} -> {stamina} ({GainedPerSecond(_restStamina, stamina, _restSpent, seconds):0.##} a second gained, {_restSpent} spent on presses, {((double)stamina - _restStamina) / seconds:0.##} a second net, ACE {PullRestRule.StaminaPerSecondAtOne * PullRestRule.HealthStance(posture):0.##} before Rejuvenation), mana {_restMana} -> {mana} ({((double)mana - _restMana) / seconds:0.##} a second)"));
+            }
         }
+    }
+
+    /// <summary>
+    /// M6 7 AO, the check after: the key was taken, so the server's motion must show the posture within <see cref="RestEcho.WaitSeconds"/>. No echo stands her by name for this pass of the keeper (<c>failed=no-echo</c>, TODO(m6-rest-lie-echo)); a posture that went away after its echo is named, and she lies down again up to <see cref="MaxPostureLost"/> times. True while the posture holds or its echo is awaited.
+    /// </summary>
+    private bool PostureHolds(double now)
+    {
+        var command = _options.Posture == RestPosture.Sit ? SitCommand : LieCommand;
+        var shown = RestEcho.Shows(_session.State, command);
+        if (!_postureEchoed)
+        {
+            if (shown)
+            {
+                _postureEchoed = true;
+                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vitals: check after: the server's motion shows the posture {RestEcho.Read(_session.State)} {now - _postureSentAt:0.0} s after the key"));
+                return true;
+            }
+
+            if (now - _postureSentAt < RestEcho.WaitSeconds)
+            {
+                return true;
+            }
+
+            _postureFailed = true;
+            _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vitals: check after: failed=no-echo: she was asked to {(command == LieCommand ? "lie down" : "sit")}, but the server's motion shows {RestEcho.Read(_session.State)} after {now - _postureSentAt:0.0} s (TODO(m6-rest-lie-echo)); she rests on her feet"));
+            StandFirst();
+            return false;
+        }
+
+        if (shown)
+        {
+            return true;
+        }
+
+        _postureFailed = ++_postureLost >= MaxPostureLost;
+        _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vitals: check: failed=posture-lost: the server's motion no longer shows the posture ({RestEcho.Read(_session.State)}), {_postureLost} of {MaxPostureLost}: {(_postureFailed ? "she rests on her feet" : "she lies down again")}"));
+        _stanceSynced = false;
+        StandFirst();
+        return false;
+    }
+
+    /// <summary>
+    /// M6 7 AN, AO: true when a creature that can attack her stands within <see cref="QuietMetres"/>: she rests on her feet then (the owner: lying down only where nothing is awake within reach), named once a rest. A town NPC is no reason (<see cref="WorldObjectTable.NearestAttackableCreature"/>).
+    /// M6 16 E2b (the one world picture): a creature stands where the session's <see cref="IGameSessionView.Live"/> says (the body the client draws when it draws one and the body can be trusted, else the server's last report), as the
+    /// fight's own awake read takes it; a session that draws no bodies answers from the report, as before.
+    /// </summary>
+    private bool CreatureAwakeNear()
+    {
+        // M6 16 Q1: the session's threat board answers (its awake query: any living creature that may be attacked within the reach, where the session draws it; the later of two at one distance, as the old scan took it).
+        var query = ThreatQuery.AwakeNear(QuietMetres) with { TiesToLast = true };
+        var answer = ThreatBoard.For(_session).Ask(_session, in query, _session.Clock.Now);
+        if (answer.Kind != ThreatAnswerKind.Standing)
+        {
+            return false;
+        }
+
+        if (!_quietNoted)
+        {
+            _quietNoted = true;
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"vitals: 0x{answer.Guid:X8} is within {QuietMetres:0} m: she rests standing"));
+        }
+
+        return true;
     }
 
     /// <summary>Stands up (the stop key) when the keeper holds a posture; true when the stand was sent (the caller's action waits for the next step).</summary>
@@ -1187,11 +1408,23 @@ public sealed class VitalsKeeper
                 if (outcome.Kind == ActionOutcomeKind.Local && press is { Kind: ActionOutcomeKind.Local })
                 {
                     PostureDown = true;
+                    _postureEchoed = false;
+                    _postureSentAt = now;
+                    _session.State.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxHealth, out _lieHealth, out _);
                 }
                 else
                 {
                     _postureFailed = true;
                     _log.Warn(LogCategory, $"vitals: the rest posture {_options.Posture.ToString().ToLowerInvariant()} was not taken ({(press ?? outcome).Kind}: {(press ?? outcome).Detail}); resting standing (ACE's stance factor 1.0)");
+                }
+
+                break;
+            case Pending.Stance:
+                _stanceSynced = outcome.Kind is ActionOutcomeKind.Local or ActionOutcomeKind.Confirmed or ActionOutcomeKind.Sent;
+                if (!_stanceSynced)
+                {
+                    _postureFailed = true;
+                    _log.Warn(LogCategory, $"vitals: the rest posture {_options.Posture.ToString().ToLowerInvariant()} was not taken (the walker's stance was not synced to non-combat: {outcome.Kind}: {outcome.Detail}); resting standing");
                 }
 
                 break;

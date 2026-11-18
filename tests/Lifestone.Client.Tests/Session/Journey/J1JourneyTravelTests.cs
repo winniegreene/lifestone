@@ -105,6 +105,19 @@ public sealed class J1JourneyTravelTests
         Assert.Equal("travel:recall:no-caster", leg.Failure);
     }
 
+    /// <summary>M6 7 K (round 1c: <c>travel:recall:no-caster</c> on a Throwaway whose book holds the recall): the book decides for a character the name list does not hold.</summary>
+    [Fact]
+    public void A_character_no_list_names_with_the_recall_in_its_book_goes_home_by_it_M6_7_K()
+    {
+        var t = new J1JourneyRig(J1JourneyRig.BeltCell);
+        t.Context("Lifestone Throwaway");
+        var leg = t.Travel!.GoTo(t.View, Home(), t.Now);
+        Assert.Equal(TravelMeans.Recall, leg.Means);
+        Assert.Equal(TravelStatus.Arrived, t.RunLeg(leg));
+        Assert.Equal([1635u], t.Casts);
+        Assert.Equal((1, true), (t.Facts.Recalls, t.Facts.LifestoneTied));
+    }
+
     [Fact]
     public void Nothing_travels_when_the_player_already_stands_at_the_destination()
     {

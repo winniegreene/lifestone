@@ -294,7 +294,7 @@ public sealed class HeldItemTests(DatSetFixture fixture, ITestOutputHelper outpu
 
     /// <summary>
     /// The Healer's Heart on the real human: the orb's Setup 0x020009AD carries a light and a default script with an emitter; held in the right hand the light is lit and
-    /// the emitter runs; stowed, neither. (The owner's "glow when it comes out" and "glowing artifact" with the retail data.)
+    /// the emitter runs; stowed, neither. (The owner's reports of a glow when it comes out and of a glowing artifact, with the retail data.)
     /// </summary>
     [RequiresDatsFact]
     public void The_healers_hearts_light_and_emitter_follow_the_real_human_hand_and_stop_when_it_is_stowed()

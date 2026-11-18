@@ -1,0 +1,161 @@
+{
+  "key": "pathwarden",
+  "name": "The Pathwarden Token and the Aluvian Pathwarden Chest",
+  "giver": { "wcid": 33596, "name": "Pathwarden Thorolf" },
+  "start": { "cell": "0xA9B40019", "point": null, "name": "Holtburg (where the Academy's exit arrives)" },
+  "steps": [
+    {
+      "kind": "go",
+      "what": "to Pathwarden Thorolf in Holtburg",
+      "place": { "cell": "0xA9B40022", "point": [97.0, 27.0, 94.0], "name": "beside Pathwarden Thorolf, Holtburg" },
+      "target": { "wcid": 33596, "name": "Pathwarden Thorolf" },
+      "item": null,
+      "expect": { "reply": null, "stamp": null, "item": null },
+      "source": "W0 SELECT, m6-plan.md section 8: Pathwarden Thorolf (wcid 33596) at cell 0xA9B40022, (97.00, 27.00, 94.00) (a3-facts)",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "hand the Pathwarden Token to Thorolf",
+      "place": null,
+      "target": { "wcid": 33596, "name": "Pathwarden Thorolf" },
+      "item": { "wcid": 33613, "name": "Pathwarden Token" },
+      "expect": { "reply": null, "stamp": "PathwardenComplete", "item": { "wcid": 33608, "name": "Pathwarden Supply Key" } },
+      "source": "W0 SELECT, m6-plan.md section 8: Give 33613 (in a new character's pack): InqQuest PathwardenFound1111@TokenTurnIn; both outcomes (QuestSuccess and QuestFailure, categories 12 and 13) give the Pathwarden Supply Key 33608 and stamp PathwardenComplete, so no talk comes first (item 0 live round 1: his talk stamps PathwardenFound1111 only for a character holding ToPathwarden; a fresh one hears the greeting)",
+      "todo": null
+    },
+    {
+      "kind": "use",
+      "what": "open the Aluvian Pathwarden Chest with the key",
+      "place": { "cell": "0xA9B40022", "point": [99.0, 29.5, 94.0], "name": "beside the Aluvian Pathwarden Chest, Holtburg" },
+      "target": { "wcid": 33609, "name": "Aluvian Pathwarden Chest" },
+      "item": { "wcid": 33608, "name": "Pathwarden Supply Key" },
+      "expect": { "reply": null, "stamp": null, "item": null },
+      "source": "W0 SELECT, m6-plan.md section 8: the chest 33609 beside Thorolf is opened with the key 33608 ('Use this item on a locked chest'); closed by M6 0 round 9 (m6-pathwarden-chest-open-check): the chest opened and 3 of the 4 pieces were worn, the check being the chest's contents coming into view",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the robe from the chest",
+      "place": null,
+      "target": { "wcid": 33609, "name": "Aluvian Pathwarden Chest" },
+      "item": { "wcid": 40439, "name": "Pathwarden Robe" },
+      "expect": { "reply": null, "stamp": null, "item": null },
+      "source": "W0 SELECT, m6-plan.md section 8: the chest's generator holds one each of 41513, 4616, 33597, 33601, 40439, 33605, 33606, 33607; the mage takes and wears the robe, gauntlets, sollerets and trinket (spec DoD 2)",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the gauntlets from the chest",
+      "place": null,
+      "target": { "wcid": 33609, "name": "Aluvian Pathwarden Chest" },
+      "item": { "wcid": 33606, "name": "Pathwarden Gauntlets" },
+      "expect": { "reply": null, "stamp": null, "item": null },
+      "source": "W0 SELECT, m6-plan.md section 8: as step 4",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the sollerets from the chest",
+      "place": null,
+      "target": { "wcid": 33609, "name": "Aluvian Pathwarden Chest" },
+      "item": { "wcid": 33605, "name": "Pathwarden Sollerets" },
+      "expect": { "reply": null, "stamp": null, "item": null },
+      "source": "W0 SELECT, m6-plan.md section 8: as step 4",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Pathwarden Trinket from the chest",
+      "place": null,
+      "target": { "wcid": 33609, "name": "Aluvian Pathwarden Chest" },
+      "item": { "wcid": 41513, "name": "Pathwarden Trinket" },
+      "expect": { "reply": null, "stamp": null, "item": null },
+      "source": "W0 SELECT, m6-plan.md section 8: as step 4; the trinket's +4% experience is the spec section 5.5's first row",
+      "todo": null
+    }
+  ],
+  "done": { "stamp": "PathwardenComplete", "reply": null, "item": { "wcid": 41513, "name": "Pathwarden Trinket" } },
+  "timer_seconds": null,
+  "carry": {
+    "line_percent": 90,
+    "reserve_burden": 120,
+    "always": [40439, 41513]
+  },
+  "sources": [
+    "W0 SELECT, m6-plan.md section 8: Pathwarden Thorolf 33596, the Pathwarden Token 33613, the Pathwarden Supply Key 33608, the Aluvian Pathwarden Chest 33609 and its generator; afterwards his talk replies 'I hope that armor treats you well...'",
+    "Spec DoD 2 (docs/milestones/m6-the-ladder.md): the robe, gauntlets, sollerets and trinket worn; wearing them is a3's station, not a step (the wear kind is not yet built)",
+    "The ladder note section 7 (cache/m6/level-ladder-note.md): the Pathwarden Token opens Thorolf's armor cache in Holtburg",
+    "M6 item 14: the plate form of 2026-11-11 (the chest's five plate pieces in place of the robe) is off by the owner's order of 2026-11-12: its block is kept below as armour_plate_off, which nothing reads as the armour form, so the pick-up steps above (the robe, as before) are what the chest gives; the leather block is the set she wears in the robe's place once her purse pays for it",
+    "Not taken: the Great Mana Stone 4616, the Plate Hauberk 33597, the Plate Leggings 33601 and the Helm 33607 (spec DoD 2 names four pieces); giving back outgrown pieces is the returns block below (M6 2 d)",
+    "M6 0 F8 carry gate (the first climb probe: 129% after one restock): burdens are the world SQL v0.9.296 PropertyInt 5 (a read-only parse of the pinned zip): Pathwarden Robe 40439 = 200, Gauntlets 33606 = 900, Sollerets 33605 = 540, Trinket 41513 = 60. A Strength 10 mage (the creation template) has capacity 150 x 10 = 1,500 (EncumbranceSystem.EncumbranceCapacity, no augmentations: retail 0x004FD7A0, ACE EncumbranceSystem.cs @95ef426d). The probe read 129% = 1,935 after the trip bought 247 components (1,063 by the SQL burdens: 4 each, the Prismatic Taper 6, the Mana Potion 15), so her pack was 872 before it (TODO(m6-starter-burden): the starter items' sum by the SQL is 1,250, so one of the items weighs less than the SQL says; read EncumbranceVal per item live). The gate takes a piece, lightest first, only when burden + piece + the 120 the restock needs (the outskirts profile's keeps: 26 herbs, powders, talismans and scarabs at 4 = 104, one Mana Potion 15) stays within 90% of the capacity (1,350): the trinket (872 + 60 + 120 = 1,052) and the robe (932 + 200 + 120 = 1,252) fit; the sollerets (1,132 + 540 + 120 = 1,792) and the gauntlets stay in the chest, and are taken from Strength 14 (1,890 allowed) and, after the sollerets, 20 (2,700). TODO(m6-climber-strength): the credit plan's Strength ranks (item 1) decide how many pieces she wears.",
+    "TODO(m6-pathwarden-quest-row): the quest rows' min_Delta and max_Solves (PathwardenComplete) are not in the SELECT; the quest is taken as done once per character (timer null) from his afterwards reply",
+    "M6 2 d (m6-pathwarden-item-names, closed): the pieces' display names are the world SQL v0.9.296 weenie_properties_string type 1 (PropertyString 'Name'), read offline from the pinned zip: 40439 'Pathwarden Robe' (row 58401), 33606 'Pathwarden Gauntlets' (57166), 33605 'Pathwarden Sollerets' (57164), 41513 'Pathwarden Trinket' (76887), 33607 'Pathwarden Helm' (57168), 33601 'Pathwarden Plate Leggings' (57156), 33597 'Pathwarden Plate Hauberk' (57148); the runner still matches by wcid"
+  ],
+  "armour_plate_off": {
+    "pieces": [
+      { "wcid": 33597, "name": "Pathwarden Plate Hauberk", "coverage": 15360, "armour_level": 120, "burden": 2500, "strength": 15 },
+      { "wcid": 33601, "name": "Pathwarden Plate Leggings", "coverage": 768, "armour_level": 120, "burden": 2000, "strength": 0 },
+      { "wcid": 33607, "name": "Pathwarden Helm", "coverage": 16384, "armour_level": 120, "burden": 600, "strength": 0 },
+      { "wcid": 33606, "name": "Pathwarden Gauntlets", "coverage": 32768, "armour_level": 120, "burden": 900, "strength": 0 },
+      { "wcid": 33605, "name": "Pathwarden Sollerets", "coverage": 65536, "armour_level": 120, "burden": 540, "strength": 0 }
+    ],
+    "instead_of": [40439],
+    "sources": [
+      "M6 item 14 (the owner, 2026-11-11): armour instead of the robe. The chest's generator holds the five plate pieces beside the robe (step 4's source); the set covers every part of the body (0x1FF00: the hauberk the chest, abdomen and arms 0x3C00, the leggings the legs 0x300, the helm 0x4000, the gauntlets 0x8000, the sollerets 0x10000), the robe every part but the hands (0x17F00) and nothing can be worn over or under it in those parts (ACE Creature_Equipment.cs:50-58, 93-101 @95ef426d), so it is the whole set or the robe",
+      "Read-only SELECT of ace_world on this server, 2026-11-11 (weenie_properties_int of 33597, 33601, 33607, 33606, 33605 and 40439): ArmorLevel (28) 120 for each plate piece and 50 for the robe; EncumbranceVal (5) 2500, 2000, 600, 900, 540 (the set 6,540) and 200; ClothingPriority (4) 15360, 768, 16384, 32768, 65536 and 98048; Bonded (33) 1 and Attuned (114) 1 for all six, Value (19) 0; no wield requirement row (158 to 160, 270 to 272); ItemSpellcraft (106) 100, ItemCurMana and ItemMaxMana (107, 108) 1000, ItemDifficulty (109) 0",
+      "weenie_properties_float of the same: ArmorModVsSlash (13) 1.3, Pierce (14) 1.0, Bludgeon (15) 1.0, Cold (16) 0.4, Fire (17) 0.4, Acid (18) 0.6, Electric (19) 0.4 for each plate piece; the robe 0.8, 0.8, 1.0, 0.2, 0.2, 0.1, 0.2; ManaRate (5) -0.033 a second (1,000 mana is about 8.4 hours of wear)",
+      "weenie_properties_spell_book of the same: the hauberk Strength Self II (1328, stat_Mod_Val 15) and Impenetrability II (1482, +50); the leggings Endurance Self II and Impenetrability II; the helm Focus Self II, Willpower Self II and Impenetrability II; the gauntlets Coordination Self II and Impenetrability II; the sollerets Quickness Self II and Impenetrability II; the robe Strength, Endurance, Focus and Willpower Self II and Impenetrability II. The set gives every line the robe gives, and Coordination and Quickness beside",
+      "The order is the lift order (Mage/ArmourSet.cs, ArmourForm): the hauberk first, because its Strength Self II raises the capacity (150 x Strength) from 1,500 to 3,750 and ACE refuses an item that puts the burden over 3 x the capacity (Player_Inventory.cs:53-76); the live climber of 2026-11-11 stood at burden 2,460 before the chest with the Academy Coat (600) and the Leather Boots (420) the set replaces: 1,440 + 2,500 = 3,940 of the 4,500 a Strength of 10 may lift",
+      "The first live run (2026-11-11 23:40 UTC) did not take the set: she wears the Leather Boots but carries the Academy Coat in her pack, and a shed of the worn pieces alone left her at 2,040, 40 over the lift. The shed now takes every piece she holds, worn or in the pack, that the set replaces (PathwardenWear.ShedFirst), and the stop at the buff bot comes before the chest when it applies to the run (ArmourForm.BotFirst; the headless journey reads the autopilot's --autopilot-buff-bot): with the bot's Strength line her capacity is 7,500 and she may lift 22,500, so no lift is marginal and she is never at twice her load between the chest and the bot",
+      "The burden, said: the set is 6,540 against the robe and gauntlets' 1,100. After the chest about 8,040 (1,440 + 6,540 + the trinket 60): 214% of the capacity 3,750 her Strength of 25 gives (run modifier 0), 107% of the 7,500 the buff bot's Strength line gives (+40, m6-plan.md section 3.1). The Strength floor counts the worn pieces' own line and the bot's (Mage/ArmourSet.cs, StandingStrength). By the dats' XpTable the floor's first buy is then 8 ranks (2,511 experience; the robe form's was 6 ranks, 1,527). TODO(m6-armour-bot-off): with the stop at the bot off the floor counts the hauberk's own line alone and buys 33 ranks (40,434 experience, more than twice what she holds at level 6) before every share; the owner decides whether a climb without the bot keeps the robe: taking this block out of the file restores the robe form"
+    ]
+  },
+  "leather": {
+    "vendor": {
+      "name": "Sedor Wystan the Blacksmith",
+      "wcid": 712,
+      "guid": "0x7A9B4026",
+      "cell": "0xA9B40100",
+      "point": [87.48, 131.04, 66.005],
+      "buys_item_types": "0x40040103",
+      "buy_price": 0.95
+    },
+    "pieces": [
+      { "wcid": 46, "name": "Metal Cap", "coverage": 16384, "locations": 1, "armour_level": 140, "burden": 120, "price": 92, "also": [] },
+      { "wcid": 42, "name": "Studded Leather Breastplate", "coverage": 1024, "locations": 512, "armour_level": 90, "burden": 675, "price": 1813, "also": [] },
+      { "wcid": 63, "name": "Studded Leather Girth", "coverage": 2048, "locations": 1024, "armour_level": 90, "burden": 350, "price": 200, "also": [] },
+      { "wcid": 89, "name": "Studded Leather Pauldrons", "coverage": 4096, "locations": 2048, "armour_level": 90, "burden": 350, "price": 138, "also": [] },
+      { "wcid": 38, "name": "Studded Leather Bracers", "coverage": 8192, "locations": 4096, "armour_level": 90, "burden": 330, "price": 138, "also": [] },
+      { "wcid": 84, "name": "Studded Leather Leggings", "coverage": 768, "locations": 24576, "armour_level": 90, "burden": 900, "price": 263, "also": [] },
+      { "wcid": 59, "name": "Studded Leather Gauntlets", "coverage": 32768, "locations": 32, "armour_level": 130, "burden": 450, "price": 1375, "also": [56, 33606] },
+      { "wcid": 116, "name": "Studded Leather Boots", "coverage": 65536, "locations": 384, "armour_level": 130, "burden": 690, "price": 1563, "also": [115] }
+    ],
+    "instead_of": [40439],
+    "sources": [
+      "M6 item 14 (the owner's order of 2026-11-12, after the plate was seen live): leather in place of the plate. The plate set is 6,540 burden: 107% of her load with the buff bot's Strength line and 228% without, and the Strength floor then wanted 42 ranks. The set here is bought at Holtburg's blacksmith and worn in place of the Pathwarden Robe as one swap, on the first supply trip whose purse pays for all of its missing pieces after the trip's other buys (Mage/LeatherSet.cs, LeatherSwap); until then the robe stays on, so no part of the body is ever bare",
+      "Read-only SELECT of ace_world on this server, 2026-11-12: Sedor Wystan the Blacksmith is weenie 712, landblock_instance guid 0x7A9B4026 in cell 0xA9B40100 at (87.48, 131.04, 66.005); MerchandiseItemTypes (int 74) 1074004227 = 0x40040103, BuyPrice (float 37) 0.95, SellPrice (float 38) 1.25. His create list (destination 4, rows 65384 to 65394, each unlimited) holds the Metal Cap 46, the Studded Leather Breastplate 42, Girth 63, Pauldrons 89, Bracers 38, Leggings 84, Gauntlets 59 and Boots 116",
+      "weenie_properties_int of the pieces: ArmorLevel (28) 140 for the cap, 90 for the breastplate, girth, pauldrons, bracers and leggings, 130 for the gauntlets and boots; EncumbranceVal (5) 120, 675, 350, 350, 330, 900, 450, 690; ClothingPriority (4) and ValidLocations (9) as written; Value (19) 73, 1450, 160, 110, 110, 210, 1100, 1250; no wield requirement row, not attuned, not bonded. weenie_properties_float 15 (ArmorModVsBludgeon) 1.0 for each. The price is ACE's GetSellCost, max(1, ceil(1.25 x Value - 0.1)) (Vendor.cs 577-585 @95ef426d)",
+      "also: a piece she already holds fills its part and is not bought: the Leather Gauntlets 56 the gear floor buys on her first trip (Shopkeeper Renald the Elder, 1,485; armour level 130, burden 270) or the Pathwarden Gauntlets 33606 for the hands, and the Leather Boots 115 a new character wears (armour level 130, burden 420) for the feet; the Pathwarden station keeps those boots when it takes them off for the robe, and the sale keeps them. For the fresh climber the swap is therefore the first six pieces: 2,644 pyreals and 2,725 burden; the whole set on her is 3,415 burden against the plate's 6,540 and the robe and gauntlets' 470",
+      "Why the blacksmith's studded leather and not the shopkeeper's leather: the same armour level 90 and bludgeon protection 1.0 (and more against a slash or a pierce), and the six pieces are 2,644 pyreals at one counter where the shopkeeper's are about 11,500 at 1.35 x Value; his Leather Breastplate is 255 lighter (420) for 1,890 and a second stop. The cap: armour level 140 for 92 pyreals and 120 burden",
+      "What it is worth (Mage/ArmorReport.cs): the robe casts Impenetrability II on itself (50 + 50), the leather casts nothing (90), so before she casts Impenetrability herself the two meet a tusker's swing alike; with her own Impenetrability and Bludgeon Bane at III the leather lets about 13% less through than the robe, the plate 17%"
+    ]
+  },
+  "returns": {
+    "giver": { "wcid": 33596, "name": "Pathwarden Thorolf" },
+    "rows": [
+      { "item": { "wcid": 33607, "name": "Pathwarden Helm" }, "reward": { "wcid": 33620, "name": "bag of Granite (Salvage)" }, "emote": 53553, "source": "W0 SELECT (world SQL v0.9.296, read offline): weenie_properties_emote 53553, object 33596, category 6 (Give) of 33607; its actions: 0 TakeItems, 1 Tell, 2 Give weenie_Class_Id 33620 stack_Size 1" },
+      { "item": { "wcid": 33606, "name": "Pathwarden Gauntlets" }, "reward": { "wcid": 33621, "name": "bag of Steel (Salvage)" }, "emote": 53554, "source": "W0 SELECT (world SQL v0.9.296, read offline): weenie_properties_emote 53554, object 33596, category 6 (Give) of 33606; its actions: 0 TakeItems, 1 Tell, 2 Give weenie_Class_Id 33621 stack_Size 1" },
+      { "item": { "wcid": 33605, "name": "Pathwarden Sollerets" }, "reward": { "wcid": 33621, "name": "bag of Steel (Salvage)" }, "emote": 53555, "source": "W0 SELECT (world SQL v0.9.296, read offline): weenie_properties_emote 53555, object 33596, category 6 (Give) of 33605; its actions: 0 TakeItems, 1 Tell, 2 Give weenie_Class_Id 33621 stack_Size 1" },
+      { "item": { "wcid": 40439, "name": "Pathwarden Robe" }, "reward": { "wcid": 6876, "name": "Sturdy Iron Key" }, "emote": 53556, "source": "W0 SELECT (world SQL v0.9.296, read offline): weenie_properties_emote 53556, object 33596, category 6 (Give) of 40439; its actions: 0 TakeItems, 1 Tell, 2 Give weenie_Class_Id 6876 stack_Size 1" },
+      { "item": { "wcid": 33601, "name": "Pathwarden Plate Leggings" }, "reward": { "wcid": 6876, "name": "Sturdy Iron Key" }, "emote": 53557, "source": "W0 SELECT (world SQL v0.9.296, read offline): weenie_properties_emote 53557, object 33596, category 6 (Give) of 33601; its actions: 0 TakeItems, 1 Tell, 2 Give weenie_Class_Id 6876 stack_Size 1" },
+      { "item": { "wcid": 33597, "name": "Pathwarden Plate Hauberk" }, "reward": { "wcid": 6876, "name": "Sturdy Iron Key" }, "emote": 53558, "source": "W0 SELECT (world SQL v0.9.296, read offline): weenie_properties_emote 53558, object 33596, category 6 (Give) of 33597; its actions: 0 TakeItems, 1 Tell, 2 Give weenie_Class_Id 6876 stack_Size 1" }
+    ],
+    "sources": [
+      "M6 2 d, GearReturn: an attuned piece the equip pass did not wear (outgrown by GearScore, or kept off by the coverage rule) is given to Thorolf, whose Give emotes take it (ACE GiveObjectToNPC, Player_Inventory.cs:3395-3443 @95ef426d, no attuned check; the piece cannot be dropped, :866-871, :1389-1393, and is Value 0, so no vendor pays for it)",
+      "The Pathwarden Trinket 41513 has no Give emote (weenie_properties_emote of object 33596 holds category 6 rows for 33613, 33607, 33606, 33605, 40439, 33601 and 33597 only): it is kept",
+      "The rewards: 33620 and 33621 are Salvage (bags of Granite and Steel; PropertyInt 19 Value 10, bonded), 6876 is the Sturdy Iron Key (Value 25; PropertyBool 69 IsSellable 0)",
+      "The pieces' burdens (PropertyInt 5): Helm 600, Gauntlets 900, Sollerets 540, Robe 200, Plate Leggings 2000, Plate Hauberk 2500, Trinket 60; all but the trinket are attuned (PropertyInt 114 1) and bonded (33 1) with Value 0 (19)"
+    ]
+  }
+}

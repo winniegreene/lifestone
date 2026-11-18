@@ -125,6 +125,18 @@ public static class DeathLegVerdict
     /// <summary>The <c>trip_abort=</c> text when the trip did not abort (or was not made).</summary>
     public const string TripAbortNone = "none";
 
+    /// <summary>M6 6 C1: the <c>trip_abort=</c> text when no trip was needed (nothing but pyreals left the inventory at the death, <see cref="DeathDropRule"/>; paired with <c>corpse_recovered=none-needed</c>).</summary>
+    public const string TripAbortNoneNeeded = "none-needed";
+
+    /// <summary>M6 7 AY: the <c>trip_abort=</c> of a corpse behind a shut gate (<see cref="Autopilot.RungOwner.CorpseRun"/>; with <c>corpse_recovered=no</c>): a shut gate means no fetch.</summary>
+    public const string TripAbortGateShut = "gate-shut";
+
+    /// <summary>M6 7 BB: the <c>trip_abort=</c> of a corpse that holds something she needs but lies where the ground's <c>corpse_fetch</c> data does not call it safe (with <c>corpse_recovered=no</c>).</summary>
+    public const string TripAbortCellUnsafe = "cell-unsafe";
+
+    /// <summary>M6 14 retreat attackers (rule 7): the <c>trip_abort=</c> of a corpse in an approach she cannot survive at her state (<see cref="Vitals.CorpseApproachRule"/>; with <c>corpse_recovered=no</c>): it is not walked to.</summary>
+    public const string TripAbortApproach = "approach";
+
     /// <summary><c>rebuffed=</c> when the rebuff stage's buff cycle ended with every profile line up.</summary>
     public const string RebuffedYes = "yes";
 
@@ -326,3 +338,107 @@ public static class DeathLegVerdict
 /// <param name="Line">The verdict line, <c>bsd-death done ok=... </c>.</param>
 /// <param name="Problems">What did not hold, one sentence each; empty when <paramref name="Ok"/>.</param>
 public sealed record DeathLegOutcome(bool Ok, string Line, IReadOnlyList<string> Problems);
+
+/// <summary>The inputs of <see cref="DeathDropRule.Decide"/>: what the handler can read at the respawn about what left the inventory at the death.</summary>
+/// <param name="Level">The character's level (PropertyInt 25) at the respawn, or null when the description carried none.</param>
+/// <param name="RetainedLine">True when ACE's "You have retained all your items..." line was seen since the death.</param>
+/// <param name="LostLine">ACE's "You've lost ..." line seen since the death, or null.</param>
+/// <param name="LinesRead">True when the chat could be tied to this death (its corpse's clock is known), so the absence of both lines means something; false: the lines are unread.</param>
+/// <param name="WornBefore">The pieces the worn memory held from before the death (0: the memory is empty, the worn side is unread).</param>
+/// <param name="WornMissing">Those of them the player does not hold now.</param>
+/// <param name="CasterKept">True when a caster was still wielded at the respawn (<c>rearm=none</c>).</param>
+public readonly record struct DeathDropInput(int? Level, bool RetainedLine, string? LostLine, bool LinesRead, int WornBefore, int WornMissing, bool CasterKept);
+
+/// <summary>What <see cref="DeathDropRule.Decide"/> said: nothing to recover (<c>corpse_recovered=none-needed</c>, no walk) or the corpse leg as before, with the reason on one line.</summary>
+/// <param name="NoneNeeded">True when nothing but pyreals left the inventory at the death.</param>
+/// <param name="Why">The reason, naming the inputs that decided.</param>
+public readonly record struct DeathDropDecision(bool NoneNeeded, string Why);
+
+/// <summary>
+/// M6 6 C1 (map-death section 2, gap c; facts section 2): did anything but pyreals leave the inventory at the death? Below level 11 ACE drops no item (only half the pyreals from level 6, destroyed) and an empty corpse rots in 15 s, so the
+/// corpse walk has nothing to find. The decision reads the diff the handler can take at the respawn: the worn side (the worn memory of before the death against what the player holds, and the wielded caster), ACE's own account of the pack
+/// side (its "You've lost ..." line lists every dropped item but the pyreals with "your ", @95ef426d <c>Player_Death.cs</c>:690-732 <c>DropMessage</c>; its "You have retained all your items..." line when nothing dropped,
+/// <c>Creature_Death.cs</c>:578-579), cross-checked with ACE's level rule (<c>GetNumItemsDropped</c> returns 0 at level 10 or less, <c>Player_Death.cs</c>:652-653; wielded items join the pool only from level 35, 489).
+/// A Slippery item always drops, at any level (561-567), so the level rule alone never decides: an unread diff walks as before, and the reason says so. Pure and allocation-free but for the reason's text.
+/// </summary>
+public static class DeathDropRule
+{
+    /// <summary>ACE's line when nothing dropped (<c>Creature_Death.cs</c>:579 @95ef426d).</summary>
+    public const string RetainedLine = "You have retained all your items. You do not need to recover your corpse!";
+
+    /// <summary>The start of ACE's drop list (<c>Player_Death.cs</c>:705 @95ef426d).</summary>
+    public const string LostPrefix = "You've lost ";
+
+    /// <summary>The mark ACE puts before every dropped item that is not a coin (<c>Player_Death.cs</c>:721 @95ef426d).</summary>
+    public const string ItemMark = "your ";
+
+    /// <summary>ACE's level rule: at this level or below no item is dropped (<c>GetNumItemsDropped</c>, <c>Player_Death.cs</c>:652-653 @95ef426d).</summary>
+    public const int NoItemLevel = 10;
+
+    /// <summary>The items other than pyreals a "You've lost ..." line lists (each carries <see cref="ItemMark"/>; the pyreals do not).</summary>
+    /// <param name="line">The line.</param>
+    public static int LostItems(string line)
+    {
+        ArgumentNullException.ThrowIfNull(line);
+        var count = 0;
+        for (var at = line.IndexOf(ItemMark, StringComparison.Ordinal); at >= 0; at = line.IndexOf(ItemMark, at + ItemMark.Length, StringComparison.Ordinal))
+        {
+            count++;
+        }
+
+        return count;
+    }
+
+    /// <summary>The decision (see the class).</summary>
+    /// <param name="input">What the handler read.</param>
+    public static DeathDropDecision Decide(in DeathDropInput input)
+    {
+        var level = input.Level is { } l ? l.ToString(CultureInfo.InvariantCulture) : "unknown";
+        var levelNote = input.Level is { } lv ? (lv <= NoItemLevel ? $"level {lv} <= {NoItemLevel}: ACE drops no item but a Slippery one" : $"level {lv} > {NoItemLevel}: ACE may drop items") : "level unknown";
+        if (!input.CasterKept)
+        {
+            return new(false, $"the wielded caster left the hands at the death ({levelNote})");
+        }
+
+        if (input.WornMissing > 0)
+        {
+            return new(false, string.Create(CultureInfo.InvariantCulture, $"{input.WornMissing} of the {input.WornBefore} pieces worn before the death are not held ({levelNote})"));
+        }
+
+        if (input.LostLine is { } lost && LostItems(lost) is var items and > 0)
+        {
+            return new(false, string.Create(CultureInfo.InvariantCulture, $"ACE's line lists {items} item(s) but pyreals ({levelNote}{(input.Level <= NoItemLevel ? "; against the level rule: a Slippery item" : string.Empty)})"));
+        }
+
+        if (input.RetainedLine)
+        {
+            return new(true, $"ACE's line says every item was retained ({levelNote}{(input.Level > NoItemLevel ? ": an empty roll" : string.Empty)}); {WornSide(in input)}");
+        }
+
+        if (input.LostLine is not null)
+        {
+            return new(true, $"ACE's line lists pyreals only, and pyreals are not gone back for ({levelNote}); {WornSide(in input)}");
+        }
+
+        if (!input.LinesRead)
+        {
+            return new(false, $"the chat cannot be tied to this death (no corpse clock), so ACE's drop lines are unread; level {level}: the diff cannot be read");
+        }
+
+        if (input.Level is { } low && low <= NoItemLevel && input.WornBefore > 0)
+        {
+            return new(true, string.Create(CultureInfo.InvariantCulture, $"no drop line from ACE, and the level rule agrees with the worn side ({levelNote}; the {input.WornBefore} pieces worn before the death are all held)"));
+        }
+
+        return new(false, input.WornBefore == 0
+            ? $"no drop line from ACE and the worn set before the death is not known (an empty memory): the diff cannot be read ({levelNote})"
+            : $"no drop line from ACE and {levelNote}: the pack side cannot be read");
+    }
+
+    /// <summary>
+    /// M6 6 FXD1 (6-D11): what the worn side says beside ACE's line: "the worn side agrees" only when the worn memory of before the death held pieces (all held now: a missing one decided earlier); with an empty memory
+    /// (<see cref="DeathDropInput.WornBefore"/> 0: every journey that passes no worn memory) the worn side is unread and the line alone decides, said so.
+    /// </summary>
+    private static string WornSide(in DeathDropInput input) =>
+        input.WornBefore == 0 ? "the worn side unread (the worn set before the death is not known: an empty memory); ACE's line decides alone" : "the worn side agrees";
+}

@@ -138,7 +138,12 @@ public interface IActionApi
     /// </summary>
     /// <param name="spellId">The spell id (<c>SpellTable</c>, a spell the character knows).</param>
     /// <param name="source">Who is asking.</param>
-    /// <remarks>A literal <c>Cast(id, 0)</c> binds this overload (0 converts to <see cref="ActionSource"/>) unless the int overload below takes it: see <see cref="Cast(uint, int, ActionSource)"/>.</remarks>
+    /// <remarks>
+    /// <para>A literal <c>Cast(id, 0)</c> binds this overload (0 converts to <see cref="ActionSource"/>) unless the int overload below takes it: see <see cref="Cast(uint, int, ActionSource)"/>.</para>
+    /// <para><b>The player's rule</b> (M6 item 15; every cast overload, <see cref="ActionSource.Automation"/> only, <c>--autopilot-player-rules</c>, on by default): a spell that is on none of the character's spell bars is put on
+    /// one first, as a player puts it (<see cref="AddSpellFavorite"/>, and <see cref="RemoveSpellFavorite"/> for the lower level of its line it replaces: <c>SpellBarRule</c>), queued ahead of the cast; a cast whose spell is
+    /// still on no bar at its turn (the spellbook lacks it) is <see cref="ActionOutcomeKind.Refused"/> by name; and <see cref="SpellBarCast"/> is published as the cast goes out.</para>
+    /// </remarks>
     ActionHandle Cast(uint spellId, ActionSource source = ActionSource.Host);
 
     /// <summary>The object the last targeted cast, melee attack or missile attack aimed at (not the player), or 0 before any (M5 7: what <c>--examine-capture-creatures</c> follows).</summary>
@@ -319,6 +324,9 @@ public interface IActionApi
     /// "The &lt;name&gt; restores N points of your &lt;Vital&gt;." (<see cref="HealResultKind.Drank"/>); N of 0 is <see cref="HealResultKind.Wasted"/>, still Confirmed, because ACE spends a potion drunk at a full vital (capture.md C3).
     /// A refusal (0x028A 0x001D busy, 0x04EB jumping) ends at the UseDone as a <see cref="ActionOutcomeKind.ServerError"/> with its code, as does a UseDone with a code. The effect comes about 0.75 s after the send and the UseDone about 1.5 s;
     /// 20 s timeout. Refused at once for item 0, and offline.
+    /// <para><b>The player's rule</b> (M6 item 15; <see cref="ActionSource.Automation"/> only, <c>--autopilot-player-rules</c>, on by default): the drink is the use of the shortcut bar's item of that kind. The item drunk is
+    /// the one the kind's shortcut holds (another stack of the same weenie class is swapped for it, and the handle names the item drunk); a kind with no shortcut gets one first (<see cref="AddShortcut"/> on the slot
+    /// <c>DrinkBarRule</c> names, queued ahead of the drink); an item that is on no slot at its turn (a full bar) is <see cref="ActionOutcomeKind.Refused"/> by name.</para>
     /// </summary>
     /// <param name="item">The potion's or food's guid.</param>
     /// <param name="source">Who is asking.</param>
@@ -338,6 +346,18 @@ public interface IActionApi
     /// <param name="target">The player's own guid (every equipped item), or an item's.</param>
     /// <param name="source">Who is asking.</param>
     ActionHandle UseManaStone(uint stone, uint target, ActionSource source = ActionSource.Host) => throw new NotSupportedException("IActionApi.UseManaStone is not implemented by this view");
+
+    /// <summary>
+    /// Uses one held item on another as a crafting recipe (GameAction 0x0035 {source, target}, retail <c>CM_Inventory::Event_UseWithTargetEvent</c>, 11.6096 0x006AD3E0; ACE <c>RecipeManager.UseObjectOnTarget</c>, @95ef426d <c>Managers/RecipeManager.cs:43-149</c>). Lane Heal (one use with a UseDone at a time).
+    /// Not <see cref="UseWithTarget"/>: that tracker confirms only a kit's Structure falling or the item's removal, so a recipe that keeps its source (6068) would read as a false "nothing happened", and the handle says nothing about what the recipe did.
+    /// <para>The handle says only how the server ended the use: <see cref="ActionOutcomeKind.Confirmed"/> on UseDone 0 with no refusal; <see cref="ActionOutcomeKind.ServerError"/> with the code on a UseDone with a code (0x001D busy, 0x043A combat mode, 0x0437 requirements), on the WeenieError ACE sends before a UseDone 0 (0x043B untrained), or with code 0 on the
+    /// refusal lines. Whether the recipe succeeded is <see cref="Quests.RecipeOutcomes.Read"/>'s to say, from the items. Holds nothing after its UseDone (ACE clears its busy flag in the same action: <c>RecipeManager.cs:137-143</c>). 20 s timeout. Refused at once for 0 guids, one item used on itself, an item not held, and offline.</para>
+    /// The default body throws: a view that cannot send it does not implement it.
+    /// </summary>
+    /// <param name="sourceItem">The source's guid.</param>
+    /// <param name="targetItem">The target's guid (a different object from the source).</param>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle UseRecipe(uint sourceItem, uint targetItem, ActionSource source = ActionSource.Host) => throw new NotSupportedException("IActionApi.UseRecipe is not implemented by this view");
 
     /// <summary>
     /// Merges <paramref name="amount"/> units of one stack the player holds into another stack of the same item (GameAction 0x0054 {from, to, amount}, retail
@@ -466,6 +486,22 @@ public interface IActionApi
     /// </summary>
     string? BusyReason { get; }
 
+    /// <summary>
+    /// M6 14 (the fight's cast-wait line): the actions this API still has out, by number and kind, in one line for a log: each one sent and unanswered with the seconds since its send, each lane held after an outcome, and each one
+    /// still waiting its turn (movement intents left out) with the seconds it has waited; "nothing" when there is none. A caller whose own action gets no answer writes it so the log says what it waits behind
+    /// (a Use and a Cast are never out together: ACE's UseDone names no request). Allocates: for a log line, not for every frame. The default is <see cref="BusyReason"/>'s text.
+    /// </summary>
+    string PendingText => BusyReason ?? "nothing";
+
+    /// <summary>
+    /// M6 14 recall unblock (live 2026-11-14 17:27:27 to 17:27:39 UTC: the fight stopped its Harm Other try when the trip home was asked, but the cast stayed queued behind a held Use lane, went out 12 s later and was the busy
+    /// reason the recall failed on): withdraws an action its caller no longer wants while it still waits its turn. It completes <see cref="ActionOutcomeKind.Cancelled"/> with <paramref name="why"/>, nothing sent. True when it was
+    /// withdrawn; false when it was already sent (an action on the wire cannot be unsent: its answer still comes), already complete, or not this API's. The default withdraws nothing.
+    /// </summary>
+    /// <param name="handle">The handle the call returned.</param>
+    /// <param name="why">Why, for the outcome and the log.</param>
+    bool Withdraw(ActionHandle handle, string why) => false;
+
     // ---- M4 3.2 h1: the shortcut bar's actions (appended) ----
 
     /// <summary>
@@ -584,6 +620,47 @@ public interface IActionApi
         throw new NotSupportedException("IActionApi.RecallLifestone is not implemented by this view (M5 6)");
 
     /// <summary>
+    /// The guardian window's Buy button (M6 villa): GameAction 0x021C BuyHouse {guardian, the stacks placed in the purchase pane}. ACE checks them against the
+    /// price and takes what it needs (<c>Player_House.HandleActionBuyHouse</c>, @95ef426d): <see cref="ActionOutcomeKind.Confirmed"/> on "Congratulations!  You now own this
+    /// dwelling."; a refusal it says (already own, level, rank, the 30-day and 15-day rules) is a <see cref="ActionOutcomeKind.ServerError"/>; a silent refusal (items short of
+    /// the price, no guardian on the landblock) times out after 10 s, named. Refused at once for an empty pane or an item not in the inventory. Never retried. Lane Use.
+    /// Call it from the window (<c>GuardianWindowModel.PressBuy</c>), never with items a player could not have placed.
+    /// </summary>
+    /// <param name="guardian">The guardian's guid.</param>
+    /// <param name="items">The stacks in the purchase pane.</param>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle BuyHouse(uint guardian, IReadOnlyList<uint> items, ActionSource source = ActionSource.Host) =>
+        throw new NotSupportedException("IActionApi.BuyHouse is not implemented by this view (M6 villa)");
+
+    /// <summary>
+    /// The guardian window's Pay button (M6 villa): GameAction 0x0221 RentHouse {guardian, the stacks placed in the rent pane}
+    /// (<c>Player_House.HandleActionRentHouse</c>): <see cref="ActionOutcomeKind.Confirmed"/> on "Maintenance paid." or "Maintenance partially paid." (the detail says
+    /// "partially paid"); "already been paid" and the several-houses line are a <see cref="ActionOutcomeKind.ServerError"/>; 10 s. Never retried. Lane Use.
+    /// </summary>
+    /// <param name="guardian">The guardian's guid.</param>
+    /// <param name="items">The stacks in the rent pane.</param>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle PayRent(uint guardian, IReadOnlyList<uint> items, ActionSource source = ActionSource.Host) =>
+        throw new NotSupportedException("IActionApi.PayRent is not implemented by this view (M6 villa)");
+
+    /// <summary>
+    /// <c>/house recall</c> (M6 villa): GameAction 0x0262 TeleToHouse (<c>Player_Location.HandleActionTeleToHouse</c>): <see cref="ActionOutcomeKind.Confirmed"/> on the teleport to
+    /// the house's guardian; a refusal (WeenieError YouMustOwnHouseToUseCommand, YoureTooBusy, YouHaveMovedTooFar, ...) is a <see cref="ActionOutcomeKind.ServerError"/>
+    /// naming it; 38 s. Never retried. Lane Magic.
+    /// </summary>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle RecallHouse(ActionSource source = ActionSource.Host) =>
+        throw new NotSupportedException("IActionApi.RecallHouse is not implemented by this view (M6 villa)");
+
+    /// <summary>
+    /// GameAction 0x021E HouseQuery (M6 villa; retail sends it at sign-in): <see cref="ActionOutcomeKind.Confirmed"/> when HouseData or HouseStatus answers
+    /// (<see cref="GameState.HouseStatus"/>, <see cref="GameState.House"/>); 5 s. Lane Query.
+    /// </summary>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle QueryHouse(ActionSource source = ActionSource.Host) =>
+        throw new NotSupportedException("IActionApi.QueryHouse is not implemented by this view (M6 villa)");
+
+    /// <summary>
     /// <c>/marketplace</c>: GameAction 0x028D TeleToMarketPlace (retail <c>CM_Character::Event_TeleToMarketplace</c>, 11.6096 0x006A2A40). ACE plays the recall motion, waits 14 s and
     /// teleports the player to the marketplace (<c>Player_Location.cs:199-262</c>, @95ef426d): <see cref="ActionOutcomeKind.Confirmed"/> on the teleport; a refusal (as
     /// <see cref="RecallLifestone"/>'s WeenieErrors, plus OlthoiCanOnlyRecallToLifestone) is a <see cref="ActionOutcomeKind.ServerError"/> naming it; 24 s. Never retried. Lane Magic.
@@ -624,4 +701,26 @@ public interface IActionApi
     /// <param name="source">Who is asking.</param>
     ActionHandle SetInscription(uint item, string inscription, ActionSource source = ActionSource.Ui) =>
         throw new NotSupportedException("IActionApi.SetInscription is not implemented by this view (M5 7)");
+
+    /// <summary>
+    /// Tells <paramref name="text"/> to the object <paramref name="target"/> by its id (M6 14): GameAction 0x0032 TalkDirect, the tell a creature that is not a player hears (ACE sends a tell by name,
+    /// <see cref="Tell"/>, to online players only). ACE looks the id up on the player's landblock (<c>GameActionTalkDirect.cs:21-50</c>, @95ef426d): a creature there gets the text (an NPC runs its
+    /// answer to it) and the teller the line <c>You tell NAME, "TEXT"</c> of chat type OutgoingTell (0x04), which makes it <see cref="ActionOutcomeKind.Confirmed"/>; any other id is answered WeenieError
+    /// CharacterNotAvailable (0x052B), a <see cref="ActionOutcomeKind.ServerError"/>. 5 s. Refused at once for target 0 or an empty text. Lane Chat (rate-limited with Talk and Tell). The NPC's answer is
+    /// not part of the action: its tells arrive as <see cref="ChatKind.Tell"/> lines from its id.
+    /// </summary>
+    /// <param name="target">The object's id.</param>
+    /// <param name="text">The message (ASCII).</param>
+    /// <param name="source">Who is asking.</param>
+    ActionHandle TalkDirect(uint target, string text, ActionSource source) =>
+        throw new NotSupportedException("IActionApi.TalkDirect is not implemented by this view (M6 14)");
+
+    /// <summary>M6 8 L: the check both fights ask before a bolt is paid for, or null on a host with no physics (the wasted-cast count is then the only guard). The default is null.</summary>
+    Lifestone.Client.Session.Casting.IShotCheck? Shots => null;
+
+    /// <summary>M6 8 L: gives the fights their shot check (the host that owns the player's physics world). The default does nothing.</summary>
+    /// <param name="shots">The check.</param>
+    void UseShots(Lifestone.Client.Session.Casting.IShotCheck shots)
+    {
+    }
 }

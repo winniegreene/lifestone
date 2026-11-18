@@ -47,6 +47,7 @@ public sealed class PlayerDescriptionCostTests(ITestOutputHelper output)
     }
 
     [Fact]
+    [Trait("Tier", "Timing")] // m4-timing-tier-candidates: a decode-and-reduce wall-clock budget
     public void A_live_shaped_PlayerDescription_decodes_and_reduces_within_the_burst_budget()
     {
         var body = LiveShaped(ReducerHarness.PlayerGuid);

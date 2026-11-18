@@ -447,6 +447,7 @@ M2: log in, create or select a character, enter the world at Holtburg, see objec
 | F7B1 / 0xF61B | Jump | C→S | should | `GameActionJump.cs`, `Structure/JumpPack.cs` |
 | F7B1 / 0x0015 | Talk (String16L; `@` = admin command) | C→S | should (test hooks) | `GameActionTalk.cs` |
 | F7B1 / 0x005D | Tell (String16L message, then String16L target, both ASCII) | C→S | should | `GameActionTell.cs` |
+| F7B1 / 0x0032 | TalkDirect (String16L message, ASCII, then u32 target object id; M6 14) | C→S | sent | `GameActionTalkDirect.cs` (the id is looked up on the sender's landblock; no creature there: WeenieError 0x052B; else the OutgoingTell line `You tell NAME, "TEXT"`, then the creature's answer) |
 | F7B1 / 0x0036 | Use (u32 GUID) | C→S | should | `GameActionUseItem.cs` |
 | F7B1 / 0x01BF | QueryHealth (u32 GUID) | C→S | should | `GameActionQueryHealth.cs` |
 | F7B1 / 0x0044 | RaiseVital (u32 vital, u32 experience) | C→S | should (M3 1.1) | `GameActionRaiseVital.cs` |
@@ -716,6 +717,7 @@ Running is forward = WalkForward plus current hold key = Run (2). ACE turns that
 - **0x01BF QueryHealth:** u32 GUID (`CM_Combat::Event_QueryHealth`, 11.4186 0x006A9B40, 11.6096 0x006AAAA0).
 - **The four stat actions (M3 1.1; `StatActionCodecs`):** F7B1 {sequence, type} then two 32-bit words, 20 bytes in all. **0x0044 RaiseVital** {u32 vital: the maximum's id 1, 3 or 5, u32 experience} (`CM_Train::Event_TrainAttribute2nd`, 11.4186 0x006A8040, 11.6096 0x006A8FA0); **0x0045 RaiseAttribute** {u32 attribute 1 to 6, u32 experience} (`Event_TrainAttribute`, 0x006A7F30 / 0x006A8E90); **0x0046 RaiseSkill** {u32 skill, u32 experience} (`Event_TrainSkill`, 0x006A8150 / 0x006A90B0); **0x0047 TrainSkill** {u32 skill, **i32** credits} (`Event_TrainSkillAdvancementClass`, 0x006A8260 / 0x006A91C0). The experience is unsigned because level 126 costs 4,286,609,098, which an i32 cannot hold (ACE reads `ReadUInt32` for it and `ReadInt32` for the credits). ACE answers in its own order: 0x02CF available experience first (SpendXP), then the stat's private update (0x02E3 attribute, 0x02E7 vital, 0x02DD skill; a train adds 0x02CD credits and a chat line), and refuses most bad requests silently; docs/session.md section 29 has what each completes on.
 - **0x005D Tell:** String16L message, then String16L target, both ASCII and the target non-empty (`CM_Communication::Event_TalkDirectByName`, 11.4186 0x006A4780, 11.6096 0x006A55A0).
+- **0x0032 TalkDirect (M6 14; `ChatActionCodecs.WriteTalkDirect`):** String16L message (ASCII: it is not the last field), then the u32 id of the object told, a target of 0 refused before writing. Written from ACE's reader (`GameActionTalkDirect.cs:18-19`, 95ef426d); retail's sender is the `Event_TalkDirect` docs/retail-ui.md names, whose body and address were not read.
 - Talk: its text is the last field, so it may be Windows-1252.
 - **The vendor and shortcut actions (M4 3.2 s0):** **GA 0x005F BuyItems** and **0x0060 SellItems**: u32 vendor, u32 count, then per item an i32 amount and a u32 guid, in that order, and nothing after the last item (ACE reads no alternate-currency word: it is commented out in `GameActionBuyItems.cs:29-32`); **0x00C8 IdentifyObject:** u32 guid (0 clears the appraisal target and gets no reply); **0x019C AddShortCut:** u32 index (0-based), u32 object, u16 spell, u16 layer; **0x019D RemoveShortCut:** u32 index. Retail senders `CM_Vendor::Event_Buy` 0x006AB050, `Event_Sell` 0x006AAF60, `CM_Item::Event_Appraise` 0x006A94A0, `CM_Character::Event_AddShortCut` 0x006A1CD0, `Event_RemoveShortCut` 0x006A25E0 (11.6096; bodies not read).
 
@@ -769,6 +771,48 @@ the empty FriendsListUpdate, then the chat channels (three at login, three more 
 0x0276, GM 0x02D0, 0x02D1, 0x02D2, 0x02D4 or 0x02D6, nor the client actions above; their layouts are ACE's writers'.
 Not in this section: 24 server frames that are all zero bytes (opcode 0, 36 to 48 bytes, SmartBox queue) in 14 recordings
 stay unknown (`TODO(m5-6-zero-messages)`).
+
+---
+
+### 5.6 Housing (M6 villa)
+
+Added by the M6 villa track. ACE references are the vendored tree's `WorldObjects/{SlumLord,House,Storage,Player_House,Player_Location}.cs`
+and `Network/Structure/{HouseProfile,HouseData,HousePayment,RestrictionDB}.cs`; Chorizite.ACProtocol's protocol.xml agrees on every
+layout except the noted ones. Retail's housing handlers and senders are not in the project's notes yet (`TODO(villa-retail-house-senders)`,
+`TODO(villa-retail-slumlord-recv)`), so the layouts are ACE's writers and readers. Decoded by `HouseCodecs`, written by `HouseActionCodecs`;
+the read model is docs/session.md section 116.
+
+**Server to client**
+
+| Opcode | Name | Layout (little-endian) | ACE | Lifestone |
+|---|---|---|---|---|
+| GE 0x021D | HouseProfile | u32 guardian, u32 dwelling id, u32 owner, u32 bitmask (0x1 Active, 0x2 RequiresMonarch), i32 min level, i32 max level, i32 min rank, i32 max rank (-1 none), u32 maintenance free, u32 type (1 cottage, 2 villa, 3 mansion, 4 apartment), String16L owner name, buy list, rent list; a list is u32 count + count x {i32 required, i32 paid, u32 wcid, String16L name, String16L plural} | `GameEventHouseProfile.cs`, `HouseProfile.cs` (sent by `SlumLord.ActOnUse`: every Use, after a rent payment, 3 s after a purchase) | reduced: `GameState.Guardian` (`GameStateReducer.House.cs`) |
+| GE 0x0225 | HouseData | u32 buy time, u32 rent time (Unix), u32 type, u32 maintenance free, buy list, rent list, Position (u32 cell, 3 x f32, then W X Y Z) | `GameEventHouseData.cs`, `HouseData.cs` (the HouseQuery's answer when a house is owned) | reduced: `GameState.House`, `HouseStatus` Owned |
+| GE 0x0226 | HouseStatus | u32 notice (ACE writes a WeenieError: BadParam 0x0002 "no house", HouseEvicted 0x045F at login) | `GameEventHouseStatus.cs` | reduced: `HouseStatus` None; another notice logged (`TODO(villa-house-status-text)`) |
+| GE 0x0227 | UpdateRentTime | u32 time | `GameEventHouseUpdateRentTime.cs` (no caller) | decoded, logged once (`TODO(villa-unsent-house-events)`) |
+| GE 0x0228 | UpdateRentPayment | rent list | `GameEventHouseUpdateRentPayment.cs` (no caller) | decoded, logged once |
+| GE 0x0248 | HouseUpdateRestrictions | **u8** sequence (a ByteSequence), u32 object, then UNALIGNED u32 version 0x10000002, u32 open, u32 monarch, u16 count, u16 buckets (768), count x {u32 guid, u32 access}. Chorizite reads the table header as one packed u32; ACE writes two u16 | `GameEventHouseUpdateRestrictions.cs`, `RestrictionDB.cs:74-105` | reduced: `GameState.HouseRestrictions` |
+| GE 0x0259 | HouseTransaction | u32 notice (ACE writes 2) | `GameEventHouseTransaction.cs` (no caller) | decoded, logged once |
+| GE 0x0271 | AvailableHouses | u32 type, u32 count + count x u32 landcell, i32 total | `GameEventHouseAvailableHouses.cs` | reduced: `GameState.AvailableHouses` |
+
+**Client to server**
+
+| Opcode | Name | Layout | ACE | Lifestone |
+|---|---|---|---|---|
+| GA 0x021C | BuyHouse | u32 guardian, u32 count + count x u32 item (the stacks placed in the purchase pane) | `GameActionHouseBuyHouse.cs`; `Player_House.HandleActionBuyHouse` | sent (`IActionApi.BuyHouse`, from `GuardianWindowModel.PressBuy`) |
+| GA 0x0221 | RentHouse | the same layout | `GameActionHouseRentHouse.cs`; `HandleActionRentHouse` | sent (`PayRent`, from `PressPay`) |
+| GA 0x021E | HouseQuery | none | `GameActionHouseQuery.cs` | sent (`QueryHouse`) |
+| GA 0x0262 | TeleToHouse | none (`/house recall`) | `GameActionTeleToHouse.cs`; `Player_Location.HandleActionTeleToHouse` | sent (`RecallHouse`) |
+| GA 0x021F | AbandonHouse | none | `GameActionHouseAbandon.cs` | written by the codec; no send method (nothing abandons a house) |
+| GA 0x0258 | QueryLord | u32 guardian | `GameActionHouseQueryLord.cs` (ACE reads it and does nothing) | written by the codec; no send method |
+
+**What ACE answers a purchase or a payment.** Buy: the lines "You already own a house!" or the 15-day line (a transient string and a
+system line), WeenieErrorWithString 0x0488 (level) or 0x048B (rank), WeenieError 0x048A (monarch) or 0x0532 (30-day rule); items that do
+not cover the price, and a guardian not on the landblock, are refused SILENTLY (`VerifyPurchase` logs only); success is "Congratulations!
+You now own this dwelling." (two spaces), the deed, then 3 s later HouseData, the access list and a fresh profile. Rent: "Maintenance paid."
+or "Maintenance partially paid.", after the fresh profile and HouseData; "The maintenance has already been paid for this period." and the
+several-houses line refuse. ACE takes from the placed stacks only what each line needs, smallest stacks first, trade notes after coins
+(`HousePayment.GetConsumeItems`).
 
 ---
 

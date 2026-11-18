@@ -197,6 +197,7 @@ public sealed class AcSessionCreateTests
             () => session.SendQueryHealth(1),
             () => session.SendTalk("hello"),
             () => session.SendTell("someone", "hello"),
+            () => session.SendTalkDirect(1, "hello"),
             session.LogOff,
         ];
 

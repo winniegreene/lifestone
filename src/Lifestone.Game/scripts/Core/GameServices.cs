@@ -137,6 +137,7 @@ public partial class GameServices : Node
 
     public override void _Process(double delta)
     {
+        using var framePhase = Lifestone.Game.Diagnostics.FramePhases.Services(); // M6 16 Eperf2: this call's share of a long frame
         var start = Stopwatch.GetTimestamp();
         MainThread.Drain();
         LastDrainMs = Stopwatch.GetElapsedTime(start).TotalMilliseconds;

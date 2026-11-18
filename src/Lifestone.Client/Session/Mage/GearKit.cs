@@ -1,4 +1,5 @@
 using System.Globalization;
+using DatReaderWriter.Enums;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session.Actions;
 using Lifestone.Client.Session.Contracts;
@@ -157,7 +158,7 @@ public sealed class GearKit
     /// <summary>The Prismatic Taper's weenie class id (component 188; maximum stack 1,000): the foci formula's taper, in the kit.</summary>
     public const uint PrismaticTaperWcid = 20631;
 
-    /// <summary>The Platinum Scarab (level VII's scarab), whose low stack is the named stop <c>m5-platinum-stock</c> (D8).</summary>
+    /// <summary>The Platinum Scarab (level VII's scarab), whose low stack is the named stop <c>m5-carried-stock</c> at the fight's start (D8); the autopilot's audit queues the buy-trip station for it first when the seller's town is reachable (M6 4 t4b, D44, closes <c>m6-buy-trip-autopilot</c>, once <c>m5-platinum-stock</c>).</summary>
     public const uint PlatinumScarabWcid = 8897;
 
     /// <summary>The burden of one Prismatic Taper (a read-only SELECT of the world database, 2026-10-16: 6, where every other component of the kit has <see cref="ComponentBurden"/>).</summary>
@@ -182,7 +183,7 @@ public sealed class GearKit
     public const int PaletteGold = 21;
 
     /// <summary>
-    /// The held caster (the property keeps its M3 name; the weenie is the owner's D43 choice): weenie 8552 "The Healer's Heart" (<c>orbhealer</c>), a Caster (WeenieType 35, ItemType 0x8000) held in the hand (ValidLocations 0x01000000), burden 50, no
+    /// The held caster (the property keeps its M3 name; the weenie is the owner's D43 choice): weenie 8552, The Healer's Heart (<c>orbhealer</c>), a Caster (WeenieType 35, ItemType 0x8000) held in the hand (ValidLocations 0x01000000), burden 50, no
     /// WieldRequirements (a read-only parse of the pinned world SQL, ACE-World-16PY-Patches v0.9.296, 2026-10-19: the only weenie of that name). It carries three item spells (Regeneration Self VI 170, Healing Mastery Self VI 879, Life Giver 1997; item
     /// spellcraft 225, ItemDifficulty 105, which BSD Mage's Arcane Lore 144 meets) and is <b>not a focus</b>: it is not in <see cref="FociWcids"/>, so ACE's <c>HasFoci</c> does not apply and the casts use the account's customised formulas.
     /// </summary>
@@ -278,27 +279,34 @@ public sealed class GearKit
     /// <param name="accountName">The account's name; checked, never stored, logged or printed (kept for the callers: the foci formula does not depend on it).</param>
     /// <param name="heroRing">True only for the hero mage's gear station (M4 P5b fix FB, P5b-R12): the cast spells also hold <see cref="KitFightSpells"/> (Cassius' Ring of Fire).</param>
     /// <param name="ground">The ground whose supplies the kit is (the fight's <c>--fight-ground</c>); null: the default ground (<see cref="FightOptions.DefaultGround"/>).</param>
+    /// <param name="holdsFocus">M6 3 a2, M6 6 MG (<c>m6-kit-account-formula</c>): whether the character holds the school's focus; given, a school without one burns the account's full formula (<see cref="AccountFormula"/>, hashed from <paramref name="accountName"/>), so a climber with no focus (Winnie on the account <c>test</c>) is kitted with those components. The Client callers that can see the character pass it (the heal station's gear, <c>HealStations.cs</c>; the journey's gear station, <c>JourneyStations.cs</c>, whose kit lists the four foci itself); the legs (<c>BuffLegRunner</c>, <c>FightLegRunner</c>, <c>DeathLegRunner</c>), <c>GearScenario</c>, <see cref="KitPlan"/> and the play-checks stay on the foci formula by design (the den's mage holds every focus; the ladder's dungeon profiles carry both formulas' lines). Null: the foci formula for every school.</param>
+    /// <param name="stockOnly">M6 5 (<c>TODO(m6-loopback-burrow-kit)</c> closed): true for a Throwaway loopback's grant on a ground with no vendor kit (the Burrow, the Cave of Alabree): the kit is the default ground's vendor wand (ACE's magic mode needs a wielded caster), the four foci and the stock lines, with no robe; false (every play caller): a ground with no vendor kit fails by name, as before.</param>
     /// <returns>The kit: the wielded line first, then the worn lines, the four foci, the stock lines in the profile's order.</returns>
     /// <exception cref="KeyNotFoundException">A cast spell is not in <paramref name="spells"/>.</exception>
-    /// <exception cref="InvalidOperationException">The ground has no kit or no stock; a component of a cast is not a stock line; a line names a weenie this table does not know (<c>TODO(m6-kit-weenie)</c>); a keep passes one stack.</exception>
-    public static GearKit Build(IReadOnlyDictionary<uint, SpellInfo> spells, string accountName, bool heroRing = false, HuntingGround? ground = null)
+    /// <exception cref="InvalidOperationException">The ground has no kit (unless <paramref name="stockOnly"/>) or no stock; a component of a cast is not a stock line; a line names a weenie this table does not know (<c>TODO(m6-kit-weenie)</c>); a keep passes one stack.</exception>
+    /// <param name="withheld">M6 6 live round 2: the profile spells the build does not teach (<see cref="CastBurns"/>); null: none.</param>
+    /// <param name="offPlan">M6 7 K: what a Throwaway loopback's fight casts off the ground's plan (<see cref="OffPlanBolts"/>; only with <paramref name="stockOnly"/>); null: nothing.</param>
+    public static GearKit Build(IReadOnlyDictionary<uint, SpellInfo> spells, string accountName, bool heroRing = false, HuntingGround? ground = null, Func<MagicSchool, bool>? holdsFocus = null, bool stockOnly = false, IReadOnlyCollection<uint>? withheld = null, OffPlanBolts? offPlan = null)
     {
         ArgumentNullException.ThrowIfNull(spells);
         ArgumentException.ThrowIfNullOrEmpty(accountName);
         var home = ground ?? GroundCatalog.Get(FightOptions.DefaultGround);
         var supplies = home.Supplies;
-        if (supplies.Kit.Count == 0 || supplies.Stock.Count == 0)
+        if ((supplies.Kit.Count == 0 && !stockOnly) || supplies.Stock.Count == 0)
         {
             throw new InvalidOperationException($"ground-plan-gap: {home.Name} has no vendor kit or no stock lines in its supplies section, so there is no mage kit to build (an outdoor ground shops at the journey's own stations)");
         }
 
-        var burns = CastBurns(home, spells, heroRing);
+        var burns = CastBurns(home, spells, heroRing, holdsFocus is null ? null : accountName, holdsFocus, keepers: !stockOnly, withheld: withheld);
         var items = new List<GearItem>();
+        // M6 5 round 2: ACE enters the magic mode only with a wielded caster (Player_Combat.cs 872-880 @95ef426d), so a stock-only plan carries the default ground's vendor wand (the climber buys its Wand by level 10, item 2).
+        var wandHome = stockOnly && !supplies.Kit.Any(k => k.Slot == KitSlot.Wielded) ? GroundCatalog.Get(FightOptions.DefaultGround) : home;
         foreach (var slot in new[] { KitSlot.Wielded, KitSlot.Worn })
         {
-            foreach (var line in supplies.Kit.Where(k => k.Slot == slot))
+            var source = slot == KitSlot.Wielded ? wandHome : home;
+            foreach (var line in source.Supplies.Kit.Where(k => k.Slot == slot))
             {
-                var w = SupplyWeenieOf(line.Wcid, home, "kit");
+                var w = SupplyWeenieOf(line.Wcid, source, "kit");
                 if (slot == KitSlot.Wielded ? w.ItemType != ItemTypeCaster : w.ItemType is not (ItemTypeArmor or ItemTypeClothing))
                 {
                     throw new InvalidOperationException($"ground-plan-gap: the kit line {line.Name} ({line.Wcid}) of {home.Name} is {slot} but the weenie's item type is 0x{w.ItemType:X}");
@@ -331,19 +339,80 @@ public sealed class GearKit
             items.Add(new GearItem(w.Wcid, line.Name, GearKind.Component, w.WeenieType, w.ItemType, EquipMask.None, line.Keep, w.MaxStack, w.UnitBurden));
         }
 
-        return new GearKit(items, [.. burns.Select(b => b.ComponentId).Distinct().Order()]);
+        var components = burns.Select(b => b.ComponentId).ToList();
+        if (offPlan is not null)
+        {
+            if (!stockOnly)
+            {
+                throw new InvalidOperationException($"the off-plan bolts are a Throwaway loopback's grant (a stock-only plan): {home.Name}'s mage casts its plan, and play grants nothing");
+            }
+
+            foreach (var (component, weenie, count) in offPlan.Lines(spells, home))
+            {
+                var w = SupplyWeenieOf(weenie, home, "off-plan bolt");
+                items.Add(new GearItem(w.Wcid, w.Name, GearKind.Component, w.WeenieType, w.ItemType, EquipMask.None, count, w.MaxStack, w.UnitBurden));
+                components.Add(component);
+            }
+        }
+
+        return new GearKit(items, [.. components.Distinct().Order()]);
+    }
+
+    /// <summary>
+    /// M6 7 K (round 1c: <c>KillTaskLiveTests</c> built a level-32 Throwaway on the Cave of Alabree, whose plan stops at level 20, so the fight chose Flame Bolt IV with no plan cap and the stock holds no scarab for it): the spells a Throwaway loopback's
+    /// fight will cast off the ground's plan, and the casts' worth of each foci-formula component that no stock line holds. Every other kit stays the ground's: <see cref="CastBurns"/> and its <c>ground-plan-gap</c> are not touched, and the play of every
+    /// other character grants nothing.
+    /// </summary>
+    /// <param name="Spells">The spell ids.</param>
+    /// <param name="Casts">The casts each line is stocked for (the rig's; capped at the weenie's stack).</param>
+    public sealed record OffPlanBolts(IReadOnlyCollection<uint> Spells, int Casts)
+    {
+        /// <summary>The lines beyond <paramref name="ground"/>'s stock, one for each component, by component id: the component, its weenie and the count.</summary>
+        /// <param name="spells">The SpellTable's spells.</param>
+        /// <param name="ground">The ground.</param>
+        internal IReadOnlyList<(uint Component, uint Wcid, int Count)> Lines(IReadOnlyDictionary<uint, SpellInfo> spells, HuntingGround ground)
+        {
+            var slots = new SortedDictionary<uint, (uint Wcid, int MaxStack, int Slots)>();
+            foreach (var id in Spells)
+            {
+                var info = spells.TryGetValue(id, out var found) ? found : throw new KeyNotFoundException($"off-plan spell {id} is not in the SpellTable");
+                foreach (var (component, n) in FociFormulaCounts(info.Formula))
+                {
+                    if (!ComponentWeenies.TryGetByComponent(component, out var weenie))
+                    {
+                        throw new InvalidOperationException($"off-plan spell {id} ({info.Name}) needs component {component}, which the component map does not hold");
+                    }
+
+                    if (ground.Supplies.StockOf(weenie.Wcid) is null)
+                    {
+                        slots[component] = (weenie.Wcid, weenie.MaxStack, Math.Max(n, slots.TryGetValue(component, out var had) ? had.Slots : 0));
+                    }
+                }
+            }
+
+            return [.. slots.Select(s => (s.Key, s.Value.Wcid, Math.Min(s.Value.Slots * Casts, s.Value.MaxStack)))];
+        }
     }
 
     /// <summary>
     /// The counts read at the fight's start (M5 item 3 m1, D8, D48): the stop, if any, before the first cast. A focus the mage does not hold is <c>m5-mage-foci</c> (its school would cast the full formula, which no stock line covers); every CARRIED stock line
-    /// (<see cref="HuntingGround.IsCarried"/>: no home vendor sells it) the kit holds whose count is under its <c>stop_under</c> is <c>m5-platinum-stock</c> (the Platinum Scarab) or <c>m5-carried-stock</c>, named with the vendors' town; a sold line under its
+    /// (<see cref="HuntingGround.IsCarried"/>: no home vendor sells it) the kit holds whose count is under its <c>stop_under</c> is <c>m5-carried-stock</c>, named with the vendors' town (the autopilot's audit queues the buy-trip station for it before the fight when the seller's town is reachable: M6 4 t4b, D44); a sold line under its
     /// <c>trip_under</c> is only reported through <paramref name="info"/> (the counters are m4's). Null when the kit has no foci (a test's hand-made kit) or every line holds.
     /// </summary>
     /// <param name="ground">The ground (its supplies, its home town).</param>
     /// <param name="kit">The kit the mage was built with.</param>
     /// <param name="held">What the pack holds, by weenie class id.</param>
     /// <param name="info">Where the trip-line notes go.</param>
-    internal static string? FightStartStop(HuntingGround ground, GearKit kit, IReadOnlyDictionary<uint, int> held, Action<string> info)
+    /// <param name="floorOnly">
+    /// M6 14 (live 2026-11-17 00:07:58, the Atlan wand's mote hunt in the Crater Caves: "m5-carried-stock: the Diamond Scarab stack is 0, under its stop line 2" ended a level-79 climber's fight on its first frame, with Frost and Shock Wave VI paid
+    /// for): the floor-only carried lines (<see cref="ComponentFloor.FloorOnly"/>, D148: only war options burn them) by weenie, each with the options that need it. Such a line under its stop line is no stop: it is named through
+    /// <paramref name="info"/> and the fight leaves those options out at their floor (<c>FightScenario.ReadFloors</c>). Null or empty: every carried line stops, as before.
+    /// </param>
+    /// <param name="capped">
+    /// M6 14 cap (live 2026-11-17 05:35:45, ladder53: "m5-carried-stock: the Platinum Scarab stack is 2, under its stop line 3" ended the climber's mote hunt, whose VI levels were paid for): the carried lines the fight has already met by leaving
+    /// out the war spells that burn them (<see cref="ShortCarriedLines"/>, the fight's level cap, logged there). They stop nothing here. Null or empty: every short carried line that is not floor-only stops, as before.
+    /// </param>
+    internal static string? FightStartStop(HuntingGround ground, GearKit kit, IReadOnlyDictionary<uint, int> held, Action<string> info, IReadOnlyDictionary<uint, IReadOnlyList<string>>? floorOnly = null, IReadOnlySet<uint>? capped = null)
     {
         if (kit.ItemOf(MageFociWcids[0]) is null)
         {
@@ -366,9 +435,20 @@ public sealed class GearKit
             }
 
             var count = held.GetValueOrDefault(line.Wcid);
+            if (ground.IsCarried(line.Wcid) && count < line.StopUnder && floorOnly is not null && floorOnly.TryGetValue(line.Wcid, out var options))
+            {
+                info(string.Create(CultureInfo.InvariantCulture, $"stock: the {line.Name} stack is {count}, under its stop line {line.StopUnder}; {ground.Home.Town} sells none: no stop, only {string.Join(" and ", options)} burn it, so they are left out at its floor and the bolt fights on (D148); no trip buys it, only loot or a trade brings more (TODO(m6-floor-line-seller))"));
+                continue;
+            }
+
+            if (ground.IsCarried(line.Wcid) && count < line.StopUnder && capped is not null && capped.Contains(line.Wcid))
+            {
+                continue; // M6 14 cap: the fight casts the levels it can pay above the line; its own line names it
+            }
+
             if (ground.IsCarried(line.Wcid) && count < line.StopUnder)
             {
-                var tag = line.Wcid == PlatinumScarabWcid ? "m5-platinum-stock" : "m5-carried-stock";
+                const string tag = "m5-carried-stock"; // M6 4 t4b: m6-buy-trip-autopilot is closed (the audit calls the buy-trip); a stop here means it was not reachable or already tried
                 return string.Create(CultureInfo.InvariantCulture, $"{tag}: the {line.Name} stack is {count}, under its stop line {line.StopUnder}; {ground.Home.Town} sells none (D8)");
             }
 
@@ -379,6 +459,34 @@ public sealed class GearKit
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// M6 14 cap: the carried stock lines (<see cref="HuntingGround.IsCarried"/>) of the kit that the pack holds under their stop lines and that are not floor-only (<paramref name="floorOnly"/>), each with the count held, in the profile's order.
+    /// Empty when the kit has no foci or a focus is not held (<see cref="FightStartStop"/> names that stop).
+    /// </summary>
+    /// <param name="ground">The ground (its supplies).</param>
+    /// <param name="kit">The kit the mage was built with.</param>
+    /// <param name="held">What the pack holds, by weenie class id.</param>
+    /// <param name="floorOnly">The floor-only lines, left out (they leave their options out at their floor, D148).</param>
+    internal static IReadOnlyList<(StockLine Line, int Held)> ShortCarriedLines(HuntingGround ground, GearKit kit, IReadOnlyDictionary<uint, int> held, IReadOnlyDictionary<uint, IReadOnlyList<string>>? floorOnly)
+    {
+        if (kit.ItemOf(MageFociWcids[0]) is null || MageFociWcids.Any(f => !held.ContainsKey(f)))
+        {
+            return [];
+        }
+
+        var list = new List<(StockLine, int)>();
+        foreach (var line in ground.Supplies.Stock)
+        {
+            var count = held.GetValueOrDefault(line.Wcid);
+            if (kit.ItemOf(line.Wcid) is not null && ground.IsCarried(line.Wcid) && count < line.StopUnder && (floorOnly is null || !floorOnly.ContainsKey(line.Wcid)))
+            {
+                list.Add((line, count));
+            }
+        }
+
+        return list;
     }
 
     /// <summary>The weenie class ids of the four foci the mage holds (D8): Enchantment 15268 (Creature), Artifice 15269 (Item), Verdancy 15270 (Life) and Strife 15271 (War). Shadow (Void) is not cast.</summary>
@@ -413,11 +521,17 @@ public sealed class GearKit
     /// two mana lines, the war bolt) and the two travel lines (<see cref="KitTravelSpells"/>), the ring with <paramref name="heroRing"/> (<see cref="KitFightSpells"/>) and <see cref="KitKeeperSpells"/>; of a line of
     /// seven or more levels, the levels the ground's spell plan casts (D26, D41: the plan's lowest to its highest <c>spell_level</c>, the den's VI and VII; the Incantation and the levels below VI are cast by no plan and
     /// need scarabs no stock line holds), of a shorter line every spell. A component that is no stock line of the ground, or a stock line smaller than one cast needs, fails by name (<c>ground-plan-gap</c>).
+    /// M6 item 14 (m6-goldscarab): a component the ground buys in another town (<see cref="HuntingGround.TownStockOf"/>: the Gold Scarab of a level V plan row, bought at Uziz on the way out) is no burn of the kit: no stock line holds it, a
+    /// build grants none, and the level floor casts the level under it until the stop has bought some (<see cref="LevelFloor"/>).
     /// </summary>
     /// <param name="ground">The ground.</param>
     /// <param name="spells">The SpellTable's spells.</param>
     /// <param name="heroRing">True: the Ring of Fire is cast.</param>
-    internal static IReadOnlyList<CastBurn> CastBurns(HuntingGround ground, IReadOnlyDictionary<uint, SpellInfo> spells, bool heroRing)
+    /// <param name="accountName">M6 3 a2: the account whose full formula a school without its focus burns (with <paramref name="holdsFocus"/>); null: the foci formula for every school.</param>
+    /// <param name="holdsFocus">M6 3 a2: whether the character holds the school's focus; null: the foci formula for every school.</param>
+    /// <param name="keepers">False (M6 5, a stock-only plan of a low rung): the den's kit keepers (Adja's Intervention) are not cast, so their scarabs need no stock line.</param>
+    /// <param name="withheld">M6 6 live round 2: the profile spells the build does not teach (a Throwaway loopback's <c>withheldSpells</c>, e.g. Lifestone Recall below 16): not cast, so their components need no stock line; null: none.</param>
+    internal static IReadOnlyList<CastBurn> CastBurns(HuntingGround ground, IReadOnlyDictionary<uint, SpellInfo> spells, bool heroRing, string? accountName = null, Func<MagicSchool, bool>? holdsFocus = null, bool keepers = true, IReadOnlyCollection<uint>? withheld = null)
     {
         var low = ground.SpellPlan.Count == 0 ? 1 : ground.SpellPlan.Min(p => p.SpellLevel);
         var high = ground.SpellPlan.Count == 0 ? 7 : ground.SpellPlan.Max(p => p.SpellLevel);
@@ -456,7 +570,7 @@ public sealed class GearKit
             }
         }
 
-        foreach (var id in KitKeeperSpells)
+        foreach (var id in keepers ? KitKeeperSpells : [])
         {
             cast.Add(("Heal Self", new ProfileSpell(7, id, "Adja's Intervention", 300, 0)));
         }
@@ -464,18 +578,31 @@ public sealed class GearKit
         var burns = new List<CastBurn>();
         foreach (var (line, spell) in cast)
         {
+            if (withheld is not null && withheld.Contains(spell.Id))
+            {
+                continue; // M6 6 live round 2: a spell the build withholds is not cast, so it burns nothing
+            }
+
             var info = spells.TryGetValue(spell.Id, out var found)
                 ? found
                 : throw new KeyNotFoundException($"profile spell {spell.Id} ({spell.Name}) is not in the SpellTable");
-            foreach (var (component, n) in FociFormulaCounts(info.Formula))
+            // M6 3 a2, M6 6 MG: with a focus test and the account, a school whose focus is not held burns the account's full formula (AccountFormula.Counts); else the foci formula, as before.
+            var useAccount = !string.IsNullOrEmpty(accountName) && holdsFocus is not null && !holdsFocus(info.School);
+            var formulaName = useAccount ? "the account's full formula (no focus of the school held)" : "the foci formula";
+            foreach (var (component, n) in useAccount ? AccountFormula.Counts(info, false, accountName) : FociFormulaCounts(info.Formula))
             {
                 if (!ComponentWeenies.TryGetByComponent(component, out var weenie))
                 {
-                    throw new InvalidOperationException($"spell {spell.Id} ({spell.Name}) needs component {component} in the foci formula, which the component map does not hold");
+                    throw new InvalidOperationException($"spell {spell.Id} ({spell.Name}) needs component {component} on {formulaName}, which the component map does not hold");
+                }
+
+                if (ground.Supplies.StockOf(weenie.Wcid) is null && ground.TownStockOf(weenie.Wcid) is not null)
+                {
+                    continue; // M6 item 14 (m6-goldscarab): bought in another town on the way out, never a stock line of the kit
                 }
 
                 var stock = ground.Supplies.StockOf(weenie.Wcid)
-                    ?? throw new InvalidOperationException($"ground-plan-gap: {line} ({spell.Name}, spell {spell.Id}) burns {weenie.Name} (wcid {weenie.Wcid}) on the foci formula, which is not a stock line of {ground.Name}; add the line to the profile's supplies");
+                    ?? throw new InvalidOperationException($"ground-plan-gap: {line} ({spell.Name}, spell {spell.Id}) burns {weenie.Name} (wcid {weenie.Wcid}) on {formulaName}, which is not a stock line of {ground.Name}; add the line to the profile's supplies");
                 if (stock.StopUnder < n)
                 {
                     throw new InvalidOperationException($"ground-plan-gap: {spell.Name} (spell {spell.Id}) needs {n} {weenie.Name} a cast but the stock line of {ground.Name} stops under {stock.StopUnder}");
@@ -524,11 +651,30 @@ public sealed class GearKit
         // M5 7 G3: 136 pack (Container 21, ItemType 0x200, burden 15, Value 65, ItemsCapacity 24: the ace_world row FighterKit.SidePackWcid cites); Renald the Elder sells it
         new(136, "Pack", Lifestone.Client.Session.Fighter.FighterKit.WeenieTypeContainer, Lifestone.Client.Session.Fighter.FighterKit.ItemTypeContainer, EquipMask.None, 15, null, 0, 65),
         new(379, "Mana Potion", 18, 0x80, EquipMask.None, 15, 100, 0, 170),
+        new(377, "Potion of Healing", 18, 0x80, EquipMask.None, 15, 100, 0, 170), // M6 14 T: weenie type 18 (Food), ItemType 0x80, burden 15, MaxStackSize 100, Value 170 (weenie_properties_int 1, 5, 11, 19: a SELECT on the world copy)
         new(PyrealWcid, "Pyreal", 9, 0x40, EquipMask.None, 0, 25_000, 0, 1),
         new(20630, "Trade Note (250,000)", 51, 0x40000, EquipMask.None, 1, 250, 0, 250_000),
         new(2625, "Trade Note (10,000)", 51, 0x40000, EquipMask.None, 1, 250, 0, 10_000),
         new(2626, "Trade Note (50,000)", 51, 0x40000, EquipMask.None, 1, 250, 0, 50_000),
     ];
+
+    /// <summary>
+    /// M6 2 b: the supply weenie of a vendor ware the gear floor reads (<see cref="GearFloor"/>: a caster, a robe), or null when the ware is not one of <see cref="SupplyWeenies"/> (a component, a mana charge, a note: never a caster or a
+    /// robe line). Unlike <see cref="SupplyWeenieOf"/> it never throws: the floor looks over every ware of every profile vendor.
+    /// </summary>
+    /// <param name="wcid">The ware's weenie.</param>
+    public static SupplyWeenie? FloorWeenieOf(uint wcid)
+    {
+        foreach (var w in SupplyWeenies)
+        {
+            if (w.Wcid == wcid)
+            {
+                return w;
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>The supply weenie <paramref name="wcid"/>: <see cref="SupplyWeenies"/>, else a spell component; else a named failure.</summary>
     internal static SupplyWeenie SupplyWeenieOf(uint wcid, HuntingGround ground, string what)
@@ -567,6 +713,9 @@ public sealed class GearKit
         /// <summary>The ground whose supplies this is.</summary>
         public HuntingGround Ground { get; }
 
+        /// <summary>M6 5 round 2: a Throwaway loopback's stock-only plan (<see cref="For"/>'s <c>stockOnly</c>): the build makes no tie (a low rung is reached by the Network and on foot, and a level-10 mage's Item Enchantment fizzles Primary Portal Tie).</summary>
+        public bool StockOnly { get; private init; }
+
         /// <summary>The kit (<see cref="Build"/>).</summary>
         public GearKit Kit { get; }
 
@@ -594,10 +743,13 @@ public sealed class GearKit
         /// <param name="account">The account name (<see cref="Build"/>).</param>
         /// <param name="heroRing">True: the Ring of Fire is cast.</param>
         /// <param name="capacityStrength">M5 7 F3 (D87): the Strength the load is judged at, as <see cref="CapacityStrength"/> is (the plan's Strength ranks, conservative by the creation value): the default is level 126's 131; a build at another level (<c>--mage-level</c>) passes its plan's.</param>
-        public static KitPlan For(HuntingGround ground, IReadOnlyDictionary<uint, SpellInfo> spells, string account, bool heroRing = false, int capacityStrength = CapacityStrength)
+        /// <param name="stockOnly">True: a ground with no vendor kit gives the foci and the stock only (a Throwaway loopback's grant, <see cref="Build"/>).</param>
+        /// <param name="withheld">M6 6 live round 2: the profile spells the build withholds (<c>MageBuildScenario</c>'s <c>withheldSpells</c>): not cast, so no component for them (<see cref="CastBurns"/>); null: none.</param>
+        /// <param name="offPlan">M6 7 K: what a Throwaway loopback's fight casts off the ground's plan (<see cref="OffPlanBolts"/>; only with <paramref name="stockOnly"/>); null: nothing.</param>
+        public static KitPlan For(HuntingGround ground, IReadOnlyDictionary<uint, SpellInfo> spells, string account, bool heroRing = false, int capacityStrength = CapacityStrength, bool stockOnly = false, IReadOnlyCollection<uint>? withheld = null, OffPlanBolts? offPlan = null)
         {
             ArgumentNullException.ThrowIfNull(ground);
-            var kit = GearKit.Build(spells, account, heroRing, ground);
+            var kit = GearKit.Build(spells, account, heroRing, ground, stockOnly: stockOnly, withheld: withheld, offPlan: offPlan);
             var purse = new List<PurseGrant>();
             var coin = ground.Supplies.Purse.Coin;
             if (coin > 0)
@@ -628,7 +780,7 @@ public sealed class GearKit
             var capacity = EncumbranceCapacity(capacityStrength);
             var load = kit.Burden + purse.Sum(p => p.Burden);
             var line = (long)capacity * ground.Supplies.BurdenTripPercent / 100;
-            var plan = new KitPlan(ground, kit, purse, load, capacity);
+            var plan = new KitPlan(ground, kit, purse, load, capacity) { StockOnly = stockOnly };
             if (load > line)
             {
                 throw new InvalidOperationException($"ground-plan-gap: {plan.LoadLine} is over the supplies' burden line of {ground.Supplies.BurdenTripPercent}% ({line}) for {ground.Name}; the kit and the purse leave no room for loot");
@@ -717,6 +869,25 @@ public sealed class GearKit
 
         return counts;
     }
+
+    /// <summary>
+    /// M6 item 0 F3 (closes <c>TODO(m6-death-outdoor-kit)</c>): the kit of a character whose profile has none (the climber on an outdoor ground: its gear is what the Academy gave and what it wears, not a vendor plan). No line, no component: a death
+    /// scenario over it has no gear stage and no gear to count; what comes back after a death is the worn set's (<see cref="Mage.WornRestorer"/>).
+    /// </summary>
+    public static GearKit Bare { get; } = new([], []);
+
+    /// <summary>True when <paramref name="ground"/>'s profile lists no vendor kit, outdoor or dungeon (M6 3 F1, 3-R1: the spine's dungeons have none; the character fights with what it holds, as on the outskirts): <see cref="Build"/> refuses it (<c>ground-plan-gap</c>) and <see cref="Bare"/> is its kit through <see cref="BuildFor"/>.</summary>
+    /// <remarks>M6 2 b: the gear floor's lines (<see cref="GearFloor"/>: a caster, a robe, a mana charge) join the resupply's buy list beside the kit and never enter <c>supplies.kit</c>, so this stays true for the outskirts with a
+    /// floor and the kit-less death keeps <c>rearm=corpse</c> or <c>none</c> (DeathHandler.BeginRearm reads the kit, not the floor; a bought spare in the pack is its <c>rearm=pack</c>).</remarks>
+    /// <param name="ground">The ground, or null (the default ground: it has a kit).</param>
+    public static bool HasNoKit(HuntingGround? ground) => ground is not null && ground.Supplies.Kit.Count == 0;
+
+    /// <summary>The kit of <paramref name="ground"/>: <see cref="Bare"/> when it has none (<see cref="HasNoKit"/>), else <see cref="Build"/>'s (every other check of Build stands: a ground with a kit but no stock still fails by name).</summary>
+    /// <param name="spells">The SpellTable's spells.</param>
+    /// <param name="accountName">The account's name.</param>
+    /// <param name="ground">The ground, or null for the default ground.</param>
+    public static GearKit BuildFor(IReadOnlyDictionary<uint, SpellInfo> spells, string accountName, HuntingGround? ground) =>
+        HasNoKit(ground) ? Bare : Build(spells, accountName, ground: ground);
 
     /// <summary>A kit of the given lines (for tests of <see cref="PlayerTools.SpawnGear"/> that need no SpellTable).</summary>
     internal static GearKit Of(IReadOnlyList<GearItem> items) => new(items, []);

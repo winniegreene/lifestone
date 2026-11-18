@@ -112,6 +112,7 @@ public sealed class GearScenario : IScenario
     public GearScenario(IReadOnlyDictionary<uint, SpellInfo> spells, string account, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, bool cast = true, bool heroRing = false)
         : this(GearKit.Build(spells, account, heroRing), log, arrivalSeconds, endSession, cast, spells)
     {
+        Account ??= account; // M6 1 h2: the first cast's level floor reads the account's full formula for a school without its focus
     }
 
     /// <summary>The gear scenario over a kit already built (the tests').</summary>
@@ -145,11 +146,23 @@ public sealed class GearScenario : IScenario
     }
 
     /// <summary>
-    /// Why the player in the world is not BSD Mage (its name, or that the name is not known yet), or null when it is: the check of <see cref="RequireCharacter"/>, shared by the live legs that run the gear inside their own script
-    /// over a session already in the world.
+    /// Why the player in the world is not one of the two cheat-free mages, BSD Mage and Winnie (its name, or that the name is not known yet), or null when it is: the journey's grant rule (<c>ScriptLeg</c>: a mage that plays cheat-free is never
+    /// granted an item it lacks; the check fails, named) and the cast-facts station's character check. M6 item 0 a6: Winnie (D7) joined BSD Mage here, so a missing item on the climber is a failed check, never a grant. The build and gear scenarios'
+    /// own check stays BSD Mage's alone (<see cref="WrongBuildCharacter"/>); the headless re-entry (<c>ChooseCharacter</c> here and in the death scenario) is BSD Mage's too, the play host entering Winnie through its own login.
     /// </summary>
     /// <param name="session">The session.</param>
     public static string? WrongCharacter(IGameSessionView session)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        var name = session.State.Self.Name;
+        return string.Equals(name, MageTemplate.CharacterName, StringComparison.OrdinalIgnoreCase) || CharacterPolicy.For(name).ScenarioMage
+            ? null
+            : $"the character in the world is '{name ?? "(name not known)"}', not {MageTemplate.CharacterName} or {MageTemplate.ClimberName}: nothing is sent for it";
+    }
+
+    /// <summary>Why the player in the world is not BSD Mage (its name, or that the name is not known yet), or null when it is: the check of <see cref="RequireCharacter"/> (the gear scenario grants, so only BSD Mage passes).</summary>
+    /// <param name="session">The session.</param>
+    public static string? WrongBuildCharacter(IGameSessionView session)
     {
         ArgumentNullException.ThrowIfNull(session);
         var name = session.State.Self.Name;
@@ -182,6 +195,12 @@ public sealed class GearScenario : IScenario
     /// False (the default, the build's own gear stage and the fighters' plans): <see cref="PlayerTools.SpawnGear"/> tops the kit up.
     /// </summary>
     public bool NoGrant { get; init; }
+
+    /// <summary>
+    /// M6 1 h2 (closes <c>m6-account-formula-callers</c> for the first-cast check): the account's name as the server stores it (the login name, not the secrets key); the account constructor sets it, a host that builds the scenario over a kit sets it here.
+    /// Null: the first cast's level floor applies only to a school whose focus the pack holds (the foci formula). Hashed by <see cref="AccountFormula"/>, never stored in a record, logged or printed.
+    /// </summary>
+    public string? Account { get; init; }
 
     /// <summary>
     /// M5 7 D146 (the owner's own exception to DoD 6 and D143, for one test run): grant exactly this many of this one item over the <c>item</c> verb and nothing else (no kit top-up, no wield, no cast),
@@ -248,10 +267,11 @@ public sealed class GearScenario : IScenario
     /// <summary>The verdict fields, <c>gear=... worn=... kit=... gear_steps=... topup=... cast=...</c> (no name, no account; <c>topup</c> and <c>cast</c> are report-only).</summary>
     public string VerdictFields()
     {
+        var bare = _finished && Failure is null && _gear.Count == 0; // M6 0 lead (live probe 7): the bare kit wields nothing, and says so
         var wielded = _finished && Failure is null && _snapshotted && _worn == _gear.Count - 1 && _wandWielded;
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"gear={(wielded ? "wielded" : "failed")} worn={_worn} kit={_kitHeld}/{_kit.Items.Count} gear_steps={GearSteps} topup={TopUp} cast={Cast}");
+            $"gear={(bare ? "bare" : wielded ? "wielded" : "failed")} worn={_worn} kit={_kitHeld}/{_kit.Items.Count} gear_steps={GearSteps} topup={TopUp} cast={Cast}");
     }
 
     /// <summary>The cast field of the verdict: <c>ok</c>, <c>fizzled</c>, <c>failed</c> or <c>n/a</c> (see the class remarks).</summary>
@@ -293,7 +313,7 @@ public sealed class GearScenario : IScenario
             case "start":
                 if (session.State.Phase == SessionPhase.InWorld && session.State.Self.Guid != 0)
                 {
-                    if (RequireCharacter && WrongCharacter(session) is { } wrong)
+                    if (RequireCharacter && WrongBuildCharacter(session) is { } wrong)
                     {
                         // Nothing was sent: no grant, no wield, no log off (the shared session belongs to the host).
                         Failure = wrong;
@@ -685,7 +705,13 @@ public sealed class GearScenario : IScenario
 
         // Everything is sent and confirmed: the read model must show the whole set.
         Snapshot(session);
-        if (!_wandWielded || _worn != _gear.Count - 1)
+        if (_gear.Count == 0)
+        {
+            // M6 0 lead (live probe 4): the bare kit (GearKit.Bare: an outdoor ground with no vendor kit, the climber's) lists nothing to wield or wear; the caster in the hands is the
+            // autopilot audit's wield-caster fix, not this stage's. Nothing is judged short.
+            _log.Info(LogCategory, "the kit is bare (the ground lists no vendor kit): nothing to wield or wear here; the hands' caster is the audit's");
+        }
+        else if (!_wandWielded || _worn != _gear.Count - 1)
         {
             return Fail(session, $"the wield ended short: the read model shows the wand {(_wandWielded ? "wielded" : "not wielded")} and {_worn} of {_gear.Count - 1} pieces worn");
         }
@@ -713,7 +739,7 @@ public sealed class GearScenario : IScenario
     {
         // M5 3 F6: the check cast is one the pack can pay for. A level whose foci-formula components the pack lacks is passed over (the ground's kit carries the scarabs of the plan's levels only; ACE refuses the others 0x0400 before it
         // looks at the skill, Player_Magic.cs:404-408 and 1227-1248 @95ef426d), named here, and the level below it that the pack can pay for is the check. Without a SpellTable the formulas are unknown: no floor, a named TODO.
-        var floor = _spells is null ? null : new PackFloor(session.State, _spells);
+        var floor = _spells is null ? null : new PackFloor(session.State, _spells, Account);
         var pick = GearCasts.Pick(session.State.Self.Qualities, ProfileRole.CreatureBuff, out var why, floor);
         if (floor is not null)
         {
@@ -1279,6 +1305,12 @@ public static class GearCasts
         return true;
     }
 
+    /// <summary>M6 7 AK: the base of a magic skill (raw attributes, InitLevel, ranks: <see cref="SkillRules.TryBase"/>); false when it cannot be read.</summary>
+    /// <param name="q">The player's qualities.</param>
+    /// <param name="skillId">The magic skill.</param>
+    /// <param name="value">The base value.</param>
+    public static bool TryBaseSkill(PlayerQualities q, uint skillId, out uint value) => SkillRules.TryBase(q, skillId, MagicFormula, SkillRules.TrainedClass, out value);
+
     /// <summary>The formula of the four magic skills: (Focus + Self) / 4 (the SkillTable's, pinned by <c>MageTemplateDatTests</c>), so <see cref="TryCurrentSkill"/> needs no SkillTable.</summary>
     private static readonly Lifestone.Data.CharacterCreation.SkillTableFormula MagicFormula = new(0, 1, 1, MageTemplate.MagicSkillDivisor, MageTemplate.Focus, MageTemplate.Self);
 
@@ -1443,7 +1475,8 @@ public static class GearCasts
 /// </summary>
 /// <param name="state">The read model (the pack).</param>
 /// <param name="spells">The SpellTable's spells (the formulas).</param>
-public sealed class PackFloor(GameState state, IReadOnlyDictionary<uint, SpellInfo> spells)
+/// <param name="accountName">M6 1 h2: the account's name as the server stores it (the login name), or null: the floor then applies only to a school whose focus the pack holds (the foci formula). With it a school without its focus is judged on the account's full formula (<see cref="AccountFormula"/>); hashed there, never stored or printed.</param>
+public sealed class PackFloor(GameState state, IReadOnlyDictionary<uint, SpellInfo> spells, string? accountName = null)
 {
     private readonly List<string> _skipped = [];
 
@@ -1451,13 +1484,13 @@ public sealed class PackFloor(GameState state, IReadOnlyDictionary<uint, SpellIn
     public IReadOnlyList<string> Skipped => _skipped;
 
     /// <summary>What the pack holds when the floor applies to <paramref name="school"/> (<see cref="LevelFloor.HeldFor"/>), else null.</summary>
-    internal Dictionary<uint, int>? HeldFor(MagicSchool school) => LevelFloor.HeldFor(state, school);
+    internal Dictionary<uint, int>? HeldFor(MagicSchool school) => LevelFloor.HeldForAccount(state, school, accountName);
 
     /// <summary>True, with the reason in <paramref name="text"/> (no line name), when the floor applies (<paramref name="held"/> is not null) and the pack cannot pay for <paramref name="spell"/>.</summary>
     internal bool Passes(Dictionary<uint, int>? held, ProfileSpell spell, out string text)
     {
         text = string.Empty;
-        if (held is null || !spells.TryGetValue(spell.Id, out var info) || !LevelFloor.ShortOf(held, info, out var need))
+        if (held is null || !spells.TryGetValue(spell.Id, out var info) || !LevelFloor.ShortOf(held, info, out var need, accountName))
         {
             return false;
         }

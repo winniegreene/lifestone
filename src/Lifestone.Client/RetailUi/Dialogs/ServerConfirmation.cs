@@ -103,12 +103,15 @@ public sealed class ServerConfirmation : IDisposable
         }
 
         var shown = _shown.Find(s => s.Type == type && s.Context == context);
-        if (shown is null || reason == ConfirmationCloseReason.Answered)
+        if (shown is null)
         {
-            return; // our own answer closed it, or it never had a dialog
+            return; // our own answer closed it (OnAnswer removes the dialog before it sends), or it never had a dialog
         }
 
-        _manager.Services.Log.Info("retailui", $"the server's question (type {type}, context {context}) closed ({reason}); its dialog closes");
+        // M6 5 Q5 (m5-6-headless-confirm-reply): an answer that was not the dialog's (the automation's: the autopilot's tick, the quest station's confirm step) closes the question locally; its dialog closes too, with no second answer.
+        _manager.Services.Log.Info("retailui", reason == ConfirmationCloseReason.Answered
+            ? $"the server's question (type {type}, context {context}) was answered by the automation ({(closed.Accepted == true ? "Yes" : "No")}); its dialog closes"
+            : $"the server's question (type {type}, context {context}) closed ({reason}); its dialog closes");
         shown.Withdrawn = true;
         _manager.Dialogs.CloseDialog(shown.Dialog);
     }

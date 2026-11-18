@@ -1,3 +1,4 @@
+using Lifestone.Data.Physics.Objects;
 using Lifestone.Data.World;
 
 namespace Lifestone.Client.Movement.Wayfinding;
@@ -37,4 +38,34 @@ public sealed class ControllerNavBody : INavBody
 
     /// <inheritdoc/>
     public double Now => _controller.Now;
+
+    /// <inheritdoc/>
+    public float? JumpReachMetres => Routes.JumpReach.FlightMetres(_controller.Player.Weenie);
+
+    /// <inheritdoc/>
+    public double? JumpBarLevel => _controller.Jump.Pending ? _controller.Jump.GetPowerBarLevel(_controller.Now, _controller.Motion.Interpreted.CurrentStyle) : 0.0;
+
+    /// <inheritdoc/>
+    public float? RunSpeedMetresPerSecond => _controller.Player.Weenie is { } weenie && weenie.TryGetRunRate(out var rate) ? Data.Motion.MotionInterpreter.RunAnimSpeed * rate : null;
+
+    /// <inheritdoc/>
+    public bool? StandingLongJump => _controller.Motion.StandingLongJump;
+
+    /// <inheritdoc/>
+    public float RunSpeed => _controller.Motion.GetMaxSpeed();
+
+    /// <inheritdoc/>
+    public NavBodyContact Contact => _controller.Player.LastTransitionObstacle.Kind switch
+    {
+        TransitionObstacleKind.Environment => NavBodyContact.Wall,
+        TransitionObstacleKind.Object => NavBodyContact.Object,
+        TransitionObstacleKind.Step => NavBodyContact.Step,
+        _ => NavBodyContact.None,
+    };
+
+    /// <inheritdoc/>
+    public uint ContactObject => _controller.Player.LastTransitionObstacle.Object?.Id ?? 0;
+
+    /// <inheritdoc/>
+    public System.Numerics.Vector3 ContactNormal => _controller.Player.LastTransitionObstacle.Normal;
 }

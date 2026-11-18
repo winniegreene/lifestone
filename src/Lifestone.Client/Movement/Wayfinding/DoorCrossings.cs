@@ -23,7 +23,12 @@ namespace Lifestone.Client.Movement.Wayfinding;
 /// <param name="Radius">The door's own extent in metres: the radius of its Setup's selection sphere (<c>CSetup::selection_sphere</c>, which covers the door's leaf; the Setup's physics radius is a 0.14 m dummy) times its scale; <see cref="DoorCrossings.UnknownRadiusMetres"/> when it could not be read.</param>
 /// <param name="Open">True while the door's physics state has Ethereal.</param>
 /// <param name="Locked">The server's word that the door is locked (ACE <c>PropertyBool.Locked</c> through a property update), or null while it has not said.</param>
-public readonly record struct NavDoor(uint Guid, CellFrame At, float Radius, bool Open, bool? Locked);
+/// <param name="Unusable">The CreateObject's Usable is No (1; ACE writes <c>ItemUseable</c> into the weenie header, <c>WorldObject_Networking.cs:103,733</c> @95ef426d): a door the player cannot
+/// Use, opened only by a linked lever or switch (M6 4 w6a: Fort Tethana's gate door 0x72581042, wcid 2179 'doorprisonactivated', whose Use text is "This door cannot be activated from here.",
+/// opened by its lever 0x72581044 and shut again after its ResetInterval 300 s). The walk does not Use one (<c>TODO(door-lever)</c>).</param>
+/// <param name="LockedFrom">Where <paramref name="Locked"/> was read from (<c>appraised</c>, <c>refused-use</c> or <c>property-update</c>), or null while unknown (M6 8 C).</param>
+/// <param name="Name">The door's name for the logs, or null.</param>
+public readonly record struct NavDoor(uint Guid, CellFrame At, float Radius, bool Open, bool? Locked, bool Unusable = false, string? LockedFrom = null, string? Name = null);
 
 /// <summary>
 /// A door matched to the doorway it stands in (<see cref="DoorCrossings.Map(IReadOnlyList{NavDoor}, INavPathSource)"/>): the tile's doorway lane (an outside door) or the room graph's portal crossing,
@@ -81,6 +86,15 @@ public interface INavDoorFeed
     /// <returns>The action's handle, or null for a feed that sends none.</returns>
     ActionHandle? Use(uint guid);
 
+    /// <summary>
+    /// Asks the server whether the door is locked before the body walks up to it (M6 8 C, D117): the session's appraisal of the door. The answer arrives later and sets <see cref="NavDoor.Locked"/> with
+    /// <see cref="NavDoor.LockedFrom"/> <c>appraised</c>. A feed that cannot ask does nothing (the default).
+    /// </summary>
+    /// <param name="guid">The door's id.</param>
+    void ReadLock(uint guid)
+    {
+    }
+
     /// <summary>The doorway each of <paramref name="doors"/> stands in on <paramref name="paths"/>' landblocks; overridden by a test that has no tile and no rooms.</summary>
     /// <param name="doors">The doors.</param>
     /// <param name="paths">The run's path source (its tile and room graph).</param>
@@ -114,6 +128,9 @@ public static class DoorCrossings
 
     /// <summary>The extent assumed for a door whose Setup radius cannot be read, in metres (a door is about a metre across; logged once). Not retail: Lifestone's own.</summary>
     public const float UnknownRadiusMetres = 1f;
+
+    /// <summary>The weenie header's Usable value No (ACE <c>Usable.No</c> = 0x01, <c>ACE.Entity/Enum/Usable.cs:9</c> @95ef426d): the object cannot be used.</summary>
+    public const uint UsableNo = 0x01;
 
     /// <summary>
     /// A door Setup's extent by its id from <paramref name="dats"/>: the radius of its selection sphere (<c>CSetup::selection_sphere</c>), else its physics radius (<c>CSetup::radius</c>), or null for a Setup not in
@@ -158,7 +175,7 @@ public static class DoorCrossings
     public static NavDoor Describe(WorldObject o, float radius)
     {
         ArgumentNullException.ThrowIfNull(o);
-        return new NavDoor(o.Guid, o.Position!.Value, radius, (o.State & PhysicsState.Ethereal) != 0, o.Locked);
+        return new NavDoor(o.Guid, o.Position!.Value, radius, (o.State & PhysicsState.Ethereal) != 0, o.Locked, o.Weenie.Usable == UsableNo, o.LockedFrom, o.Name);
     }
 
     /// <summary>The doorway of each door on the path source's landblocks (see the class remarks); doors with none are left out.</summary>
@@ -442,8 +459,12 @@ public sealed class SessionDoorFeed(IGameSessionView session, ILogSink? log = nu
     }
 
     /// <inheritdoc/>
+    public void ReadLock(uint guid) => _ = session.Actions.Identify(guid, ActionSource.Automation);
+
+    /// <inheritdoc/>
     public ActionHandle? Use(uint guid)
     {
+        DoorRefusals.Attach(session); // a locked door answers the Use with its sound 0x94 (Door.cs:108-116 @95ef426d)
         var handle = session.Actions.Use(guid, ActionSource.Automation);
         if (handle is not null)
         {
@@ -474,6 +495,28 @@ public sealed class SessionDoorFeed(IGameSessionView session, ILogSink? log = nu
         }
 
         return DoorCrossings.UnknownRadiusMetres;
+    }
+}
+
+/// <summary>
+/// The refusal of a locked door (M6 8 C, D117). ACE answers a Use of a locked door from the front with the transient line "The door is locked!" and the sound 0x94 on the door, and no error code
+/// (<c>Door.cs:108-116</c> @95ef426d); this reads the sound and marks the door locked, read from <c>refused-use</c>. One subscription per session, made by the feed's first Use.
+/// </summary>
+internal static class DoorRefusals
+{
+    private static readonly ConditionalWeakTable<ActionLog, IDisposable> Attached = [];
+
+    /// <summary>Starts reading the session's door refusals (once).</summary>
+    public static void Attach(IGameSessionView session)
+    {
+        Attached.GetValue(session.ActionLog, _ => session.Events.Subscribe<ObjectSoundPlayed>((in ObjectSoundPlayed e) =>
+        {
+            if (e.SoundId == Lifestone.Client.Session.Actions.Trackers.OpenContainerTracker.LockedSound && session.State.Objects.TryGet(e.Guid, out var o) && (o.DescriptionFlags & DoorCrossings.DoorFlag) != 0)
+            {
+                o.Locked = true;
+                o.LockedFrom = "refused-use";
+            }
+        }));
     }
 }
 

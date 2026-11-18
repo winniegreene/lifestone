@@ -3,7 +3,9 @@ namespace Lifestone.Client.Diagnostics;
 /// <summary>
 /// The frame times of one <c>[soak]</c> interval (M5 item 0 c3): sampled every frame without allocating, read once per interval.
 /// The maximum and the over-50 and over-75 ms counts are exact for the whole interval; the 99th percentile is read from the last
-/// <see cref="Capacity"/> frames (16,384 by default: a minute at 240 fps with room to spare).
+/// <see cref="Capacity"/> frames (16,384 by default: a minute at 240 fps with room to spare). M6 16 Eperf: the frames are counted
+/// and their mean is exact for the whole interval too (<see cref="Frames"/>, <see cref="Mean"/>), so two runs can be compared by
+/// what a frame took on average, not by the worst frame of a minute alone.
 /// </summary>
 public sealed class SoakFrameWindow
 {
@@ -17,6 +19,7 @@ public sealed class SoakFrameWindow
     private readonly double[] _scratch;
     private int _next;
     private int _filled;
+    private double _total;
 
     /// <summary>Creates the window with its two buffers; nothing is allocated after this.</summary>
     /// <param name="capacity">Frames the percentile reads (at least 1).</param>
@@ -36,6 +39,9 @@ public sealed class SoakFrameWindow
     /// <summary>The longest frame since the last <see cref="Reset"/>, in milliseconds (0 when none).</summary>
     public double Max { get; private set; }
 
+    /// <summary>M6 16 Eperf: the mean frame since the last <see cref="Reset"/>, in milliseconds (0 when none): every frame's time over the frames, exact for the whole interval.</summary>
+    public double Mean => Frames == 0 ? 0.0 : _total / Frames;
+
     /// <summary>Frames longer than 50 ms since the last <see cref="Reset"/>.</summary>
     public int Over50 { get; private set; }
 
@@ -54,6 +60,7 @@ public sealed class SoakFrameWindow
         }
 
         Frames++;
+        _total += milliseconds;
         if (milliseconds > Max)
         {
             Max = milliseconds;
@@ -92,6 +99,7 @@ public sealed class SoakFrameWindow
     {
         _next = 0;
         _filled = 0;
+        _total = 0.0;
         Frames = 0;
         Max = 0.0;
         Over50 = 0;

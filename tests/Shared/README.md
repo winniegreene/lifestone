@@ -44,6 +44,8 @@ The moved helpers keep the namespaces they had (`Lifestone.Data.Tests`, `Lifesto
   `[Trait("Tier", "Exhaustive")]` marks the tests that read the retail dats: the full sweeps and the decoder and asset pins (the retail UI, session and avatar tests keep the dats only as an input and stay in the default run).
 - `[Trait("Tier", "Timing")]` marks a test whose verdict is wall-clock time (a frame budget, a latency, a rate) and so only
   means something on a quiet machine. The default filter leaves it out; the lead runs it alone (`--filter "Tier=Timing"`), with no other Godot or
-  dotnet process up.
+  dotnet process up. It covers allocation counts too (a zero-byte assertion over a hot path gains bytes from tiered JIT and from a loaded
+  machine, M6 item 0 slice t). Every Timing test carries a one-line comment beside its trait naming the row that moved it (`grep -rn 'Tier", "Timing' tests`
+  lists them). Two allocation tests joined the tier in M6 item 0's fix F3, each with its reason beside its trait: `FightPickerTests.A_decision_allocates_nothing` (m6-alloc-flake-fightpicker) and `IndoorCreatureLayerTests.A_warm_indoor_runner_with_a_creature_layer_allocates_nothing_a_step` (m6-alloc-flake-indoor-layer). Each is a zero-byte count that failed once under the parallel suite and passes alone (tiered JIT and the other tests on the thread pool). Not Timing: a test of the Exhaustive tier (it reads the dats and runs at every gate) and a Loopback test (it needs the backend).
 - `[Trait("Status", "KnownFailure")]` marks a test that is known to fail. It never counts in the green total (the default filter leaves it out),
   and its `Trait` reason or a comment names the `TODO(...)` row that owns the failure, so it cannot be forgotten. Run them with `--filter "Status=KnownFailure"`.

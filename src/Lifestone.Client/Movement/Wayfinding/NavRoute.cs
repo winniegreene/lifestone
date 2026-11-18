@@ -309,6 +309,12 @@ public sealed record NavPlanResult
     /// <summary>What the plan came to.</summary>
     public NavStatus Status { get; init; }
 
+    /// <summary>The landblocks of the world route past the attached tiles, nearest first, on a horizon that followed it; else empty. The streamer's next tiles.</summary>
+    public IReadOnlyList<uint> Corridor { get; init; } = [];
+
+    /// <summary>On a failed plan with world routes: why they did not give a way on. Else null.</summary>
+    public string? WorldRouteNote { get; init; }
+
     /// <summary>The pulled route (on <see cref="NavStatus.Found"/> and <see cref="NavStatus.Horizon"/>), else null.</summary>
     public NavRoute? Route { get; init; }
 

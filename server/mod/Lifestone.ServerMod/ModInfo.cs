@@ -51,6 +51,18 @@ internal static class ModLog
     /// <summary>Starts the one line logged per request: <c>Lifestone tool: account=… character=… verb=… id=… args=… -&gt; ok|&lt;code&gt;</c>.</summary>
     public const string Tool = "Lifestone tool: ";
 
+    /// <summary>Starts the arrival guard's lines (<see cref="ArrivalGuard"/>).</summary>
+    public const string ArrivalGuard = "Lifestone arrival guard: ";
+
+    /// <summary>Starts the coin rule's line (<see cref="CorpseCoin"/>).</summary>
+    public const string CorpseCoin = "Lifestone corpse coin: ";
+
+    /// <summary>Starts the house account-age rule's line (<see cref="HouseAccountAge"/>).</summary>
+    public const string HouseAccountAge = "Lifestone house account age: ";
+
+    /// <summary>Starts the buff bot's lines (<see cref="BuffBot"/>).</summary>
+    public const string BuffBot = "Lifestone buff bot: ";
+
     /// <summary>Starts a reply to a command typed at ACE's console, which has no session to send it to.</summary>
     public const string ConsoleReply = "Lifestone console: ";
 }

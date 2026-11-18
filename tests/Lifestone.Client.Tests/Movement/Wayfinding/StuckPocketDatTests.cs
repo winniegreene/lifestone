@@ -76,7 +76,7 @@ public sealed class WalkAfterGiveUpTests(ITestOutputHelper output)
         Assert.True(forwardAt <= 1.5, $"forward went down {forwardAt} s into the leg");
         Assert.True(Math.Abs(rig.Body.Heading - 180f) > 30f, "the heading did not change");
         Assert.True(Vector2.Distance(start, rig.Body.Xy) > 2f, "the body did not move off the spot");
-        Assert.Equal(standTurns + 1, rig.Runner.StandTurns); // the leg's first press is the turn in place
+        Assert.Equal(standTurns, rig.Runner.StandTurns); // W8: a standing body's press in the corner's approach is the ordinary one now, so P7i's fallback is not needed
     }
 
     [Fact]
@@ -187,7 +187,8 @@ public sealed class StuckPocketDatTests(DatSetFixture fixture, ITestOutputHelper
         Assert.True(Math.Abs(RetailFrames.GetHeading(walker.Position.Frame) - heading) > 30.0);
         Assert.True(moved > 1.5, $"the body moved {moved:0.0} m in 3 s");
         Assert.Equal(0, runner.Rungs);
-        Assert.Single(log.Lines, l => l.Contains("a turn in place: the aim is behind the body and no key would press (P7i)", StringComparison.Ordinal) && l.Contains("why=corner-approach", StringComparison.Ordinal));
+        // W8 (the world walk's rooms): the corner's approach holds back no press of a body standing still, so the ordinary press turns it and P7i's fallback is not needed.
+        Assert.DoesNotContain(log.Lines, l => l.Contains("a turn in place: the aim is behind the body and no key would press (P7i)", StringComparison.Ordinal));
     }
 }
 

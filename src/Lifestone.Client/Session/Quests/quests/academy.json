@@ -1,0 +1,756 @@
+{
+  "key": "academy",
+  "name": "The Training Academy (Aluvian, exit to Holtburg)",
+  "giver": null,
+  "start": {
+    "cell": "0x860201AD",
+    "point": null,
+    "name": "the Training Academy's start (CharGen start area 0)"
+  },
+  "steps": [
+    {
+      "kind": "give",
+      "what": "hand the Calling Stone to the Society Greeter",
+      "place": null,
+      "target": {
+        "wcid": 30991,
+        "name": "Society Greeter"
+      },
+      "item": {
+        "wcid": 5084,
+        "name": "Calling Stone"
+      },
+      "expect": {
+        "reply": "Why don't you go talk to the Agent in the next room?",
+        "stamp": "CallingStoneGiven",
+        "item": null
+      },
+      "source": "W0 SELECT, m6-plan.md section 8: cache/m6/0/sel-academy.tsv: academygreeter 30991, Give (category 6) of 5084: Tell, StampQuest CallingStoneGiven; W0 SELECT, m6-plan.md section 8: cache/m6/0/sel-academy-8602.tsv (every object placed in 0x8602): the Society Greeter 30991 in the start cell 0x860201AD at (9.84, -31.73, 0); the Calling Stone is in a new character's pack (ladder note section 7)",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Leather Gauntlets beside Jonathan",
+      "place": {
+        "cell": "0x860201B0",
+        "point": [
+          18.36,
+          -21.1,
+          0.0
+        ],
+        "name": "Jonathan's room"
+      },
+      "target": {
+        "wcid": 13240,
+        "name": "Leather Gauntlets"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "W0 SELECT, m6-plan.md section 8: cache/m6/0/sel-academy-8602.tsv (every object placed in 0x8602): Leather Gauntlets 13240 in 0x860201B0 at (18.36, -21.10, 0)",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Leather Gauntlets",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 13240,
+        "name": "Leather Gauntlets"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "W0 SELECT, m6-plan.md section 8: cache/m6/0/sel-academy.tsv: academyguard2 29322 refuses 13239, 13240 and 13241 with 'Drag this item onto your paperdoll to wear it.'; its Use asks LeggingsAcademyPickUp, CapAcademyPickUp, GauntletsAcademyPickUp; W0 SELECT, m6-plan.md section 8: cache/m6/0/sel-academy-8602.tsv (every object placed in 0x8602): 13240 is the Leather Gauntlets",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the armour room's leggings and cap",
+      "place": {
+        "cell": "0x860201B6",
+        "point": [
+          17.79,
+          -41.73,
+          0.0
+        ],
+        "name": "the armour room"
+      },
+      "target": {
+        "wcid": 13241,
+        "name": "Leather Leggings"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "W0 SELECT, m6-plan.md section 8: cache/m6/0/sel-academy-8602.tsv (every object placed in 0x8602): Leather Leggings 13241 at (17.79, -41.73, 0) and Leather Cap 13239 at (22.21, -40.22, 0.67) in 0x860201B6",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Leather Leggings",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 13241,
+        "name": "Leather Leggings"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "W0 SELECT, m6-plan.md section 8: cache/m6/0/sel-academy-8602.tsv (every object placed in 0x8602): 13241 is the Leather Leggings",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Leather Cap",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 13239,
+        "name": "Leather Cap"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "W0 SELECT, m6-plan.md section 8: cache/m6/0/sel-academy-8602.tsv (every object placed in 0x8602): 13239 is the Leather Cap",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to Samuel",
+      "place": {
+        "cell": "0x860201B1",
+        "point": [
+          21.88,
+          -30.61,
+          0.0
+        ],
+        "name": "Samuel's cell"
+      },
+      "target": {
+        "wcid": 29322,
+        "name": "Samuel"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "W0 SELECT, m6-plan.md section 8: cache/m6/0/sel-academy-8602.tsv (every object placed in 0x8602): Samuel 29322 (academyguard2) in 0x860201B1 at (21.88, -30.61, 0)",
+      "todo": null
+    },
+    {
+      "kind": "talk",
+      "what": "show the armour to Samuel",
+      "place": null,
+      "target": {
+        "wcid": 29322,
+        "name": "Samuel"
+      },
+      "item": null,
+      "expect": {
+        "reply": "You may now proceed to the Training Area.",
+        "stamp": null,
+        "item": null
+      },
+      "source": "W0 SELECT, m6-plan.md section 8: cache/m6/0/sel-academy.tsv: academyguard2 29322, Use (category 7): InqQuest LeggingsAcademyPickUp, then CapAcademyPickUp, then GauntletsAcademyPickUp; any held: Tell 'You found some armor!...', 'You may now proceed to the Training Area.'",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Training Master",
+      "place": {
+        "cell": "0x8602023A",
+        "point": [
+          56.08,
+          -20.12,
+          0.0
+        ],
+        "name": "the Training Master's cell"
+      },
+      "target": {
+        "wcid": 29320,
+        "name": "Training Master"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "W0 SELECT, m6-plan.md section 8: cache/m6/0/sel-academy-8602.tsv (every object placed in 0x8602): the Training Master 29320 in 0x8602023A at (56.08, -20.12, 0)",
+      "todo": null
+    },
+    {
+      "kind": "talk",
+      "what": "hear the Training Master's task",
+      "place": null,
+      "target": {
+        "wcid": 29320,
+        "name": "Training Master"
+      },
+      "item": null,
+      "expect": {
+        "reply": "The signs will tell you how to retrieve the Academy Token.",
+        "stamp": null,
+        "item": null
+      },
+      "source": "W0 SELECT, m6-plan.md section 8: cache/m6/0/sel-sentry-master.tsv: academyguardtrainingmaster 29320, Use (category 7): Tell 'The signs will tell you how to retrieve the Academy Token. Bring that ...' (the SELECT's text is cut at 70 characters, so the check is its first sentence)",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Sparring Golem beside the Training Master",
+      "place": {
+        "cell": "0x8602023A",
+        "point": [
+          60.92,
+          -20.01,
+          0.01
+        ],
+        "name": "the Sparring Golem's generator"
+      },
+      "target": {
+        "wcid": 12698,
+        "name": "Sparring Golem"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "W0 SELECT, m6-plan.md section 8: cache/m6/0/sel-academy-8602.tsv (every object placed in 0x8602): a Sparring Golem 12698 on the 10 s generator 28282 in 0x8602023A at (60.92, -20.01, 0.01); more at 0x8602026C, 026E, 0282-0284 and 0299",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Academy Token from the Sparring Golem's corpse (killed with war spells)",
+      "place": null,
+      "target": {
+        "wcid": 12698,
+        "name": "Sparring Golem"
+      },
+      "item": {
+        "wcid": 12709,
+        "name": "Academy Token"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "W0 SELECT, m6-plan.md section 8 (cache/m6/0/a3-facts.md): the Sparring Golem 12698's contained treasure (destination type 9) is the Academy Token 12709; academyguard1shoushiw 12724: 'These are harmless Sparring Golems. When you kill one, double-click on its body...'; a pick-up whose target is a creature is a kill and the loot of its corpse (AcademyStation)",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "hand the Academy Token to the Training Master",
+      "place": null,
+      "target": {
+        "wcid": 29320,
+        "name": "Training Master"
+      },
+      "item": {
+        "wcid": 12709,
+        "name": "Academy Token"
+      },
+      "expect": {
+        "reply": "You have completed your combat training!",
+        "stamp": "AcademyTokenGiven",
+        "item": null
+      },
+      "source": "W0 SELECT, m6-plan.md section 8: cache/m6/0/sel-sentry-master.tsv: 29320, Give 12709: InqQuest AcademyTokenGiven; QuestFailure (category 13): Tell 'Excellent work! You have completed your combat training!...', AwardXP 1,000, StampQuest AcademyTokenGiven",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Central Courtyard portal",
+      "place": {
+        "cell": "0x86020273",
+        "point": [
+          70.0,
+          -40.0,
+          -0.06
+        ],
+        "name": "the Central Courtyard portal's cell"
+      },
+      "target": {
+        "wcid": 31061,
+        "name": "Central Courtyard"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "W0 SELECT, m6-plan.md section 8: cache/m6/0/sel-academy-8602.tsv (every object placed in 0x8602): Central Courtyard 31061 in 0x86020273 at (70.00, -40.00, -0.06); docs/session.md section 25: it needs AcademyTokenGiven",
+      "todo": null
+    },
+    {
+      "kind": "use",
+      "what": "through the Central Courtyard portal",
+      "place": {
+        "cell": "0x8602021E",
+        "point": [
+          50.0,
+          -54.0,
+          1.0
+        ],
+        "name": "the courtyard's Portal Linkspot (the portal's landing)"
+      },
+      "target": {
+        "wcid": 31061,
+        "name": "Central Courtyard"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "docs/session.md section 25: 'Central Courtyard' (31061) needs AcademyTokenGiven (its QuestRestriction, string 37); the pinned ACE world release this server loads (ACE-World-Database v0.9.296, server/runtime/downloads), read offline in M6 0 F6 with the database down; the lead's SELECT confirms it on the next round: landblock_instance_link 0x78602052 (the portal in 0x86020273) -> 0x786020A8, the Portal Linkspot 10762 in 0x8602021E at (50, -54, 1); live rounds 5 and 7 (cache/m6/0/live/r7-test-keep.log): the walk to it ended with a teleport to (50.00, -54.00, 1.01) in 0x8602021E",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to a Thieving Thrungus in the courtyard",
+      "place": {
+        "cell": "0x86020225",
+        "point": [
+          46.42,
+          -131.7,
+          0.0
+        ],
+        "name": "the courtyard's thrungus rooms"
+      },
+      "target": {
+        "wcid": 29333,
+        "name": "Thieving Thrungus"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "W0 SELECT, m6-plan.md section 8: cache/m6/0/sel-academy-8602.tsv: Thieving Thrungus 29333 on the 1 min generator 28282 in 0x86020224, 0225 (46.42, -131.70, 0), 01E7, 01E8, 01FC and 01FD; AcademyStationTests (the room graph): the courtyard's landing 0x8602021E reaches 0x86020225 by 10 doorways; live round 7: the only way on from the landing to the Outer Courtyard portal is through the Academy Library door 30998, locked (the pinned ACE world release this server loads (ACE-World-Database v0.9.296, server/runtime/downloads), read offline in M6 0 F6 with the database down; the lead's SELECT confirms it on the next round: weenie 30998 Locked and DefaultLocked, LockCode keydooracademya)",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Bellows from a Thieving Thrungus's corpse (killed with war spells)",
+      "place": null,
+      "target": {
+        "wcid": 29333,
+        "name": "Thieving Thrungus"
+      },
+      "item": {
+        "wcid": 12710,
+        "name": "Bellows"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "W0 SELECT, m6-plan.md section 8 (cache/m6/0/a3-facts.md): the thrungus's contained treasure is the Bellows; the pinned ACE world release this server loads (ACE-World-Database v0.9.296, server/runtime/downloads), read offline in M6 0 F6 with the database down; the lead's SELECT confirms it on the next round: weenie 12710 'Bellows' ('If found, please return to the Academy Blacksmith', Quest string BellowsNewbiePickedUp)",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Academy Blacksmith",
+      "place": {
+        "cell": "0x860201F6",
+        "point": [
+          37.88,
+          -89.23,
+          0.0
+        ],
+        "name": "the Academy Blacksmith's room"
+      },
+      "target": {
+        "wcid": 30996,
+        "name": "Academy Blacksmith"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "W0 SELECT, m6-plan.md section 8: cache/m6/0/sel-academy-8602.tsv: Academy Blacksmith 30996 in 0x860201F6 at (37.88, -89.23, 0); AcademyStationTests: 0x86020225 reaches 0x860201F6 by 5 doorways",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "hand the Bellows to the Academy Blacksmith for the Academy Library Key",
+      "place": null,
+      "target": {
+        "wcid": 30996,
+        "name": "Academy Blacksmith"
+      },
+      "item": {
+        "wcid": 12710,
+        "name": "Bellows"
+      },
+      "expect": {
+        "reply": "My bellows! Thank you.",
+        "stamp": "BellowsNewbieTurnedIn",
+        "item": {
+          "wcid": 30999,
+          "name": "Academy Library Key"
+        }
+      },
+      "source": "the pinned ACE world release this server loads (ACE-World-Database v0.9.296, server/runtime/downloads), read offline in M6 0 F6 with the database down; the lead's SELECT confirms it on the next round: the Academy Blacksmith 30996, Give (category 6) of 12710: Tell 'My bellows! Thank you. Take this, with my thanks!', Tells naming the Academy Researcher and 'Use this key to enter the Academy Library...', a level-proportional award (type 62), Give 30999 (the Academy Library Key, KeyCode keydooracademya, 20 uses), StampQuest BellowsNewbieTurnedIn",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Academy Library door",
+      "place": {
+        "cell": "0x8602024C",
+        "point": [
+          63.0,
+          -90.0,
+          0.0
+        ],
+        "name": "the Academy Library door"
+      },
+      "target": {
+        "wcid": 30998,
+        "name": "Academy Library"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "W0 SELECT (the lead's, live round 7): the Academy Library door 30998 in 0x8602024C at (64.74, -90.00, 0), the door 0x7860204D; AcademyStationTests: 0x860201F6 reaches 0x8602024C by 4 doorways and the landing reaches the Outer Courtyard portal's room 0x86020331 only through 0x8602024C",
+      "todo": null
+    },
+    {
+      "kind": "use",
+      "what": "unlock the Academy Library door with its key",
+      "place": null,
+      "target": {
+        "wcid": 30998,
+        "name": "Academy Library"
+      },
+      "item": {
+        "wcid": 30999,
+        "name": "Academy Library Key"
+      },
+      "expect": {
+        "reply": "The Academy Library has been unlocked.",
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned ACE world release this server loads (ACE-World-Database v0.9.296, server/runtime/downloads), read offline in M6 0 F6 with the database down; the lead's SELECT confirms it on the next round: weenie 30998 'Academy Library' (a door, Locked, DefaultLocked, LockCode keydooracademya, ResetInterval 60 s: 'Use the Academy Library Key on this door to open it.'); ACE @95ef426d Lock.cs:248-280 (UnlockerHelper.Unlock: Locked false, broadcast) and :53 ('The {name} has been unlocked.'); Door.cs:91-117 (a locked door opens only from behind, its heading; the walker reached it from the front in live round 7: 'door-closed-timeout' after two Uses)",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "up to the Senior Guard",
+      "place": {
+        "cell": "0x8602032C",
+        "point": [
+          82.38,
+          -57.63,
+          12.01
+        ],
+        "name": "the Senior Guard's room"
+      },
+      "target": {
+        "wcid": 29318,
+        "name": "Senior Guard"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "W0 SELECT (sel-academy-8602.tsv): Senior Guard 29318 in 0x8602032C at (82.38, -57.63, 12.01); AcademyStationTests: from the landing the room route is 021E ... 024C (the library door) 027A ... 0305 (z 6) 0327 (z 12) ... 032C, next to the Outer Courtyard portal's room 0331 by 0333 (door 568, not locked: the pinned ACE world release this server loads (ACE-World-Database v0.9.296, server/runtime/downloads), read offline in M6 0 F6 with the database down; the lead's SELECT confirms it on the next round)",
+      "todo": null
+    },
+    {
+      "kind": "talk",
+      "what": "hear the Senior Guard's word on the Outer Courtyard",
+      "place": null,
+      "target": {
+        "wcid": 29318,
+        "name": "Senior Guard"
+      },
+      "item": null,
+      "expect": {
+        "reply": "A hive of Olthoi just breached the walls of the Outer Courtyard.",
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned ACE world release this server loads (ACE-World-Database v0.9.296, server/runtime/downloads), read offline in M6 0 F6 with the database down; the lead's SELECT confirms it on the next round and the lead's SELECT (live round 7): the Senior Guard 29318, Use (category 7): Tell 'A hive of Olthoi just breached the walls of the Outer Courtyard. I need you to help us clear them out. Go thro...', Tell 'Go!' (no stamp, no item: informational; the Sentry's 'You must be the one the Senior Guard told me about' follows it)",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Outer Courtyard portal",
+      "place": {
+        "cell": "0x86020331",
+        "point": [
+          90.0,
+          -60.0,
+          11.94
+        ],
+        "name": "the Outer Courtyard portal's cell"
+      },
+      "target": {
+        "wcid": 29334,
+        "name": "Outer Courtyard"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "W0 SELECT cache/m6/0/sel-academy-8602.tsv: the Outer Courtyard portal 29334 in 0x86020331 at (90.00, -60.00, 11.94); AcademyStationTests: from the Senior Guard's room 0x8602032C the route is 0333 (door 568) then 0331; the walk to it is taken on touch (a teleport the client sees)",
+      "todo": null
+    },
+    {
+      "kind": "use",
+      "what": "through the Outer Courtyard portal",
+      "place": {
+        "cell": "0x860202C3",
+        "point": [
+          119.0,
+          -141.0,
+          0.0
+        ],
+        "name": "the Sentry's Portal Linkspot (the portal's landing)"
+      },
+      "target": {
+        "wcid": 29334,
+        "name": "Outer Courtyard"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the only portal of the courtyard's upper floor; the pinned ACE world release this server loads (ACE-World-Database v0.9.296, server/runtime/downloads), read offline in M6 0 F6 with the database down; the lead's SELECT confirms it on the next round: landblock_instance_link 0x78602065 (the portal 29334 in 0x86020331) -> 0x786020A9, the Portal Linkspot 10762 in 0x860202C3 at (119, -141, 0), beside the Sentry; weenie 29334 has no QuestRestriction ('Walk into this portal to enter the Outer Courtyard.'): it takes the player on touch",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Sentry",
+      "place": {
+        "cell": "0x860202C2",
+        "point": [
+          123.67,
+          -132.95,
+          0.0
+        ],
+        "name": "the Sentry's cell"
+      },
+      "target": {
+        "wcid": 30994,
+        "name": "Sentry"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "W0 SELECT, m6-plan.md section 8: cache/m6/0/sel-academy-8602.tsv (every object placed in 0x8602): the Sentry 30994 in 0x860202C2 at (123.67, -132.95, 0)",
+      "todo": null
+    },
+    {
+      "kind": "talk",
+      "what": "hear the Sentry's task",
+      "place": null,
+      "target": {
+        "wcid": 30994,
+        "name": "Sentry"
+      },
+      "item": null,
+      "expect": {
+        "reply": "You must infiltrate the hive",
+        "stamp": null,
+        "item": null
+      },
+      "source": "W0 SELECT, m6-plan.md section 8: cache/m6/0/sel-sentry-master.tsv: the Sentry 30994, Use (category 7): Tells 'You must be the one the Senior Guard told me about...', 'A hive of Olthoi just breached the Outer Wall...', 'You must infiltrate the hive and travel as deep into it as you can...', 'Go!'",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "deep into the hive, to the Adolescent Olthoi",
+      "place": {
+        "cell": "0x86020100",
+        "point": [
+          153.41,
+          -234.61,
+          -12.0
+        ],
+        "name": "the hive's deepest room"
+      },
+      "target": {
+        "wcid": 29331,
+        "name": "Adolescent Olthoi"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "W0 SELECT, m6-plan.md section 8: cache/m6/0/sel-academy-8602.tsv (every object placed in 0x8602): the Adolescent Olthoi 29331 in 0x86020100 at (153.41, -234.61, -12); Young Olthoi 29332 in 0x86020104, 010C, 0125, 014F, 0162, 0195 and 01A1",
+      "todo": "TODO(m6-academy-sentry-ramp): the Sentry's rooms (0x860202C2-C5) join the others only through floor portals 6 m down (0x860202C4 -> 0x8602013B, 0x860202C5 -> 0x8602013C), which the room graph refuses (not upright), and no cell of the landblock opens outside (AcademyStationTests, M6 0 F6): the walk is expected to fail indoor-start-unreachable from 0x860202C2 until the room graph walks that way down (item 4's seam); TODO(m6-academy-hive-ramp): the hive's deepest rooms (0x86020100-0107, z -12) join the rest only through 0x86020105 -> 0x8602010A (upright, fails the fit probe) and 0x86020105 -> 0x86020106 (not upright) (AcademyStationTests, M6 0 F6): the walk between them and the courtyard below the Sentry fails by name until the room graph walks it (item 4's seam)"
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Protection Orb from the Adolescent Olthoi's corpse (killed with war spells)",
+      "place": null,
+      "target": {
+        "wcid": 29331,
+        "name": "Adolescent Olthoi"
+      },
+      "item": {
+        "wcid": 29336,
+        "name": "Protection Orb"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "W0 SELECT, m6-plan.md section 8 (cache/m6/0/a3-facts.md): the Adolescent Olthoi 29331's contained treasure (destination type 9) is the Protection Orb 29336",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "back to the Sentry",
+      "place": {
+        "cell": "0x860202C2",
+        "point": [
+          123.67,
+          -132.95,
+          0.0
+        ],
+        "name": "the Sentry's cell"
+      },
+      "target": {
+        "wcid": 30994,
+        "name": "Sentry"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "W0 SELECT, m6-plan.md section 8: cache/m6/0/sel-academy-8602.tsv (every object placed in 0x8602): the Sentry 30994 in 0x860202C2",
+      "todo": "TODO(m6-academy-hive-ramp): the hive's deepest rooms (0x86020100-0107, z -12) join the rest only through 0x86020105 -> 0x8602010A (upright, fails the fit probe) and 0x86020105 -> 0x86020106 (not upright) (AcademyStationTests, M6 0 F6): the walk between them and the courtyard below the Sentry fails by name until the room graph walks it (item 4's seam); TODO(m6-academy-sentry-ramp): the Sentry's rooms (0x860202C2-C5) join the others only through floor portals 6 m down (0x860202C4 -> 0x8602013B, 0x860202C5 -> 0x8602013C), which the room graph refuses (not upright), and no cell of the landblock opens outside (AcademyStationTests, M6 0 F6): the walk is expected to fail indoor-start-unreachable from 0x860202C2 until the room graph walks that way down (item 4's seam)"
+    },
+    {
+      "kind": "give",
+      "what": "hand the Protection Orb to the Sentry",
+      "place": null,
+      "target": {
+        "wcid": 30994,
+        "name": "Sentry"
+      },
+      "item": {
+        "wcid": 29336,
+        "name": "Protection Orb"
+      },
+      "expect": {
+        "reply": "Thank you! You have done the Dereth Exploration Society a great",
+        "stamp": "SentryTaskComplete",
+        "item": null
+      },
+      "source": "W0 SELECT, m6-plan.md section 8: cache/m6/0/sel-sentry-master.tsv: the Sentry 30994, Give 29336: Tell 'Thank you! You have done the Dereth Exploration Society a great servic...' (cut at 70 characters), 'Now, you must leave this place...'; the GotoSet finalize_give: gives 49563, a level-proportional XP award (amount 5,000), StampQuest SentryTaskComplete",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the exit portal",
+      "place": {
+        "cell": "0x86020169",
+        "point": [
+          158.64,
+          -149.52,
+          -6.06
+        ],
+        "name": "the exit portal's cell"
+      },
+      "target": {
+        "wcid": 29338,
+        "name": "Exit to Holtburg"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "W0 SELECT, m6-plan.md section 8: cache/m6/0/sel-academy-8602.tsv (every object placed in 0x8602): 'Exit to Holtburg' 29338 in 0x86020169 at (158.64, -149.52, -6.06)",
+      "todo": "TODO(m6-academy-sentry-ramp): the Sentry's rooms (0x860202C2-C5) join the others only through floor portals 6 m down (0x860202C4 -> 0x8602013B, 0x860202C5 -> 0x8602013C), which the room graph refuses (not upright), and no cell of the landblock opens outside (AcademyStationTests, M6 0 F6): the walk is expected to fail indoor-start-unreachable from 0x860202C2 until the room graph walks that way down (item 4's seam)"
+    },
+    {
+      "kind": "use",
+      "what": "through the exit portal to Holtburg",
+      "place": {
+        "cell": "0xA9B40019",
+        "point": null,
+        "name": "Holtburg (the exit's destination)"
+      },
+      "target": {
+        "wcid": 29338,
+        "name": "Exit to Holtburg"
+      },
+      "item": null,
+      "expect": {
+        "reply": "Congratulations! You have completed your training!",
+        "stamp": null,
+        "item": null
+      },
+      "source": "docs/session.md section 25: destination Holtburg 0xA9B40019, needs SentryTaskComplete; W0 SELECT, m6-plan.md section 8: cache/m6/0/sel-academy.tsv: portalnewbieexitholtburg 29338, Portal (category 4): EraseQuest x10, then the message 'Congratulations! You have completed your training! Make sure you talk to Alcott...'",
+      "todo": null
+    }
+  ],
+  "done": {
+    "stamp": null,
+    "reply": "Congratulations! You have completed your training!",
+    "item": null
+  },
+  "timer_seconds": null,
+  "sources": [
+    "W0 SELECT, m6-plan.md section 8: the Academy's emote rows, cache/m6/0/sel-academy.tsv and sel-sentry-master.tsv (ACE EmoteType 2 AwardXP, 3 Give, 10 Tell, 21 InqQuest, 22 StampQuest, 31 EraseQuest, 62 AwardLevelProportionalXP; EmoteCategory 4 Portal, 6 Give, 7 Use, 12/13 QuestSuccess/QuestFailure, 32 GotoSet); the SELECT cuts a reply at 70 characters, so each check is a whole sentence of the cut text",
+    "W0 SELECT, m6-plan.md section 8: cache/m6/0/sel-academy-8602.tsv, every object placed in landblock 0x8602 (the names, cells and positions of the steps); the same layout is instanced in other landblocks with the same cell low words, so the station matches a cell by its low word in the landblock it starts in",
+    "docs/session.md section 25 (the Academy exit, ST16): the portals 29338, 31061, 29334, the Sentry 30994 and SentryTaskComplete, the exit's emote set (it erases the Academy's stamps, so the done condition is the message, not a stamp); the start's rooms and the exit's wing are joined by the quest-gated portals only",
+    "the ladder note section 7 (cache/m6/level-ladder-note.md): the Calling Stone 5084 and the Pathwarden Token 33613 in a new character's pack; the spec section 5.5's first row",
+    "The spec's 'the token to Thorolf' is the Pathwarden Token (quests/pathwarden.json); the Academy's own token is the Academy Token 12709 given to the Training Master",
+    "TODO(m6-academy-sentry-percent): the Sentry's AwardLevelProportionalXP row gives the amount 5,000 only (cache/m6/0/sel-sentry-master.tsv); its percent and minimum are not in the SELECT, and the kills' XP (the golem, the olthoi) is not either, so the level the Academy reaches is read live from the character's own level property",
+    "Closed by M6 5 q6a (m6-academy-sentry-gift): the item 49563 the Sentry's finalize_give gives is the Facility Hub Portal Gem (weenie_properties_string type 1 of object 49563, the pinned world SQL v0.9.296, read offline); the station still logs what arrives",
+    "Closed by M6 0 (D37, round 9; m6-academy-skip): the greeter's skip path is the full decode in quests/academy-skip.json (Jonathan 29324, the Exit Token 29335); the climber takes the skip, this file stays the full route"
+  ]
+}

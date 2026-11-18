@@ -33,7 +33,8 @@ public enum RecallStatus
 /// </summary>
 /// <remarks>
 /// <para><b>Steps and the failure name.</b> The steps are <c>present</c> (the character must be in the world and not in portal space), <c>swap-in</c>, <c>spell</c> (the spellbook, once the description has arrived, lacks spell 1635), <c>mode</c>
-/// (the magic mode, for a caster that has not entered it), <c>busy-wait</c> (M4 P5b fix FC-a1: the cast waits while <see cref="IActionApi.BusyReason"/> names a busy chain, at most <see cref="BusyWaitSeconds"/>), <c>cast</c>, <c>teleport</c>, <c>arrival</c> and <c>swap-out</c>. A failure is <c>recall:&lt;step&gt;</c> with a sentence behind it; nothing is retried silently, but a fizzled cast (0x0402) is counted and cast again, at most <see cref="MaxFizzles"/> times a recall (M4 P5a fix F-abil, P5a-R4: Item Enchantment is built to the 0.9 chance rule, so about one cast in ten fizzles and a journey must not fail for it). The cast's refusals are named from ACE
+/// (the magic mode, for a caster that has not entered it), <c>busy-wait</c> (M4 P5b fix FC-a1: the cast waits while <see cref="IActionApi.BusyReason"/> names a busy chain, at most <see cref="BusyWaitSeconds"/>; M6 14: an open ground container
+/// is closed first, and past the bound the cast goes anyway, so this step no longer fails), <c>cast</c>, <c>teleport</c>, <c>arrival</c> and <c>swap-out</c>. A failure is <c>recall:&lt;step&gt;</c> with a sentence behind it; nothing is retried silently, but a fizzled cast (0x0402) is counted and cast again, at most <see cref="MaxFizzles"/> times a recall (M4 P5a fix F-abil, P5a-R4: Item Enchantment is built to the 0.9 chance rule, so about one cast in ten fizzles and a journey must not fail for it). The cast's refusals are named from ACE
 /// @95ef426d: WeenieError 0x049E <c>YouMustLinkToLifestoneToRecall</c> (<c>WorldObject_Magic.cs</c> 1087-1093 sends it when the player has no LinkedLifestone; <c>WeenieError.cs</c> 658), 0x049F
 /// <c>YouFailToRecallToLifestone</c> (:663), 0x04CC <c>YouHaveBeenInPKBattleTooRecently</c> (:834, <c>WorldObject_Magic.cs</c> 1054-1058), and the spell refusals 0x0400 (components), 0x0401 (mana), 0x0402 (fizzle) the Action API reports. Research
 /// section 1's portal ones (0x04A3 <c>YouMustLinkToPortalToRecall</c>, 0x04AD <c>YouCannotRecallPortal</c>) are named too for the portal recall P5b may add. A refusal arrives as a chat line of the WeenieError kind, so the recall
@@ -75,13 +76,21 @@ public sealed class RecallHome : IDisposable
     public const int MaxFizzles = 5;
 
     /// <summary>
-    /// Seconds the recall waits, before it sends the cast, for the player to stop being busy by the Action API's lane rule (<see cref="IActionApi.BusyReason"/>; M4 P5b fix FC-a1): past it the recall fails <c>recall:busy-wait</c>.
+    /// Seconds the recall waits, before it sends the cast, for the player to stop being busy by the Action API's lane rule (<see cref="IActionApi.BusyReason"/>; M4 P5b fix FC-a1). M6 14 recall unblock (m6-recall-preempt): past it
+    /// the cast is sent anyway and ACE's own answer judges it (a busy refusal is retried once, <see cref="BusyRetries"/>); the way out never fails for a wait. An open ground container is closed first
+    /// (<see cref="OpenContainerPreempt"/>), so its held Use lane is never waited out: only an action truly in flight (or a short chain after one) is.
     /// Lifestone's own bound, not retail's: the longest chain the rule knows is a corpse pickup's 1.35 s after its return stance, and a held lane is let go at its tracker's timeout; 15 s covers a loot's last move and a heal's Ready with room.
     /// </summary>
     public const double BusyWaitSeconds = 15.0;
 
-    /// <summary>The cast's retry rules (M5 item 1 lane K4, D13): <see cref="CastRules.Travel(int)"/> of <see cref="MaxFizzles"/> same-level retries, sent at once with no mana check between them, as the recall always did.</summary>
-    private static readonly CastRules FizzleRules = CastRules.Travel(MaxFizzles);
+    /// <summary>
+    /// M6 14 recall unblock: the busy refusals (0x001D, ACE's <c>VerifyBusy</c>, <c>Player_Magic.cs</c> 375-383 @95ef426d) the recall retries: once, after the busy clears (the Action API's rule reads free, and at least
+    /// <see cref="CastRules.DefaultBusyWaitSeconds"/> after the refusal); the next one fails <c>recall:cast</c>, named.
+    /// </summary>
+    public const int BusyRetries = 1;
+
+    /// <summary>The cast's retry rules (M5 item 1 lane K4, D13): <see cref="CastRules.Travel(int)"/> of <see cref="MaxFizzles"/> same-level retries, sent at once with no mana check between them, as the recall always did. A busy refusal ends the attempt: the recall itself retries it (<see cref="BusyRetries"/>).</summary>
+    private static readonly CastRules FizzleRules = CastRules.Travel(MaxFizzles) with { MaxBusy = 0 };
 
     private readonly IGameSessionView _session;
     private readonly IActionApi _actions;
@@ -113,6 +122,9 @@ public sealed class RecallHome : IDisposable
     private int _fizzlesThisRecall;
     private int _fizzles;
     private double _busySince = double.NaN;
+    private readonly OpenContainerPreempt _preempt;
+    private int _busyRefusals;
+    private double _busyRetryAt = double.NaN;
 
     private enum Phase
     {
@@ -144,10 +156,15 @@ public sealed class RecallHome : IDisposable
         _spellName = SpellName(spellId);
         _travelSubscription = session.Events.Subscribe<SelfTravelChanged>(OnTravel);
         _chatSubscription = session.Events.Subscribe<ChatReceived>(OnChat);
+        _preempt = new OpenContainerPreempt(session.Actions, session.State, log, LogCategory, "recall");
     }
 
+    /// <summary>The ground containers the recall closed before its cast (M6 14 recall unblock, m6-recall-preempt).</summary>
+    public int PreemptCloses => _preempt.Closes;
+
     /// <summary>
-    /// The recall for the character named <paramref name="characterName"/>: a Brawler or an Archer (over a <see cref="CasterSwap"/>), BSD Mage (alone), or null for any other character (the Hunter has no magic).
+    /// The recall for the character named <paramref name="characterName"/>: a Brawler or an Archer (over a <see cref="CasterSwap"/>), BSD Mage or Winnie (alone; M6 item 0 a6), or null for any other character (the Hunter has no magic).
+    /// Winnie's spellbook may not hold the recall yet (Lifestone Recall is a level 3 Item spell): the cast then fails <c>recall:spell</c> by name (the attempt's own check), and the journey's way home walks instead (<see cref="Scenarios.Journey.WayHomeRule"/>).
     /// </summary>
     /// <param name="session">The session.</param>
     /// <param name="characterName">The character's name as the read model holds it, or null.</param>
@@ -163,7 +180,8 @@ public sealed class RecallHome : IDisposable
             return new RecallHome(session, CasterSwap.For(template, session.Actions, session.State, log), log, homeLandblock, spellId);
         }
 
-        return string.Equals(characterName?.Trim(), MageTemplate.CharacterName, StringComparison.OrdinalIgnoreCase) ? new RecallHome(session, null, log, homeLandblock, spellId) : null;
+        var name = characterName?.Trim();
+        return string.Equals(name, MageTemplate.CharacterName, StringComparison.OrdinalIgnoreCase) || CharacterPolicy.For(name).ScenarioMage ? new RecallHome(session, null, log, homeLandblock, spellId) : null;
     }
 
     /// <summary>Where the recall is.</summary>
@@ -241,6 +259,9 @@ public sealed class RecallHome : IDisposable
         _refusal = 0;
         _fizzlesThisRecall = 0;
         _busySince = double.NaN;
+        _busyRefusals = 0;
+        _busyRetryAt = double.NaN;
+        _preempt.Reset();
         _swapIn = false;
         _pending = null;
         _rearm = null;
@@ -362,7 +383,7 @@ public sealed class RecallHome : IDisposable
             if (_swap is null && !_rearmed && CombatModeGuard.Read(_state) is { Caster: null, Unknown: 0 })
             {
                 _rearmed = true;
-                if (HeldCaster.Rearm(_state, new SelfEquipJudge([], 0, _ => null), out var why) is not { } caster)
+                if (HeldCaster.Rearm(_state, Quartermaster.Wardrobe.For(_state).RearmJudge(), out var why) is not { } caster)
                 {
                     return Fail("mode", "no caster held: " + why, now);
                 }
@@ -397,21 +418,35 @@ public sealed class RecallHome : IDisposable
     {
         if (!_casting)
         {
-            // FC-a1: ACE answers a cast sent into the player's busy chain (a corpse pickup's return stance, a heal's Ready) 0x001D; wait for the Action API's rule to clear, bounded, then cast once. A 0x001D after that is a failure.
-            if (_actions.BusyReason is { } busy)
+            // M6 14 recall unblock (m6-recall-preempt): an open ground container is closed first, and the server's answer checked: its open's held Use lane is then free, never waited out.
+            if (_preempt.Step(_spellName, now))
+            {
+                return Status;
+            }
+
+            // FC-a1: ACE answers a cast sent into the player's busy chain (a corpse pickup's return stance, a heal's Ready) 0x001D; wait for the Action API's rule to clear, bounded. M6 14: past the bound the cast goes anyway, and
+            // ACE's own answer judges it (a busy refusal is retried once, after the busy clears).
+            var busy = _actions.BusyReason;
+            if (busy is not null || now < _busyRetryAt)
             {
                 if (double.IsNaN(_busySince))
                 {
                     _busySince = now;
-                    _log.Info(LogCategory, $"recall:busy-wait: the player is busy ({busy}); the cast waits up to {BusyWaitSeconds:0} s");
+                    _log.Info(LogCategory, busy is null
+                        ? string.Create(CultureInfo.InvariantCulture, $"recall:busy-wait: the retry after ACE's busy refusal waits {_busyRetryAt - now:0.0#} s more (at least {CastRules.DefaultBusyWaitSeconds:0} s after the refusal)")
+                        : $"recall:busy-wait: the player is busy ({busy}); the cast waits up to {BusyWaitSeconds:0} s, then goes anyway");
                 }
 
-                return now - _busySince > BusyWaitSeconds
-                    ? Fail("busy-wait", $"the player was still busy after {BusyWaitSeconds:0} s ({busy}); the cast was not sent", now)
-                    : Status;
-            }
+                if (now - _busySince <= BusyWaitSeconds)
+                {
+                    return Status;
+                }
 
-            if (!double.IsNaN(_busySince))
+                _log.Warn(LogCategory, $"recall:busy-wait: the player is still busy after {BusyWaitSeconds:0} s ({busy ?? "the retry's wait"}): the cast is sent anyway; the Action API sends it when its own lane rule frees, and ACE's answer judges it (m6-recall-preempt)");
+                _busySince = double.NaN;
+                _busyRetryAt = double.NaN;
+            }
+            else if (!double.IsNaN(_busySince))
             {
                 _log.Info(LogCategory, $"recall:busy-wait: the player is free after {now - _busySince:0.00} s");
                 _busySince = double.NaN;
@@ -444,6 +479,20 @@ public sealed class RecallHome : IDisposable
         var report = _attempt.Report;
         var last = _attempt.LastOutcome;
         var described = last is { } outcome ? Describe(outcome) : $"{report.End.Name()}: {report.Why}";
+        if (report.End == CastEnd.Busy && _refusal == 0)
+        {
+            // M6 14 recall unblock: ACE refused the cast as too busy (0x001D): retried once, after the busy clears; the next refusal is named and fails the recall.
+            if (++_busyRefusals <= BusyRetries)
+            {
+                _busyRetryAt = now + CastRules.DefaultBusyWaitSeconds;
+                _busySince = double.NaN;
+                _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"recall: ACE answered You're too busy (0x001D; VerifyBusy, Player_Magic.cs 375-383 @95ef426d): {_spellName} is retried once, after the busy clears and at least {CastRules.DefaultBusyWaitSeconds:0} s from now (busy refusal {_busyRefusals} of {BusyRetries})"));
+                return Status;
+            }
+
+            return Fail("cast", $"ACE answered You're too busy (0x001D) again after the busy cleared ({_busyRefusals} busy refusals, over the {BusyRetries} retried): " + described, now);
+        }
+
         if (report.End == CastEnd.Fizzled)
         {
             return Fail("cast", $"{_spellName} fizzled {_fizzlesThisRecall} times in one recall, over the cap of {MaxFizzles}: " + described, now);

@@ -26,6 +26,7 @@ public sealed class AutopilotRecoveryTableTests(ITestOutputHelper output)
     [InlineData(ActionReason.NotEnoughMana, RecoveryFix.ManaDance, "mana-dance")]
     [InlineData(ActionReason.TargetGone, RecoveryFix.RePick, "re-pick")]
     [InlineData(ActionReason.Busy, RecoveryFix.Wait, "wait")]
+    [InlineData(ActionReason.InTheAir, RecoveryFix.Wait, "wait")] // M6 14 airborne: 0x04EB, the landing then the same action
     [InlineData(ActionReason.NotHeld, RecoveryFix.PlanAgain, "plan-again")]
     [InlineData(ActionReason.Fizzled, RecoveryFix.Generic, "generic")]
     [InlineData(ActionReason.ContraryResult, RecoveryFix.Generic, "generic")]
@@ -98,13 +99,13 @@ public sealed class AutopilotRecoveryTableTests(ITestOutputHelper output)
     public void A_full_pack_with_nothing_the_pack_rules_may_shed_stops_the_run_safely_with_the_reason(string key)
     {
         var w = new ApWorld(key, output, atHome: false) { Prime = c => Proven(c, key) };
-        var free = BuyTracker.FreeSlots(w.Trip.Vendor.State)!.Value;
+        var free = Lifestone.Client.Session.Quartermaster.PackView.AllPacksLessFociFree(w.Trip.Vendor.State)!.Value;
         for (var i = 0; i < free; i++)
         {
             w.Trip.Own("Loot " + i, 9000 + (uint)i, VendorRig.MiscType, 10); // the packs full of loot, and no mana stone: nothing the pack rules shed away from a vendor
         }
 
-        Assert.Equal(0, BuyTracker.FreeSlots(w.Trip.Vendor.State));
+        Assert.Equal(0, Lifestone.Client.Session.Quartermaster.PackView.AllPacksLessFociFree(w.Trip.Vendor.State));
         w.Factory.Script = spec => spec.Kind == StationKinds.Logistics
             ? new Failing(w, new ActionOutcome(ActionOutcomeKind.Refused, 0, "no free pack slot: the pick-up of 0x80009999 needs one and the packs have 0 free", ActionReason.NoFreeSlot))
             : null;
@@ -118,6 +119,53 @@ public sealed class AutopilotRecoveryTableTests(ITestOutputHelper output)
         Assert.Contains("the shed-pack fix for NoFreeSlot could not be made", autopilot.Failure, StringComparison.Ordinal);
         Assert.DoesNotContain(w.Lines, l => l.StartsWith("autopilot recovery after", StringComparison.Ordinal)); // no generic recovery spent on it
         Assert.Empty(w.Trip.Vendor.H.Net.Of(FakeSendKind.DropItem)); // nothing was dropped
+    }
+
+    [Theory]
+    [InlineData(Den, 2, true)]
+    [InlineData(Den, 99, false)]
+    public void M6_7_I1_the_same_station_failing_again_from_the_same_cell_settles_and_steps_before_its_last_retry_and_then_stops_by_name(string key, int homeFailures, bool survives)
+    {
+        var w = new ApWorld(key, output, atHome: false) { Prime = c => Proven(c, key) };
+        var trips = 0;
+        var homes = 0;
+        w.Factory.Script = spec => spec.Kind switch
+        {
+            StationKinds.Logistics when ++trips == 1 => new Plain("back: travel: run: no path: indoor-start-unreachable"),
+            StationKinds.Logistics => new AsksMagic(string.Empty, w, before: null, then: () => ScenarioStatus.Succeeded) { Fields = "sold=1 bought=1" },
+            StationKinds.RecallHome when ++homes <= homeFailures => new Plain("walk-home: run 'journey-bind-" + homes + "' no path: indoor-start-unreachable"), // the leg's number changes; the failure is the same
+            StationKinds.RecallHome => new Plain(null) { Reaches = () => Home(w) },
+            _ => null,
+        };
+        var autopilot = w.Autopilot(new AutopilotOptions { TripAfterKills = 1 });
+
+        var status = w.Run(autopilot, a => survives && trips >= 2 && a.State == AutopilotState.Fight, perFrame: _ => AnswerWieldsAndModes(w));
+
+        Assert.Equal(1, w.Lines.Count(l => l.StartsWith("autopilot recovery: repeat=2 fix=settle-step", StringComparison.Ordinal))); // the second identical failure settles and steps; its retry is not charged
+        Assert.Contains(w.Lines, l => l.StartsWith("autopilot recovery: reason=None fix=settle-step done: settled 5 s", StringComparison.Ordinal));
+        if (survives)
+        {
+            Assert.Equal(ScenarioStatus.Running, status);
+            Assert.Null(autopilot.StopName);
+            Assert.Contains(w.Lines, l => l.StartsWith("autopilot recovery: reason=None fix=settle-step retry=ok", StringComparison.Ordinal));
+            autopilot.RequestStop("test");
+            Assert.Equal(ScenarioStatus.Succeeded, w.Run(autopilot, perFrame: _ => AnswerWieldsAndModes(w)));
+        }
+        else
+        {
+            Assert.Equal(ScenarioStatus.Failed, status);
+            Assert.StartsWith("failed:", autopilot.StopName, StringComparison.Ordinal);
+            Assert.Equal(3, homes); // the first, the second, and the last retry after the settle and the step: no fourth
+        }
+    }
+
+    [Fact]
+    public void M6_7_I1_the_signature_collapses_digits_and_tells_stations_and_cells_apart()
+    {
+        Assert.Equal(RecoveryTable.Signature("failed:travel:a", "cell 0x1", "leg bind-11 at 6.6 m"), RecoveryTable.Signature("failed:travel:a", "cell 0x1", "leg bind-12 at 7.1 m"));
+        Assert.NotEqual(RecoveryTable.Signature("failed:travel:a", "cell 0x1", "x"), RecoveryTable.Signature("failed:travel:a", "cell 0x2", "x"));
+        Assert.NotEqual(RecoveryTable.Signature("failed:travel:a", "cell 0x1", "x"), RecoveryTable.Signature("failed:trip:a", "cell 0x1", "x"));
+        Assert.Equal("settle-step", RecoveryTable.Name(RecoveryFix.SettleStep));
     }
 
     private static void Proven(JourneyContext c, string key)
@@ -226,6 +274,29 @@ public sealed class AutopilotRecoveryTableTests(ITestOutputHelper output)
 
             return ScenarioStatus.Failed;
         }
+
+        public string VerdictFields() => "sold=0 bought=0";
+    }
+
+    /// <summary>A scripted station that fails at once with a plain, untyped failure text.</summary>
+    private sealed class Plain(string? failure) : IStationRun
+    {
+        public string Name => "plain";
+
+        public string Stage => "scripted";
+
+        public string? Failure => failure;
+
+        public double? WhereMaxMetres => null;
+
+        public long Unmatched => 0;
+
+        public bool Ok => failure is null;
+
+        /// <summary>Set: the station ends well after this (it stands the player where it says).</summary>
+        public Func<ScenarioStatus?>? Reaches { get; init; }
+
+        public ScenarioStatus Step(IGameSessionView session, double now) => failure is null ? Reaches?.Invoke() ?? ScenarioStatus.Succeeded : ScenarioStatus.Failed;
 
         public string VerdictFields() => "sold=0 bought=0";
     }

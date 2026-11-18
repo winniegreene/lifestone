@@ -103,11 +103,28 @@ public sealed partial class AutopilotScenario
         var waited = audit.WaitingOn == StartupAudit.WaitActions ? _clock - audit.WaitStartedAt : 0;
         audit.EndWait();
         audit.ActionsSettled = true;
-        var released = session.Actions.Move.ReleaseAutomation();
-        var finding = queued + inFlight == 0
-            ? string.Create(CultureInfo.InvariantCulture, $"no automation action queued or in flight{(waited > 0 ? $" (waited {waited:0.#} s)" : string.Empty)}")
-            : string.Create(CultureInfo.InvariantCulture, $"{queued} queued and {inFlight} in flight after {StartupAudit.ActionsSettleSeconds:0} s: TODO(m6-chat-controls-robust): they end by their own timeouts");
-        var fix = released > 0 ? string.Create(CultureInfo.InvariantCulture, $"released {released} movement key(s) an automation still held") : "none: no movement key held by an automation";
+        string finding;
+        string fix;
+        var released = 0;
+        if (queued + inFlight == 0)
+        {
+            released = session.Actions.Move.ReleaseAutomation();
+            finding = string.Create(CultureInfo.InvariantCulture, $"no automation action queued or in flight{(waited > 0 ? $" (waited {waited:0.#} s)" : string.Empty)}");
+            fix = released > 0 ? string.Create(CultureInfo.InvariantCulture, $"released {released} movement key(s) an automation still held") : "none: no movement key held by an automation";
+        }
+        else
+        {
+            // M6 6 MF (m6-chat-controls-robust, the audit's settle): at the bound the queued automation actions are cancelled (the same stand-down as /stop: cancel, then release, so no queued intent presses a key after the release) and
+            // checked after; only the in-flight ones are left, which were sent and only the server's answer (or the Action API's own timeout) can end, so they are reported, not waited for.
+            int cancelled;
+            (cancelled, released) = session.Actions.Move.StandDownAutomation("the autopilot audit's settle: past its bound of " + StartupAudit.ActionsSettleSeconds.ToString("0", CultureInfo.InvariantCulture) + " s");
+            var (queuedAfter, inFlightAfter) = session.Actions is Lifestone.Client.Session.Actions.ActionApi after ? after.PendingOf(ActionSource.Automation) : (0, 0);
+            finding = string.Create(CultureInfo.InvariantCulture, $"{queued} queued and {inFlight} in flight after {StartupAudit.ActionsSettleSeconds:0} s");
+            fix = string.Create(CultureInfo.InvariantCulture, $"cancelled {cancelled} queued (the stand-down); after: {queuedAfter} queued, {inFlightAfter} in flight: sent to the server, they end by its answer or their own timeout, which only the server can cut short; released {released} movement key(s)");
+            queued = queuedAfter;
+            inFlight = inFlightAfter;
+        }
+
         if (queued + inFlight > 0)
         {
             _log.Warn(LogCategory, StartupAudit.Line("actions", finding, fix));
@@ -216,7 +233,8 @@ public sealed partial class AutopilotScenario
     /// <summary>
     /// 5d (D145): the caster held (its name and weenie) and whether it is the gear plan's pick (<see cref="SelfEquipJudge.BestCaster"/>, the worn-set restore's judge); none held with casters in the packs: the recovery table's
     /// <see cref="RecoveryFix.WieldCaster"/> (<see cref="HeldCaster.Rearm"/>), checked after (a caster in the hands); a fix that cannot be made stops the run safely by name. No caster anywhere is a named gap: the first magic action's
-    /// refusal (NoCasterHeld) then goes to the recovery table, which stops the run safely.
+    /// refusal (NoCasterHeld) then goes to the recovery table, which stops the run safely. M6 6 MF (<c>m6-climber-start-weapon</c>): it runs before the bind and the portal tie (the Lifestone Tie is a cast), so the worn-set restore's
+    /// swap to a better caster comes after it; the gear floor's no-caster stop is <see cref="FloorStep"/>, after the kit step.
     /// </summary>
     private ScenarioStatus? CasterStep(IGameSessionView session, StartupAudit audit)
     {
@@ -230,7 +248,7 @@ public sealed partial class AutopilotScenario
                 audit.Caster = other is null ? "pick" : "held";
                 _log.Info(LogCategory, StartupAudit.Line("caster", string.Create(CultureInfo.InvariantCulture, $"held '{held.Name}' 0x{held.Guid:X8} wcid {held.Weenie.WeenieClassId}; {casters.Count} caster(s) in the packs; {pickWhy}"), other is null
                     ? "none: it is the gear plan's pick"
-                    : string.Create(CultureInfo.InvariantCulture, $"none: '{other.Name}' 0x{other.Guid:X8} beats it and the worn-set restore did not swap it (no pack with room, a refusal, or deferred with a hostile on him); the next trip's gear check swaps it")));
+                    : string.Create(CultureInfo.InvariantCulture, $"none here: '{other.Name}' 0x{other.Guid:X8} beats it: the worn-set restore after the kit swaps it (unless no pack has room, a refusal, or a hostile on it defers it; then the next trip's gear check swaps it)")));
                 audit.CasterDone = true;
                 return null;
             }
@@ -238,7 +256,7 @@ public sealed partial class AutopilotScenario
             if (casters.Count == 0)
             {
                 audit.Caster = "none";
-                audit.Note("no caster in his hands or packs");
+                audit.Note("no caster in its hands or packs");
                 _log.Error(LogCategory, StartupAudit.Line("caster", "the hands and the packs hold no caster", "none: gap: the first magic action is refused (NoCasterHeld) and the recovery table's wield-caster fix stops the run safely with that reason"));
                 audit.CasterDone = true;
                 return null;
@@ -275,6 +293,36 @@ public sealed partial class AutopilotScenario
         return null;
     }
 
+    /// <summary>
+    /// 5d (M6 2 e, <c>m5-no-caster</c>, the audit's half; moved by M6 6 MF after the kit step): under two casters from the floor level and none can be bought (no profile vendor sells one, or the purse is short): the run stops by name. Under two
+    /// but buyable is a named line (the kit check made the trip due), never a stop. 2-R12: before the audit's trip a stop only by the purse waits for the trip's sale (<see cref="StartupAudit.ReadFloor"/>'s <c>saleMade</c>); this step runs
+    /// after the kit step, so on the pass after that trip it reads the purse the sale left and stops by name if it is still short. Once a pass.
+    /// </summary>
+    private ScenarioStatus? FloorStep(GameState state, StartupAudit audit)
+    {
+        audit.FloorDone = true;
+        var floor = StartupAudit.ReadFloor(state, _ground, _options.LootOn, saleMade: audit.TripTried);
+        if (floor.Stop is { } floorStop)
+        {
+            audit.Caster = "gap";
+            var after = audit.TripTried ? " (judged after the audit's trip and its sale, 2-R12)" : string.Empty;
+            _log.Error(LogCategory, StartupAudit.Line("caster", $"{GearFloor.CastersHeld(state)} caster(s) held, {GearFloor.CastersWanted} wanted: {floorStop}{after}", "stop: " + GearFloor.NoCaster));
+            return AuditStop(GearFloor.NoCaster, floorStop + after);
+        }
+
+        if (floor.Short is { } floorShort)
+        {
+            _log.Info(LogCategory, StartupAudit.Line("caster", floorShort, audit.TripTried ? "none: the audit's trip above was to buy it (a loot trip buys the floor)" : "none: a trip is due for it"));
+        }
+
+        return null;
+    }
+
+    /// <summary>The kit check's text for the kit lines held under their count (M6 6 MF, <c>m5-audit-kit-restock</c>): the gear floor's lines with its word (<see cref="KitReading.FloorRouted"/>), and the rest no trip buys, named.</summary>
+    private static string KitMissingText(KitReading kit) =>
+        (kit.KitRest.Count == 0 ? string.Empty : $"; kit_missing={string.Join(',', kit.KitRest)} (report-only: no trip buys a glove, a pack or a focus: TODO(m5-audit-kit-restock))")
+        + (kit.FloorRouted.Count == 0 ? string.Empty : $"; kit_floor={string.Join("; ", kit.FloorRouted)}");
+
     /// <summary>The casters held in the packs (the wielded one is not in them).</summary>
     private static List<GearCandidate> PackCasters(GameState state)
     {
@@ -291,12 +339,98 @@ public sealed partial class AutopilotScenario
     }
 
     /// <summary>The caster in the packs that beats the held one by the gear plan (the worn-set restore's judge: the ground's element at the character's level), or null when the held one is the pick; <paramref name="why"/> says so.</summary>
-    private GearCandidate? CasterPick(GameState state, List<GearCandidate> casters, out string why)
+    private GearCandidate? CasterPick(GameState state, List<GearCandidate> casters, out string why, bool logElement = true)
     {
-        var judge = new SelfEquipJudge(_ground.Loot?.KeepAside?.SpellNames() ?? [], SelfEquipJudge.ElementOf(_ground.PlanFor(state.Self.Qualities.Level)?.Family), id => _context.Spells.TryGetValue(id, out var s) ? s.Name : null);
+        var element = Quartermaster.Wardrobe.For(state).ElementOn(_ground, _context.Spells, out var elementSource); // M6 16 E5e3: the element the judge below reads, the fight's own choice on the ground
+        if (logElement)
+        {
+            _log.Info(LogCategory, StartupAudit.Line("caster", $"the pick's element 0x{element:X}: {elementSource}", "none")); // M6 2 e (m5-self-equip-element): the rung's first, the source logged
+        }
+
+        var judge = Quartermaster.Wardrobe.For(state).JudgeOn(_ground, _context.Spells, out var read);
+        Quartermaster.Wardrobe.For(state).NoteBlindElement(_log, LogCategory, _ground, read); // M6 16 E5e3: no element while the fight has a line is an error, once a session
         var choice = judge.BestCaster(casters, SelfEquipJudge.Worn(state), new QualitiesSkills(state.Self.Qualities), out var pickWhy);
         why = pickWhy.Replace("gear: ", string.Empty, StringComparison.Ordinal);
         return choice is null ? null : casters.FirstOrDefault(c => c.Guid == choice.Guid);
+    }
+
+    /// <summary>M6 6 MF: the worn-set restore's judge, damage types and all (WornRestorer's constructor); M6 14 (<c>m6-caster</c>): with the caster score's terms of the character now (<see cref="CasterTerms.OfLadder"/>).</summary>
+    private SelfEquipJudge CasterJudge(GameState state) =>
+        Quartermaster.Wardrobe.For(state).JudgeOn(_ground, _context.Spells); // M6 16 E5e2: the session's one wear judge, the trip's (its held-back memory the session's, which the trip's swap marks)
+
+    /// <summary>
+    /// M6 14 (<c>m6-caster</c>; the brief: the pick read again after each level-up spend, so the Fire Baton goes on the day her base War Magic reaches its 290): the caster pick over the casters she holds, read on the skills the spend
+    /// left (pure; nothing is sent). A better caster is logged as owed: the swap is the next visit's gear phase, at home in peace mode and out of combat (<c>ResupplyRun.SwapBestCaster</c>; the station's needs ask peace), never in a fight.
+    /// </summary>
+    private void CasterPickAfterSpend(int level)
+    {
+        if (_session is not { } session || !HeldCaster.Held(session.State))
+        {
+            return;
+        }
+
+        var state = session.State;
+        var element = Quartermaster.Wardrobe.For(state).ElementOn(_ground, _context.Spells, out var source); // M6 16 E5e3: the element the pick's judge reads
+        var pick = CasterPick(state, PackCasters(state), out var why, logElement: false);
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"ladder: caster pick after the spend at level {level} (element 0x{element:X}: {source}): {why}{(pick is null ? string.Empty : $"; the swap to '{pick.Name}' 0x{pick.Guid:X8} is owed to the next visit's gear phase (at home, in peace mode, out of combat), not sent in the field")}"));
+    }
+
+    /// <summary>
+    /// M6 14 (<c>m6-caster-spend</c>; the owner's ruling, 2026-11-14: she should definitely use the fire wand she has): what the experience spends read of the casters she holds (the level-up spend's, the trip's through
+    /// <c>JourneyFacts.CasterSpend</c>): every caster in the packs short of a wield requirement, scored as if wielded by the same judge as the pick (the ground's element at her level, the caster terms of her now), and her measured rate. Read at
+    /// each call's plan, so a caster looted since or a raise since is in it. Null while no session is held.
+    /// </summary>
+    private CasterSpendFacts? LadderCasterFacts()
+    {
+        if (_session is not { } session)
+        {
+            return null;
+        }
+
+        var state = session.State;
+        var shorts = CasterJudge(state).ShortCasters(PackCasters(state), SelfEquipJudge.Worn(state), new QualitiesSkills(state.Self.Qualities));
+        var (rate, why) = MeasuredXpPerHour();
+        return new CasterSpendFacts(shorts, rate, why);
+    }
+
+    /// <summary>
+    /// M6 14 (<c>m6-lore-spend</c>; the owner, 2026-11-14: her experience spend raises Arcane Lore when gear she holds needs it): what the experience spends read for the Arcane Lore rule (the level-up spend's, the trip's through
+    /// <c>JourneyFacts.LoreSpend</c>): every armour, clothing and jewellery piece in her packs judged by the resupply's last wear pick (<c>JourneyFacts.WearJudge</c>, the terms of her at that visit) on her numbers now, those her Arcane Lore alone
+    /// keeps dark with the pick's verdict at their ItemDifficulty; her standing lore (<see cref="StandingLore"/>: what ACE reads at the wield, the bot's lines counted while its stop applies); her rate. Null while no session is held.
+    /// </summary>
+    private LoreSpendFacts? LadderLoreFacts()
+    {
+        if (_session is not { } session)
+        {
+            return null;
+        }
+
+        var state = session.State;
+        var q = state.Self.Qualities;
+        var standing = StandingLore.OwnOf(q, state.Self.Spellbook.Knows, out var loreWhy); // M6 14 own lore (the owner, 2026-11-17): her gear's lore is read on her own buffs; the bot's lines lapse
+        var (rate, rateWhy) = MeasuredXpPerHour();
+        if (_context.Facts.WearJudge is not { Wear: { } terms } judge)
+        {
+            return new LoreSpendFacts([], standing, loreWhy + "; no wear pick is held yet this run (a visit's gear phase makes it): no piece is read", null, null, rate, rateWhy);
+        }
+
+        var skills = new QualitiesSkills(q);
+        var worn = SelfEquipJudge.Worn(state);
+        var wants = LoreSpend.Wants(judge, LoreSpend.HeldPieces(state), worn, skills).Concat(LoreSpend.WornWants(judge, worn, skills)).ToList(); // M6 14 own lore: the worn pieces whose spells are off too
+        return new LoreSpendFacts(wants, standing, loreWhy, judge.Context(skills), terms, rate, rateWhy);
+    }
+
+    /// <summary>
+    /// M6 14 (<c>m6-caster-spend</c>): her measured experience an hour: the run's experience counted by the fights (the cycles closed, a resumed run's checkpoint totals among them, and the open cycle) over the run's seconds; null with none
+    /// counted yet, named.
+    /// </summary>
+    private (double? Rate, string Why) MeasuredXpPerHour()
+    {
+        var xp = _total.Xp + _tally.Xp;
+        var seconds = _total.Seconds + Math.Max(0, _clock - _cycleStart);
+        return xp > 0 && seconds > 0
+            ? (xp * 3600.0 / seconds, string.Create(CultureInfo.InvariantCulture, $"her rate this run: {xp:N0} experience in {seconds / 3600.0:0.00} h"))
+            : (null, string.Create(CultureInfo.InvariantCulture, $"no rate is measured yet ({xp:N0} experience counted in {seconds / 3600.0:0.00} h this run)"));
     }
 
     /// <summary>
@@ -368,7 +502,7 @@ public sealed partial class AutopilotScenario
 
     /// <summary>
     /// 6 (D145): the vitae, every wanted buff line and its time left (<see cref="BuffCycle.ReadLines"/>), the lines under the re-buff margin (<see cref="BuffCycle.RebuffDue"/>), and the Spirit Drinker aura. Lines due (or none up): the
-    /// buff pass before the fight (<c>buffs=buff</c>); with a hostile on him the fight fights back first and refreshes them between kills (<c>buffs=fight-first</c>).
+    /// buff pass before the fight (<c>buffs=buff</c>); with a hostile on it the fight fights back first and refreshes them between kills (<c>buffs=fight-first</c>).
     /// </summary>
     private void BuffsCheck(IGameSessionView session, StartupAudit audit)
     {
@@ -377,7 +511,7 @@ public sealed partial class AutopilotScenario
         var vitae = _deathTally?.VitaePercent ?? 0;
         var up = enchantments.IsDefaultOrEmpty ? "no enchantment is up" : string.Create(CultureInfo.InvariantCulture, $"{enchantments.Length} enchantment(s) up");
         _buffOptions ??= _options.Buff ?? new BuffOptions();
-        _buffCycle ??= new BuffCycle(session, _context.Spells, _buffOptions, _log, ArmourBuffLedger.For(state));
+        BuffReads(session);
         string lines;
         IReadOnlyList<string> due = [];
         if (_buffCycle.SeedPending)
@@ -398,7 +532,7 @@ public sealed partial class AutopilotScenario
         var fix = audit.Buffs switch
         {
             "buff" => "the buff pass before the first fight" + (due.Count > 0 ? string.Create(CultureInfo.InvariantCulture, $" (renews {due.Count} line(s))") : string.Empty),
-            "fight-first" => "deferred: a hostile is on him: the fight fights back first (D88) and refreshes the due lines between kills (F23)",
+            "fight-first" => "deferred: a hostile is on it: the fight fights back first (D88) and refreshes the due lines between kills (F23)",
             _ => "none: the fight refreshes the due lines between kills (F23)",
         };
         _log.Info(LogCategory, StartupAudit.Line("buffs", string.Create(CultureInfo.InvariantCulture, $"{up}; vitae {vitae}% (logged only: it clears by earned experience); lines: {lines}{dueText}"), fix));
@@ -437,7 +571,7 @@ public sealed partial class AutopilotScenario
             return;
         }
 
-        var floor = HealthFloorFor(_ground, _options);
+        var floor = HealthFloorNow(session); // M6 14 holding safety: the derived line where the place gives the facts
         audit.HealFirst = audit.Place == "ground" && audit.Attacker is null && floor > 0 && health < floor;
         audit.Vitals = audit.HealFirst ? "heal" : "ok";
         var fix = audit.HealFirst ? string.Create(CultureInfo.InvariantCulture, $"the heal in place first (the keeper's pass to {JourneyPlans.FightHealthPercent}% health; the floor is {floor:0}%)")
@@ -459,11 +593,11 @@ public sealed partial class AutopilotScenario
             return;
         }
 
-        _log.Info(LogCategory, StartupAudit.Line("load", string.Create(CultureInfo.InvariantCulture, $"{free} free slot(s) in the main pack; burden {burden:0}% of the capacity"), audit.Kit is "trip" or "trip-deferred" ? "the trip the kit check named (the counters' trip covers the slots and the burden)" : "none: the counters call a trip at their slot and burden lines"));
+        _log.Info(LogCategory, StartupAudit.Line("load", string.Create(CultureInfo.InvariantCulture, $"{free} free slot(s) in the main pack; burden {burden:0}% of the capacity"), audit.Kit is "trip" or "trip-deferred" ? "the trip the kit check named (the counters' trip covers the slots, the burden and the full pack)" : _counters.FullPackRule(MageLootThresholds.LoadLineOf(_ground)))); // M6 14 pit-hold: what a full pack calls here, said as it is; M6 14 pack room: the full-pack line (amends m6-full-pack-no-trip)
     }
 
     /// <summary>
-    /// 7 (D145): the loot queue. The stopped fight's queue (its kill notices paired with their corpses) is not carried into the resumed fight; the creature corpses in view are read and named. TODO(m6-resume-loot-queue).
+    /// 7 (D145): the loot queue. The stopped fight's queue (its kill/corpse pairs) is in the checkpoint (M6 6 F3, m6-resume-loot-queue) and the resumed fight queues those still in view and ours (<see cref="SeedResumedLoot"/>); the creature corpses in view are read and named here.
     /// </summary>
     private void LootQueueCheck(GameState state, StartupAudit audit)
     {
@@ -487,9 +621,12 @@ public sealed partial class AutopilotScenario
         }
 
         audit.CorpsesInView = count;
+        var saved = _resumeCorpses ?? [];
+        var kept = saved.Count(c => state.Objects.TryGet(c.Guid, out var o) && (o.DescriptionFlags & WorldObjectTable.CorpseFlag) != 0);
+        var carried = saved.Count == 0 ? string.Empty : string.Create(CultureInfo.InvariantCulture, $"; the checkpoint names {saved.Count} kill corpse(s) of the stopped fight, {kept} in view");
         _log.Info(LogCategory, count == 0
-            ? StartupAudit.Line("loot_queue", "no creature corpse in view; the resumed fight starts with an empty queue", "none")
-            : StartupAudit.Line("loot_queue", string.Create(CultureInfo.InvariantCulture, $"{count} creature corpse(s) in view{(nearestName.Length > 0 ? ", the nearest " + nearestName : string.Empty)}; the stopped fight's queue is not carried over"), "none: the resumed fight queues the kills it makes from now (its kill notices); these are left to rot: TODO(m6-resume-loot-queue)"));
+            ? StartupAudit.Line("loot_queue", "no creature corpse in view" + carried + "; the resumed fight starts with an empty queue", "none")
+            : StartupAudit.Line("loot_queue", string.Create(CultureInfo.InvariantCulture, $"{count} creature corpse(s) in view{(nearestName.Length > 0 ? ", the nearest " + nearestName : string.Empty)}{carried}"), saved.Count > 0 ? "none: the resumed fight queues the checkpoint's corpses still in view and ours, then the kills it makes" : "none: the resumed fight queues the kills it makes from now (its kill notices); a corpse of no recorded kill is not ours to loot"));
     }
 
     // ------------------------------------------------------------------------------------------------ the Flame Bolt split (D145 point 6)

@@ -20,9 +20,13 @@ public readonly record struct DrainLevel(SpellInfo Info, TransferRow Row, double
 /// <param name="LifeMagic">The caster's current Life Magic (<see cref="GearCasts.TryCurrentSkill"/>).</param>
 /// <param name="LifeInitPlusRanks">Life Magic's start level plus its ranks, which the range reads.</param>
 /// <param name="TargetHealth">The target's current health in points.</param>
-/// <param name="TargetMagicDefence">The target's Magic Defense skill; 0 when unknown (the pick assumes it equals the caster's skill: an even chance to land).</param>
+/// <param name="TargetMagicDefence">The target's Magic Defense skill as ACE computes it. 0 is a Magic Defense of 0, as ACE rolls it (<see cref="ResistRoll"/>, M6 16 E1e); a caller that passes 0 for a kind it does not know names that itself.</param>
 /// <param name="Distance">The distance to the target in metres.</param>
-public readonly record struct DrainSituation(uint Health, uint HealthMax, uint Mana, uint LifeMagic, uint LifeInitPlusRanks, uint TargetHealth, uint TargetMagicDefence, double Distance);
+/// <param name="TargetDrainResist">
+/// M6 14 drain resistance: the target kind's health-drain resistance (<see cref="DrainResist.Of"/>, its <c>ResistHealthDrain</c>): the share of the take ACE lets through, applied before the cap. 1 takes the full share; 0 gives nothing, so
+/// a heal pick expects nothing of a drain on it and takes Heal Self.
+/// </param>
+public readonly record struct DrainSituation(uint Health, uint HealthMax, uint Mana, uint LifeMagic, uint LifeInitPlusRanks, uint TargetHealth, uint TargetMagicDefence, double Distance, double TargetDrainResist = 1.0);
 
 /// <summary>Why the pick came out as it did (<see cref="DrainPicker.Name(DrainWhy)"/> says it in words for the log).</summary>
 public enum DrainWhy
@@ -65,10 +69,12 @@ public readonly record struct DrainChoice(int Index, double ExpectedHeal, double
 /// <remarks>
 /// <para><b>What a cast does.</b> ACE's <c>HandleCastSpell_Transfer</c> (<c>WorldObject_Magic.cs</c> 697-760 @95ef426d, the same arithmetic as the Stamina to Mana rows: <see cref="BuffStatMods.Transfer"/>): the target loses
 /// <c>round(current health x Proportion)</c>, cut to the row's <c>TransferCap</c> (721-727); the caster gains <c>round(taken x (1 - LossPercent))</c> (732), cut to its own missing health (cut to the cap, 737-749, the taken scaled
-/// with it). The drain and boost resistances of the target and caster (719, 735) are 1 here (<c>TODO(m5-drain-resistance-mods)</c>). Level VII ("Vitality Siphon") takes more (0.5 of the health, cap 180) but loses half of it; level VI takes 0.4
+/// with it). The target's drain resistance scales the take before the cap (719-726: <c>round(current health x Proportion x drainMod)</c>, the mod its <c>GetResistanceMod(HealthDrain)</c>, its <c>ResistHealthDrain</c>, float property
+/// 125): <see cref="DrainSituation.TargetDrainResist"/>, read by kind (<see cref="DrainResist"/>; M6 14 drain resistance closed <c>TODO(m5-drain-resistance-mods)</c> after an Armored Tusker, resistance 0, gave three drains of 0 and the
+/// climber died). The caster's boost resistance (730) is 1 (a player with no healing rating). Level VII ("Vitality Siphon") takes more (0.5 of the health, cap 180) but loses half of it; level VI takes 0.4
 /// (cap 150) and loses a quarter: on a big target VI heals more than VII, which is why the level is picked and not just the highest.</para>
 /// <para><b>The chance a cast lands</b> is two rolls: the cast chance (<see cref="GearCasts.Chance"/>, the 0.07 factor, the fizzle: <c>Player_Magic.cs</c> @95ef426d) and the target's resist (<c>MagicDefenseCheck</c>, <c>WorldObject_Magic.cs</c>
-/// 104-113: the 0.03 logistic of the caster's skill against the target's Magic Defense, an even chance when they are equal). Their product is the chance.</para>
+/// 104-113: the 0.03 logistic of the caster's skill against the target's Magic Defense, an even chance when they are equal; <see cref="ResistRoll"/>, the one function the bolt's rate asks too). Their product is the chance.</para>
 /// <para><b>The score</b> is the expected heal (chance times the heal a landing gives, cut to the health missing, so a level that overshoots earns nothing for the overshoot) per second of casting. Of the levels whose score is within
 /// <see cref="NearBestShare"/> of the best, the cheapest in mana is taken (Lifestone's own tolerance: mana is what the soak runs short of). When even the best expected heal is under <see cref="MinWorthShare"/> of the caster's
 /// maximum health the answer is no drain: a bolt that kills the nearly dead target is better than a drain that heals a few points (Lifestone's own share).</para>
@@ -119,18 +125,13 @@ public static class DrainPicker
         return null;
     }
 
-    /// <summary>The chance the target does not resist: the 0.03 logistic of the caster's skill against the target's Magic Defense (0: unknown, taken as the caster's skill, so one half).</summary>
+    /// <summary>
+    /// The chance the target does not resist: ACE's resist roll, the 0.03 logistic of the caster's skill against the target's Magic Defense (<see cref="ResistRoll.LandChance"/>). M6 16 E1e: a Magic Defense of 0 is rolled as
+    /// ACE rolls it (the curve of the skill alone: 0.99987 at 298); before, 0 was read as unknown and gave an even 0.5, where the bolt's rate (<see cref="KillRate.LandChance"/>) gave 1 for the same creature.
+    /// </summary>
     /// <param name="skill">The caster's skill.</param>
-    /// <param name="defence">The target's Magic Defense, or 0.</param>
-    public static double PassChance(uint skill, uint defence)
-    {
-        if (defence == 0)
-        {
-            return 0.5;
-        }
-
-        return 1.0 / (1.0 + Math.Exp(-ResistSlope * ((double)skill - defence)));
-    }
+    /// <param name="defence">The target's Magic Defense.</param>
+    public static double PassChance(uint skill, uint defence) => ResistRoll.LandChance(skill, defence);
 
     /// <summary>The health a landed cast of <paramref name="level"/> gives the caster in <paramref name="s"/> (ACE's arithmetic, cut to the health missing).</summary>
     /// <param name="level">The level.</param>
@@ -139,7 +140,7 @@ public static class DrainPicker
     {
         var missing = s.HealthMax > s.Health ? s.HealthMax - s.Health : 0u;
         var row = level.Row;
-        BuffStatMods.Transfer(in row, s.TargetHealth, missing, out _, out var given);
+        BuffStatMods.Transfer(in row, s.TargetHealth, missing, out _, out var given, (float)s.TargetDrainResist);
         return given;
     }
 

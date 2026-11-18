@@ -62,7 +62,7 @@ public sealed class FighterBuffCycleTests
             vitals.Add(new VitalDesc(FighterTemplate.MaxHealth, 0, 0, 0, 200));
             vitals.Add(new VitalDesc(FighterTemplate.MaxStamina, 0, 0, 0, 275));
             vitals.Add(new VitalDesc(MageTemplate.MaxMana, 0, 0, 0, 1000));
-            R.H.Describe(new PlayerDescriptionMsg { Attributes = attributes.ToImmutable(), Skills = skills.ToImmutable(), Vitals = vitals.ToImmutable() });
+            R.H.Describe(new PlayerDescriptionMsg { Attributes = attributes.ToImmutable(), Skills = skills.ToImmutable(), Vitals = vitals.ToImmutable(), Spells = Table.Keys.ToImmutableDictionary(id => id, _ => 2f) }); // M6 15: the fighter knows its profile's spells (the player's rule puts each on a spell bar before its cast)
             R.CombatModeIs(CombatModes.Magic);
             Cycle = new BuffCycle(R.Api, R.H.State, Table, new BuffOptions(), R.H.Log, profile: profile);
             Profile = profile;

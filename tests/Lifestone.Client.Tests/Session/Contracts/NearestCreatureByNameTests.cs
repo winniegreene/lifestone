@@ -14,6 +14,24 @@ public sealed class NearestCreatureByNameTests
     private static readonly CellFrame Centre = At(Den | 0x0375, 0, 0);
 
     [Fact]
+    public void An_attackable_creature_is_what_can_come_at_her_a_town_npc_is_not()
+    {
+        var table = new WorldObjectTable();
+        table.Set(Make(1, "Scrivener of Item Magic", 0x10, 0, 2)); // the nearest creature: an NPC, the attackable bit clear
+        table.Set(Make(2, "Lifestone", 0x1000, WorldObjectTable.AttackableFlag, 3)); // not a creature
+        table.Set(Make(3, "Holtburg Hunter", 0x10, 0x8 | WorldObjectTable.AttackableFlag, 4)); // a player
+
+        Assert.False(table.NearestAttackableCreature(Centre, 50f, 0, out _));
+        Assert.True(table.NearestCreature(Centre, 50f, 0, null, 0, int.MaxValue, null, out var npc)); // the plain query is unchanged
+        Assert.Equal(1u, npc);
+
+        table.Set(Make(4, "Drudge Skulker", 0x10, WorldObjectTable.AttackableFlag, 9));
+        Assert.True(table.NearestAttackableCreature(Centre, 50f, 0, out var guid));
+        Assert.Equal(4u, guid);
+        Assert.False(table.NearestAttackableCreature(Centre, 5f, 0, out _));
+    }
+
+    [Fact]
     public void Non_creatures_players_and_the_dead_are_skipped()
     {
         var table = new WorldObjectTable();

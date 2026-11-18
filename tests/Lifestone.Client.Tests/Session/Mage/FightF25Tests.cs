@@ -56,7 +56,7 @@ public sealed class FightF25Tests(ITestOutputHelper output)
         r.Buff = new BuffOptions { FightSeedSeconds = 120 };
         r.AddTusker(12);
         r.AddTusker(60);
-        FightF24Tests.Prime(r, l => l.Name switch { "Quickness Self" => 100, "Strength Self" => 400, _ => 1500 });
+        FightF24Tests.Prime(r, l => l.Name switch { "Quickness Self" => 50, "Strength Self" => 400, _ => 1500 });
         var scenario = Armed(r);
         Assert.True(scenario.BuffsKeptAhead);
         Assert.Equal(120, scenario.FightMeanSeconds);
@@ -68,26 +68,26 @@ public sealed class FightF25Tests(ITestOutputHelper output)
         r.Run(scenario, 60, 0.1, () => BuffCasts(r).Contains("Quickness Self"));
         r.Run(scenario, 20, 0.1);
         Dump(r);
-        Assert.Equal(["Quickness Self"], BuffCasts(r).Distinct().ToList()); // 100 s < the horizon; Strength Self's 400 s is not
+        Assert.Equal(["Quickness Self"], BuffCasts(r).Distinct().ToList()); // 50 s < the 60 s horizon (M6 7 AZ: the margin alone); Strength Self's 400 s is not
         Assert.Equal(1, scenario.FightsMeasured);
         Assert.InRange(scenario.FightMeanSeconds, 84, 110); // 0.7 x 120 + 0.3 x the measured fight (its first hit to 10 s after its last)
         Assert.Contains(r.Log.Lines, l => l.Contains("buff refresh: lull: the fight lasted ", StringComparison.Ordinal) && l.Contains(" s from its first hit; the fight mean is now ", StringComparison.Ordinal));
         var lookahead = r.Log.Lines.Single(l => l.Contains("buff refresh: lookahead: Quickness Self ", StringComparison.Ordinal));
-        Assert.Matches(@"buff refresh: lookahead: Quickness Self \d+ s left < next lull \d+ s \(fight mean \d+ \+ margin 60\)", lookahead);
+        Assert.Matches(@"buff refresh: lookahead: Quickness Self \d+ s left < next lull 60 s \(margin 60; the fight\'s mean \d+ s is read, not added", lookahead);
         Assert.DoesNotContain(r.Log.Lines, l => l.Contains("lookahead: Strength Self", StringComparison.Ordinal));
         Assert.Null(scenario.StopReason);
     }
 
     [Fact]
-    public void With_the_seed_of_120_s_a_line_at_100_s_is_inside_the_horizon_and_one_at_400_s_is_outside()
+    public void The_horizon_is_the_margin_alone_a_line_at_50_s_is_inside_it_and_one_at_400_s_is_outside()
     {
-        var r = Rig(l => l.Name switch { "Quickness Self" => 100, "Strength Self" => 400, _ => 1500 }, new BuffOptions { FightSeedSeconds = 120 }, 60);
-        var scenario = Armed(r); // no hit: the lull is now, the mean is the seed's 120 s, the horizon 180 s
+        var r = Rig(l => l.Name switch { "Quickness Self" => 50, "Strength Self" => 400, _ => 1500 }, new BuffOptions { FightSeedSeconds = 120 }, 60);
+        var scenario = Armed(r); // no hit: the lull is now, the horizon is the margin's 60 s, the seed's 120 s is not added
         r.Run(scenario, 30, 0.1, () => BuffCasts(r).Contains("Quickness Self"));
         r.Run(scenario, 20, 0.1);
         Dump(r);
         Assert.Equal(["Quickness Self"], BuffCasts(r).Distinct().ToList());
-        Assert.Contains(r.Log.Lines, l => l.Contains("buff refresh: lookahead: Quickness Self 10", StringComparison.Ordinal) && l.Contains("< next lull 180 s (fight mean 120 + margin 60)", StringComparison.Ordinal));
+        Assert.Contains(r.Log.Lines, l => l.Contains("buff refresh: lookahead: Quickness Self 5", StringComparison.Ordinal) && l.Contains("< next lull 60 s (margin 60; the fight's mean 120 s is read, not added", StringComparison.Ordinal));
         Assert.Equal(0, scenario.FightsMeasured);
     }
 

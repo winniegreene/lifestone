@@ -225,7 +225,7 @@ public sealed class LoginCheckScenarioTests
         Assert.Equal("cache/x", Lifestone.Client.Play.PlayOptions.Parse(["--play-frames=cache/x"]).PlayFramesDirectory);
         Assert.Empty(Lifestone.Client.Play.PlayOptions.Parse(["--play-frames"]).Errors);
 
-        Assert.Equal(10, Lifestone.Client.Play.ShellFramesPlan.FrameNames.Count);
+        Assert.Equal(11, Lifestone.Client.Play.ShellFramesPlan.FrameNames.Count); // M6 6 MD2: 11-shell-automation-menu
         Assert.Equal(Lifestone.Client.Play.ShellFramesPlan.FrameNames.Count, Lifestone.Client.Play.ShellFramesPlan.FrameNames.Distinct().Count());
         Assert.Equal("docs/screenshots/m2/shell/2560x1440", Lifestone.Client.Play.ShellFramesPlan.FolderFor(Lifestone.Client.Play.PlayOptions.DefaultFramesDirectory, 2560, 1440));
         Assert.Equal("cache/x", Lifestone.Client.Play.ShellFramesPlan.FolderFor("cache/x", 2560, 1440));

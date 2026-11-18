@@ -188,6 +188,7 @@ public sealed class WayfindScenario : IScenario, IDisposable
 
         private readonly DatSet _dats;
         private readonly Func<uint, float?>? _setupExtent;
+        private Func<uint, float?>? _setupRadius;
         private readonly ILogSink _log;
         private readonly WayfindOptions _options;
         private readonly Func<IGameSessionView, IMovementSink>? _sinkOf;
@@ -497,6 +498,7 @@ public sealed class WayfindScenario : IScenario, IDisposable
             _runner?.Dispose();
             _runner = _body.NewRunner(_source, "wayfind-" + leg, ConfirmBudgetMilliseconds);
             _runner.Doors = new SessionDoorFeed(session, _log, _setupExtent); // M5 5 d2: a closed door on a leg is opened (purpose=door), not walked into
+            _runner.BodyFeed = new NpcBodyFeed(session.State.Objects, session.State.Self.Guid, _log, _setupRadius ??= HostileCreatureFeed.SetupRadii(_dats)); // the NPCs' bodies on the plan (M6 4 W2; the wayfind legs since M6 4 w6a)
             _runner.Start(target, session.Clock.Now);
             _nextCorridor = 0;
             _log.Info(LogCategory, "the leg begins", new LogField("leg", leg), new LogField("goal", target.Point.ToString()));

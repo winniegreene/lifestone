@@ -17,10 +17,10 @@ internal readonly record struct StandInPurgeDecision(ToolError? Refusal, Charact
 internal static class StandInCharPurge
 {
     /// <summary>The graduated test characters, which a purge never touches.</summary>
-    internal static IReadOnlyList<string> Graduated { get; } = ["Lifestone Smoke", "Lifestone Loopback", "BSD Mage", "Holtburg Hunter", "Holtburg Brawler", "Holtburg Archer", "Lifestone Tools"];
+    internal static IReadOnlyList<string> Graduated { get; } = ["Lifestone Smoke", "Lifestone Loopback", "BSD Mage", "Holtburg Hunter", "Holtburg Brawler", "Holtburg Archer", "Lifestone Tools", "Winnie", "Qwinnie"];
 
     /// <summary>The journey characters the live gate re-creates (m4-plan D44): an old copy is purged once its new copy is on the account (D45).</summary>
-    internal static IReadOnlyList<string> Recreated { get; } = ["BSD Mage", "Holtburg Brawler", "Holtburg Archer"];
+    internal static IReadOnlyList<string> Recreated { get; } = ["BSD Mage", "Holtburg Brawler", "Holtburg Archer", "Winnie", "Qwinnie"];
 
     /// <summary>Applies the rules to the stand-in's list: refuses, or picks the pending-deletion character of that name.</summary>
     internal static StandInPurgeDecision Decide(CharPurgeRequest request, string selfName, uint selfGuid, IReadOnlyList<CharacterSlot> characters)

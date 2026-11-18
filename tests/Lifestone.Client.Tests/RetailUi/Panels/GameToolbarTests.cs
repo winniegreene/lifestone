@@ -265,6 +265,27 @@ public sealed class GameToolbarTests(DatSetFixture fixture) : IClassFixture<DatS
     }
 
     [RequiresLocalDatsFact]
+    public void M6_15_an_automation_drink_shows_on_its_slot_as_a_persons_use_shows_the_overlay_until_the_drink_completes()
+    {
+        using var g = new HotbarRig(fixture, (0, HotbarRig.Potion), (1, HotbarRig.Kit));
+        var cell = g.Cell(0);
+        var uses = g.Hotbar.Uses;
+
+        // The Action API's notice of an automation drink that went out as the use of slot 1's item (PlayerRulesGate.DrinkSent): no key, no click.
+        var handle = new ActionHandle(9002, ActionKind.Drink, ActionSource.Automation, "Drink", 0);
+        g.Rig.Session.ActionApi.PublishShortcutUsed(0, HotbarRig.Potion, handle);
+        Assert.True(g.Hotbar.IsBusy(0));
+        Assert.Equal(UiItem.CooldownSteps, cell.CooldownPhase);
+        Assert.False(g.Hotbar.IsBusy(1)); // only that slot
+        Assert.Equal(1, g.Hotbar.AutomationUses);
+        Assert.Equal(uses, g.Hotbar.Uses); // the bar asked for no use of its own: the automation's drink is already on its way
+
+        Assert.True(handle.TryComplete(new ActionOutcome(ActionOutcomeKind.Confirmed, 0, "drunk"), 1.0, static (_, _) => { }));
+        Assert.False(g.Hotbar.IsBusy(0));
+        Assert.Equal(0, cell.CooldownPhase);
+    }
+
+    [RequiresLocalDatsFact]
     public void A_use_that_is_refused_at_once_shows_no_overlay()
     {
         using var g = new HotbarRig(fixture, (0, HotbarRig.Gem));

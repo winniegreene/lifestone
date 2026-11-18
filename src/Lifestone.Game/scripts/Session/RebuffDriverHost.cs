@@ -45,6 +45,7 @@ public sealed partial class RebuffDriverHost : Node
             Log.Error(LogCategory, "auto-buff: " + error);
         }
 
+        options = options with { AccountName = TryLoginName(host.Options.Account) }; // M6 1 w (closes TODO(m6-account-formula-callers) for the play host): the login name the server hashes, so the host's cycles plan a school without its focus on the account's formula
         var store = new ArmourLedgerFileStore(new UserDataFiles(ProjectSettings.GlobalizePath("user://armour")), GodotLogSink.Instance);
         var node = new RebuffDriverHost
         {
@@ -58,6 +59,20 @@ public sealed partial class RebuffDriverHost : Node
         main.AddChild(node);
         Log.Info(LogCategory, "auto-buff host installed: " + (options.Auto ? "on at start (--buff-auto on)" : "off at start") + "; the key is Pause", ("buff_options", options.ToString()));
         return node;
+    }
+
+    /// <summary>The login name of the account this play session signs in to, or null (logged, the foci formula then) when the secrets file cannot give it; hashed by the cycle, never stored in a log or printed.</summary>
+    private static string? TryLoginName(string? accountKey)
+    {
+        try
+        {
+            return JourneyLegRunner.LoginName(accountKey);
+        }
+        catch (Exception e) when (e is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            Log.Warn(LogCategory, "auto-buff: the account's name could not be read, so the cycles plan on the foci formula (" + e.GetType().Name + ")");
+            return null;
+        }
     }
 
     /// <inheritdoc/>

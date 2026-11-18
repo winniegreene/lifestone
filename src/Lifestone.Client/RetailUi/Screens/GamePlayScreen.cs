@@ -265,7 +265,7 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
             var last = GC.GetGCMemoryInfo(GCKind.Any); // the last collection of the frame (M4 P5b): how much gen 0 held when it began and what it promoted
             PostWindowGcReport = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"gen{generation} {milliseconds:0.0} ms, {_postWindowFrames} frames after {(_closeAccounted ? "the closing collection" : "Complete")}");
             _postWindowWatching = false;
-            _context.Manager.Services.Log.Info(UiElementManager.Category, string.Create(System.Globalization.CultureInfo.InvariantCulture, $"the in-game shell: first collection after the no-gc window ({NoGcWindowReport}{ClosingText()}): {PostWindowGcReport} (collections gen0/1/2 {gc0 - _postGc0}/{gc1 - _postGc1}/{gc2 - _postGc2}; the last: gen0 {last.GenerationInfo[0].SizeBeforeBytes / 1048576.0:0.0} MiB before, promoted {last.PromotedBytes / 1048576.0:0.0} MiB; TODO(m3-ui-step-gc-margin) closes only if this is under the 12 ms margin)"));
+            _context.Manager.Services.Log.Info(UiElementManager.Category, string.Create(System.Globalization.CultureInfo.InvariantCulture, $"the in-game shell: first collection after the no-gc window ({NoGcWindowReport}{ClosingText()}): {PostWindowGcReport} (collections gen0/1/2 {gc0 - _postGc0}/{gc1 - _postGc1}/{gc2 - _postGc2}; the last: gen0 {last.GenerationInfo[0].SizeBeforeBytes / 1048576.0:0.0} MiB before, promoted {last.PromotedBytes / 1048576.0:0.0} MiB; m3-ui-step-gc-margin (closed) closes only if this is under the 12 ms margin)"));
             return;
         }
 
@@ -435,6 +435,9 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
         ToolsUi = new ToolsPanel(context, Root, line => Chat?.Local(line));
         // g7 lane B: the automation inspector, a floating window that Scroll Lock toggles (section 22.2). Like the tools panel its window is made on its first open.
         Inspector = new AutomationInspector(manager, context.Session);
+        // M6 6 MC: the automation menu beside it (L1: no key; the tools panel's button opens it, and the play host wires its source and delegates). Made on its first open, as a child of the shell's root like the tools panel
+        // (M6 6 FXU: as a root of its own the shell's root took the clicks over its rows).
+        Menu = new AutomationMenu(manager, Root);
         Hotkeys = new LifestoneHotkeys(manager.Services.Log) { OpenTools = ToolsUi.Toggle, OpenInspector = Inspector.Toggle };
         Hotkeys.Attach(manager.Input);
     }
@@ -618,6 +621,9 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
     /// <summary>The automation inspector (G7 lane B): the action log, the counters and the safety switches, read-only; closed until <see cref="AutomationInspector.Open"/>. Null when the layout has no root.</summary>
     public AutomationInspector? Inspector { get; private set; }
 
+    /// <summary>The automation menu (M6 6 MC, L1): the jobs the autopilot can run now, a placeholder window; closed until <see cref="AutomationMenu.Open"/>. Null when the layout has no root.</summary>
+    public AutomationMenu? Menu { get; private set; }
+
     /// <summary>
     /// The SmartBox's window rectangle in logical UI pixels, or null without a SmartBox: what the host publishes as <c>GameViewRect</c> once scaled
     /// (<c>gmSmartBoxUI::RecvNotice_UpdateGameView</c>, 11.6096 0x004D6F20). The whole window in this shell (D40 as amended).
@@ -790,6 +796,7 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
         Hotkeys?.Detach(_context.Manager.Input);
         ToolsUi?.Dispose();
         Inspector?.Dispose();
+        Menu?.Dispose();
         PanelControllers?.Dispose(); // the panels unsubscribe from the session, which outlives the screen (review 2.2-R2)
         IndicatorsUi?.Dispose();
         if (Root is not null)

@@ -106,11 +106,13 @@ public sealed class NavRunnerDatTests(DatSetFixture fixture, ITestOutputHelper o
 
         var (runner, _, _) = Walk(world, source, Lifestone(), goal, 60, "shop-A9B40141");
 
+        // M6 4 W4: the plan itself refuses it now. The sill rule (CellRoutePlanner.HasFloorsAtSill) leaves out the doorways of the thresholds 0x140 and 0x142 (their floors
+        // sit 1 m over the floors of 13F, 141 and 143 either side), so no plan reaches 0x141 and the physics is never asked (before W4: two refused plans, 0x140 and 0x142 left out).
         Assert.Equal(NavRunState.Blocked, runner.State);
-        Assert.Equal([0xA9B40140u, 0xA9B40142u], source.AvoidedCells.Order());
+        Assert.Empty(source.AvoidedCells);
         Assert.Equal(0, runner.Rungs);
         Assert.Equal(0f, runner.RouteMetres);
-        Assert.Equal(2, runner.ConfirmFailures); // the third plan found no path
+        Assert.Equal(0, runner.ConfirmFailures);
         Assert.Contains("no path: no-doorway-lane-reaches-the-goal", runner.FailureReason, StringComparison.Ordinal);
     }
 

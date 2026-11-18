@@ -200,7 +200,7 @@ internal sealed class J3bRig
     }
 
     /// <summary>Runs a station to its end; returns the run and its final status.</summary>
-    public (IStationRun Run, ScenarioStatus Status) RunStation(IStation station, JourneyContext context, double maxSeconds = 400, double dt = 0.25)
+    public (IStationRun Run, ScenarioStatus Status) RunStation(IStation station, JourneyContext context, double maxSeconds = 400, double dt = 0.25, Action<IStationRun>? perFrame = null)
     {
         var run = station.Start(context);
         var end = Now + maxSeconds;
@@ -212,6 +212,7 @@ internal sealed class J3bRig
             Pump();
             R.Tick();
             status = run.Step(View, Now);
+            perFrame?.Invoke(run);
         }
 
         Assert.NotEqual(ScenarioStatus.Running, status);
@@ -264,8 +265,31 @@ internal sealed class J3bRig
         }
     }
 
+    /// <summary>M6 7 BC: mana the player regains a second while the rig runs a station (0: none, the default; the caster itself is not pumped here).</summary>
+    public double ManaPerSecond { get; set; }
+
+    private double _regenAt = double.NaN;
+    private double _regenAcc;
+
+    private void Regenerate()
+    {
+        if (ManaPerSecond > 0 && !double.IsNaN(_regenAt) && Now > _regenAt)
+        {
+            _regenAcc += (Now - _regenAt) * ManaPerSecond;
+            if (_regenAcc >= 1)
+            {
+                var whole = (uint)_regenAcc;
+                _regenAcc -= whole;
+                Caster.SetVitals(Caster.Mana + whole, Caster.Stamina);
+            }
+        }
+
+        _regenAt = Now;
+    }
+
     private void Pump()
     {
+        Regenerate();
         AnswerPlaces();
         var sends = R.H.Net.Sends;
         while (_seen < sends.Count)

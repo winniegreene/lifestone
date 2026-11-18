@@ -55,4 +55,31 @@ public sealed class AutopilotTripGiveUpTests(ITestOutputHelper output)
         Assert.DoesNotContain(w.Lines, l => l.Contains("TODO(m5-trip-failed-continue)", StringComparison.Ordinal));
         Assert.Contains(w.Lines, l => l.Contains("Prismatic Taper", StringComparison.Ordinal) && l.Contains("under their stop line", StringComparison.Ordinal));
     }
+
+    [Fact]
+    public void A_trip_that_ends_in_a_shop_of_the_neighbouring_landblock_goes_on_to_the_ground_not_to_the_stop()
+    {
+        // M6 7 T (r1e-climb): a good trip left the mage in a Holtburg shop; the recall-home flag of the start's walk was still set, so the known state stopped "elsewhere" instead of taking the way home.
+        var w = new ApWorld(Den, output, atHome: false) { Prime = c => Proven(c, Den) };
+        AutopilotScenario? autopilot = null;
+        w.Factory.Script = spec => spec.Kind == StationKinds.RungChange ? new ScriptedRun(spec.Name, _ =>
+        {
+            // M6 7 AV: from a Holtburg shop the way home is on foot now (the outskirts hold its landblock), the rung change's walk: it ends at the lifestone
+            w.Trip.Vendor.StandAt(w.Ground.Home.LifestoneCell, w.Ground.Home.LifestonePoint);
+            return ScenarioStatus.Succeeded;
+        }, () => "ok=yes direction=home") : spec.Kind != StationKinds.Logistics ? null : new ScriptedRun(spec.Name, _ =>
+        {
+            w.Trip.Vendor.StandAt(0xA9B30107u, new System.Numerics.Vector3(10, 10, 0));
+            typeof(AutopilotScenario).GetField("_recalledHome", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.SetValue(autopilot, true); // the start's walk home ran
+            return ScenarioStatus.Succeeded;
+        }, () => "sold=0 bought=0");
+        autopilot = w.Autopilot(new AutopilotOptions { TripAfterKills = 1 });
+
+        var status = w.Run(autopilot, a => w.Factory.Made.Any(s => s.Kind == StationKinds.Logistics) && w.Lines.Any(l => l.Contains("known-state place=elsewhere", StringComparison.Ordinal)) && a.State != AutopilotState.KnownState);
+
+        Assert.Equal(ScenarioStatus.Running, status);
+        Assert.Null(autopilot.StopName);
+        autopilot.RequestStop("test");
+        w.Run(autopilot);
+    }
 }

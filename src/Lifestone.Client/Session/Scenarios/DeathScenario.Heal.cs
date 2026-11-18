@@ -9,7 +9,7 @@ namespace Lifestone.Client.Session.Scenarios;
 /// </summary>
 public sealed partial class DeathScenario
 {
-    /// <summary>Heal Self VII, the spell the pre-trip recovery casts (<see cref="ArenaProfile.FightExtras"/>; the mage knows it).</summary>
+    /// <summary>Heal Self VII, the spell the pre-trip recovery casts (<see cref="ArenaProfile.FightExtras"/>; the den mage knows it; the death handler casts the highest Heal Self level the book knows and the pack pays for, and drops the heal when none: M6 6 FXD1, 6-D1).</summary>
     public const uint HealSelfVii = 2073;
 
     /// <summary>The most Heal Self casts of the pre-trip recovery.</summary>

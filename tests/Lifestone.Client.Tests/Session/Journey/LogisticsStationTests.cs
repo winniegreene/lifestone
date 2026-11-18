@@ -12,6 +12,7 @@ using Lifestone.Net.Diagnostics;
 using Lifestone.Net.Dispatch;
 using Lifestone.Net.Messages;
 using Lifestone.Net.Types;
+using Lifestone.Tests.Shared.Net;
 using Xunit.Abstractions;
 
 namespace Lifestone.Client.Tests.Session.Journey;
@@ -30,7 +31,7 @@ public sealed class LogisticsStationTests(ITestOutputHelper output)
 
     private static readonly XpTableData Table = ScriptedMage.SyntheticTable();
 
-    private static readonly string[] FieldNames = ["trigger", "granted", "places", "loot", "sold", "bought", "spent", "notes_sold", "spent_xp", "raises"];
+    private static readonly string[] FieldNames = ["trigger", "granted", "places", "loot", "sold", "bought", "spent", "notes_sold", "spent_xp", "raises", "learned", "scrolls_bought"];
 
     /// <summary>A travel seam that records each request and puts the player at its destination at once (a recall for Home and Ground, a run for the rest), or fails or stays put for a named purpose.</summary>
     internal sealed class TripTravel(VendorRig rig) : IJourneyTravel
@@ -47,6 +48,16 @@ public sealed class LogisticsStationTests(ITestOutputHelper output)
         public Action<TravelRequest>? OnGoTo { get; set; }
 
         public bool Busy => false;
+
+        /// <summary>M6 8 K: the survival layer's holds of the walk.</summary>
+        public int WalkHolds { get; private set; }
+
+        /// <summary>M6 8 K: the survival layer's releases of the walk.</summary>
+        public int WalkReleases { get; private set; }
+
+        public void HoldWalk() => WalkHolds++;
+
+        public void ReleaseWalk(double now) => WalkReleases++;
 
         public ITravelLeg GoTo(IGameSessionView session, TravelRequest request, double now)
         {
@@ -110,6 +121,9 @@ public sealed class LogisticsStationTests(ITestOutputHelper output)
 
         public XpTableData? XpTable => Table;
 
+        /// <summary>M6 16 E2b: the live positions the view answers with: the server's reports, until a test draws bodies.</summary>
+        public LivePositions Live { get; set; } = LivePositions.ReportsOnly;
+
         /// <summary>The window's close, as the game session's (M5 7 P7n: the autopilot's audit closes a vendor left open).</summary>
         public void CloseVendorWindow() => rig.H.R.Reducer.CloseOpenVendor("the player closed the vendor window");
     }
@@ -120,11 +134,13 @@ public sealed class LogisticsStationTests(ITestOutputHelper output)
         private readonly ActionHarness _h;
         private readonly Dictionary<(MageStatKind Kind, uint Id), (uint Ranks, uint Spent, uint Class)> _stats = [];
         private int _seen;
+        private long _total;
         private byte _sequence = 80; // M5 7 P7n: this world's own: a counter shared by the tests in parallel jumped a quality's 8-bit stamp past 127 and the reducer dropped the raise as stale (the "trip 5 s" flake)
 
         public XpServer(ActionHarness h, ulong total, long available)
         {
             _h = h;
+            _total = (long)total;
             Available = available;
             Plan = MageSpendingPlanner.Compute(Table, total);
             var attributes = new List<AttributeDesc> { new(1, 0, 100, 0) }; // Strength, so the capacity is known
@@ -171,6 +187,18 @@ public sealed class LogisticsStationTests(ITestOutputHelper output)
         /// <summary>Every raise ACE took.</summary>
         public int Raised { get; private set; }
 
+        /// <summary>M6 7 R: while true ACE drops every raise without a word (as it does a raise over the pool): the action times out.</summary>
+        public bool Deaf { get; set; }
+
+        /// <summary>M6 7 R: the kills' experience: the total and the pool grow by <paramref name="xp"/>, as ACE's two updates do.</summary>
+        public void Earn(long xp)
+        {
+            _total += xp;
+            Available += xp;
+            Update(PrivateUpdateKind.PropertyInt64, PlayerQualities.TotalExperienceProperty, _total);
+            Update(PrivateUpdateKind.PropertyInt64, PlayerQualities.AvailableExperienceProperty, Available);
+        }
+
         public void Pump()
         {
             var sends = _h.Net.Sends;
@@ -184,7 +212,7 @@ public sealed class LogisticsStationTests(ITestOutputHelper output)
                     FakeSendKind.RaiseSkill => MageStatKind.Skill,
                     _ => (MageStatKind?)null,
                 };
-                if (kind is null)
+                if (kind is null || Deaf)
                 {
                     continue;
                 }
@@ -234,7 +262,7 @@ public sealed class LogisticsStationTests(ITestOutputHelper output)
         private uint _row = 0x80006000;
         private uint _item = 0x80007000;
 
-        public Trip(string key, int coins = 300_000, Func<StockLine, int>? held = null, bool inGround = true, long xp = 6000)
+        public Trip(string key, int coins = 300_000, Func<StockLine, int>? held = null, bool inGround = true, long xp = 6000, int sidePacks = 0)
         {
             Ground = GroundCatalog.Get(key);
             Vendor = new VendorRig(coins);
@@ -263,6 +291,14 @@ public sealed class LogisticsStationTests(ITestOutputHelper output)
                 }
 
                 shop.AddTradeNotes(() => ++_row);
+            }
+
+            for (var i = 0; i < sidePacks; i++)
+            {
+                // M6 8 D: the side packs the player holds (the layout wants three; a short layout buys the rest on a trip, ResupplyPlanner.PackBuy)
+                var pack = Vendor.NextGuid();
+                Vendor.Arrive(pack, "Pack", 136, 0x200, 65);
+                Vendor.R.Raw(AceM3Writers.PutObjInContainer(VendorRig.Player, 8_000 + (uint)i, pack, VendorRig.Player, 0, 1));
             }
 
             foreach (var line in Ground.Supplies.Stock)
@@ -347,7 +383,7 @@ public sealed class LogisticsStationTests(ITestOutputHelper output)
         public int ModVerbsSent => Vendor.H.Net.ToolRequests().Count(t => t is not null && new[] { "item ", "xp ", "place ", "corpses ", "spell " }.Any(v => t.StartsWith("@lifestone " + v, StringComparison.Ordinal)));
     }
 
-    private Trip Make(string key, int coins = 300_000, Func<StockLine, int>? held = null, bool inGround = true, long xp = 6000) => new Trip(key, coins, held, inGround, xp).WithOutput(output);
+    private Trip Make(string key, int coins = 300_000, Func<StockLine, int>? held = null, bool inGround = true, long xp = 6000, int sidePacks = 0) => new Trip(key, coins, held, inGround, xp, sidePacks).WithOutput(output);
 
     private static string Field(string fields, string name) =>
         fields.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault(p => p.StartsWith(name + "=", StringComparison.Ordinal))?[(name.Length + 1)..] ?? "?";
@@ -359,12 +395,12 @@ public sealed class LogisticsStationTests(ITestOutputHelper output)
 
     [Theory]
     [InlineData(Den, "Archmage Cindrue", "Thelnoth Cort the Healer", "Archmage Cindrue")]
-    [InlineData(Temple, "Shopkeeper Yoshi Deshi", "Zisaha bint Jaidka the Mage", null)]
+    [InlineData(Temple, "Shopkeeper Yoshi Deshi", "Zisaha bint Jaidka the Mage", "Zisaha bint Jaidka the Mage")] // M6 8 I: Zisaha sells the purse notes, so the fort converts its coin too
     public void The_forced_trip_recalls_home_walks_to_the_vendors_buys_spends_the_experience_and_recalls_back_with_no_grant_and_no_place(string key, string first, string second, string? notes)
     {
-        // M5 7 D136 follow-up: the den's coin above the floor after the buys goes into notes at Cindrue, a walk of its own after the others (the temple's profile names no vendor of a purse note)
+        // M5 7 D136 follow-up: the den's coin above the floor after the buys goes into notes at Cindrue, a walk of its own after the others (M6 8 I: the fort's Zisaha sells the purse notes too)
         List<string> vendors = notes is null ? [first, second] : [first, second, notes];
-        var trip = Make(key, held: AllLow(GroundCatalog.Get(key)));
+        var trip = Make(key, held: AllLow(GroundCatalog.Get(key)), sidePacks: 3); // M6 8 D: the layout is whole, so no pack is bought and the walk is the stock's
         var run = trip.Start(forced: true);
 
         var status = trip.Run(run);
@@ -468,7 +504,9 @@ public sealed class LogisticsStationTests(ITestOutputHelper output)
         Assert.Empty(trip.Travel.Requests);
         if (ground.IsCarried(stop.Wcid))
         {
-            Assert.Contains("m5-platinum-stock", run.Failure, StringComparison.Ordinal);
+            Assert.DoesNotContain("m5-platinum-stock", run.Failure, StringComparison.Ordinal); // M6 1 d (D12): the carried stop names the buy-trip
+            Assert.Contains("; buy-trip ", run.Failure, StringComparison.Ordinal);
+            Assert.True(trip.Logged("logistics: the carried line is the buy-trip's: "));
         }
     }
 
@@ -605,5 +643,31 @@ public sealed class LogisticsStationTests(ITestOutputHelper output)
         Assert.Equal("logistics", forced.Name);
         Assert.True(forced.Needs.Peace);
         Assert.Equal(["build-verify", "gear", "buff", "cast-facts", "kit-refused", "harm-heal", "bind", "den-travel", "den-fight", "logistics", "death", "recall-home"], plan.Stations.Select(s => s.Name));
+    }
+
+    [Theory]
+    [InlineData(false, "at home")]
+    [InlineData(true, "in the ground")]
+    public void M6_14_T_every_trip_spends_the_experience_before_the_buys_so_the_plan_reads_what_the_spend_leaves(bool inGround, string where)
+    {
+        // The sprint of 2026-11-12: the run's first trip bought, then spent 22,710 experience; the raised skills made seven more scrolls due with 2,231 coin left. Live at 05:23 UTC, a trip from the ground: the plan read before the spend
+        // of 69,280 named one level of the dance line, the counters after it the next, and the visit had served neither.
+        const string First = "logistics: the experience is spent before the buys";
+        const string Spend = "logistics: experience call 1: ended";
+        const string Buys = "logistics: the resupply ended";
+        const string After = "logistics: check after the visit: the counters say";
+
+        var trip = Make(Den, inGround: inGround, held: AllLow(GroundCatalog.Get(Den)));
+        var run = trip.Start(forced: true);
+        Assert.Equal(ScenarioStatus.Succeeded, trip.Run(run));
+        var lines = trip.Lines.ToList();
+        int At(string part) => lines.FindIndex(l => l.Contains(part, StringComparison.Ordinal));
+        Assert.True(At(First) >= 0 && At(First) < At(Spend) && At(Spend) < At(Buys), string.Join(Environment.NewLine, lines.Where(l => l.Contains("logistics", StringComparison.Ordinal))));
+        Assert.Contains($"(the trip started {where}; M6 14 T)", lines[At(First)], StringComparison.Ordinal);
+        Assert.True(At(Buys) < lines.FindLastIndex(l => l.Contains(Spend, StringComparison.Ordinal))); // the second look after the buys
+        Assert.True(At(Buys) < At(After)); // the check after, with the buys and the spend made
+        Assert.True(Int(run.VerdictFields(), "spent_xp") > 0);
+        Assert.True(Int(run.VerdictFields(), "raises") > 0);
+        Assert.Equal(Int(run.VerdictFields(), "raises"), trip.Xp.Raised); // the second look finds the pool spent and raises nothing twice
     }
 }

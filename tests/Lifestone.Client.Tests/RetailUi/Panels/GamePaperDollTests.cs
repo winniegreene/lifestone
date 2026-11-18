@@ -615,6 +615,7 @@ public sealed class GamePaperDollTests(DatSetFixture fixture) : IClassFixture<Da
     }
 
     [RequiresLocalDatsFact]
+    [Trait("Tier", "Timing")] // m4-timing-tier-candidates: an 8 ms wall-clock bound
     public void The_controllers_construction_is_one_small_unit_under_eight_milliseconds()
     {
         using var g = Enter(equip: false);

@@ -857,7 +857,7 @@ public sealed class SliceCheckAndSmokeTests
         var frames = script[script.IndexOf("'shell-frames' {", StringComparison.Ordinal)..script.IndexOf("'login-check' {", StringComparison.Ordinal)];
 
         Assert.Contains("--play-checks --play-frames=$dir", frames, StringComparison.Ordinal);
-        Assert.Contains("$expectedFrames = 10", frames, StringComparison.Ordinal);
+        Assert.Contains("$expectedFrames = 11", frames, StringComparison.Ordinal);
         Assert.Contains("shell frames done size=", frames, StringComparison.Ordinal);
         Assert.Contains("$files -eq $expectedFrames", frames, StringComparison.Ordinal);
 
@@ -1350,6 +1350,9 @@ public sealed class SliceCheckAndSmokeTests
             ("recoveryonly", MageText().Replace("[logincheck] journey station=logistics", "[logincheck] journey station=heal ok=true recovery_places=3\n[logincheck] journey station=logistics", StringComparison.Ordinal), false),
             ("bought0", MageText(MageLogistics.Replace("bought=3", "bought=0", StringComparison.Ordinal)), false),
             ("spentxp0", MageText(MageLogistics.Replace("spent_xp=5000", "spent_xp=0", StringComparison.Ordinal)), false),
+            ("spentxp0pool", MageText(MageLogistics.Replace("spent_xp=5000", "spent_xp=0", StringComparison.Ordinal) + " spend_why=pool-covers-nothing"), false), // M6 7 C: the pool covered no planned next rank, not a failure
+            ("spentxp0refused", MageText(MageLogistics.Replace("spent_xp=5000", "spent_xp=0", StringComparison.Ordinal) + " spend_why=refused"), false), // something to cover, nothing spent: still fails
+            ("spentxp5000pool", MageText(MageLogistics + " spend_why=pool-covers-nothing"), false),
             ("boughtgone", MageText(MageLogistics.Replace(" bought=3", string.Empty, StringComparison.Ordinal)), false),
             ("spentxpgone", MageText(MageLogistics.Replace(" spent_xp=5000", string.Empty, StringComparison.Ordinal)), false),
             ("skippedtrip", MageText("[logincheck] journey station=logistics ok=false s=0.0 skipped=no-trip-due"), false),
@@ -1378,6 +1381,9 @@ public sealed class SliceCheckAndSmokeTests
         Assert.Contains("; granted 2 not 0 (mage heal station)", got["otherstation"], StringComparison.Ordinal);
         Assert.Contains("; bought 0 under 1 (mage logistics station)", got["bought0"], StringComparison.Ordinal);
         Assert.Contains("; spent_xp 0 under 1 (mage logistics station)", got["spentxp0"], StringComparison.Ordinal);
+        Assert.StartsWith("True|", got["spentxp0pool"], StringComparison.Ordinal);
+        Assert.StartsWith("True|", got["spentxp5000pool"], StringComparison.Ordinal);
+        Assert.Contains("; spent_xp 0 under 1 (mage logistics station)", got["spentxp0refused"], StringComparison.Ordinal);
         Assert.Contains("; bought n/a on the logistics station, not 1 or more (mage)", got["boughtgone"], StringComparison.Ordinal);
         Assert.Contains("; spent_xp n/a on the logistics station, not 1 or more (mage)", got["spentxpgone"], StringComparison.Ordinal);
         Assert.Contains("; bought n/a on the logistics station, not 1 or more (mage)", got["skippedtrip"], StringComparison.Ordinal);

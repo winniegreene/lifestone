@@ -26,13 +26,16 @@ public sealed class BuildVerifyStation : IStation
     private readonly XpTableData? _table;
     private readonly IReadOnlyList<uint>? _retailClasses;
     private readonly int _mageLevel;
+    private readonly string? _accountName;
 
     /// <summary>The station. Both arguments are for a test without dats: by default the XpTable and the skill classes are read from the journey's dats.</summary>
     /// <param name="table">The XpTable, or null to load it from <see cref="JourneyContext.Dats"/>.</param>
     /// <param name="retailClasses">The retail skill classes (only a creation needs them; the station never creates), or null.</param>
-    /// <param name="mageLevel">M5 7 F6 (D87, amended): the level of the mage's build (default <see cref="MageTemplate.TargetLevel"/>, the gate build); a level below it is the traditional mage (<see cref="MageTemplate.BuildFor"/>: no Melee Defense), judged by that level's plan. M5 7 F14: the journey passes <c>--mage-level</c> (<see cref="JourneyStations.MageLevelOf"/>), so <c>--scenario=journey --journey=mage --mage-level=80</c> verifies the level-80 traditional build; closes <c>TODO(m5-7-journey-mage-level)</c>.</param>
-    public BuildVerifyStation(XpTableData? table = null, IReadOnlyList<uint>? retailClasses = null, int mageLevel = MageTemplate.TargetLevel)
+    /// <param name="mageLevel">M5 7 F6 (D87, amended): the level of the mage's build (default <see cref="MageTemplate.TargetLevel"/>, the gate build); a level below it is the traditional mage (<see cref="MageTemplate.BuildFor"/>: no Melee Defense), judged by that level's plan. M5 7 F14: the journey passes <c>--mage-level</c> (<see cref="JourneyStations.MageLevelOf"/>), so <c>--scenario=journey --journey=mage --mage-level=80</c> verifies the level-80 traditional build; closes <c>m5-7-journey-mage-level (closed)</c>.</param>
+    /// <param name="accountName">M6 1 fix (1-R9): the login name the server hashes for the kit's component slots (the host's; never the secrets key, which <see cref="JourneyContext.Account"/> is); null: the key, with <c>TODO(j4-kit-account)</c> logged.</param>
+    public BuildVerifyStation(XpTableData? table = null, IReadOnlyList<uint>? retailClasses = null, int mageLevel = MageTemplate.TargetLevel, string? accountName = null)
     {
+        _accountName = accountName;
         _mageLevel = mageLevel;
         _table = table;
         _retailClasses = retailClasses;
@@ -55,14 +58,30 @@ public sealed class BuildVerifyStation : IStation
         var classes = _retailClasses ?? (context.Dats is { } d ? HeadlessCharacter.RetailSkillClasses(d) : []);
         if (string.Equals(context.Character, MageTemplate.CharacterName, StringComparison.OrdinalIgnoreCase))
         {
-            var mage = MageBuildOf(table, classes, context.Log, context.Dungeon, context.Spells, context.Account, endSession: false, level: _mageLevel);
+            var mage = MageBuildOf(table, classes, context.Log, context.Dungeon, context.Spells, KitAccountOf(context), endSession: false, level: _mageLevel);
             return new BuildRun(mage, mage.VerdictFields);
         }
 
         var template = FighterTemplate.ForName(context.Character) ?? throw new InvalidOperationException($"TODO(m4-p5b-build-character): build-verify knows no build for '{context.Character}'");
         // The gear's recharge (closes TODO(m4-gear-mana)): the journey's fighters keep their magic gear over many gates, so build-verify appraises its mana and uses the kit's mana charge when a piece runs low (GearRecharge, report-only).
-        var fighter = new FighterBuildScenario(table, classes, context.Log, template: template, spells: context.Spells, account: context.Account, endSession: false, rechargeGear: true);
+        var fighter = new FighterBuildScenario(table, classes, context.Log, template: template, spells: context.Spells, account: KitAccountOf(context), endSession: false, rechargeGear: true);
         return new BuildRun(fighter, fighter.VerdictFields);
+    }
+
+    /// <summary>
+    /// M6 1 fix (1-R9, narrows <c>TODO(j4-kit-account)</c>): the name the kit's components are hashed for: the host's login name when it gave one (the live hosts all do), else the context's account key with the tag logged (a scripted
+    /// host's; the key differs from the login, so the taper slots may not match the account's). Hashed by the caller, never logged.
+    /// </summary>
+    /// <param name="context">The journey's context.</param>
+    internal string KitAccountOf(JourneyContext context)
+    {
+        if (_accountName is { Length: > 0 } name)
+        {
+            return name;
+        }
+
+        context.Log.Warn(JourneyVerdict.LogCategory, "TODO(j4-kit-account): the host gave no login name; the build's kit is made for the account key (its taper slots may not match the account's)");
+        return context.Account;
     }
 
     /// <summary>

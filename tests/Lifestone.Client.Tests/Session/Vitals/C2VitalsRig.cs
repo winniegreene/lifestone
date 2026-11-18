@@ -39,6 +39,9 @@ internal sealed record C2Character
     /// <summary>The potions held (0: none).</summary>
     public uint Potions { get; init; }
 
+    /// <summary>M6 14 T: the weenie class of the potions held: the Potion of Healing by default, or another row of <see cref="HealthDrinks.All"/>.</summary>
+    public uint PotionWcid { get; init; } = FighterKit.PotionWcid;
+
     /// <summary>The Mana Potions held, one stack (M4 P5a C7; 0: none). Each drink restores 25 mana.</summary>
     public uint ManaPotions { get; init; }
 
@@ -117,6 +120,7 @@ internal sealed class C2VitalsRig
     private int _seen;
     private byte _seq;
     private double _last = double.NaN;
+    private ushort _movement = 1;
     private double _hAcc;
     private double _sAcc;
     private double _mAcc;
@@ -140,11 +144,19 @@ internal sealed class C2VitalsRig
         if (bindController)
         {
             R.Api.Move.Bind(Spy, false);
+            Spy.Echo = EchoPosture;
         }
 
         Options = options ?? new VitalsOptions();
-        Keeper = new VitalsKeeper(new View(R), Table, Options, R.H.Log);
+        Session = new View(R);
+        Keeper = new VitalsKeeper(Session, Table, Options, R.H.Log);
     }
+
+    /// <summary>The session view the keeper reads (a dance outside the keeper, <c>ManaDance</c>, is stepped over the same view).</summary>
+    public IGameSessionView Session { get; }
+
+    /// <summary>M6 16 E2b: the session draws <paramref name="bodies"/> from here on (play mode's avatar set, scripted): a creature stands where its body is drawn.</summary>
+    public void Draw(ILiveBodies bodies) => ((View)Session).Live = new LivePositions(bodies, R.H.R.Clock);
 
     public C2Character Character { get; }
 
@@ -157,6 +169,9 @@ internal sealed class C2VitalsRig
     public Dictionary<uint, SpellInfo> Table { get; }
 
     public PostureSpy Spy { get; } = new();
+
+    /// <summary>M6 7 AO: false when the server's motion never shows the posture the key asked for (the check after's failure).</summary>
+    public bool EchoesPosture { get; set; } = true;
 
     public uint Health { get; private set; }
 
@@ -415,9 +430,10 @@ internal sealed class C2VitalsRig
         Used.Add("potion");
         PosturesAtUse.Add(Spy.Posture);
         var before = Health;
+        var drink = HealthDrinks.All[HealthDrinks.IndexOf(Character.PotionWcid)];
         if (PotionRestores)
         {
-            Health = Math.Min(Character.MaxHealth, Health + (uint)RecoveryRules.PotionPoints);
+            Health = Math.Min(Character.MaxHealth, Health + drink.Boost);
             SendVital(HealthKey, Health);
         }
 
@@ -428,7 +444,7 @@ internal sealed class C2VitalsRig
             SendVital(HealthKey, Health);
         }
 
-        Line($"The Potion of Healing restores {(PotionRestores ? Math.Min(Character.MaxHealth, before + (uint)RecoveryRules.PotionPoints) - before : 0)} points of your Health.");
+        Line($"The {drink.Name} restores {(PotionRestores ? Math.Min(Character.MaxHealth, before + drink.Boost) - before : 0)} points of your Health.");
         Potions = Potions > PotionsPerDrink ? Potions - PotionsPerDrink : 0;
         if (Potions == 0)
         {
@@ -561,6 +577,22 @@ internal sealed class C2VitalsRig
 
     private void Line(string text) => R.H.ServerMessage(text, 4);
 
+    /// <summary>M6 7 AO: ACE's motion for the player after the posture's key, through the reducer as the wire's; the stop key's has no forward command.</summary>
+    private void EchoPosture(uint command)
+    {
+        if (EchoesPosture)
+        {
+            MotionIs(command == MotionCommands.Ready ? null : (ushort)(command & 0xFFFF));
+        }
+    }
+
+    /// <summary>The server's motion for the player becomes <paramref name="forward"/> (null: she stands).</summary>
+    public void MotionIs(ushort? forward)
+    {
+        var h = R.H.R;
+        h.Reducer.OnUpdateMotion(h.Context, new UpdateMotionMsg(WorldActionRig.Player, 1, ++_movement, 1, false, new ServerMotionState { MovementType = MovementType.Interpreted, Stance = 0x003D, Forward = forward }));
+    }
+
     private void Ready() =>
         R.H.R.Bus.Publish(new ObjectMotionChanged(WorldActionRig.Player, true, false, new ServerMotionState { MovementType = MovementType.Interpreted, Forward = 0x0003 }));
 
@@ -598,7 +630,7 @@ internal sealed class C2VitalsRig
 
         if (c.Potions > 0)
         {
-            Create(Potion, "Potion of Healing", FighterKit.PotionWcid, 0x80);
+            Create(Potion, HealthDrinks.All[HealthDrinks.IndexOf(c.PotionWcid)].Name, c.PotionWcid, 0x80);
             pack.Add(new ContentDesc(Potion, 0));
         }
 
@@ -717,6 +749,8 @@ internal sealed class C2VitalsRig
         public ActionLog ActionLog => rig.H.ActionLog;
 
         public LinkStats Link => default;
+
+        public LivePositions Live { get; set; } = LivePositions.ReportsOnly;
     }
 
     /// <summary>A movement controller that records the commands it takes and the posture they leave (an emote press holds it, the stop key or a locomotion command ends it).</summary>
@@ -725,6 +759,9 @@ internal sealed class C2VitalsRig
         public List<string> Calls { get; } = [];
 
         public uint Posture { get; private set; }
+
+        /// <summary>M6 7 AO: called with a posture's or the stop key's press (the rig's server echo).</summary>
+        public Action<uint>? Echo { get; set; }
 
         public CellFrame Position => default;
 
@@ -739,6 +776,10 @@ internal sealed class C2VitalsRig
             }
 
             Posture = command is VitalsKeeper.SitCommand or VitalsKeeper.LieCommand ? command : command == MotionCommands.Ready ? 0 : Posture;
+            if (command is VitalsKeeper.SitCommand or VitalsKeeper.LieCommand or MotionCommands.Ready)
+            {
+                Echo?.Invoke(command);
+            }
         }
 
         public void SetHoldRun(bool on) => Calls.Add("run " + on);

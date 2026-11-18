@@ -49,6 +49,12 @@ internal enum HeadlessScenario
 
     /// <summary>The autopilot (M5 4 h1, D57): BSD Mage's outer loop over the journey's stations until <c>--autopilot-minutes</c>, <c>--autopilot-level</c> or a stop request (<c>AutopilotScenario</c>); changes the character.</summary>
     Autopilot,
+
+    /// <summary>Create the climber Winnie on the account test (M6 item 0 a3a, D5-D7): the fresh-character re-create with the climber's template, no grants (<c>ClimberCreateScenario</c>); changes the account's character list.</summary>
+    ClimberCreate,
+
+    /// <summary>The villa track's live proof on Lifestone Throwaway (account test-tools only; M6 villa): grants by the mod's verbs, then buys apartment 4051 through the guardian window, pays its rent, recalls home and moves an item through the storage chest (<c>VillaProofScenario</c>); changes the character.</summary>
+    VillaProof,
 }
 
 /// <summary>
@@ -59,6 +65,9 @@ internal enum HeadlessScenario
 /// </summary>
 internal sealed record HeadlessOptions
 {
+    /// <summary>The account <c>--scenario=villa-proof</c> runs on (M6 villa): the test-tools account, whose Lifestone Throwaway may be levelled and granted freely.</summary>
+    internal const string VillaProofAccount = "test-tools";
+
     /// <summary>The default number of Holtburg laps.</summary>
     internal const int DefaultLaps = 3;
 
@@ -190,7 +199,9 @@ internal sealed record HeadlessOptions
                             ("hunt", HeadlessScenario.Hunt),
                             ("wayfind", HeadlessScenario.Wayfind),
                             ("journey", HeadlessScenario.Journey),
-                            ("autopilot", HeadlessScenario.Autopilot)),
+                            ("autopilot", HeadlessScenario.Autopilot),
+                            ("climber-create", HeadlessScenario.ClimberCreate),
+                            ("villa-proof", HeadlessScenario.VillaProof)),
                     };
                     break;
                 case "--journey":
@@ -297,12 +308,18 @@ internal sealed record HeadlessOptions
 
         var fighterScenario = o.Scenario is HeadlessScenario.FighterBuild or HeadlessScenario.Hunt or HeadlessScenario.Wayfind;
         var buffScenario = o.Scenario == HeadlessScenario.Buff;
-        if (o.Scenario is HeadlessScenario.MageBuild or HeadlessScenario.FighterBuild or HeadlessScenario.Gear or HeadlessScenario.Buff or HeadlessScenario.Fight or HeadlessScenario.DeathAndRegear or HeadlessScenario.Hunt or HeadlessScenario.Wayfind && session.Account is { } account && !string.Equals(account, Program.DefaultAccount, StringComparison.OrdinalIgnoreCase) && !(fighterScenario && FighterTemplate.ForAccount(account) is not null) && !(buffScenario && FighterTemplate.ForAccount(account) is { Kit.HasCaster: true }))
+        if (o.Scenario is HeadlessScenario.MageBuild or HeadlessScenario.ClimberCreate or HeadlessScenario.FighterBuild or HeadlessScenario.Gear or HeadlessScenario.Buff or HeadlessScenario.Fight or HeadlessScenario.DeathAndRegear or HeadlessScenario.Hunt or HeadlessScenario.Wayfind && session.Account is { } account && !string.Equals(account, Program.DefaultAccount, StringComparison.OrdinalIgnoreCase) && !(o.Scenario == HeadlessScenario.ClimberCreate && string.Equals(account, Lifestone.Client.Session.Credentials.TestAccounts.Qwinnie, StringComparison.Ordinal)) && !(fighterScenario && FighterTemplate.ForAccount(account) is not null) && !(buffScenario && FighterTemplate.ForAccount(account) is { Kit.HasCaster: true }))
         {
             // M3 1.1-R5: the build creates and levels a permanent character, so it runs on the default test account only (automation uses accounts.test only).
             // M4 P4 (D31): the fighter-build and hunt scenarios also run on the account of a fighter template (test-melee, test-archer); every other scenario stays on test.
             // M4 P5a C4: so does the buff scenario, on the account of a fighter with a caster (the Brawler's and the Archer's; the Hunter has none and buffs nobody).
-            errors.Add($"--account: --scenario={(o.Scenario switch { HeadlessScenario.Gear => "gear", HeadlessScenario.Buff => "buff", HeadlessScenario.Fight => "fight", HeadlessScenario.DeathAndRegear => "death-and-regear", HeadlessScenario.Hunt => "hunt", HeadlessScenario.Wayfind => "wayfind", HeadlessScenario.FighterBuild => "fighter-build", _ => "mage-build" })} runs on {(fighterScenario ? "the account of a fighter template (" + string.Join(", ", FighterTemplate.All.Select(t => t.AccountKey)) + ")" : buffScenario ? "the default test account '" + Program.DefaultAccount + "' or the account of a fighter with a caster (" + string.Join(", ", FighterTemplate.All.Where(t => t.Kit.HasCaster).Select(t => t.AccountKey)) + ")" : "the default test account '" + Program.DefaultAccount + "'")} only; the value is not shown");
+            errors.Add($"--account: --scenario={(o.Scenario switch { HeadlessScenario.Gear => "gear", HeadlessScenario.Buff => "buff", HeadlessScenario.Fight => "fight", HeadlessScenario.DeathAndRegear => "death-and-regear", HeadlessScenario.Hunt => "hunt", HeadlessScenario.Wayfind => "wayfind", HeadlessScenario.FighterBuild => "fighter-build", HeadlessScenario.ClimberCreate => "climber-create", _ => "mage-build" })} runs on {(fighterScenario ? "the account of a fighter template (" + string.Join(", ", FighterTemplate.All.Select(t => t.AccountKey)) + ")" : buffScenario ? "the default test account '" + Program.DefaultAccount + "' or the account of a fighter with a caster (" + string.Join(", ", FighterTemplate.All.Where(t => t.Kit.HasCaster).Select(t => t.AccountKey)) + ")" : "the default test account '" + Program.DefaultAccount + "'")} only; the value is not shown");
+        }
+
+        if (o.Scenario == HeadlessScenario.VillaProof && !string.Equals(session.Account, VillaProofAccount, StringComparison.OrdinalIgnoreCase))
+        {
+            // M6 villa: the proof grants and buys, so it runs on Lifestone Throwaway of the test-tools account only (CLAUDE.md: the one character that may be levelled freely); never on the climber's account.
+            errors.Add("--account: --scenario=villa-proof runs on the account '" + VillaProofAccount + "' only; the value is not shown");
         }
 
         FighterTemplate? fighter = null;
@@ -371,7 +388,8 @@ internal sealed record HeadlessOptions
         else if (o.Scenario == HeadlessScenario.Autopilot)
         {
             // M5 4 h1: the autopilot is the mage's (BSD Mage on the test account), the journey's account rule; --journey may only name the mage.
-            var plan = JourneyPlans.Mage;
+            // M6 16 E0b: with --autopilot-job=level-up the plan is the job's, as the play host's is (AutopilotHostLogic.PlanFor: the ladder's character on its test account), and the run is the climb (HeadlessClimbScenario).
+            var plan = Lifestone.Client.Session.Autopilot.AutopilotHostLogic.PlanFor(autopilot);
             if (journey is not null && journey.Name != plan.Name)
             {
                 errors.Add($"--journey: --scenario=autopilot runs the {plan.Name} plan only");
@@ -425,10 +443,24 @@ internal sealed record HeadlessOptions
             errors.Add("--fresh-character: it excludes --fighter-recreate (the first deletes the live character whatever it is, the second only when its attributes differ)");
             fresh = false;
         }
-        else if (fresh && !(o.Scenario == HeadlessScenario.MageBuild || (o.Scenario == HeadlessScenario.FighterBuild && fighter is not null && fighter.Key != FighterTemplate.Hunter.Key)))
+        else if (fresh && !(o.Scenario is HeadlessScenario.MageBuild or HeadlessScenario.ClimberCreate || (o.Scenario == HeadlessScenario.FighterBuild && fighter is not null && fighter.Key != FighterTemplate.Hunter.Key)))
         {
             errors.Add("--fresh-character: only --scenario=fighter-build on the Brawler (test-melee) or the Archer (test-archer) and --scenario=mage-build on the default account takes it; the Hunter, any other account and every other scenario refuse it");
             fresh = false;
+        }
+
+        if (o.Scenario == HeadlessScenario.ClimberCreate)
+        {
+            // M6 D7: the standing job's Winnie is never re-created without the owner's word, so the re-create is asked for in words; the character is always Winnie (BSD Mage's runs are another scenario's).
+            if (!fresh)
+            {
+                errors.Add("--scenario=climber-create: it deletes the live Winnie and creates a new one, so it needs --fresh-character");
+            }
+
+            if (session.Character is not null || o.CreateCharacter is not null)
+            {
+                errors.Add("--character and --create-character: --scenario=climber-create creates the climber only (the name is fixed); the option is refused");
+            }
         }
 
         var mageLevel = MageTemplate.TargetLevel;

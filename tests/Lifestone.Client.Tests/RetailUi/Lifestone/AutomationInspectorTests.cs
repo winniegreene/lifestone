@@ -4,6 +4,7 @@ using Lifestone.Client.RetailUi.Flow;
 using Lifestone.Client.RetailUi.LifestonePanels;
 using Lifestone.Client.RetailUi.Screens;
 using Lifestone.Client.Session;
+using Lifestone.Client.Session.Autopilot;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Tests.RetailUi.Screens;
 using Lifestone.Client.Tests.RetailUi.TestSupport;
@@ -53,10 +54,10 @@ public sealed class AutomationInspectorTests(DatSetFixture fixture, ITestOutputH
     public void The_autopilot_lines_show_the_mode_the_state_the_last_decision_and_the_next_trigger_M5_4_h2()
     {
         Assert.Equal(
-            "Autopilot: running | fight:den-fight | cycle 2 | interrupted 1, resumed 1\nLast decision: known-state -> fight: in the ground\nNext trigger: trip at 200 Tapers: 412 held",
+            "Autopilot: running | fight:den-fight | cycle 2 | interrupted 1, resumed 1\nLast decision: known-state -> fight: in the ground\nNext trigger: trip at 200 Tapers: 412 held\nJob: - | menu: n/a",
             AutomationInspector.FormatAutopilot(new AutopilotStatus(AutopilotMode.Running, "fight:den-fight", "known-state -> fight: in the ground", "trip at 200 Tapers: 412 held", 2, 1, 1)));
         Assert.Equal(
-            "Autopilot: off (type /auto to start it)\nLast decision: not started\nNext trigger: -",
+            "Autopilot: off (type /auto to start it)\nLast decision: not started\nNext trigger: -\nJob: - | menu: n/a",
             AutomationInspector.FormatAutopilot(new AutopilotStatus(AutopilotMode.Off, string.Empty, "not started", string.Empty, 0, 0, 0)));
         Assert.StartsWith("Autopilot: stopped (the controls are yours; /auto resumes)", AutomationInspector.FormatAutopilot(new AutopilotStatus(AutopilotMode.Interrupted, "fight:den-fight", "x", string.Empty, 1, 1, 0)), StringComparison.Ordinal);
         Assert.StartsWith("Autopilot: halted by the kill switch", AutomationInspector.FormatAutopilot(new AutopilotStatus(AutopilotMode.Halted, "fight:den-fight", "x", string.Empty, 1, 0, 0)), StringComparison.Ordinal);
@@ -64,10 +65,49 @@ public sealed class AutomationInspectorTests(DatSetFixture fixture, ITestOutputH
 
         // A long decision is cut to one line of the window.
         var long1 = AutomationInspector.FormatAutopilot(new AutopilotStatus(AutopilotMode.Running, "fight:den-fight", new string('x', 300), "stop at 30 min: 12 min left", 1, 0, 0)).Split('\n');
-        Assert.Equal(3, long1.Length);
+        Assert.Equal(4, long1.Length);
         Assert.Equal("Last decision: ".Length + AutomationInspector.AutopilotLineLimit, long1[1].Length);
         Assert.EndsWith("...", long1[1], StringComparison.Ordinal);
         Assert.Equal("Next trigger: stop at 30 min: 12 min left", long1[2]);
+    }
+
+    private sealed class FakeJobs : IAutopilotJobSource
+    {
+        public JobList Jobs { get; set; } = new(
+            7,
+            [
+                new JobEntry(AutopilotTask.Job, JobMenu.LevelUpLabel, null, null, "x"),
+                new JobEntry(AutopilotTask.ForQuest("tusk-female"), "do a quest: Tusker Tusks", 1000, null, "x"),
+                new JobEntry(AutopilotTask.ForQuest("atlan-wand"), "do a quest: Atlan Wand", null, null, "x"),
+                new JobEntry(AutopilotTask.Errand, "errand", null, null, "x"),
+                new JobEntry(AutopilotTask.Job, JobMenu.StopLabel, null, null, "x"),
+            ],
+            [new JobEntry(AutopilotTask.ForQuest("bone-dust"), "Bone Dust", null, "done-once", "done-once")]);
+
+        public AutopilotTask Current => AutopilotTask.Job;
+
+        public event Action? Changed;
+
+        public void Raise() => Changed?.Invoke();
+    }
+
+    [Fact]
+    public void The_fourth_line_names_the_job_and_the_menus_open_quests_M6_6()
+    {
+        var status = new AutopilotStatus(AutopilotMode.Running, "trip:quest", "x", string.Empty, 1, 0, 0, "do a quest: tusk-female");
+        Assert.EndsWith("\nJob: do a quest: tusk-female | menu: 2 quest(s) open", AutomationInspector.FormatAutopilot(status, new FakeJobs()), StringComparison.Ordinal);
+        Assert.EndsWith("\nJob: do a quest: tusk-female | menu: n/a", AutomationInspector.FormatAutopilot(status), StringComparison.Ordinal);
+        Assert.EndsWith("\nJob: - | menu: 2 quest(s) open", AutomationInspector.FormatAutopilot(status with { Job = string.Empty }, new FakeJobs()), StringComparison.Ordinal);
+        Assert.Equal("Autopilot: not available in this session\nLast decision: -\nNext trigger: -\nJob: - | menu: 2 quest(s) open", AutomationInspector.FormatAutopilot(null, new FakeJobs()));
+
+        // Refused quests, the level-up, errand and stop rows are not counted; an empty list counts none.
+        Assert.Equal("menu: 0 quest(s) open", AutomationInspector.FormatMenuCount(new JobList(1, [], [])));
+        Assert.Equal("menu: n/a", AutomationInspector.FormatMenuCount(null));
+
+        // A long job is cut to one line of the window.
+        var last = AutomationInspector.FormatAutopilot(status with { Job = new string('j', 200) }).Split('\n')[^1];
+        Assert.Equal(AutomationInspector.AutopilotLineLimit, last.Length);
+        Assert.EndsWith("...", last, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -193,6 +233,38 @@ public sealed class AutomationInspectorTests(DatSetFixture fixture, ITestOutputH
             autopilot.Raise();
             rig.Frame();
             Assert.StartsWith("Autopilot: not available", inspector.AutopilotText, StringComparison.Ordinal);
+            Assert.DoesNotContain(rig.Log.Entries, e => e.Severity >= LogSeverity.Error);
+        }
+    }
+
+    [RequiresLocalDatsFact]
+    public void The_open_inspector_shows_the_job_line_in_its_grown_block_and_follows_the_menus_source_M6_6()
+    {
+        var (rig, _, inspector) = EnterGame();
+        using (rig)
+        {
+            inspector.Open();
+            Assert.EndsWith("\nJob: - | menu: n/a", inspector.AutopilotText, StringComparison.Ordinal);
+            var window = inspector.Window!;
+            var block = window.GetChildRecursive(AutomationInspector.AutopilotId)!;
+            var list = window.GetChildRecursive(AutomationInspector.ListId)!;
+            Assert.Equal((130, 76), (block.Box.Y0, block.Box.Height)); // one line more than M5's three
+            Assert.Equal((210, 136), (list.Box.Y0, list.Box.Height)); // the list moved down 18 and keeps its bottom above the button
+
+            var jobs = new FakeJobs();
+            inspector.Jobs = jobs;
+            rig.Frame();
+            Assert.EndsWith("\nJob: - | menu: 2 quest(s) open", inspector.AutopilotText, StringComparison.Ordinal);
+
+            jobs.Jobs = jobs.Jobs with { Jobs = jobs.Jobs.Jobs.Where(e => e.Task.QuestKey != "atlan-wand").ToList() };
+            jobs.Raise();
+            Assert.True(inspector.IsStale);
+            rig.Frame();
+            Assert.EndsWith("\nJob: - | menu: 1 quest(s) open", inspector.AutopilotText, StringComparison.Ordinal);
+
+            inspector.Jobs = null;
+            rig.Frame();
+            Assert.EndsWith("menu: n/a", inspector.AutopilotText, StringComparison.Ordinal);
             Assert.DoesNotContain(rig.Log.Entries, e => e.Severity >= LogSeverity.Error);
         }
     }

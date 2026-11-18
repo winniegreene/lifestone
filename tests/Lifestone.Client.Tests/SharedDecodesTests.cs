@@ -61,6 +61,7 @@ public sealed class SharedDecodesTests
     }
 
     [Fact]
+    [Trait("Tier", "Timing")] // m5-manaorder-alloc-flake row: 16 tasks meet at a Barrier, so it needs 16 free pool threads or it waits out its 30 s bound
     public async Task Concurrent_requests_wait_for_one_decode()
     {
         var table = new SharedDecodes<int, Value>(v => Interlocked.Increment(ref v.Frees));

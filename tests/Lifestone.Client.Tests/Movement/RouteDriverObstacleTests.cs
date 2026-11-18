@@ -2,6 +2,7 @@ using System.Numerics;
 using Lifestone.Client.Movement;
 using Lifestone.Client.Movement.Routes;
 using Lifestone.Client.Physics;
+using Lifestone.Client.Session.Scenarios;
 using Lifestone.Data.Animation;
 using Lifestone.Data.Physics;
 using Lifestone.Data.Physics.Objects;
@@ -34,6 +35,40 @@ public sealed class RouteDriverObstacleTests(ITestOutputHelper output)
         output.WriteLine($"{status}: {driver.FailureReason}");
         Assert.Equal(RouteStatus.Stuck, status);
         Assert.Contains("no progress toward goal 0", driver.FailureReason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void M6_14_the_physics_stops_the_walker_at_an_object_that_only_ignores_collisions_and_lets_it_through_an_ethereal_one()
+    {
+        // The rule RoutePlay.StopsTheBody copies, on the real physics (no obstacle source, so nothing walks around): the Uziz town marker's state, 0x418 (Gravity, IgnoreCollisions,
+        // ReportCollisions, not a creature), stalls the walk as a solid object does; the same object made ethereal is walked through and the route finishes.
+        const uint marker = (uint)(PhysicsState.Gravity | PhysicsState.IgnoreCollisions | PhysicsState.ReportCollisions);
+        Assert.True(RoutePlay.StopsTheBody(marker));
+        var blocked = new Scene(npcs: [(60f, 66f)], state: marker, isCreature: false);
+        var driver = new RouteDriver(blocked.Controller, blocked.RouteNorth());
+        var status = blocked.Drive(driver, 30.0);
+        output.WriteLine($"ignores collisions: {status}: {driver.FailureReason}");
+        Assert.Equal(RouteStatus.Stuck, status);
+
+        const uint ethereal = (uint)(PhysicsState.Ethereal | PhysicsState.ReportCollisions);
+        Assert.False(RoutePlay.StopsTheBody(ethereal));
+        var open = new Scene(npcs: [(60f, 66f)], state: ethereal, isCreature: false);
+        var through = new RouteDriver(open.Controller, open.RouteNorth());
+        var passed = open.Drive(through, 30.0);
+        output.WriteLine($"ethereal: {passed}: {through.FailureReason}");
+        Assert.Equal(RouteStatus.Done, passed);
+    }
+
+    [Fact]
+    public void M6_14_an_object_that_only_ignores_collisions_is_walked_around_and_the_route_finishes()
+    {
+        // With the obstacle source the walker steps round the marker-like object (the live Uziz stall's cure).
+        var scene = new Scene(npcs: [(60f, 66f)], state: (uint)(PhysicsState.Gravity | PhysicsState.IgnoreCollisions | PhysicsState.ReportCollisions), isCreature: false);
+        var driver = scene.DriverWithObstacles(scene.RouteNorth(), out var notices);
+        var status = scene.Drive(driver, 40.0);
+        output.WriteLine($"{status} at {scene.Controller.Now:F2} s; {string.Join(" | ", notices)}; {driver.FailureReason}");
+        Assert.Equal(RouteStatus.Done, status);
+        Assert.Equal(1, driver.DetoursCount);
     }
 
     [Fact]
@@ -135,7 +170,7 @@ public sealed class RouteDriverObstacleTests(ITestOutputHelper output)
     {
         private readonly List<RouteObstacle> _npcs = [];
 
-        public Scene((float X, float Y)[] npcs)
+        public Scene((float X, float Y)[] npcs, uint state = (uint)PhysicsState.ReportCollisions, bool isCreature = true)
         {
             var (controller, _, world) = FlatController(x: 60f, y: 60f);
             Controller = controller;
@@ -147,7 +182,7 @@ public sealed class RouteDriverObstacleTests(ITestOutputHelper output)
             foreach (var (x, y) in npcs)
             {
                 var at = At(Block, x, y, 0f);
-                host.Create(new ServerObjectDescription(guid++, NpcSetupId, 1f, (uint)PhysicsState.ReportCollisions, IsCreature: true, IsSelf: false, DescriptionFlags: null), at);
+                host.Create(new ServerObjectDescription(guid++, NpcSetupId, 1f, state, IsCreature: isCreature, IsSelf: false, DescriptionFlags: null), at);
                 _npcs.Add(new RouteObstacle("Test NPC", 32205, at, NpcRadius));
             }
         }
@@ -230,6 +265,41 @@ public sealed class RouteDriverObstacleTests(ITestOutputHelper output)
             standing = new CellFrame(origin.CellId, new AcFrame(origin.Frame.Origin + new Vector3(offset.X, offset.Y, 0f), Quaternion.Identity));
             return true;
         }
+    }
+}
+
+/// <summary>M6 14 (live 2026-11-13, Uziz): the walk's obstacles are the objects the body's own physics stops it at (<see cref="Lifestone.Client.Session.Scenarios.RoutePlay"/>).</summary>
+public sealed class RouteObstacleFilterTests
+{
+    [Fact]
+    public void M6_14_an_object_that_only_ignores_collisions_is_walked_around_because_the_body_is_stopped_by_it()
+    {
+        // The Uziz town marker (wcid 49606) as ACE sends it: Gravity 0x400, IgnoreCollisions 0x10, ReportCollisions 0x8; not Ethereal 0x4.
+        Assert.True(RoutePlay.StopsTheBody(0x418));
+        Assert.True(RoutePlay.StopsTheBody(0x0)); // a plain solid object
+    }
+
+    [Fact]
+    public void M6_14_an_ethereal_object_is_not_walked_around_whether_or_not_it_also_ignores_collisions()
+    {
+        Assert.False(RoutePlay.StopsTheBody((uint)PhysicsState.Ethereal));
+        Assert.False(RoutePlay.StopsTheBody((uint)(PhysicsState.Ethereal | PhysicsState.IgnoreCollisions)));
+    }
+}
+
+/// <summary>M6 14: what the retail dats say about the Uziz town marker that stopped the walk from the Town Network's drop (wcid 49606, Setup 0x020006E7).</summary>
+public sealed class UzizMarkerShapeTests(Lifestone.Data.Tests.DatSetFixture fixture, ITestOutputHelper output) : IClassFixture<Lifestone.Data.Tests.DatSetFixture>
+{
+    [RequiresDatsFact]
+    public void M6_14_the_uziz_markers_setup_has_a_collision_shape_the_walker_can_go_round()
+    {
+        // wcid 49606's Setup (ACE world database v0.9.296: weenie_properties_d_i_d type 1 = 0x020006E7; no DefaultScale row, so 1).
+        var setup = PhysicsSetup.Load(fixture.Dats, 0x020006E7);
+        Assert.NotNull(setup);
+        var radius = RouteObstacleShapes.RadiusOf(setup, 1f);
+        output.WriteLine($"cylinders {string.Join(", ", setup.CylSpheres.Select(c => c.Radius))}; spheres {string.Join(", ", setup.Spheres.Select(s => s.Radius))}; physics bsp {setup.HasPhysicsBsp}; radius: {radius}");
+        Assert.NotNull(radius);
+        Assert.InRange(radius.Value, 0.2f, 2.0f);
     }
 }
 

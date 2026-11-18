@@ -1,0 +1,73 @@
+{
+  "key": "minor-sparking-stone",
+  "name": "The Minor Sparking Stone (the stone from the cave north-east of the West Mayoi Mountain Villas drop)",
+  "giver": null,
+  "start": {
+    "cell": "0xA9B40019",
+    "point": [
+      84.0,
+      7.7,
+      94.0
+    ],
+    "name": "Holtburg's lifestone point"
+  },
+  "steps": [
+    {
+      "kind": "go",
+      "what": "to the Minor Sparking Stone",
+      "place": {
+        "cell": "0xDD340100",
+        "point": [
+          156.236,
+          102.922,
+          134.816
+        ],
+        "name": "where the Minor Sparking Stone lies"
+      },
+      "target": {
+        "wcid": 6318,
+        "name": "Minor Sparking Stone"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/villa/writ-caves.md): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x7DD34002: weenie 6318, cell 0xDD340100; by the Town Network, the Mayoi Portal 42842 and the West Mayoi Mountain Villas Portal 13139 (travel-routes.json network-to-mayoi, mayoi-to-west-villas; no level gate); the run from the drop 0xDB330021 is TownNetworkWalkDatTests.The_run_from_the_drop_reaches_the_minor_stone(minor-sparking-stone); no door in the landblock; the guards: eight Sufut Zefir (7128, level 50, Health 90): four in the stone's room within 2 to 7 m of it, two in the passage 0xDD340101/0xDD340103, two outside the mouth; one generator 0x7DD3400B (wcid 7932, 240 s); fire resist 0.55: a fire mage hurts them",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Minor Sparking Stone from the floor",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 6318,
+        "name": "Minor Sparking Stone"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/villa/writ-caves.md): the item's own Quest string sparkingstoneminor (quest row 1356: min_Delta 3600, max_Solves -1) gates the pick-up for one hour (ACE Player_Inventory.cs:1249-1262 @95ef426d); refused, the run stops pick-up:too-recent; the stone is a child of the 25 s item generator 0x7DD3400C (wcid 5085), which also lays a Hastily Scrawled Note (wcid 6409), a Textbook (wcid 6407) beside it: not this step's",
+      "todo": null
+    }
+  ],
+  "done": {
+    "stamp": null,
+    "reply": null,
+    "item": {
+      "wcid": 6318,
+      "name": "Minor Sparking Stone"
+    }
+  },
+  "timer_seconds": 3600,
+  "sources": [
+    "cache/m6/villa/writ-caves.md: nobody starts it and nobody takes it; two minor stones of any kind are one Writ of Refuge at an Agent of the Arcanum (WritHandInStation), the villa's price and rent",
+    "timer_seconds 3600: the pinned world SQL quest row sparkingstoneminor (id 1356): min_Delta 3600, max_Solves -1",
+    "level: none in the file: the run's portals' gates are the trip rule's (TownNetworkTrip.Judge); the cave is open ground at 59.9S 75.5E, landblock 0xDD34",
+    "the way home is Lifestone Recall (the travel file has no portal way back from the drop); the villa's writ run calls it, off the ladder (no ladder field)"
+  ]
+}

@@ -88,7 +88,7 @@ public sealed record GearPiece(
 }
 
 /// <summary>
-/// The fighters' magic gear (M4 P5a C6, the owner's direction D40: "give them some magic armor that is a bit random and mismatched, but has helpful spells, the same for their weapons jewlery"): per fighter, the nine body-armour slots covered by
+/// The fighters' magic gear (M4 P5a C6, the owner's direction D40: give them some magic armor that is a bit random and mismatched but has helpful spells, and the same for their weapons and jewellery): per fighter, the nine body-armour slots covered by
 /// mismatched pieces of retail sets, a weapon, a necklace, two rings and two bracelets, every one a real ace_world weenie with helpful spells. Pinned as data; the choice is reproducible.
 /// </summary>
 /// <remarks>

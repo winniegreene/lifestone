@@ -3,6 +3,7 @@ using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session.Casting;
 using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Client.Session.Creatures;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Vitals;
 using Lifestone.Client.World;
@@ -47,10 +48,28 @@ public sealed partial class FightScenario
 
     /// <summary>M5 7 F15 (7-F4): the share of its expected gain under which a measured Drain Stamina Other sets that target aside for the drain (Lifestone's own; ACE writes "You gain 0 points" for a target with no stamina left).</summary>
     public const double StaminaDrainMinYieldShare = 0.25;
-    private bool _debuffLevelsNoted;
+    /// <summary>M6 1 f: the key of the measured seconds of a debuff cast at another (<see cref="MeasuredHeals.NoteSeconds"/>, fed by the opener's landed or resisted casts).</summary>
+    internal const string DebuffCastKey = "debuff cast at another";
+
+    private readonly Dictionary<uint, int> _wireMaxHealth = []; // M6 1 f: a creature class's maximum health from an appraisal answer (ACE's creature profile, CreatureProfile.cs:47-53 @95ef426d)
+    private readonly Dictionary<uint, (uint Guid, IdentifyHandle Handle)> _maxHealthAsks = []; // M6 1 f: the appraisal asked for each class whose maximum health no ground row gives (one a class)
+    private readonly HashSet<uint> _maxHealthUnknown = []; // M6 1 f: the classes whose appraisal answered without a health (named once each)
+    private bool _debuffSeedNoted;
 
     /// <summary>The picker (a test reads it).</summary>
-    internal FightPicker Picker => _picker ??= new FightPicker(_log, LogCategory) { LogEveryDecision = true }; // M5 7 F16: one decide: line every decision
+    internal FightPicker Picker => _picker ??= NewPicker();
+
+    /// <summary>M5 7 F16: one decide: line every decision. M6 1 f: the debuff rows I to VII from the SpellTable, the levels it lacks named once.</summary>
+    private FightPicker NewPicker()
+    {
+        var rows = DebuffRows.FromSpellTable(_spells, out var missing);
+        if (missing.Count > 0)
+        {
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"pick: {missing.Count} debuff level(s) below VI are not in the SpellTable and are not scored (first: {missing[0]})"));
+        }
+
+        return new FightPicker(_log, LogCategory) { LogEveryDecision = true, Rows = rows };
+    }
 
     /// <summary>The Drain Stamina Other casts of the stamina floor that landed.</summary>
     public int StaminaDrains => _staminaDrains;
@@ -68,6 +87,11 @@ public sealed partial class FightScenario
         var picker = Picker;
         picker.Rates.NoteIncoming(clock, _tally.DamageTaken);
         picker.EmergencyLine = _emergency.Enabled ? _emergency.LineHealth : 0;
+        if (_finishGuid != 0)
+        {
+            return false; // M6 7 Y: the emergency chose the bolt in hand: no drain floor, no debuff, no other war option comes before it
+        }
+
         if (DrainPossible(session) && HealthWait(session, clock, guid))
         {
             return true; // M5 7 F20: a drain could be chosen and the target's health is not fresh: asked of the server first (at most 1 s)
@@ -85,22 +109,7 @@ public sealed partial class FightScenario
             return TryBeginOpener(session, clock, guid); // no snapshot: F8's rule as it was (the profile's opener is the default)
         }
 
-        if (_snap.DebuffLevel == 0 && _snap.AllowedDebuffs != 0)
-        {
-            // FightDebuffs holds levels VI and VII only: under the cap the debuff cannot be scored, so the profile's opener is the default (F8's rule), named once.
-            if (!_debuffLevelsNoted)
-            {
-                _debuffLevelsNoted = true;
-                _log.Info(LogCategory, "pick: TODO(f10-debuff-levels): the debuffs' value model holds levels VI and VII only and the plan cap is under VI; the profile's opener is the default (F8)");
-            }
-
-            if (TryBeginOpener(session, clock, guid))
-            {
-                picker.Count(_openerSpell);
-                return true;
-            }
-        }
-
+        // M6 1 f (f10-debuff-levels closed): the debuffs are scored at every level I to VII the SpellTable holds (DebuffRows), so a cap under VI no longer falls back to the opener unscored.
         var pick = picker.Decide(in _snap, clock);
         if (pick.Kind == FightMoveKind.Debuff)
         {
@@ -196,25 +205,44 @@ public sealed partial class FightScenario
         return 0;
     }
 
+    /// <summary>M6 3 a2: the ground profile's row for the target class, or null. Allocates nothing.</summary>
+    private GroundTarget? GroundTargetOf(uint wcid)
+    {
+        var targets = _ground.Targets;
+        for (var i = 0; i < targets.Count; i++)
+        {
+            if (targets[i].Wcid == wcid)
+            {
+                return targets[i];
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>Fills <see cref="_snap"/> from the live state. False when the mage's skills or the target are unknown. Allocation-free once F9's options are built.</summary>
     private bool FillSnapshot(IGameSessionView session, double clock, in CellFrame here, uint guid)
     {
         var q = session.State.Self.Qualities;
         var objects = session.State.Objects;
-        if (!objects.TryGet(guid, out var target) || target.Position is not { } at || !GearCasts.TryCurrentSkill(q, MageTemplate.WarMagic, out var war, out _) || !GearCasts.TryCurrentSkill(q, MageTemplate.LifeMagic, out var life, out _))
+        if (!objects.TryGet(guid, out var target) || StandsAt(session, target) is not { } at || !GearCasts.TryCurrentSkill(q, MageTemplate.WarMagic, out var war, out _) || !GearCasts.TryCurrentSkill(q, MageTemplate.LifeMagic, out var life, out _))
         {
             return false;
         }
 
-        GearCasts.TryCurrentSkill(q, MageTemplate.CreatureEnchantment, out var creature, out _);
+        var creatureTrained = GearCasts.TryCurrentSkill(q, MageTemplate.CreatureEnchantment, out var creature, out _);
         GearCasts.TryCurrentSkill(q, MageTemplate.MeleeDefense, out var melee, out _);
         q.TryGetVitalLevels(MageTemplate.MaxHealth, out var health, out var healthMax);
         q.TryGetVitalLevels(MageTemplate.MaxStamina, out var stamina, out var staminaMax);
         q.TryGetVitalLevels(MageTemplate.MaxMana, out var mana, out var manaMax);
         var distance = at.ToGlobal().DistanceTo(here.ToGlobal());
         var (maxHealth, defence) = TargetStatsOf(target.Weenie.WeenieClassId);
+        if (GroundTargetOf(target.Weenie.WeenieClassId) is not { MaxHealth: > 0 } && WireMaxHealth(session, guid, target.Weenie.WeenieClassId, target.Name ?? "creature") is var wire and > 0)
+        {
+            maxHealth = wire; // M6 1 f: an outdoor ground's creatures carry no health row; M6 16 E1b: the appraisal is still asked once a class (the server's own word), and the bestiary's health stands until it answers (TargetStatsOf)
+        }
         var fraction = 1f;
-        var known = ReadHealth(objects, guid, clock, out var f, out var healthSource, out var healthAge); // M5 7 F20: the one live model
+        var known = ReadHealth(objects, guid, clock, out var f, out var healthSource, out var healthAge, Threat.HealthReader.FightPicker); // M5 7 F20: the one live model
         if (known)
         {
             fraction = f;
@@ -226,22 +254,34 @@ public sealed partial class FightScenario
         (s.TargetGuid, s.TargetName, s.TargetHealthFraction, s.TargetMaxHealth, s.TargetMagicDefense, s.Distance, s.LineClear) = (guid, target.Name ?? "creature", fraction, maxHealth, defence, distance, true);
         (s.TargetHealthSource, s.TargetHealthAge, s.TargetHealthUnknown) = (known ? TargetHealthModel.Name(healthSource) : null, healthAge, !known);
         s.DrainOffWhy = _live.DrainOff(guid, out var offWhy) ? offWhy : null;
+        s.TargetHealthDrainResistance = DrainResistOf(target.Weenie.WeenieClassId, target.Name); // M6 14 drain resistance: the drains' and Harm Other's share (FightDebuffs), and no drain offered at 0
         s.TargetStamina = 0; // TODO(f10-target-stamina): the profile carries no stamina; the attack picker does not read it
+        FightPicker.FillTargetStats(ref s, GroundTargetOf(target.Weenie.WeenieClassId)); // M6 3 a2: the profile's attributes and swing for this creature, zero when it has none (the debuffs that read them are skipped, named)
         var cap = LevelCapFor(q);
-        s.DebuffLevel = cap >= 7 ? 7 : cap >= 6 ? 6 : 0;
+        s.DebuffLevel = Math.Clamp(cap, 1, 7); // M6 1 f: the bolt's cap at this moment (slice a sets it from the ladder; the fight only reads it)
         s.AllowedDebuffs = AllowedDebuffsOf(target.Weenie.WeenieClassId);
+        var book = _options.ArenaHere ? null : session.State.Self.Spellbook;
+        FillDebuffBook(ref s, book, creatureTrained);
         FillDrainOffer(ref s, q, distance);
 
         // The bolt and F9's best war option.
         (s.BoltName, s.BoltMeanDamage, s.BoltCastSeconds, s.BoltBaseMana, s.BoltPower, s.BoltLevel) = (string.Empty, 0, 0, 0, 0, _level + 1);
         (s.WarName, s.WarSeconds, s.WarBoltSeconds, s.WarMana, s.WarLevel) = (null, 0, 0, 0, 0);
-        WarBuildOptions(q, _options.ArenaHere ? null : session.State.Self.Spellbook, war, session.State, clock);
+        WarBuildOptions(q, book, war, session.State, clock);
         _ringPredicted = 0;
         _volleyPredicted = 0;
         _ringCasts?.Tick(clock);
         _volleyCasts?.Tick(clock);
         if (_warPicks is not { Options.Count: > 0 } picks)
         {
+            // M6 1 f (f10-picker-data): no war option was built; the bolt's numbers come from the bolt the fight will cast (the SpellTable's mana and power, the projectile row's damage, the cast seconds the code holds).
+            if (_level >= 0 && _level < _levelIds.Length && _spells.TryGetValue(_levelIds[_level], out var hand))
+            {
+                FightPicker.FillBolt(ref s, FallbackWarPicker, hand.Id, hand.Name, hand.BaseMana, hand.Power, war, distance);
+            }
+
+            s.DebuffCastSeconds = DebuffCastSeconds(FallbackWarPicker.Settings);
+            SeedHealRate(in s);
             return true;
         }
 
@@ -253,7 +293,7 @@ public sealed partial class FightScenario
         s.BoltMeanDamage = picks.Picker.MeanHit(bolt, war);
         s.BoltCastSeconds = bolt.EffectSeconds + settings.CastOverheadSeconds + (bolt.Row.SpeedMetresPerSecond > 0 ? distance / bolt.Row.SpeedMetresPerSecond : 0);
         (s.BoltBaseMana, s.BoltPower, s.BoltLevel) = (bolt.BaseMana, bolt.Power, bolt.Row.Level);
-        s.DebuffCastSeconds = WarSpellData.EffectSeconds(WarKind.Bolt) + settings.CastOverheadSeconds; // TODO(f10-debuff-gesture): a Life or Creature cast at another is taken as the bolt's gesture
+        s.DebuffCastSeconds = DebuffCastSeconds(settings); // M6 1 f (f10-debuff-gesture closed): the measured seconds of the opener's casts, the bolt's gesture until one is measured
         SeedHealRate(in s);
         if (picks.Options.Count > 1)
         {
@@ -273,6 +313,112 @@ public sealed partial class FightScenario
         }
 
         return true;
+    }
+
+    /// <summary>M6 1 f: the bolt's numbers when no war option was built (F9's estimates: the gesture, the overhead, the crit and the rating).</summary>
+    private static readonly WarSpellPicker FallbackWarPicker = new(new WarPickSettings());
+
+    private readonly HashSet<string> _pickNoted = new(StringComparer.Ordinal); // M6 1 f: the once-only warnings (a ground's opener line the profile does not hold)
+
+    /// <summary>
+    /// M6 1 f (<c>f10-picker-data</c>): the maximum health of a creature class no ground row gives, from the wire. Check: a class answered before, or an appraisal answer held for the guid asked. Act: one appraisal (GameAction 0x00C8,
+    /// the Query lane, no hold) of the first creature of the class the picker meets; ACE answers every creature appraisal with the creature profile's health and maximum health, success or not (<c>CreatureProfile.cs:47-53</c>,
+    /// <c>AppraiseInfo.cs:568</c> @95ef426d; a class's weenie fixes its maximum health). Check: the answer on a later decision; an ask that completed without a health names the class once, <c>TODO(f10-picker-data)</c>, and is never repeated.
+    /// 0 while unknown. M6 16 E1b: the fight's read (<see cref="TargetStatsOf"/>) then gives the bestiary's health, so only a class the bestiary does not hold stays unscored (the picker then keeps the bolt); an answer that differs from
+    /// the bestiary's is named once, <c>TODO(engine-bestiary-health-differs)</c>.
+    /// </summary>
+    private int WireMaxHealth(IGameSessionView session, uint guid, uint wcid, string name)
+    {
+        if (_wireMaxHealth.TryGetValue(wcid, out var known))
+        {
+            return known;
+        }
+
+        if (_maxHealthUnknown.Contains(wcid))
+        {
+            return 0;
+        }
+
+        var asked = _maxHealthAsks.TryGetValue(wcid, out var ask);
+        var answeredGuid = asked ? ask.Guid : guid;
+        if (session.State.Appraisals.TryGet(answeredGuid, out var answer) && answer.CreatureHealthMax is { } max && max > 0)
+        {
+            _wireMaxHealth[wcid] = (int)max;
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"pick: {name} (class {wcid}) has a maximum health of {max} by its appraisal (0x{answeredGuid:X8}); the picker scores this class from now on"));
+            if (Bestiary.Find(wcid)?.Vitals.MaxHealth is > 0 and var recorded && recorded != (int)max)
+            {
+                // M6 16 E1b: the server's word and the tracked tables disagree (an enchantment on this one, or a table to regenerate): a finding, said once a class; the appraisal stands
+                _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"TODO(engine-bestiary-health-differs): {name} (class {wcid}): its appraisal gives a maximum health of {max}, the bestiary {recorded}; the appraisal stands for this fight"));
+            }
+
+            return (int)max;
+        }
+
+        if (!asked)
+        {
+            if (session.State.Objects.TryGet(guid, out _) && session.Actions.Identify(guid, ActionSource.Automation) is { } handle)
+            {
+                _maxHealthAsks[wcid] = (guid, handle);
+                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"pick: {name} 0x{guid:X8} (class {wcid}): no ground row gives its maximum health; appraising it once for the class (ACE's creature profile carries it)"));
+            }
+
+            return 0;
+        }
+
+        if (ask.Handle.IsCompleted)
+        {
+            _maxHealthUnknown.Add(wcid);
+            var stays = Bestiary.Find(wcid)?.Vitals.MaxHealth is > 0 and var recorded
+                ? string.Create(CultureInfo.InvariantCulture, $"the bestiary's {recorded} stands, named once") // M6 16 E1b: the class is scored on the tracked tables' health
+                : "this class stays unscored (the bolt), named once";
+            _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"TODO(f10-picker-data): {name} (class {wcid}): the appraisal of 0x{ask.Guid:X8} ended ({ask.Handle.Outcome?.Kind.ToString() ?? "no outcome"}) with no maximum health; {stays}"));
+        }
+
+        return 0;
+    }
+
+    /// <summary>M6 1 f: a bit per debuff kind whose spell at the cap level the spellbook holds, with its school trained (Life Magic is, or the snapshot was not filled); none read in the arena (no book).</summary>
+    private void FillDebuffBook(ref FightSnapshot s, Spellbook? book, bool creatureTrained)
+    {
+        s.KnownDebuffs = 0;
+        s.BookRead = book is not null;
+        if (book is null)
+        {
+            return;
+        }
+
+        var rows = Picker.Rows;
+        var level = Math.Min(s.DebuffLevel, 7);
+        foreach (var kind in DebuffKinds)
+        {
+            if (rows.Find(kind, level) is { } spell && book.Knows(spell.Id) && (spell.School == DebuffSchool.LifeMagic || creatureTrained))
+            {
+                s.KnownDebuffs |= FightPicker.Bit(kind);
+            }
+        }
+    }
+
+    private static readonly DebuffKind[] DebuffKinds = Enum.GetValues<DebuffKind>();
+
+    /// <summary>
+    /// M6 1 f (<c>f10-debuff-gesture</c> closed): a debuff's cast seconds are the measured mean of the opener's casts at another (<see cref="DebuffCastKey"/>); until one is measured, the bolt's gesture and overhead (the seed, named once).
+    /// </summary>
+    private double DebuffCastSeconds(WarPickSettings settings)
+    {
+        var measured = _heals.Seconds(DebuffCastKey, double.NaN);
+        if (!double.IsNaN(measured))
+        {
+            return measured;
+        }
+
+        var seed = WarSpellData.EffectSeconds(WarKind.Bolt) + settings.CastOverheadSeconds;
+        if (!_debuffSeedNoted)
+        {
+            _debuffSeedNoted = true;
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"pick: a debuff's cast seconds are the bolt's gesture and overhead ({seed:0.00} s) until an opener's cast is measured"));
+        }
+
+        return seed;
     }
 
     /// <summary>The debuff kinds the target's profile entry allows: its <c>opener</c> line (the hint and the default; F8).</summary>
@@ -295,11 +441,14 @@ public sealed partial class FightScenario
         return 0;
     }
 
-    /// <summary>Which Drain Health Other levels (VI 1242, VII 2328) are offered now: known, paid for, the mana over the floor and the target in range.</summary>
+    /// <summary>
+    /// Which Drain Health Other levels (VI 1242, VII 2328) are offered now: known, paid for, the mana over the floor and the target in range; M6 14 drain resistance: none on a target whose kind lets no drain through
+    /// (<see cref="FightSnapshot.TargetHealthDrainResistance"/> 0).
+    /// </summary>
     private void FillDrainOffer(ref FightSnapshot s, PlayerQualities q, double distance)
     {
         (s.DrainVI, s.DrainVII) = (false, false);
-        if (_drain.Count == 0 || !q.TryGetSkill(MageTemplate.LifeMagic, out var lifeSkill))
+        if (_drain.Count == 0 || s.TargetHealthDrainResistance is <= 0 || !q.TryGetSkill(MageTemplate.LifeMagic, out var lifeSkill))
         {
             return;
         }
@@ -358,7 +507,7 @@ public sealed partial class FightScenario
                 ref readonly var s = ref _snap;
                 var targetHealth = (uint)Math.Round(s.TargetMaxHealth * Math.Clamp(s.TargetHealthFraction, 0, 1));
                 var life = GearCasts.TryCurrentSkill(session.State.Self.Qualities, MageTemplate.LifeMagic, out var current, out _) ? current : (uint)Math.Round(s.LifeSkill);
-                var situation = new DrainSituation(s.Health, s.HealthMax, s.Mana, life, 0, targetHealth, (uint)Math.Round(s.TargetMagicDefense), s.Distance);
+                var situation = new DrainSituation(s.Health, s.HealthMax, s.Mana, life, 0, targetHealth, (uint)Math.Round(s.TargetMagicDefense), s.Distance, s.TargetHealthDrainResistance ?? 1.0);
                 return DrainBeatsHealSelf("pick", in levels[i], in situation, guid, out _, out _);
             }
         }
@@ -456,7 +605,7 @@ public sealed partial class FightScenario
         }
 
         var objects = session.State.Objects;
-        if (_killed.Contains(_target) || TargetGone(objects, _target) || !objects.TryGet(_target, out var target) || target.Position is not { } at)
+        if (_killed.Contains(_target) || TargetGone(objects, _target) || !objects.TryGet(_target, out var target) || StandsAt(session, target) is not { } at)
         {
             return false;
         }
@@ -486,8 +635,8 @@ public sealed partial class FightScenario
             return false;
         }
 
-        var held = LevelFloor.HeldFor(session.State, line.School);
-        var index = ChooseOpenerLevel(line, _spells, book, life, _buffOptions.CastChance, LevelCapFor(q), held is null ? null : info => LevelFloor.ShortOf(held, info, out var need) ? need : null, out var why);
+        var held = LevelFloor.HeldForAccount(session.State, line.School, _buffOptions.AccountName); // M6 1 h1
+        var index = ChooseOpenerLevel(line, _spells, book, life, _buffOptions.CastChance, LevelCapFor(q), held is null ? null : info => LevelFloor.ShortOf(held, info, out var need, _buffOptions.AccountName) ? need : null, out var why);
         if (index < 0)
         {
             NoteStaminaDrain("pick: Drain Stamina Other is not cast (" + why + "); Revitalize Self");
@@ -495,9 +644,9 @@ public sealed partial class FightScenario
         }
 
         var info = _spells[line.Spells[index].Id];
-        if (FightDebuffs.Find(DebuffKind.DrainStaminaOther, index + 1) is not { } drain)
+        if (Picker.Rows.Find(DebuffKind.DrainStaminaOther, index + 1) is not { } drain) // M6 1 h1 (f10-stamina-drain-row closed): the picker's rows, levels I to VII (DebuffRows.FromSpellTable)
         {
-            NoteStaminaDrain("pick: TODO(f10-stamina-drain-row): Drain Stamina Other level " + (index + 1).ToString(CultureInfo.InvariantCulture) + " has no transfer row in FightDebuffs; Revitalize Self");
+            NoteStaminaDrain("pick: Drain Stamina Other level " + (index + 1).ToString(CultureInfo.InvariantCulture) + " has no transfer row (the SpellTable lacks it: DebuffRows.FromSpellTable named it); Revitalize Self");
             return false;
         }
 
@@ -531,6 +680,14 @@ public sealed partial class FightScenario
             return false;
         }
 
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"pick: {info.Name} on {target.Name ?? "creature"} 0x{_target:X8} | stamina {drainRate:0.0} a second vs Revitalize Self {revitalizeRate:0.0} | hit {FightDebuffs.Chance(life, _snap.TargetMagicDefense) * 100:0}% | mana {mana:0.#} | why the stamina floor: the drain refills faster"));
+        StartStaminaDrain(session, clock, _target, line, index, info.Name, stamina, gainIfLanded);
+        return true;
+    }
+
+    /// <summary>Sends a Drain Stamina Other at <paramref name="guid"/>; <see cref="StaminaDrainStep"/> reads what it gave.</summary>
+    private void StartStaminaDrain(IGameSessionView session, double clock, uint guid, ProfileLine line, int index, string name, uint stamina, double gainIfLanded)
+    {
         if (_staminaDrainIds.Length != line.Spells.Count)
         {
             _staminaDrainIds = new uint[line.Spells.Count];
@@ -541,14 +698,13 @@ public sealed partial class FightScenario
             _staminaDrainIds[i] = line.Spells[i].Id;
         }
 
-        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"pick: {info.Name} on {target.Name ?? "creature"} 0x{_target:X8} | stamina {drainRate:0.0} a second vs Revitalize Self {revitalizeRate:0.0} | hit {FightDebuffs.Chance(life, _snap.TargetMagicDefense) * 100:0}% | mana {mana:0.#} | why the stamina floor: the drain refills faster"));
-        Picker.Count(info.Name);
+        Picker.Count(name);
         _staminaDrainCast ??= new CastAttempt(session.Actions, session.State, _log, _spells);
         _staminaDrainProof ??= new CastChatProof(session.State, _spells);
-        (_staminaDrainGuid, _staminaDrainBefore, _staminaDrainExpected) = (_target, stamina, gainIfLanded);
-        _staminaDrainCast.Start(new CastRequest { Levels = _staminaDrainIds, Index = index, Target = _target, Rules = StaminaDrainRules, Purpose = "fight stamina drain", Proof = _staminaDrainProof }, clock);
+        (_staminaDrainGuid, _staminaDrainBefore, _staminaDrainExpected) = (guid, stamina, gainIfLanded);
+        _staminaAskAt.Remove(guid); // M6 7 AN: its stamina is read again after the cast
+        _staminaDrainCast.Start(new CastRequest { Levels = _staminaDrainIds, Index = index, Target = guid, Rules = StaminaDrainRules, Purpose = "fight stamina drain", Proof = _staminaDrainProof }, clock);
         _manaPhase = ManaPhase.StaminaDrain;
-        return true;
     }
 
     /// <summary>The stamina drain's cast ends: counted; a cast that did not land (not a resist) sets the drain aside <see cref="FightRefill.AsideSeconds"/>; the order decides again.</summary>
@@ -575,12 +731,13 @@ public sealed partial class FightScenario
             _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: Drain Stamina Other landed; stamina {stamina} of {staminaMax} now"));
             MeasureStaminaDrain(stamina);
         }
-        else if (end != CastEnd.Resisted)
+        else if (end is not (CastEnd.Resisted or CastEnd.InTheAir)) // M6 14 airborne: held in the air is the moment's: the drain is not set aside
         {
             _staminaDrainAsideUntil = clock + FightRefill.AsideSeconds;
             _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: Drain Stamina Other did not land ({end.Name()}: {report.Why}); set aside {FightRefill.AsideSeconds:0} s: Revitalize Self"));
         }
 
+        NoteManaLoopAfter(session, "drain", end.Succeeded()); // M6 8 H: the check after the act: what it really gave
         ReadRefill(session);
         _manaPhase = ManaPhase.Decide;
         return ScenarioStatus.Running;
@@ -607,6 +764,7 @@ public sealed partial class FightScenario
         var gain = after > before ? after - before : 0u;
         var share = Math.Clamp(gain / expected, 0, 1);
         _staminaDrainYield[guid] = share;
+        _drainedFrom[guid] = _drainedFrom.GetValueOrDefault(guid) + gain; // M6 14: an unread creature's assumed stamina is its kind's read less this
         _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: Drain Stamina Other on 0x{guid:X8} gave {gain} stamina of the {expected:0.#} expected ({share:P0}){(share < StaminaDrainMinYieldShare ? "; set aside for this target: Revitalize Self takes over" : string.Empty)}"));
     }
 
@@ -626,6 +784,7 @@ public sealed partial class FightScenario
             if (!objects.TryGet(guid, out _))
             {
                 _staminaDrainYield.Remove(guid);
+                _drainedFrom.Remove(guid);
                 return; // one a frame: no allocation, the next frame takes the next
             }
         }
@@ -643,14 +802,9 @@ public sealed partial class FightScenario
     /// <summary>The opener landed: the debuff goes in the picker's ledger with its magnitude and its duration from now.</summary>
     private void NoteOpenerLanded(uint guid, string spell, double clock)
     {
-        var spells = FightDebuffs.Spells;
-        for (var i = 0; i < spells.Count; i++)
+        if (Picker.Rows.Named(spell) is { } row) // M6 1 f: every level I to VII the rows hold
         {
-            if (string.Equals(spells[i].Name, spell, StringComparison.Ordinal))
-            {
-                Picker.NoteLanded(guid, spells[i].Kind, spells[i].Magnitude, clock + spells[i].DurationSeconds);
-                return;
-            }
+            Picker.NoteLanded(guid, row.Kind, row.Magnitude, clock + row.DurationSeconds);
         }
     }
 }

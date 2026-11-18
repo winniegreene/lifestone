@@ -21,8 +21,9 @@ namespace Lifestone.Client.Movement.Wayfinding;
 /// </summary>
 /// <remarks>
 /// <para><b>Shadows.</b> A tile is built with the attached neighbours (<see cref="NavBuildOptions.Neighbours"/>): a static of a neighbour whose footprint
-/// reaches over the border is stamped as a "shadow". When a landblock attaches after its neighbour's tile was built and has shadows that fall in that
-/// neighbour, the neighbour's tile is built again (counted in <see cref="TileRebuilds"/>); a tile built after its neighbours needs nothing more. When a
+/// reaches over the border is stamped as a "shadow", and so are a neighbour's sea wall, its too-steep land near the border and its statics whose solid
+/// reaches over without a shadow. When a landblock attaches after a neighbour's tile was built, that neighbour's tile is built again (counted in
+/// <see cref="TileRebuilds"/>), since any of these may change it; a tile built after its neighbours needs nothing more. When a
 /// landblock detaches, the neighbours' tiles keep its old shadows (conservative: an obstacle that is no longer there is avoided, never walked into),
 /// and the tile is built fresh when the landblock attaches again. A tile build whose landblock was released meanwhile is dropped.</para>
 /// <para><b>Threads.</b> The collision build and the tile build run on the workers (read-only on the attached blocks); every attach, detach, event
@@ -87,16 +88,17 @@ public sealed class HeadlessStreamer : IDisposable
     /// <param name="log">Where it logs.</param>
     /// <param name="workers">The worker threads (default <see cref="WorkerCount"/>).</param>
     /// <param name="tileOptions">The tile build's options without neighbours (default <see cref="NavBuildOptions.Default"/>).</param>
-    public HeadlessStreamer(DatSet dats, PhysicsGeometryLibrary? geometry, PhysicsWorld world, NavMap? map, ILogSink log, int workers = WorkerCount, NavBuildOptions? tileOptions = null)
+    /// <param name="build">Builds one landblock's collision (null: a new builder over <paramref name="dats"/>). The world walk shares one store of finished landblocks across its worlds.</param>
+    public HeadlessStreamer(DatSet dats, PhysicsGeometryLibrary? geometry, PhysicsWorld world, NavMap? map, ILogSink log, int workers = WorkerCount, NavBuildOptions? tileOptions = null, Func<LandblockCoord, CancellationToken, LandblockCollision>? build = null)
     {
         ArgumentNullException.ThrowIfNull(dats);
         ArgumentNullException.ThrowIfNull(world);
         ArgumentNullException.ThrowIfNull(log);
-        var builder = new LandblockCollisionBuilder(dats, geometry ?? new PhysicsGeometryLibrary(dats));
+        build ??= new LandblockCollisionBuilder(dats, geometry ?? new PhysicsGeometryLibrary(dats)).Build;
         (_world, _map, _log) = (world, map, log);
         _tileOptions = tileOptions ?? NavBuildOptions.Default;
         _workers = new WorkerPool(workers);
-        _collision = new CollisionStreamer(world, (coord, cancellation) => builder.Build(coord, cancellation), _workers, log);
+        _collision = new CollisionStreamer(world, build, _workers, log);
         _collision.BlockAttached += OnAttached;
         _collision.BlockReleased += OnReleased;
         _budget.Error = e => _log.Error(LogCategory, "an attach on the frame budget threw", new LogField("error", e.GetType().Name), new LogField("message", e.Message));
@@ -120,7 +122,7 @@ public sealed class HeadlessStreamer : IDisposable
     /// <summary>Tiles built (the first build of each attach).</summary>
     public int TileBuilds { get; private set; }
 
-    /// <summary>Tiles built again because a landblock attached later and casts shadows into them.</summary>
+    /// <summary>Tiles built again because a neighbouring landblock attached later.</summary>
     public int TileRebuilds { get; private set; }
 
     /// <summary>Tile builds that threw (each logged once; the landblock counts as settled without a tile).</summary>
@@ -184,7 +186,9 @@ public sealed class HeadlessStreamer : IDisposable
         }
 
         var here = NavMap.FromCellFrame(body).Global;
-        var waypoints = runner.Path is { } path ? path.Waypoints.Select(w => w.Point.Global).ToArray() : [];
+        var waypoints = runner.Path is { } path
+            ? path.Waypoints.Select(w => w.Point.Global).Concat(path.Corridor.Select(id => new Vector2(((id >> 24) + 0.5f) * 192f, (((id >> 16) & 0xFF) + 0.5f) * 192f))).ToArray()
+            : [];
         var goal = runner.Goal?.Point.Global ?? here;
         var ahead = AheadBlocks(here, waypoints, goal, AheadLandblocks);
         var changed = !ahead.Select(id => LandblockCoord.FromId(id)).SequenceEqual(_collision.Corridor);
@@ -466,11 +470,14 @@ public sealed class HeadlessStreamer : IDisposable
         }
 
         StartTile(coord, rebuild: false);
+
+        // A neighbour's tile is rebuilt: this landblock's shadows, sea wall, too-steep land near the border and statics reaching over it all change that tile
+        // (the world walk's land seams and border statics). A tile build is a few milliseconds on a worker.
         for (var dx = -1; dx <= 1; dx++)
         {
             for (var dy = -1; dy <= 1; dy++)
             {
-                if ((dx != 0 || dy != 0) && coord.Offset(dx, dy) is { } near && _jobs.TryGetValue(near, out var job) && (job.Done || job.Task is not null) && CastsShadowsInto(block, near))
+                if ((dx != 0 || dy != 0) && coord.Offset(dx, dy) is { } near && _jobs.TryGetValue(near, out var job) && (job.Done || job.Task is not null))
                 {
                     StartTile(near, rebuild: true);
                 }
@@ -493,19 +500,6 @@ public sealed class HeadlessStreamer : IDisposable
         }
 
         _map.Detach(TileId(coord));
-    }
-
-    private static bool CastsShadowsInto(LandblockCollision block, LandblockCoord target)
-    {
-        foreach (var shadow in block.ForeignShadows)
-        {
-            if (LandblockCoord.FromId(shadow.CellId) == target)
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     /// <summary>Starts the tile build of an attached landblock on a worker with the neighbours attached now; a build still running for it is cancelled and dropped.</summary>
@@ -549,8 +543,10 @@ public sealed class HeadlessStreamer : IDisposable
     }
 
     /// <summary>
-    /// TODO(nav-water-corner), where it bites: a tile with water nodes is flagged by the whole 24 m land cell (the finer corner data is private to
-    /// the collision set), so a shore walk may be refused that retail allows. Logged once per landblock, with the node count.
+    /// The water a tile flags, logged once per landblock with the node count: a land cell with any water corner flags all its nodes (costed, never
+    /// blocked), an entirely flooded landblock is all blocked (<c>NavTileBuilder</c>'s sea wall). The former <c>TODO(nav-water-corner)</c> is closed by
+    /// evidence (M6 4 w3): the island's partly flooded landblocks were walked and confirmed (<c>IslandRunDatTests</c>: wades of 991 to 1,083 m over 54 to 57
+    /// flagged land cells to the Holding, 0 refusals), so no shore walk was refused for the per-cell flag.
     /// </summary>
     private void LogWaterOnce(LandblockCoord coord, NavTile tile)
     {
@@ -570,7 +566,7 @@ public sealed class HeadlessStreamer : IDisposable
 
         if (water > 0)
         {
-            _log.Info(LogCategory, "TODO(nav-water-corner): water is flagged by whole land cells; a shore may be refused that retail allows", new LogField("landblock", coord.ToString()), new LogField("water_nodes", water));
+            _log.Info(LogCategory, "water flagged by whole land cells (costed; an entirely flooded landblock is a wall)", new LogField("landblock", coord.ToString()), new LogField("water_nodes", water));
         }
     }
 

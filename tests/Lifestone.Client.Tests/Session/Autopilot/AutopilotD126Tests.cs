@@ -64,6 +64,7 @@ public sealed class AutopilotD126Tests(ITestOutputHelper output)
             fights.Add(wrapped);
             return wrapped;
         };
+        w.Factory.Script = spec => spec.Kind == StationKinds.Logistics ? new ScriptedRun(spec.Name, _ => ScenarioStatus.Succeeded, () => "sold=3 bought=2") : null; // M6 6 ME: a trip that sold or bought joins the mean
         var autopilot = w.Autopilot(new AutopilotOptions { TripAfterKills = 2 });
         Assert.Equal(AutopilotScenario.TripSeedSeconds, autopilot.TripMeanSeconds);
         w.Run(autopilot, a => a.Cycles == 1 && a.State == AutopilotState.Fight);
@@ -72,10 +73,36 @@ public sealed class AutopilotD126Tests(ITestOutputHelper output)
 
         Assert.Contains(StationKinds.Logistics, w.Factory.Made.Select(s => s.Kind));
         var leave = Assert.Single(fights.SelectMany(f => f.Leaves));
-        Assert.Equal(AutopilotScenario.TripSeedSeconds + new Lifestone.Client.Session.Mage.BuffOptions().LookaheadMarginSeconds, leave.Horizon); // 120 + 60
+        Assert.Equal(AutopilotScenario.TripSeedSeconds + new Lifestone.Client.Session.Mage.BuffOptions().LookaheadMarginSeconds, leave.Horizon); // the seed + 60
         Assert.False(leave.Stopped, "asked before the stop");
-        Assert.StartsWith("forced-trip: the trip's mean 120 s + margin 60 s", leave.Detail, StringComparison.Ordinal);
+        Assert.StartsWith($"forced-trip: the trip's mean {AutopilotScenario.TripSeedSeconds:0} s + margin 60 s", leave.Detail, StringComparison.Ordinal);
         Assert.Contains(w.Lines, l => l.Contains("autopilot trip: it took ", StringComparison.Ordinal) && l.Contains("the trip's mean is now ", StringComparison.Ordinal));
         Assert.NotEqual(AutopilotScenario.TripSeedSeconds, autopilot.TripMeanSeconds);
+    }
+
+    /// <summary>M6 6 ME (<c>m6-trip-mean-empty</c>): a trip that sold and bought nothing does not join the mean; one that did, does.</summary>
+    [Theory]
+    [InlineData("sold=0 bought=0", false)]
+    [InlineData("sold=0 bought=2", true)]
+    [InlineData("sold=3 bought=0", true)]
+    public void Only_a_trip_that_sold_or_bought_joins_the_trips_mean(string fields, bool folds)
+    {
+        var w = new ApWorld(Den, output);
+        w.Factory.Script = spec => spec.Kind == StationKinds.Logistics ? new ScriptedRun(spec.Name, _ => ScenarioStatus.Succeeded, () => fields) : null;
+        var autopilot = w.Autopilot(new AutopilotOptions { TripAfterKills = 2 });
+        w.Run(autopilot, a => a.State == AutopilotState.Fight && w.Factory.Made.Any(s => s.Kind == StationKinds.Logistics));
+
+        Assert.Contains(StationKinds.Logistics, w.Factory.Made.Select(s => s.Kind));
+        if (folds)
+        {
+            Assert.NotEqual(AutopilotScenario.TripSeedSeconds, autopilot.TripMeanSeconds);
+            Assert.Contains(w.Lines, l => l.Contains("the trip's mean is now ", StringComparison.Ordinal));
+        }
+        else
+        {
+            Assert.Equal(AutopilotScenario.TripSeedSeconds, autopilot.TripMeanSeconds);
+            Assert.Contains(w.Lines, l => l.Contains("sold and bought nothing: it does not join the trip's mean", StringComparison.Ordinal));
+            Assert.True(double.IsNaN(autopilot.Seed.TripMeanSeconds));
+        }
     }
 }

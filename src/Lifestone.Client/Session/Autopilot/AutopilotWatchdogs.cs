@@ -24,12 +24,14 @@ public sealed class AutopilotWatchdogs
     private double _since = double.NaN;
     private int _recoveries;
     private readonly double _fightBase;
+    private readonly double _passBase;
 
     /// <summary>Watchdogs with the bounds scaled by <paramref name="scale"/>.</summary>
     /// <param name="scale">The factor on every base bound (greater than 0; 1 is the default).</param>
     /// <param name="maxRecoveries">The recoveries a cycle may make (0 or more).</param>
     /// <param name="fightBaseSeconds">The fight's base bound without a kill (default <see cref="BaseSeconds"/>'s 900; the scenario passes <see cref="FightBaseSeconds"/> of its ground).</param>
-    public AutopilotWatchdogs(double scale = 1, int maxRecoveries = DefaultMaxRecoveries, double fightBaseSeconds = 0)
+    /// <param name="passBaseSeconds">The base bound of a buff state on a climber's run (<see cref="ClimberPassSeconds"/>); 0 keeps <see cref="BaseSeconds"/>.</param>
+    public AutopilotWatchdogs(double scale = 1, int maxRecoveries = DefaultMaxRecoveries, double fightBaseSeconds = 0, double passBaseSeconds = 0)
     {
         if (!(scale > 0) || !double.IsFinite(scale))
         {
@@ -42,7 +44,13 @@ public sealed class AutopilotWatchdogs
             throw new ArgumentOutOfRangeException(nameof(fightBaseSeconds), fightBaseSeconds, "the fight's base bound must be 0 (the default) or a positive number");
         }
 
+        if (!(passBaseSeconds >= 0) || !double.IsFinite(passBaseSeconds))
+        {
+            throw new ArgumentOutOfRangeException(nameof(passBaseSeconds), passBaseSeconds, "the pass's base bound must be 0 (the default) or a positive number");
+        }
+
         _fightBase = fightBaseSeconds > 0 ? fightBaseSeconds : BaseSeconds(AutopilotState.Fight);
+        _passBase = passBaseSeconds;
         Scale = scale;
         MaxRecoveries = maxRecoveries;
     }
@@ -58,7 +66,7 @@ public sealed class AutopilotWatchdogs
 
     /// <summary>
     /// The base bound of <paramref name="state"/>, in seconds (Lifestone's own, about twice the stations' own limits): the known state 90 (it waits 60 s for the player to be present), the buff 300 (the station's limit is 200), the travel 150
-    /// (60 and 30), the fight 900 without a kill (the default for a ground that lists no generator; the scenario passes <see cref="FightBaseSeconds"/> of its ground instead, M5 4 F1), the upkeep 300, the trip 900 (the station's limit is 600), the death 900 (280 and the rearm's shopping); the stopped state has none (0).
+    /// (60 and 30), the fight 900 without a kill (the default for a ground that lists no generator; the scenario passes <see cref="FightBaseSeconds"/> of its ground instead, M5 4 F1), the upkeep 300, the trip 900 without progress (its stations' limits are 2,100 s and 3,000 s: the body moving 10 m is the trip's progress, M6 4 F1, 4-R7), the death 900 (280 and the rearm's shopping); the stopped state has none (0).
     /// </summary>
     /// <param name="state">The state.</param>
     public static double BaseSeconds(AutopilotState state) => state switch
@@ -92,7 +100,17 @@ public sealed class AutopilotWatchdogs
 
     /// <summary>The bound of <paramref name="state"/> with the scale applied (0: none).</summary>
     /// <param name="state">The state.</param>
-    public double BoundSeconds(AutopilotState state) => (state == AutopilotState.Fight ? _fightBase : BaseSeconds(state)) * Scale;
+    public double BoundSeconds(AutopilotState state) => (state == AutopilotState.Fight ? _fightBase : _passBase > 0 && state is AutopilotState.Buff or AutopilotState.Upkeep ? _passBase : BaseSeconds(state)) * Scale;
+
+    /// <summary>
+    /// M6 7 AO: a climber's pass waits for mana up to the ladder's named limit (<see cref="LadderVitals.BuffPassWaitSeconds"/>, 900 s) and then ends done (M6 7 AN), so the buff state's bound is that limit plus its own base: 300 s alone would cut the first whole pass (about 650 mana on a pool of 165, the AK note) every time.
+    /// </summary>
+    /// <param name="vitals">The ladder's vitals data.</param>
+    public static double ClimberPassSeconds(LadderVitals vitals)
+    {
+        ArgumentNullException.ThrowIfNull(vitals);
+        return vitals.BuffPassWaitSeconds + BaseSeconds(AutopilotState.Buff);
+    }
 
     /// <summary>
     /// A state was entered but its station has not started (the keeper's vitals pass and the peace come first, each with its own bound: 420 s and 15 s): the state's clock does not run until <see cref="Enter"/> is called again when the
@@ -120,6 +138,10 @@ public sealed class AutopilotWatchdogs
 
     /// <summary>A cycle ended: the recoveries count starts again.</summary>
     public void NewCycle() => _recoveries = 0;
+
+    /// <summary>Takes the cycle's recoveries from the scenario a re-seat replaced.</summary>
+    /// <param name="recoveries">The recoveries so far this cycle.</param>
+    public void RestoreRecoveries(int recoveries) => _recoveries = recoveries;
 
     /// <summary>The state is held (a reconnect is under way): its clock starts again, the recoveries are kept.</summary>
     /// <param name="now">The session clock.</param>

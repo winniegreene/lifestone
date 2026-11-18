@@ -4,7 +4,7 @@ using System.Runtime;
 namespace Lifestone.Client.RetailUi.Screens;
 
 /// <summary>
-/// M4 1.1 s4 and its fix (<c>TODO(m3-ui-step-gc-margin)</c>): one no-GC window (<see cref="GC.TryStartNoGCRegion(long, bool)"/>) over the staged shell build. Only the instance whose start returned true
+/// M4 1.1 s4 and its fix (<c>m3-ui-step-gc-margin (closed)</c>): one no-GC window (<see cref="GC.TryStartNoGCRegion(long, bool)"/>) over the staged shell build. Only the instance whose start returned true
 /// owns the process's region and ends it (a static owner), so a screen that was refused, or whose region ended early, never ends another screen's. The budget is per server-GC heap, so the request is sized
 /// from the heap count (<see cref="RequestBytes"/>).
 /// <para>M4 P5b (<c>TODO(m4-throwaway-teleport-frame)</c>): <see cref="GC.EndNoGCRegion"/> leaves gen 0's allocation budget at the region's size, so after a held window the next collection waited

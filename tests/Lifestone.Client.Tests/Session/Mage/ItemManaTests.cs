@@ -190,4 +190,62 @@ public sealed class ItemManaTests
         Assert.Contains(chat, l => l.Contains("kind=System type=7 text=\"Your Compass is out of Mana.\"", StringComparison.Ordinal));
         Assert.Contains(chat, l => l.Contains("text=\"Your Arcane Lore is too low to use that item's magic.\"", StringComparison.Ordinal) && !l.Contains("text=\"\"", StringComparison.Ordinal));
     }
+
+    [Fact]
+    public void The_keeper_asks_the_caster_rule_first_a_swap_or_a_rewield_is_the_callers_and_a_due_caster_outside_the_worn_list_is_refilled()
+    {
+        var atlan = new WornMana(0xA0000001, "Atlan Wand", 181, 500, -500.0 / (5.5 * 3600));
+        HeldStone[] charged = [new(30, "High Mana Charge", 500, 1)];
+        ManaOffer[] cindrue = [new(2304, "Archmage Cindrue", 4615, 3375)];
+
+        var refill = ItemManaKeeper.Next([], charged, [], Me, null, new CasterManaInput(atlan, false, [], cindrue));
+        Assert.Equal(ItemManaAct.Refill, refill.Act);
+        Assert.Equal(30u, refill.Stone);
+        Assert.Equal(CasterManaAct.RefillDue, refill.Caster!.Value.Act);
+
+        var out0 = atlan with { Mana = 0 };
+        var spare = new WornMana(0xA0000003, "Spare Wand", 200, 200, -0.01);
+        var swap = ItemManaKeeper.Next([out0], charged, [], Me, null, new CasterManaInput(out0, true, [spare], cindrue));
+        Assert.Equal(ItemManaAct.None, swap.Act);
+        Assert.Equal(CasterManaAct.SwapToSpare, swap.Caster!.Value.Act);
+        Assert.StartsWith("caster mana: Atlan Wand 0/500 0h -> SwapToSpare (", swap.ToString(), StringComparison.Ordinal);
+
+        var back = atlan with { Mana = 500 };
+        var rewield = ItemManaKeeper.Next([back], [], [], Me, null, new CasterManaInput(back, true, [], cindrue));
+        Assert.Equal(ItemManaAct.None, rewield.Act);
+        Assert.Equal(CasterManaAct.Rewield, rewield.Caster!.Value.Act);
+    }
+
+    [Fact]
+    public void A_low_caster_with_no_charged_stone_closes_m5_stone_short_with_the_want_and_without_a_caster_the_old_TODO_stays()
+    {
+        var atlan = new WornMana(0xA0000001, "Atlan Wand", 100, 500, -500.0 / (5.5 * 3600));
+        HeldStone[] empty = [new(32, "Lesser Mana Stone", null, 0.25)];
+        ManaOffer[] cindrue = [new(2304, "Archmage Cindrue", 4614, 2025), new(2304, "Archmage Cindrue", 4615, 3375)];
+
+        var step = ItemManaKeeper.Next([atlan], empty, [], Me, null, new CasterManaInput(atlan, false, [], cindrue));
+        Assert.Equal(ItemManaAct.None, step.Act);
+        Assert.Equal(CasterManaAct.WantStone, step.Caster!.Value.Act);
+        Assert.Equal(4615u, step.Caster.Value.WantWcid);
+        Assert.Contains("want 1 x wcid 4615", step.Why, StringComparison.Ordinal);
+        Assert.DoesNotContain("TODO(m5-stone-short)", step.Why, StringComparison.Ordinal);
+
+        Assert.Contains("TODO(m5-stone-short)", ItemManaKeeper.Next([atlan], empty, [], Me).Why, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_caster_input_with_a_full_caster_changes_nothing_for_the_worn_items()
+    {
+        var atlan = new WornMana(0xA0000001, "Atlan Wand", 500, 500, -500.0 / (5.5 * 3600));
+        var low = new WornMana(1, "Compass", 400, 1000, -0.02);
+        HeldStone[] stones = [new(11, "Greater Mana Stone", 700)];
+
+        var plain = ItemManaKeeper.Next([low, atlan], stones, [], Me);
+        var asked = ItemManaKeeper.Next([low, atlan], stones, [], Me, null, new CasterManaInput(atlan, false, [], []));
+
+        Assert.Equal(plain.Act, asked.Act);
+        Assert.Equal(plain.Stone, asked.Stone);
+        Assert.Equal(plain.Why, asked.Why);
+        Assert.Equal(CasterManaAct.None, asked.Caster!.Value.Act);
+    }
 }

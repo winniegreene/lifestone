@@ -51,7 +51,12 @@ public static class GroundCatalog
     /// <summary>The profile of <paramref name="key"/>.</summary>
     /// <param name="key">The profile's key (its file name without <c>.json</c>).</param>
     /// <exception cref="KeyNotFoundException">No profile has the key.</exception>
-    public static HuntingGround Get(string key)
+    public static HuntingGround Get(string key) =>
+        TryGet(key) ?? throw new KeyNotFoundException($"no hunting-ground profile '{key}' (known: {string.Join(", ", All.Select(g => g.Key))})");
+
+    /// <summary>The profile of <paramref name="key"/>, or null when no profile has it (M6 item 0 a1: the ladder's pending rungs are checked against it).</summary>
+    /// <param name="key">The profile's key (its file name without <c>.json</c>).</param>
+    public static HuntingGround? TryGet(string key)
     {
         foreach (var g in All)
         {
@@ -61,7 +66,7 @@ public static class GroundCatalog
             }
         }
 
-        throw new KeyNotFoundException($"no hunting-ground profile '{key}' (known: {string.Join(", ", All.Select(g => g.Key))})");
+        return null;
     }
 
     /// <summary>The embedded profile text of a file name (the key plus <c>.json</c>), or null.</summary>
@@ -189,6 +194,38 @@ public static class GroundCatalog
 
         public uint Hex(string name) => reader.Hex(Take(name), $"{path}.{name}");
 
+        /// <summary>M6 3 a1: a known optional hex mask: 0 when the field is absent, else read as strictly as <see cref="Hex"/> and above 0 (a mask of 0 says nothing: leave the field out).</summary>
+        public uint OptionalHex(string name)
+        {
+            _taken.Add(name);
+            if (!Has(name))
+            {
+                return 0;
+            }
+
+            var v = Hex(name);
+            return v != 0 ? v : throw reader.Fail($"{path}.{name}", "is 0 (leave the field out when the mask is not given)");
+        }
+
+        /// <summary>M6 3 a1: a required whole number that may be null (a property the weenie does not have): null for a JSON null, else read as strictly as <see cref="Int"/>.</summary>
+        public int? NullableInt(string name, int min, int max)
+        {
+            var e = Take(name);
+            return e.ValueKind == JsonValueKind.Null ? null : reader.Int(e, $"{path}.{name}", min, max);
+        }
+
+        /// <summary>M6 3 a1: a required true or false.</summary>
+        public bool Bool(string name)
+        {
+            var e = Take(name);
+            return e.ValueKind switch
+            {
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
+                _ => throw reader.Fail($"{path}.{name}", $"is {e.ValueKind}, not true or false"),
+            };
+        }
+
         public Vector3 Point(string name) => reader.Point(Take(name), $"{path}.{name}");
 
         /// <summary>A known optional point: null when the field is absent, else read as strictly as <see cref="Point"/> (a JSON null or a malformed point fails, naming the field).</summary>
@@ -203,6 +240,43 @@ public static class GroundCatalog
         {
             _taken.Add(name);
             return element.EnumerateObject().Any(p => p.NameEquals(name)) ? Text(name) : null;
+        }
+
+        /// <summary>
+        /// M6 16 Q12: this creature's optional <c>from_bestiary</c> list: the facts the loader reads from the bestiary's tables instead of the profile (a creature is named by its weenie class, its numbers are the bestiary's). Each name
+        /// must be one of <paramref name="known"/>, listed once and not also stated here (one source for a fact). Empty when the field is absent.
+        /// </summary>
+        /// <param name="known">The fact names this kind of creature may take from the bestiary.</param>
+        public HashSet<string> FromBestiary(params string[] known)
+        {
+            _taken.Add("from_bestiary");
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            if (!Has("from_bestiary"))
+            {
+                return names;
+            }
+
+            reader.List(Take("from_bestiary"), $"{path}.from_bestiary", (e, p) =>
+            {
+                var name = reader.Text(e, p);
+                if (!known.Contains(name, StringComparer.Ordinal))
+                {
+                    throw reader.Fail(p, $"'{name}' is out of range ({string.Join(", ", known)})");
+                }
+
+                if (Has(name))
+                {
+                    throw reader.Fail(p, $"'{name}' is also stated in this creature (a fact has one source: leave it out or take it from the bestiary)");
+                }
+
+                if (!names.Add(name))
+                {
+                    throw reader.Fail(p, $"'{name}' is listed twice");
+                }
+
+                return name;
+            });
+            return names;
         }
 
         /// <summary>True when the object has a field of this name (an optional section).</summary>
@@ -259,6 +333,55 @@ public static class GroundCatalog
         private IReadOnlyList<ushort> _landblocks = [];
 
         public GroundProfileException Fail(string path, string problem) => new(file, path, problem);
+
+        /// <summary>M6 16 Q12: the bestiary's tables' numbers of a creature a profile takes numbers from (<c>from_bestiary</c>); the load fails, naming the creature, when a table does not hold it.</summary>
+        private Creatures.TableFacts TableOf(uint wcid, string path) =>
+            Creatures.Bestiary.TableFactsOf(wcid) ?? throw Fail($"{path}.from_bestiary", $"weenie {wcid} is not in the bestiary's tables (a creature named by reference must be a kind of the bestiary)");
+
+        /// <summary>M6 16 Q12: a number the bestiary gives, held to the range the profile's own field is read in (a value out of it fails the load, naming the field).</summary>
+        private int Checked(int value, int min, int max, string path) => value >= min && value <= max ? value : throw Fail(path, $"{value} (the bestiary's) is out of range ({min} to {max})");
+
+        private double Checked(double value, double min, double max, string path) => value >= min && value <= max ? value : throw Fail(path, $"{value} (the bestiary's) is out of range ({min} to {max})");
+
+        private long Checked(long value, long min, long max, string path) => value >= min && value <= max ? value : throw Fail(path, $"{value} (the bestiary's) is out of range ({min} to {max})");
+
+        /// <summary>
+        /// M6 7 AB: the optional rest before the next pull of <c>fight</c>: null when neither floor is written (no rest rule, the den's case); with a floor the until share, the posture and the sight reach are required, the until at least both floors.
+        /// </summary>
+        private Vitals.GroundPullRest? PullRestOf(Section fight)
+        {
+            var mana = fight.OptionalInt("pull_mana_percent", 1, 100);
+            var health = fight.OptionalInt("pull_health_percent", 1, 100);
+            var stamina = fight.OptionalInt("pull_stamina_percent", 1, 100); // M6 7 AN
+            var full = fight.OptionalInt("pull_full_percent", 1, 100); // M6 7 AN: the owner's fullness bar
+            if (mana == 0 && health == 0 && stamina == 0 && full == 0)
+            {
+                return null;
+            }
+
+            var until = fight.Int("pull_rest_until_percent", 1, 100);
+            if (until < mana || until < health || until < stamina)
+            {
+                throw Fail("$.fight.pull_rest_until_percent", $"{until} is under a floor (pull_mana_percent {mana}, pull_health_percent {health}, pull_stamina_percent {stamina})");
+            }
+
+            var posture = fight.Text("pull_rest_posture") switch
+            {
+                "sit" => Vitals.RestPosture.Sit,
+                "lie" => Vitals.RestPosture.Lie,
+                "stand" => Vitals.RestPosture.Stand,
+                var other => throw Fail("$.fight.pull_rest_posture", $"'{other}' is not sit, lie or stand"),
+            };
+            var potions = fight.OptionalInt("pull_rest_potions", 1, 1) == 1; // M6 8: a held Mana Potion is drunk before a rest for mana
+            var potionMana = fight.OptionalInt("pull_potion_mana_percent", 1, 100); // M6 8 (the owner, 2026-11-11): the mana's line while potions are in use
+            var potionStamina = fight.OptionalInt("pull_potion_stamina_percent", 1, 100); // M6 8: the stamina's floor in the bar's place
+            if (!potions && (potionMana != 0 || potionStamina != 0))
+            {
+                throw Fail("$.fight.pull_potion_mana_percent", "a potion line needs pull_rest_potions 1");
+            }
+
+            return new Vitals.GroundPullRest(mana, health, until, posture, fight.Number("pull_aggro_metres", 1, 100), stamina, full, potions, potionMana, potionStamina);
+        }
 
         public HuntingGround Read(JsonElement root)
         {
@@ -346,16 +469,52 @@ public static class GroundCatalog
             var targets = top.List("targets", (e, p) =>
             {
                 var s = Object(e, p, nullable: false)!;
-                var role = s.Text("role") switch
+                var roleText = s.Text("role");
+                var role = roleText switch
                 {
-                    "target" => GroundRole.Target,
+                    "target" or "kill-first" => GroundRole.Target, // M6 3 a1: a kill-first creature is a target the pick orders first (KillFirst), so every Role == Target check holds
                     "avoid" => GroundRole.Avoid,
-                    var other => throw Fail($"{p}.role", $"'{other}' is out of range (target or avoid)"),
+                    var other => throw Fail($"{p}.role", $"'{other}' is out of range (target, kill-first or avoid)"),
                 };
-                var t = new GroundTarget((uint)s.Int("wcid", 1, int.MaxValue), s.Text("name"), s.Int("level", 1, 10000), role, s.OptionalInt("max_health", 1, 1_000_000), s.OptionalInt("magic_defence", 1, 10_000), s.OptionalText("opener"));
+                var wcid = (uint)s.Int("wcid", 1, int.MaxValue);
+                var name = s.Text("name");
+                var level = s.Int("level", 1, 10000);
+                var moved = s.FromBestiary("max_health", "magic_defence", "xp", "resist_health_drain"); // M6 16 Q12: the creature's numbers by reference
+                var table = moved.Count > 0 ? TableOf(wcid, p) : default;
+                var t = new GroundTarget(wcid, name, level, role, moved.Contains("max_health") ? Checked(table.MaxHealth, 1, 1_000_000, $"{p}.max_health") : s.OptionalInt("max_health", 1, 1_000_000), moved.Contains("magic_defence") ? Checked(table.MagicDefence, 1, 10_000, $"{p}.magic_defence") : s.OptionalInt("magic_defence", 1, 10_000), s.OptionalText("opener"))
+                {
+                    KillFirst = roleText == "kill-first",
+                    Attributes = TargetAttributes(s), // M6 3 a1: the target stats, each optional
+                    DamageTypes = s.OptionalHex("damage_types"),
+                    SwingSeconds = s.OptionalNumber("swing_s", 0.01, 60),
+                    ResistHealthDrain = moved.Contains("resist_health_drain") ? Checked(table.ResistHealthDrain, 0, 10, $"{p}.resist_health_drain") : s.OptionalNumber("resist_health_drain", 0, 10) ?? 1.0, // M6 14 drain resistance: ResistHealthDrain (float 125), named in sources.targets
+                };
                 if (t.Opener is not null && role != GroundRole.Target)
                 {
                     throw Fail($"{p}.opener", "an avoided creature has no opener (only a target is fought)");
+                }
+
+                // M6 14 holding safety: the attack's facts the derived fight line reads (FightLines), each pair with its source; a d_val needs the d_var, the Strength (attributes) and the source that names the SELECT
+                if (s.Has("d_val") || s.Has("d_var") || s.Has("attack_source"))
+                {
+                    var dVal = s.Int("d_val", 1, 100_000);
+                    var dVar = s.Number("d_var", 0, 1);
+                    _ = s.Text("attack_source");
+                    if (t.Attributes is null)
+                    {
+                        throw Fail($"{p}.d_val", "an attack's facts need the creature's attributes (its Strength scales the hit)");
+                    }
+
+                    t = t with { DVal = dVal, DVar = dVar };
+                }
+
+                if (s.Has("xp"))
+                {
+                    t = t with { Xp = s.Int("xp", 1, int.MaxValue) }; // M6 14 approach cost: the kill's experience (XpOverride), a rung's planned rate
+                }
+                else if (moved.Contains("xp"))
+                {
+                    t = t with { Xp = Checked(table.Xp, 1, int.MaxValue, $"{p}.xp") };
                 }
 
                 s.End();
@@ -387,6 +546,11 @@ public static class GroundCatalog
                     portalSection.Point("front_point"));
                 portalSection.End();
             }
+
+            var entry = top.Has("entry") ? Entry(top.Object("entry")!, portal) : null; // M6 3 a1: the entry portal's gate (optional)
+            var exit = top.Has("exit") ? Exit(top.Object("exit")!, kind) : null; // M6 3 a1: the exit's kind (optional)
+            var jumps = top.Has("jumps") ? top.List("jumps", Jump) : []; // M6 14 pits: the pits a running jump crosses (optional)
+            var plates = top.Has("plates") ? Plates(top.Object("plates")!) : null; // M6 14 holding plates: the pressure plates the walks keep off (optional)
 
             var homeSection = top.Object("home")!;
             var home = new GroundHome(homeSection.Text("town"), homeSection.Hex("lifestone_cell"), homeSection.Point("lifestone_point"));
@@ -497,7 +661,7 @@ public static class GroundCatalog
                 throw Fail("$.supplies.kit", $"the pack lines hold more than the {Lifestone.Client.Session.Mage.GearKit.ContainerCapacity} containers a player can carry");
             }
 
-            var burdenTripPercent = suppliesSection.Int("burden_trip_percent", 1, 100);
+            var burdenTripPercent = suppliesSection.Int("burden_trip_percent", 1, 200) /* M6 0 lead: up to ACE's 200%, where the burden mod stops the run (EncumbranceSystem.GetBurdenMod); a climber that loots nothing trips above 100% */;
             var purseSection = suppliesSection.Object("purse")!;
             var purse = new GroundPurse(
                 purseSection.Int("coin", 0, MaxPyreals),
@@ -508,7 +672,11 @@ public static class GroundCatalog
                     s.End();
                     return note;
                 }),
-                purseSection.OptionalInt("min_note", 1, MaxPyreals) is var minNote and > 0 ? minNote : GroundPurse.DefaultMinNote); // M5 7 D136 follow-up: the smallest note the trips buy
+                purseSection.OptionalInt("min_note", 1, MaxPyreals) is var minNote and > 0 ? minNote : GroundPurse.DefaultMinNote, // M5 7 D136 follow-up: the smallest note the trips buy
+                purseSection.OptionalInt("trip_spend_percent", 1, 100) is var spend and > 0 ? spend : 100) // M6 7 V: the trip's stock budget
+            {
+                LearnTripCoin = purseSection.OptionalInt("learn_trip_coin", 1, MaxPyreals) is var learnCoin and > 0 ? learnCoin : GroundPurse.DefaultLearnTripCoin, // M6 7 AT: a learn trip waits for two scrolls' coin or this
+            };
             Unique(purse.Notes.Select(n => n.Wcid), "$.supplies.purse.notes", "wcid");
             purseSection.End();
             suppliesSection.End();
@@ -550,13 +718,240 @@ public static class GroundCatalog
 
             int? fightRetreat = null;
             int? fightRingMin = null;
+            Vitals.GroundPullRest? pullRest = null;
             if (top.Has("fight"))
             {
                 var fightSection = top.Object("fight")!;
-                fightRetreat = fightSection.Int("retreat_health_percent", 0, 100);
+                fightRetreat = fightSection.Has("retreat_health_percent") ? fightSection.Int("retreat_health_percent", 0, 100) : null; // M6 7 AN: optional: the outskirts' section has no opinion on it
                 fightRingMin = fightSection.OptionalInt("ring_min_targets", 1, 9) is var ringMin and > 0 ? ringMin : null; // M5 7 F22: the war picker's floor for Cassius' Ring of Fire
+                pullRest = PullRestOf(fightSection); // M6 7 AB: the rest before the next pull (absent: no rest rule)
                 fightSection.OptionalText("source"); // the note that says where the value comes from (not a section of the sources map: the section is optional)
                 fightSection.End();
+            }
+
+            GroundHunt? hunt = null;
+            if (top.Has("hunt"))
+            {
+                var huntSection = top.Object("hunt")!; // M6 7 AR: what the plain hunt leaves alone
+                var keepOut = Cells(huntSection.Take("keep_out"), "$.hunt.keep_out");
+                foreach (var cell in keepOut.Cells)
+                {
+                    if (!storeys.Any(s => s.Cells.Contains(cell)))
+                    {
+                        throw Fail("$.hunt.keep_out", $"0x{cell:X8} is on no storey (a keep-out that keeps nothing out)");
+                    }
+                }
+
+                hunt = new GroundHunt(keepOut, huntSection.Int("keep_out_under_level", 1, 1000), huntSection.List("pulls", (e, p) =>
+                {
+                    var s = Object(e, p, nullable: false)!;
+                    var pull = new GroundPull((uint)s.Int("item", 1, int.MaxValue), s.Text("name"), [.. Cells(s.Take("cells"), $"{p}.cells").Cells]);
+                    if (s.Has("stand"))
+                    {
+                        var d = s.Object("stand")!; // M6 7 AX: the pull's data
+                        var stand = new PullStand(d.Text("quest"), d.Int("from_level", 1, 1000), d.Int("to_level", 1, 1000), d.Hex("cell"), d.Point("point"), (uint)d.Int("holder_wcid", 1, int.MaxValue), d.Hex("holder_cell"), d.Number("wait_s", 1, 3600), d.Int("tries", 1, 9));
+                        d.OptionalText("source");
+                        d.End();
+                        if (!keepOut.Contains(stand.HolderCell) || keepOut.Contains(stand.Cell))
+                        {
+                            throw Fail($"{p}.stand", "the holder must stand in the keep-out and the stand point outside it");
+                        }
+
+                        pull = pull with { Stand = stand };
+                    }
+
+                    s.End();
+                    return pull;
+                }), huntSection.Has("drop_back_keep_out") ? Cells(huntSection.Take("drop_back_keep_out"), "$.hunt.drop_back_keep_out") : CellSet.Empty);
+                foreach (var cell in hunt.KeepOut.Cells)
+                {
+                    if (hunt.HasDropBack && !hunt.DropBack.Contains(cell))
+                    {
+                        throw Fail("$.hunt.drop_back_keep_out", $"leaves 0x{cell:X8} of keep_out (the drop-back's list is all she leaves alone)");
+                    }
+                }
+
+                huntSection.OptionalText("source");
+                huntSection.End();
+            }
+
+            GroundCorpseFetch? corpseFetch = null;
+            if (top.Has("corpse_fetch"))
+            {
+                var fetchSection = top.Object("corpse_fetch")!; // M6 7 AY: where a corpse is safe to reach for its coin
+                var anywhere = fetchSection.Bool("anywhere");
+                var fetchCells = fetchSection.Has("cells") ? Cells(fetchSection.Take("cells"), "$.corpse_fetch.cells") : CellSet.Empty;
+                if (anywhere == (fetchCells.Cells.Count > 0))
+                {
+                    throw Fail("$.corpse_fetch", "names neither or both of anywhere and cells");
+                }
+
+                foreach (var cell in fetchCells.Cells)
+                {
+                    if (hunt is { } kept && (kept.KeepOut.Contains(cell) || kept.DropBack.Contains(cell)))
+                    {
+                        throw Fail("$.corpse_fetch.cells", $"0x{cell:X8} is inside the keep-out (a safe cell is outside it)");
+                    }
+                }
+
+                corpseFetch = new GroundCorpseFetch(anywhere, fetchCells);
+                fetchSection.OptionalText("source");
+                fetchSection.End();
+            }
+
+            GroundApproach? approach = null;
+            if (top.Has("approach"))
+            {
+                // M6 14 entry recharge: the outdoor approach to the entry and the hostiles that stand there, facts with their source (never a fight number)
+                var approachSection = top.Object("approach")!;
+                var approachLandblocks = approachSection.List("landblocks", (e, p) =>
+                {
+                    var lb = Hex(e, p);
+                    return lb <= 0xFFFF ? (ushort)lb : throw Fail(p, $"0x{lb:X} is out of range (a landblock is 0x0000 to 0xFFFF)");
+                });
+                if (approachLandblocks.Count == 0)
+                {
+                    throw Fail("$.approach.landblocks", "is empty (an approach lies in at least one landblock)");
+                }
+
+                var hostiles = approachSection.List("hostiles", (e, p) =>
+                {
+                    var s = Object(e, p, nullable: false)!;
+                    var hostile = new GroundApproachHostile((uint)s.Int("wcid", 1, int.MaxValue), s.Text("name"));
+                    var moved = s.FromBestiary("health", "magic_defence", "resist", "awareness_m", "xp", "pace", "resist_health_drain"); // M6 16 Q12: the creature's numbers by reference
+                    var table = moved.Count > 0 ? TableOf(hostile.Wcid, p) : default;
+                    string[] facts = ["level", "health", "damage_types", "d_val", "d_var", "strength", "pack", "attack_source"];
+                    if (facts.Any(s.Has) || moved.Contains("health"))
+                    {
+                        // M6 14 retreat attackers: the creature's facts, all or none, with the source that names the SELECT (never a fight number)
+                        hostile = hostile with
+                        {
+                            Level = s.Int("level", 1, 10_000),
+                            MaxHealth = moved.Contains("health") ? Checked(table.MaxHealth, 1, 1_000_000, $"{p}.health") : s.Int("health", 1, 1_000_000),
+                            DamageTypes = s.Hex("damage_types") is var types and > 0 and <= 0x7F ? types : throw Fail($"{p}.damage_types", "is out of range (the DamageType bits 0x1 to 0x40)"),
+                            DVal = s.Int("d_val", 1, 100_000),
+                            DVar = s.Number("d_var", 0, 1),
+                            Strength = s.Int("strength", 1, 10_000),
+                            Pack = s.Int("pack", 1, 50),
+                        };
+                        _ = s.Text("attack_source");
+                    }
+
+                    string[] crossing = ["magic_defence", "resist", "awareness_m", "per_roll", "xp"];
+                    if (crossing.Any(s.Has) || moved.Overlaps(["magic_defence", "resist", "awareness_m", "xp"]))
+                    {
+                        // M6 14 approach cost: the crossing's facts, all or none, from the pinned world SQL (the approach's cost_source names the SELECTs); never a fight number
+                        if (hostile.MaxHealth is null)
+                        {
+                            throw Fail($"{p}.magic_defence", "the crossing's facts need the creature's attack facts (its health)");
+                        }
+
+                        var resist = new Dictionary<string, double>(StringComparer.Ordinal);
+                        if (moved.Contains("resist"))
+                        {
+                            foreach (var element in Mage.SpellPlan.BoltLineNames.Keys)
+                            {
+                                resist[element] = Checked(Creatures.Bestiary.ResistOf(hostile.Wcid, element), 0, 10, $"{p}.resist.{element}");
+                            }
+                        }
+                        else
+                        {
+                            var resistSection = s.Object("resist")!;
+                            foreach (var element in Mage.SpellPlan.BoltLineNames.Keys)
+                            {
+                                resist[element] = resistSection.Number(element, 0, 10);
+                            }
+
+                            resistSection.End();
+                        }
+
+                        hostile = hostile with
+                        {
+                            MagicDefence = moved.Contains("magic_defence") ? Checked(table.MagicDefence, 0, 10_000, $"{p}.magic_defence") : s.Int("magic_defence", 0, 10_000),
+                            Resist = resist,
+                            AwarenessMetres = moved.Contains("awareness_m") ? Checked(table.AwarenessMetres, 0.1, 500, $"{p}.awareness_m") : s.Number("awareness_m", 0.1, 500),
+                            PerRoll = s.Number("per_roll", 0, 100),
+                            Xp = moved.Contains("xp") ? Checked(table.Xp, 0, int.MaxValue, $"{p}.xp") : s.Int("xp", 0, int.MaxValue),
+                        };
+                    }
+
+                    if (moved.Contains("pace"))
+                    {
+                        // M6 16 Q12: the pace by reference: the Run skill ACE computes from the weenie's Run row and Quickness, the motion table and the scale, from the bestiary's tables
+                        var run = table.RunSkill ?? throw Fail($"{p}.from_bestiary", $"weenie {hostile.Wcid} has no motion table in the bestiary's tables (its pace is not known)");
+                        hostile = hostile with
+                        {
+                            RunSkill = Checked(run, 0, 10_000, $"{p}.pace.run_skill"),
+                            MotionTable = table.MotionTable is >= 0x09000000 and <= 0x09FFFFFF ? table.MotionTable : throw Fail($"{p}.pace.motion_table", "is not a motion table (0x09000000 to 0x09FFFFFF)"),
+                            Scale = Checked(table.Scale, 0.05, 20, $"{p}.pace.scale"),
+                        };
+                    }
+                    else if (s.Has("pace"))
+                    {
+                        // M6 14 run past (D137): its Run skill, motion table and scale, all three, with the SELECTs named (its speed is derived at run time from the dats)
+                        var pace = s.Object("pace")!;
+                        hostile = hostile with
+                        {
+                            RunSkill = pace.Int("run_skill", 0, 10_000),
+                            MotionTable = pace.Hex("motion_table") is var motionTable and >= 0x09000000 and <= 0x09FFFFFF ? motionTable : throw Fail($"{p}.pace.motion_table", "is not a motion table (0x09000000 to 0x09FFFFFF)"),
+                            Scale = pace.Number("scale", 0.05, 20),
+                        };
+                        _ = pace.Text("source");
+                        pace.End();
+                    }
+
+                    if (s.Has("ranged"))
+                    {
+                        // M6 14 run past: its thrown weapon's damage, type, the thrower's Strength and the range, with the SELECTs named
+                        var ranged = s.Object("ranged")!;
+                        hostile = hostile with
+                        {
+                            Ranged = new GroundRanged(
+                                ranged.Int("d_val", 1, 100_000),
+                                ranged.Number("d_var", 0, 1),
+                                ranged.Hex("damage_types") is var bits and > 0 and <= 0x7F ? bits : throw Fail($"{p}.ranged.damage_types", "is out of range (the DamageType bits 0x1 to 0x40)"),
+                                ranged.Int("strength", 1, 10_000),
+                                ranged.Number("range_m", 1, 200))
+                            {
+                                Share = ranged.Has("share") ? ranged.Number("share", 0, 1) : 1.0,
+                                Spell = ranged.Has("spell") && ranged.Bool("spell"),
+                            },
+                        };
+                        _ = ranged.Text("source");
+                        ranged.End();
+                    }
+
+                    if (s.OptionalNumber("resist_health_drain", 0, 10) is { } drainResist)
+                    {
+                        hostile = hostile with { ResistHealthDrain = drainResist }; // M6 14 drain resistance: ResistHealthDrain (float 125), named in the approach's source
+                    }
+                    else if (moved.Contains("resist_health_drain"))
+                    {
+                        hostile = hostile with { ResistHealthDrain = Checked(table.ResistHealthDrain, 0, 10, $"{p}.resist_health_drain") };
+                    }
+
+                    s.End();
+                    return hostile;
+                });
+                if (hostiles.Count == 0)
+                {
+                    throw Fail("$.approach.hostiles", "is empty (an approach is recorded for its hostiles)");
+                }
+
+                Unique(hostiles.Select(h => h.Wcid), "$.approach.hostiles", "wcid");
+                approach = new GroundApproach(approachLandblocks, hostiles, approachSection.Text("source"));
+                string[] costFacts = ["encounters", "per_roll", "cost_source"];
+                if (costFacts.Any(approachSection.Has))
+                {
+                    // M6 14 approach cost: the approach's own crossing facts, all or none: its encounter generators and the creatures a roll stands up, with the SELECTs named
+                    approach = approach with { Encounters = approachSection.Int("encounters", 0, 100_000), PerRoll = approachSection.Number("per_roll", 0, 100), CostSource = approachSection.Text("cost_source") };
+                    if (approach.Hostiles.Where(h => h.PerRoll is not null).Sum(h => h.PerRoll!.Value) > approach.PerRoll!.Value + 1e-6)
+                    {
+                        throw Fail("$.approach.per_roll", $"{approach.PerRoll} is under the listed hostiles' per_roll sum (every kind a roll stands up is counted in it)");
+                    }
+                }
+
+                approachSection.End();
             }
 
             IReadOnlyList<GroundAvoidRegion> avoidRegions = [];
@@ -585,7 +980,9 @@ public static class GroundCatalog
                     MaxItemBurden = lootSection.OptionalInt("max_item_burden", 0, 100_000),
                     TripEveryBuffCycles = lootSection.OptionalInt("trip_every_buff_cycles", 0, 1000),
                     MinFreeSlots = lootSection.OptionalInt("min_free_slots", 0, 1000),
-                    LoadLinePercent = lootSection.OptionalInt("load_line_percent", 0, 100),
+                    LoadLinePercent = lootSection.OptionalInt("load_line_percent", 0, 200), // M6 7 AR: past the capacity is a choice: ACE slows her, the trip sells it
+                    SaleTripValue = lootSection.OptionalInt("sale_trip_value", 1, 100_000_000) is var saleValue and > 0 ? saleValue : GroundLoot.DefaultSaleTripValue, // M6 7 AT: the sale trip's line, in Value
+                    RadiusMetres = lootSection.OptionalInt("radius_m", 0, 100), // M6 7 AR: the walk to a kill's corpse; 0 keeps --fight-loot-radius-m
                     KeepAside = lootSection.KeepAside(), // M5 7 F30 (the owner): the wands and cantrip pieces kept aside and never sold
                 };
                 lootSection.OptionalText("source"); // where the value comes from (the section is optional, so it has no entry in the sources map)
@@ -613,6 +1010,19 @@ public static class GroundCatalog
                 Unique(learn.Select(l => l.SpellId), "$.learn", "spell");
             }
 
+            IReadOnlyList<GroundWant> wantsKnown = [];
+            if (top.Has("wants_known"))
+            {
+                wantsKnown = top.List("wants_known", (e, p) =>
+                {
+                    var s = Object(e, p, nullable: false)!;
+                    var want = new GroundWant((uint)s.Int("spell", 1, int.MaxValue), s.Text("name"), s.Text("why"));
+                    s.End();
+                    return want;
+                });
+                Unique(wantsKnown.Select(w => w.SpellId), "$.wants_known", "spell");
+            }
+
             var tour = top.List("tour", (e, p) => OwnCell(e, p));
 
             var outdoorSection = top.Object("outdoor", nullable: true);
@@ -638,7 +1048,17 @@ public static class GroundCatalog
                     outdoorSection.List("creatures", (e, p) =>
                     {
                         var s = Object(e, p, nullable: false)!;
-                        var c = new GroundCreature((uint)s.Int("wcid", 1, int.MaxValue), s.Text("name"), s.Int("level", 1, 10000)) { SpawnMass = s.Number("spawn_mass", 0, 1) };
+                        var wcid = (uint)s.Int("wcid", 1, int.MaxValue);
+                        var name = s.Text("name");
+                        var level = s.Int("level", 1, 10000);
+                        var moved = s.FromBestiary("max_health", "resist_health_drain"); // M6 16 Q12: the creature's numbers by reference
+                        var table = moved.Count > 0 ? TableOf(wcid, p) : default;
+                        var c = new GroundCreature(wcid, name, level)
+                        {
+                            MaxHealth = moved.Contains("max_health") ? Checked(table.MaxHealth, 1, 1_000_000, $"{p}.max_health") : s.OptionalInt("max_health", 1, 1_000_000),
+                            SpawnMass = s.Number("spawn_mass", 0, 1),
+                            ResistHealthDrain = moved.Contains("resist_health_drain") ? Checked(table.ResistHealthDrain, 0, 10, $"{p}.resist_health_drain") : s.OptionalNumber("resist_health_drain", 0, 10) ?? 1.0,
+                        };
                         s.End();
                         return c;
                     }),
@@ -646,6 +1066,51 @@ public static class GroundCatalog
                     outdoorSection.Int("cell_cap", 1, 10000),
                     outdoorSection.Number("expected_yield_per_spot", 0, 10000));
                 outdoorSection.End();
+            }
+
+            IReadOnlyList<TownStockLine> townStock = [];
+            if (top.Has("town_stock"))
+            {
+                // M6 14 T: the wares bought in another town on the way out; no stock line and no home vendor's ware
+                townStock = top.List("town_stock", (e, p) =>
+                {
+                    var s = Object(e, p, nullable: false)!;
+                    var wcid = (uint)s.Int("wcid", 1, int.MaxValue);
+                    var wareName = s.Text("name");
+                    var keep = s.Int("keep", 1, MaxCount);
+                    var tripUnder = s.Int("trip_under", 1, MaxCount);
+                    if (tripUnder > keep)
+                    {
+                        throw Fail($"{p}.trip_under", $"{tripUnder} is above keep {keep} (keep >= trip_under >= 1)");
+                    }
+
+                    var price = s.Int("price", 1, MaxPyreals);
+                    var burden = s.Int("burden", 0, 100_000);
+                    var town = s.Text("town");
+                    if (string.Equals(town, home.Town, StringComparison.Ordinal))
+                    {
+                        throw Fail($"{p}.town", $"{town} is the home town: a ware sold at home is a line of supplies.stock");
+                    }
+
+                    var v = s.Object("vendor")!;
+                    var cell = v.Hex("cell");
+                    var vendor = new GroundVendor(v.Text("name"), (uint)v.Int("wcid", 1, int.MaxValue), v.Hex("guid"), cell, v.Point("point"), cell, null, 0, [new VendorWare(wcid, wareName, price)]);
+                    v.End();
+                    s.OptionalText("source");
+                    s.End();
+                    if (supplies.StockOf(wcid) is not null)
+                    {
+                        throw Fail($"{p}.wcid", $"{wcid} is a line of supplies.stock too (a ware is bought at home or in a town, not both)");
+                    }
+
+                    if (vendors.Any(h => h.Wcid == vendor.Wcid))
+                    {
+                        throw Fail($"{p}.vendor.wcid", $"{vendor.Wcid} is a home vendor");
+                    }
+
+                    return new TownStockLine(wcid, wareName, keep, tripUnder, price, burden, town, vendor);
+                });
+                Unique(townStock.Select(t => t.Wcid), "$.town_stock", "wcid");
             }
 
             top.End();
@@ -665,18 +1130,40 @@ public static class GroundCatalog
                 throw Fail("$.outdoor", "is null for an outdoor ground");
             }
 
-            CheckSupplies(supplies, vendors, plan, components, learn);
+            CheckSupplies(supplies, vendors, plan, components, learn, townStock);
 
             var ground = new HuntingGround(
                 key, name, kind, sources.AsReadOnly(), _landblocks, arrival, walk, storeys, noGo, targets, levelBand, portal, home, vendors, plan, components, holds, respawn, tour, outdoor)
             {
                 Supplies = supplies,
                 FightRetreatHealthPercent = fightRetreat,
+                PullRest = pullRest,
+                Hunt = hunt,
+                CorpseFetch = corpseFetch,
+                Approach = approach,
+                TownStock = BuffBotFee.With(townStock, supplies, home.Town, vendors, ScrivenerCatalog.Default), // D138: the bot's fee, a Platinum Scarab a stop from level 60, on every ground
                 FightRingMinTargets = fightRingMin,
                 Loot = lootSetting,
                 AvoidRegions = avoidRegions,
                 Learn = learn,
+                WantsKnown = wantsKnown,
+                Entry = entry,
+                Exit = exit,
+                Jumps = jumps,
+                Plates = plates,
+                Scriveners = [.. ScrivenerCatalog.Default.VendorsIn(home.Town).Where(c => !vendors.Any(v => v.Wcid == c.Wcid))], // M6 1 c (D40): the home town's catalog scriveners join the vendor view (additive; a profile's own wins)
             };
+            for (var i = 0; i < jumps.Count; i++)
+            {
+                foreach (var (side, sideName) in new[] { (jumps[i].A, "sides[0]"), (jumps[i].B, "sides[1]") })
+                {
+                    if (!ground.IsWalkable(side.Cell))
+                    {
+                        throw Fail($"$.jumps[{i}].{sideName}.cell", $"0x{side.Cell:X8} is not walkable (in no storey, or no-go): a jump lands in a room the walk stands in");
+                    }
+                }
+            }
+
             for (var i = 0; i < tour.Count; i++)
             {
                 if (kind == GroundKind.Dungeon && !ground.IsWalkable(tour[i]))
@@ -689,10 +1176,175 @@ public static class GroundCatalog
         }
 
         /// <summary>
-        /// The supplies section against the rest of the profile (D48): a vendor's ware is a stock or kit line and has one vendor (one source of a price); a line the vendor lists has the vendor's name for it; and every
-        /// row of the spell plan has components at its spell level, each a stock line (<c>TODO(ground-plan-gap)</c> when not).
+        /// M6 14 pits: one <c>jumps</c> entry: <c>name</c>, <c>pit_cell</c> (the floorless cell), <c>gap_m</c> (brink to brink), <c>need_m</c> (the level-ground flight a jump needs, at least the gap), two <c>sides</c>
+        /// (each <c>cell</c>, <c>brink</c>, <c>run_up</c> and <c>landing</c>, landblock-local points) and the <c>source</c>.
         /// </summary>
-        private void CheckSupplies(GroundSupplies supplies, IReadOnlyList<GroundVendor> vendors, IReadOnlyList<SpellPlanRow> plan, IReadOnlyList<GroundComponent> components, IReadOnlyList<LearnLine> learn)
+        private Lifestone.Client.Movement.Routes.PitJump Jump(JsonElement e, string path)
+        {
+            var s = Object(e, path, nullable: false)!;
+            var name = s.Text("name");
+            var pit = OwnCell(s.Take("pit_cell"), $"{path}.pit_cell");
+            var gap = (float)s.Number("gap_m", 0.1, 100);
+            var need = (float)s.Number("need_m", 0.1, 100);
+            if (need < gap)
+            {
+                throw Fail($"{path}.need_m", $"{need} is under gap_m {gap} (a jump lands past the far brink)");
+            }
+
+            var sides = s.List("sides", (se, sp) =>
+            {
+                var side = Object(se, sp, nullable: false)!;
+                var made = new Lifestone.Client.Movement.Routes.PitJumpSide(OwnCell(side.Take("cell"), $"{sp}.cell"), side.Point("brink"), side.Point("run_up"), side.Point("landing"));
+                side.End();
+                return made;
+            });
+            if (sides.Count != 2)
+            {
+                throw Fail($"{path}.sides", $"has {sides.Count} sides (a pit has two)");
+            }
+
+            s.Text("source");
+            s.End();
+            return new Lifestone.Client.Movement.Routes.PitJump(name, pit, gap, need, sides[0], sides[1]);
+        }
+
+        /// <summary>
+        /// M6 14 holding plates: the <c>plates</c> section: <c>wcid</c>, <c>name</c>, <c>shape_m</c> and <c>top_m</c> (the Setup's shape seen from above and the height her feet clear it at), <c>spells</c> (each <c>id</c> and <c>name</c>),
+        /// <c>points</c> (each <c>guid</c>, <c>cell</c> and landblock-local <c>point</c>) and the <c>source</c>.
+        /// </summary>
+        private GroundPlates Plates(Section s)
+        {
+            var wcid = (uint)s.Int("wcid", 1, int.MaxValue);
+            var name = s.Text("name");
+            var shape = (float)s.Number("shape_m", 0.01, 10);
+            var top = (float)s.Number("top_m", 0, 10);
+            var spells = s.List("spells", (e, p) =>
+            {
+                var spell = Object(e, p, nullable: false)!;
+                var made = new GroundPlateSpell((uint)spell.Int("id", 1, int.MaxValue), spell.Text("name"));
+                spell.End();
+                return made;
+            });
+            var points = s.List("points", (e, p) =>
+            {
+                var plate = Object(e, p, nullable: false)!;
+                var made = new GroundPlate(plate.Hex("guid"), OwnCell(plate.Take("cell"), $"{p}.cell"), plate.Point("point"));
+                plate.End();
+                return made;
+            });
+            if (points.Count == 0)
+            {
+                throw Fail("$.plates.points", "is empty (a plates section is recorded for its plates)");
+            }
+
+            Unique(points.Select(p => p.Guid), "$.plates.points", "guid");
+            var source = s.Text("source");
+            s.End();
+            return new GroundPlates(wcid, name, shape, top, spells, points, source);
+        }
+
+        /// <summary>M6 3 a1: a target's optional <c>attributes</c> block (the six attributes, each required inside it), or null.</summary>
+        private static GroundAttributes? TargetAttributes(Section target)
+        {
+            if (!target.Has("attributes"))
+            {
+                return null;
+            }
+
+            var a = target.Object("attributes")!;
+            var attributes = new GroundAttributes(
+                a.Int("strength", 1, 10_000), a.Int("endurance", 1, 10_000), a.Int("coordination", 1, 10_000), a.Int("quickness", 1, 10_000), a.Int("focus", 1, 10_000), a.Int("self", 1, 10_000));
+            a.End();
+            return attributes;
+        }
+
+        /// <summary>
+        /// M6 3 a1: the <c>entry</c> section: the entry portal's place (wcid, guid, cell, origin, front_cell, front_point), its gate (min_level and max_level, each a number or null), <c>tieable</c> and the <c>source</c>.
+        /// A portal that cannot be tied carries no tie record: a profile whose <c>entry.tieable</c> is false and whose <c>portal</c> is not null fails at <c>$.portal</c>; when both are present they name one portal.
+        /// </summary>
+        private GroundEntry Entry(Section s, GroundPortal? portal)
+        {
+            var entry = new GroundEntry(
+                (uint)s.Int("wcid", 1, int.MaxValue),
+                s.Hex("guid"),
+                s.Hex("cell"),
+                s.Point("origin"),
+                s.Hex("front_cell"),
+                s.Point("front_point"),
+                s.NullableInt("min_level", 1, 10_000),
+                s.NullableInt("max_level", 1, 10_000),
+                s.Bool("tieable"));
+            s.Text("source");
+            s.End();
+            if (entry is { MinLevel: { } min, MaxLevel: { } max } && min > max)
+            {
+                throw Fail("$.entry.min_level", $"{min} is above max_level {max}");
+            }
+
+            if (!entry.Tieable && portal is not null)
+            {
+                throw Fail("$.portal", $"is a tie record, but $.entry.tieable is false: the entry portal (wcid {entry.Wcid}) carries NoRecall in its PortalBitmask, so it cannot be tied (ACE Portal.NoTie); write \"portal\": null");
+            }
+
+            if (portal is not null && (portal.Wcid != entry.Wcid || portal.Guid != entry.Guid))
+            {
+                throw Fail("$.entry.guid", $"wcid {entry.Wcid} 0x{entry.Guid:X8} is not $.portal's wcid {portal.Wcid} 0x{portal.Guid:X8} (the entry and the tie record name one portal)");
+            }
+
+            return entry;
+        }
+
+        /// <summary>
+        /// M6 3 a1: the <c>exit</c> section: <c>kind</c> (portal, recall or walk) and the <c>source</c>; a portal exit also has the exit portal's wcid, cell (one of the ground's), origin and destination cell and the optional
+        /// <c>from_arrival_m</c> hint; the other kinds have none of these. A dungeon is not left on foot and an outdoor ground has no exit portal.
+        /// </summary>
+        private GroundExitSection Exit(Section s, GroundKind kind)
+        {
+            var exitKind = s.Text("kind") switch
+            {
+                "portal" => GroundExitKind.Portal,
+                "recall" => GroundExitKind.Recall,
+                "walk" => GroundExitKind.Walk,
+                var other => throw Fail("$.exit.kind", $"'{other}' is out of range (portal, recall or walk)"),
+            };
+            if (exitKind == GroundExitKind.Walk && kind == GroundKind.Dungeon)
+            {
+                throw Fail("$.exit.kind", "'walk' is an outdoor ground's exit, and this ground is a dungeon (portal or recall)");
+            }
+
+            if (exitKind == GroundExitKind.Portal && kind == GroundKind.Outdoor)
+            {
+                throw Fail("$.exit.kind", "'portal' is a dungeon's exit, and this ground is outdoor (walk or recall)");
+            }
+
+            GroundExitSection exit;
+            if (exitKind == GroundExitKind.Portal)
+            {
+                exit = new GroundExitSection(exitKind, (uint)s.Int("wcid", 1, int.MaxValue), OwnCell(s.Take("cell"), "$.exit.cell"), s.Point("origin"), s.Hex("destination"), s.OptionalNumber("from_arrival_m", 0, 100_000));
+            }
+            else
+            {
+                foreach (var field in new[] { "wcid", "cell", "origin", "destination", "from_arrival_m" })
+                {
+                    if (s.Has(field))
+                    {
+                        throw Fail($"$.exit.{field}", $"is a field of a portal exit only (this exit's kind is {exitKind.ToString().ToLowerInvariant()})");
+                    }
+                }
+
+                exit = new GroundExitSection(exitKind, 0, 0, null, 0, null);
+            }
+
+            s.Text("source");
+            s.End();
+            return exit;
+        }
+
+        /// <summary>
+        /// The supplies section against the rest of the profile (D48): a vendor's ware is a stock or kit line and has one vendor (one source of a price); a line the vendor lists has the vendor's name for it; and every
+        /// row of the spell plan has components at its spell level, each a stock line or (M6 item 14, m6-goldscarab) a line of the town stock (<c>TODO(ground-plan-gap)</c> when not).
+        /// </summary>
+        private void CheckSupplies(GroundSupplies supplies, IReadOnlyList<GroundVendor> vendors, IReadOnlyList<SpellPlanRow> plan, IReadOnlyList<GroundComponent> components, IReadOnlyList<LearnLine> learn, IReadOnlyList<TownStockLine> townStock)
         {
             var sold = new Dictionary<uint, (int Vendor, int Ware)>();
             for (var i = 0; i < vendors.Count; i++)
@@ -706,9 +1358,12 @@ public static class GroundCatalog
                     }
 
                     sold[ware.Wcid] = (i, j);
-                    if (supplies.StockOf(ware.Wcid) is null && supplies.KitOf(ware.Wcid) is null && !supplies.Purse.Notes.Any(n => n.Wcid == ware.Wcid) && !learn.Any(l => l.ScrollWcid == ware.Wcid)) // M5 7 G1: a purse note may be sold too, the sell trip buys it; M5 7 P7j: a learn line's scroll
+                    // M5 7 G1: a purse note may be sold too, the sell trip buys it; M5 7 P7j: a learn line's scroll; M6 2 b: a gear floor ware (a caster, a robe, a Mana Charge: Mage.GearFloor; M6 7 AH: hand armour, GearFloor.IsGauntletWare) or one of ACE's trade notes (Scenarios.Journey.PurseNotes)
+                    if (supplies.StockOf(ware.Wcid) is null && supplies.KitOf(ware.Wcid) is null && !supplies.Purse.Notes.Any(n => n.Wcid == ware.Wcid) && !learn.Any(l => l.ScrollWcid == ware.Wcid)
+                        && !Lifestone.Client.Session.Mage.GearFloor.IsFloorWare(ware.Wcid) && !Lifestone.Client.Session.Mage.GearFloor.IsGauntletWare(ware.Wcid) && !Lifestone.Client.Session.Scenarios.Journey.PurseNotes.All.Any(n => n.Wcid == ware.Wcid)
+                        && ware.Wcid != Lifestone.Client.Session.Fighter.FighterKit.SidePackWcid /* M6 8 D: the side pack a short layout buys (ResupplyPlanner.PackBuy), no stock or kit line of the ground */)
                     {
-                        throw Fail($"$.vendors[{i}].sells[{j}]", $"wcid {ware.Wcid} ({ware.Name}) is not a line of $.supplies.stock, $.supplies.kit, a note of $.supplies.purse or a scroll of $.learn (a vendor lists only the wares the supplies need)");
+                        throw Fail($"$.vendors[{i}].sells[{j}]", $"wcid {ware.Wcid} ({ware.Name}) is not a line of $.supplies.stock, $.supplies.kit, a note of $.supplies.purse or a scroll of $.learn, nor a gear floor ware or a trade note (a vendor lists only the wares the supplies need)");
                     }
                 }
             }
@@ -733,9 +1388,10 @@ public static class GroundCatalog
 
                 foreach (var c in burned)
                 {
-                    if (supplies.StockOf(c.Wcid) is null)
+                    // M6 item 14 (m6-goldscarab): a component bought in another town (a line of $.town_stock: the Gold Scarab at Uziz) covers the plan's level too; the pack may hold none, and the level floor then casts the level under it
+                    if (supplies.StockOf(c.Wcid) is null && !townStock.Any(t => t.Wcid == c.Wcid))
                     {
-                        throw Fail($"$.spell_plan[{i}]", $"TODO(ground-plan-gap): spell level {plan[i].SpellLevel} of the row for levels {plan[i].MinLevel}-{plan[i].MaxLevel} ({plan[i].Family}) burns component {c.Wcid} ({c.Name}), which is not a line of $.supplies.stock");
+                        throw Fail($"$.spell_plan[{i}]", $"TODO(ground-plan-gap): spell level {plan[i].SpellLevel} of the row for levels {plan[i].MinLevel}-{plan[i].MaxLevel} ({plan[i].Family}) burns component {c.Wcid} ({c.Name}), which is not a line of $.supplies.stock or of $.town_stock");
                     }
                 }
             }

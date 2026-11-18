@@ -167,7 +167,7 @@ public static class HuntGround
     /// <c>--hunt-ground forest</c> (the belt stays the default). The band is <b>30 to 40</b>: the hunter is level 40, so the lead narrowed the spec's 30 to 60 (m4-plan.md 4.6; thirteen of the table's creatures are in it).
     /// The cells are <b>all 33</b> encounter spots of the strip (M5 item 2 g3, D42, <c>m5-hunt-band-empty</c>): a loop by landblock from the spot nearest Holtburg, each stopped at on the spot's own point (the generator's
     /// corner), the profile's cell cap (33) bounding the on-foot search. ACE rolls a spot's children by cumulative probability, so a cell may hold nothing and the hunt tries the next one, as on the belt. Their terrain is the
-    /// dat test's finding (<c>HuntGroundDatTests</c>, 2026-10-21: all 33 read dry and flat, lowest normal z 0.973 or more; closes <c>TODO(m4-forest-cells)</c>).
+    /// dat test's finding (<c>HuntGroundDatTests</c>, 2026-10-21: all 33 read dry and flat, lowest normal z 0.973 or more; closes <c>m4-forest-cells (closed)</c>).
     /// </summary>
     public static HuntGroundRow LowNorthForestMix { get; } = RowOf(ForestKey, LowNorthForestCreatures, LowNorthForestTable);
 

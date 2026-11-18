@@ -217,6 +217,7 @@ public sealed class IndoorCreatureLayerTests
     }
 
     [Fact]
+    [Trait("Tier", "Timing")] // m6-alloc-flake-indoor-layer: a zero-byte allocation count a step (failed once under the parallel suite, passes alone: tiered JIT and the other tests on the thread pool)
     public void A_warm_indoor_runner_with_a_creature_layer_allocates_nothing_a_step()
     {
         var rig = new IndoorRig(IndoorRoomKit.LongHall(), 0f, IndoorRoomKit.Hall, new Vector2(96f, 58f), heading: 0f, withFeed: true);

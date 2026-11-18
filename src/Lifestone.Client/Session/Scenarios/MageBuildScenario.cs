@@ -76,6 +76,8 @@ public sealed class MageBuildScenario : IScenario
     /// <summary>The most spell ids one <c>spell learn</c> carries.</summary>
     public const int SpellChunk = PlayerTools.MaxSpellIds;
 
+    private readonly string _name;
+    private readonly IReadOnlyList<uint> _spells;
     private readonly bool _endSession;
     private readonly GearKit.KitPlan? _kitPlan;
     private bool _kitGranted;
@@ -126,9 +128,13 @@ public sealed class MageBuildScenario : IScenario
     /// <param name="endSession">True (the headless host's): log in, build, log off and quit. False (M4 P5b J3b, the journey's <c>build-verify</c> station): the session already holds the character in the world, so the scenario skips the login, never logs off and ends at <c>done</c> in the world, as the hunt does.</param>
     /// <param name="kitPlan">M5 item 3 m1 (D8, D38, D46, D49): the ground's kit, the four foci, the stock lines and the purse (<see cref="GearKit.KitPlan.For"/>), granted by the build once the template is met (stage <c>granting</c>: <see cref="PlayerTools.SpawnGear"/> for the kit, then the purse as pyreal stacks and trade notes; the load logged as <c>load: &lt;burden&gt; of &lt;capacity&gt;</c>); null: no grant (the journey's embedded build-verify and the older tests). The build may grant; play may not (the spec section 5.6).</param>
     /// <param name="freshCharacter">M4 fresh B1 (owner decisions D44, D45): delete the BSD Mage's live character from the character list (never entering it), create the template's and build it, purge the old copies of the name with the mod, then place it in Holtburg; the verdict gains <c>fresh=recreated|created purged=&lt;n&gt; refill=none|level-up:&lt;a&gt;-&gt;&lt;b&gt;|failed</c> (M4 fresh F1: one level-up refills the vitals before the purge, so the mage ends at level 127). Only with <paramref name="endSession"/>.</param>
+    /// <param name="characterName">M6 item 1 c (D39): the character the build finds or creates, enters and builds (null: <see cref="MageTemplate.CharacterName"/>, BSD Mage). Lifestone Throwaway on <c>test-tools</c> is the only other one (CLAUDE.md: the only character levelled freely); the account is the host's.</param>
+    /// <param name="withheldSpells">M6 item 1 c (D39): the arena profile's spells the build does NOT learn (null: none), so the run learns them by play (the VI loopback's bolt line).</param>
     /// <param name="level">M5 7 F3 (D87): the level the build reaches (<c>--mage-level</c>, default <see cref="MageTemplate.TargetLevel"/>); the plan is <see cref="MageTemplate.PlanAt"/> at it. A level whose credits cannot train all four later skills trains what fits and logs the rest (<c>TODO(m5-mage-level-credits)</c>).</param>
-    public MageBuildScenario(XpTableData table, IReadOnlyList<uint> retailClasses, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, bool freshCharacter = false, GearKit.KitPlan? kitPlan = null, int level = MageTemplate.TargetLevel)
+    public MageBuildScenario(XpTableData table, IReadOnlyList<uint> retailClasses, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, bool freshCharacter = false, GearKit.KitPlan? kitPlan = null, int level = MageTemplate.TargetLevel, string? characterName = null, IReadOnlyCollection<uint>? withheldSpells = null)
     {
+        _name = characterName ?? MageTemplate.CharacterName; // M6 1 c (D39): the Throwaway's VI loopback builds Lifestone Throwaway; every other caller builds BSD Mage
+        _spells = [.. ArenaProfile.SpellsToLearn.Where(id => withheldSpells is null || !withheldSpells.Contains(id))];
         _kitPlan = kitPlan;
         _endSession = endSession;
         _fresh = freshCharacter;
@@ -165,7 +171,7 @@ public sealed class MageBuildScenario : IScenario
         _holtburgLandblock = _holtburg.Location.Position.CellId >> 16;
         if (freshCharacter)
         {
-            _purge = new FreshPurge(MageTemplate.CharacterName, log, LogCategory);
+            _purge = new FreshPurge(_name, log, LogCategory);
             _refill = new FreshRefill(table, log, LogCategory);
         }
     }
@@ -238,7 +244,7 @@ public sealed class MageBuildScenario : IScenario
         var fresh = _fresh ? string.Create(CultureInfo.InvariantCulture, $" fresh={_freshHow ?? "none"} purged={_purge?.Purged ?? 0} refill={_refill?.Field ?? "none"}") : string.Empty;
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"mage={state} level={_level} {template} spells={SpellsAccounted}/{ArenaProfile.SpellsToLearn.Count} built_steps={BuiltSteps}{fresh}");
+            $"mage={state} level={_level} {template} spells={SpellsAccounted}/{_spells.Count} built_steps={BuiltSteps}{fresh}");
     }
 
     /// <summary>
@@ -277,9 +283,9 @@ public sealed class MageBuildScenario : IScenario
                 if (session.State.Phase == SessionPhase.InWorld && session.State.Self.Guid != 0)
                 {
                     // Already in the world (a host that logged in itself, the journey, or the offline stand-in): nothing to log in. The build acts on the BSD Mage and nobody else.
-                    if (session.State.Self.Name is { } already && !string.Equals(already, MageTemplate.CharacterName, StringComparison.OrdinalIgnoreCase))
+                    if (session.State.Self.Name is { } already && !string.Equals(already, _name, StringComparison.OrdinalIgnoreCase))
                     {
-                        return Fail(session, "the entered character is not " + MageTemplate.CharacterName + ": nothing is sent for it");
+                        return Fail(session, "the entered character is not " + _name + ": nothing is sent for it");
                     }
 
                     EnteredGuid = session.State.Self.Guid;
@@ -310,7 +316,7 @@ public sealed class MageBuildScenario : IScenario
                     }
 
                     Created = true;
-                    _log.Info(LogCategory, "created " + MageTemplate.CharacterName);
+                    _log.Info(LogCategory, "created " + _name);
                     return Go("choosing");
                 }
 
@@ -399,7 +405,7 @@ public sealed class MageBuildScenario : IScenario
                         _freshHow = "recreated";
                         _createTried = false;
                         Created = false;
-                        _log.Warn(LogCategory, "fresh=recreated: the old " + MageTemplate.CharacterName + " is listed as pending deletion (restorable until the new copy has been built and purges it); creating the template's character");
+                        _log.Warn(LogCategory, "fresh=recreated: the old " + _name + " is listed as pending deletion (restorable until the new copy has been built and purges it); creating the template's character");
                         return Go("choosing");
                     }
                 }
@@ -469,7 +475,7 @@ public sealed class MageBuildScenario : IScenario
         var characters = session.State.Characters;
         foreach (var c in characters.Entries)
         {
-            if (string.Equals(c.Name, MageTemplate.CharacterName, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(c.Name, _name, StringComparison.OrdinalIgnoreCase))
             {
                 if (c.PendingDeletion)
                 {
@@ -486,13 +492,13 @@ public sealed class MageBuildScenario : IScenario
                     // M4 fresh B1 (D44): the live copy is never entered. It is deleted from the list through the retail delete, and the new copy purges it once built (D45).
                     _freshDecided = true;
                     _oldGuid = c.Guid;
-                    _log.Warn(LogCategory, "fresh-character: deleting the live " + MageTemplate.CharacterName + " from the character list through the retail character delete (it is not entered); the new copy purges it after the build");
+                    _log.Warn(LogCategory, "fresh-character: deleting the live " + _name + " from the character list through the retail character delete (it is not entered); the new copy purges it after the build");
                     _pending = session.Actions.DeleteCharacter(c.Guid, ActionSource.Host);
                     return Go("recreate-delete");
                 }
 
                 EnteredGuid = c.Guid;
-                _log.Info(LogCategory, (Created ? "entering the character just created" : "entering the existing character") + " " + MageTemplate.CharacterName);
+                _log.Info(LogCategory, (Created ? "entering the character just created" : "entering the existing character") + " " + _name);
                 _pending = session.Actions.EnterWorld(c.Guid, ActionSource.Host);
                 return Go("entering");
             }
@@ -507,7 +513,7 @@ public sealed class MageBuildScenario : IScenario
         {
             return Fail(
                 session,
-                string.Create(CultureInfo.InvariantCulture, $"choosing: the account has no free character slot ({characters.Entries.Count} of {characters.SlotCount} used), so {MageTemplate.CharacterName} was not created; no other character is touched"));
+                string.Create(CultureInfo.InvariantCulture, $"choosing: the account has no free character slot ({characters.Entries.Count} of {characters.SlotCount} used), so {_name} was not created; no other character is touched"));
         }
 
         _createTried = true;
@@ -517,8 +523,8 @@ public sealed class MageBuildScenario : IScenario
             _freshHow = "created"; // M4 fresh B1: no live copy was listed, so there is nothing to delete
         }
 
-        _log.Info(LogCategory, "absent; creating " + MageTemplate.CharacterName + " with the template's creation intent");
-        _pending = session.Actions.CreateCharacter(MageTemplate.CreationIntent(MageTemplate.CharacterName, _retailClasses, _plan.Build), ActionSource.Host);
+        _log.Info(LogCategory, "absent; creating " + _name + " with the template's creation intent");
+        _pending = session.Actions.CreateCharacter(MageTemplate.CreationIntent(_name, _retailClasses, _plan.Build), ActionSource.Host);
         return Go("creating");
     }
 
@@ -661,7 +667,7 @@ public sealed class MageBuildScenario : IScenario
         }
 
         // (d) the spellbook, in chunks the mod accepts. A ready mage's chunks all answer known.
-        var ids = ArenaProfile.SpellsToLearn;
+        var ids = _spells;
         var first = _spellChunk * SpellChunk;
         if (first < ids.Count)
         {
@@ -702,7 +708,9 @@ public sealed class MageBuildScenario : IScenario
             {
                 _tieDone = true;
                 Tie = "skipped";
-                _log.Warn(LogCategory, "the tie is skipped: the ground '" + _kitPlan!.Ground.Key + "' has no portal record, so there is no portal to tie to (TODO(m6-ground-fields)); a journey of this ground's mage finds its portal untied");
+                _log.Warn(LogCategory, _kitPlan!.StockOnly
+                    ? "the tie is skipped: a stock-only plan (a Throwaway loopback on a low rung, M6 5) makes no build-time tie"
+                    : "the tie is skipped: the ground '" + _kitPlan.Ground.Key + "' has no portal record, so there is no portal to tie to (TODO(m6-ground-fields)); a journey of this ground's mage finds its portal untied");
             }
             else
             {
@@ -714,7 +722,7 @@ public sealed class MageBuildScenario : IScenario
         if (_purge is not null && !_purged)
         {
             // M4 fresh B1 (D45): the old copies are purged only once the build has ended met, so a failed build leaves the old copy restorable. M4 fresh F1: the vitals are refilled first (the build's raises lifted the maxima over the current values).
-            _log.Info(LogCategory, "the build ended met; refilling the vitals by a level-up, then purging the old copies of " + MageTemplate.CharacterName + " with the server mod");
+            _log.Info(LogCategory, "the build ended met; refilling the vitals by a level-up, then purging the old copies of " + _name + " with the server mod");
             return Go("refilling");
         }
 
@@ -824,9 +832,9 @@ public sealed class MageBuildScenario : IScenario
             return Waiting(session, "the entered character's name is not known");
         }
 
-        if (!string.Equals(name, MageTemplate.CharacterName, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(name, _name, StringComparison.OrdinalIgnoreCase))
         {
-            return Fail(session, "the entered character is not " + MageTemplate.CharacterName + ": nothing is sent for it");
+            return Fail(session, "the entered character is not " + _name + ": nothing is sent for it");
         }
 
         var clock = session.Clock.Now;
@@ -922,7 +930,7 @@ public sealed class MageBuildScenario : IScenario
     /// </summary>
     /// <param name="plan">The kit plan, or null.</param>
     /// <param name="endSession">True for the session-ending (headless) build.</param>
-    public static string TieIntent(GearKit.KitPlan? plan, bool endSession) => plan is null || !endSession ? "none" : plan.Ground.Portal is null ? "skipped" : "tie";
+    public static string TieIntent(GearKit.KitPlan? plan, bool endSession) => plan is null || !endSession ? "none" : plan.Ground.Portal is null || plan.StockOnly ? "skipped" : "tie";
 
     /// <summary>
     /// M5 3 p1 (D50, spec section 5.6): the first tie, the build's one place beyond its own start. <see cref="PortalTieLeg"/> places the mage at the ground's portal front, casts the ground's tie spell through the cast policy, checks the link, and places the mage back at the ground's home; a failure
@@ -935,9 +943,9 @@ public sealed class MageBuildScenario : IScenario
             return Waiting(session, "the entered character's name is not known");
         }
 
-        if (!string.Equals(name, MageTemplate.CharacterName, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(name, _name, StringComparison.OrdinalIgnoreCase))
         {
-            return Fail(session, "the entered character is not " + MageTemplate.CharacterName + ": nothing is sent for it");
+            return Fail(session, "the entered character is not " + _name + ": nothing is sent for it");
         }
 
         _tieLeg ??= new PortalTieLeg(_kitPlan!.Ground, _log);
@@ -992,9 +1000,9 @@ public sealed class MageBuildScenario : IScenario
             return Waiting(session, "the entered character's name is not known");
         }
 
-        if (!string.Equals(name, MageTemplate.CharacterName, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(name, _name, StringComparison.OrdinalIgnoreCase))
         {
-            return Fail(session, "the entered character is not " + MageTemplate.CharacterName + ": nothing is sent for it");
+            return Fail(session, "the entered character is not " + _name + ": nothing is sent for it");
         }
 
         switch (_refill!.Poll(session, out var failure))
@@ -1010,7 +1018,7 @@ public sealed class MageBuildScenario : IScenario
                     _steps.Add(string.Create(CultureInfo.InvariantCulture, $"refill xp {_refill.Granted:N0} (a level-up: {_refill.Field})")); // recorded, not a built step: BuiltSteps counts the template's
                 }
 
-                _log.Info(LogCategory, "the vitals are full (refill=" + _refill.Field + "); purging the old copies of " + MageTemplate.CharacterName + " with the server mod");
+                _log.Info(LogCategory, "the vitals are full (refill=" + _refill.Field + "); purging the old copies of " + _name + " with the server mod");
                 return Go("purging");
         }
     }
@@ -1026,9 +1034,9 @@ public sealed class MageBuildScenario : IScenario
             return Waiting(session, "the entered character's name is not known");
         }
 
-        if (!string.Equals(name, MageTemplate.CharacterName, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(name, _name, StringComparison.OrdinalIgnoreCase))
         {
-            return Fail(session, "the entered character is not " + MageTemplate.CharacterName + ": nothing is sent for it");
+            return Fail(session, "the entered character is not " + _name + ": nothing is sent for it");
         }
 
         switch (_purge!.Poll(session, out var failure))
@@ -1040,7 +1048,7 @@ public sealed class MageBuildScenario : IScenario
             default:
                 if (_freshHow == "recreated" && _purge.Purged == 0)
                 {
-                    return Fail(session, "purge: the old copy was not purged (the mod answered unknown-character for the first ask, though the retail delete left the old " + MageTemplate.CharacterName + " pending deletion)");
+                    return Fail(session, "purge: the old copy was not purged (the mod answered unknown-character for the first ask, though the retail delete left the old " + _name + " pending deletion)");
                 }
 
                 _purged = true;
@@ -1084,9 +1092,9 @@ public sealed class MageBuildScenario : IScenario
             return Waiting(session, "the entered character's name is not known");
         }
 
-        if (!string.Equals(name, MageTemplate.CharacterName, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(name, _name, StringComparison.OrdinalIgnoreCase))
         {
-            return Fail(session, "the entered character is not " + MageTemplate.CharacterName + ": nothing is sent for it");
+            return Fail(session, "the entered character is not " + _name + ": nothing is sent for it");
         }
 
         _bindLeg ??= new LifestoneBindLeg(_kitPlan!.Ground, _log);
@@ -1410,7 +1418,7 @@ public sealed class PortalTieLeg : ScriptLeg
                     var mark = _chat.Count;
                     var attempt = new CastAttempt(S.Actions, S.State, _sink, _spells);
                     var ids = new[] { portal.TieSpell };
-                    var end = attempt.Start(new CastRequest { Levels = ids, Rules = CastRules.Travel(MaxFizzles), Purpose = "portal tie", Target = guid, Source = ActionSource.Host }, S.Clock.Now);
+                    var end = attempt.Start(new CastRequest { Levels = ids, Rules = CastRules.Travel(MaxFizzles), Purpose = "portal tie", Target = guid, Source = ActionSource.Automation }, S.Clock.Now); // M6 15: a scripted cast is the automation's, so the player's rule holds for it (the spell is on a spell bar)
                     while (end == CastEnd.Running)
                     {
                         yield return null;

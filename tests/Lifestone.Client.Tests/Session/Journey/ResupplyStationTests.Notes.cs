@@ -116,7 +116,7 @@ public sealed partial class ResupplyStationTests
     [Fact]
     public void M5_7_D136_soak_round_13_s_trip_buys_the_notes_of_one_coin_stack_and_up_merges_each_into_its_stack_and_logs_the_decision()
     {
-        var home = new Home(Den, 150_021, notes: false);
+        var home = new Home(Den, 135_021, notes: false); // M6 14 pack rules: the float is one coin stack (25,000) where the purse's coin was 40,000, so the same 110,021 lies above it
         var tenK = home.Own("Trade Note (10,000)", Note10k, VendorStock.PromissoryNoteType, 10_000, stack: 1, maxStack: NoteMax);
         var fiftyK = home.Own("Trade Note (50,000)", 2626, VendorStock.PromissoryNoteType, 250_000, stack: 5, maxStack: NoteMax);
         home.Own("Trade Note (250,000)", Note250k, VendorStock.PromissoryNoteType, 250_000, stack: 1, maxStack: NoteMax);
@@ -124,9 +124,10 @@ public sealed partial class ResupplyStationTests
 
         Assert.Equal(ScenarioStatus.Succeeded, home.Run(run));
 
-        Assert.True(home.Logged("purse: coin 150021, floor 40000, above 110021, notes of 25000 and up (a smaller note saves no pack slot and costs 15%): buy 1 x Trade Note (50,000) at 57500; 52521 stays coin (under 57500, the Trade Note (50,000)'s price)"));
+        Assert.True(home.Logged("purse: coin 135021, floor 25000 (float 25000: the trip's own spend 0 "));
+        Assert.True(home.Logged("), above 110021, notes of 25000 and up (a smaller note saves no pack slot and costs 15%): buy 1 x Trade Note (50,000) at 57500; 52521 stays coin (under 57500, the Trade Note (50,000)'s price)"));
         Assert.Equal(1, run.NotesBought);
-        Assert.Equal(92_521, home.Vendor.State.Self.Qualities.CoinValue); // four coin stacks
+        Assert.Equal(77_521, home.Vendor.State.Self.Qualities.CoinValue); // four coin stacks, from six
         var inventory = home.Vendor.State.Self.Inventory;
         Assert.True(inventory.TryGetStack(fiftyK, out var fifties, out _));
         Assert.Equal(6u, fifties); // the bought one joined the held five
@@ -139,7 +140,7 @@ public sealed partial class ResupplyStationTests
 
         Assert.True(home.Logged("purse: bought 1 x Trade Note (50,000) at Archmage Cindrue for 57500 pyreals (57500 each"));
         Assert.False(home.Logged("x Trade Note (10,000) at Archmage Cindrue"));
-        Assert.True(home.Logged("purse: done at Archmage Cindrue: the coin 92521, 52521 above the floor 40000"));
+        Assert.True(home.Logged("purse: done at Archmage Cindrue: the coin 77521, 52521 above the floor 25000"));
         Assert.Equal(0, run.MergesRefused);
     }
 
@@ -184,5 +185,114 @@ public sealed partial class ResupplyStationTests
         Assert.Equal(expected, string.Join("; ", merges));
         Assert.True(size.Values.Count(s => s is > 0 and < 25_000) <= 1, $"{at}: more than one partial stack left");
         Assert.Equal(sizes.Sum(), size.Values.Sum());
+    }
+
+    private const uint Outskirts10k = 2625; // Trade Note (10,000)
+
+    /// <summary>
+    /// M6 item 14 (the den run's trip, the owner's order of 2026-11-13: turn the coin into notes before the run): while the order's fact stands the purse's floor is 0, so the same 40,000 that stays coin on an ordinary trip buys
+    /// three notes of 10,000 at 11,500 each and 5,500 is left as coin, under the smallest note's price.
+    /// </summary>
+    [Fact]
+    public void M6_14_an_order_that_turns_the_coin_into_notes_buys_notes_down_to_a_floor_of_nothing()
+    {
+        var home = new Home("holtburg-outskirts", 40_000);
+        home.ShopOf(Outskirts10k).MaxStacks[Outskirts10k] = NoteMax;
+        var run = home.Start(new ResupplyOptions(true), facts: f => f.CoinToNotes = true);
+
+        Assert.Equal(ScenarioStatus.Succeeded, home.Run(run));
+
+        Assert.Equal(3, run.NotesBought);
+        Assert.True(home.Logged("purse: coin 40000, floor 0 (the order turns the coin into notes), above 40000, notes of 10000 and up"));
+        Assert.True(home.Logged("purse: bought 3 x Trade Note (10,000)"));
+    }
+
+    [Fact]
+    public void M6_7_AU_the_outskirts_climber_keeps_her_coin_a_note_costs_15_percent_and_saves_no_slot_she_needs()
+    {
+        var home = new Home("holtburg-outskirts", 40_000); // M6 14 pack rules: 15,000 above the float of one coin stack (it was 10,000 above the 30,000 floor, M6 8 I): one 10,000 note would leave 28,500 in two stacks, as 40,000 takes now, so it stays coin
+        home.ShopOf(Outskirts10k).MaxStacks[Outskirts10k] = NoteMax;
+        var run = home.Start(new ResupplyOptions(true));
+
+        Assert.Equal(ScenarioStatus.Succeeded, home.Run(run));
+
+        Assert.Equal(0, run.NotesBought);
+        Assert.Equal(10_000, home.Ground.Supplies.Purse.MinNote);
+        Assert.True(home.Logged("purse: coin 40000, floor 25000 (float 25000: the trip's own spend 0 "));
+        Assert.True(home.Logged("), above 15000, notes of 10000 and up (a smaller note saves no pack slot and costs 15%): no notes: 1 x Trade Note (10,000) would leave the coin in as many slots or more, a note stack counted (2 coin stacks now): a note costs 15% and frees no slot; it stays coin"));
+        Assert.False(home.Logged("purse: bought"));
+    }
+
+    [Fact]
+    public void M6_7_AU_a_trade_note_the_profile_does_not_list_is_changed_to_coin_before_the_buy()
+    {
+        // 2026-11-06 18:31: "short by 2920 ... no note is left" with a Trade Note (100,000) held: NextNote read only the faces the profile's purse lists (the 10,000). A scrivener's mask holds PromissoryNote (0x40000) and ACE does not check MerchandiseMaxValue on a sale.
+        var home = new Home("holtburg-outskirts", 100, held: l => l.Name == "Prismatic Taper" ? l.Keep - 10 : l.Keep, notes: false);
+        home.Own("Trade Note (100,000)", 2627, VendorStock.PromissoryNoteType, 100_000);
+        var run = home.Start();
+
+        Assert.Equal(ScenarioStatus.Succeeded, home.Run(run));
+
+        Assert.Equal(1, run.NotesSold);
+        Assert.Equal(0, run.Short);
+        Assert.True(home.Logged("purse: changed Trade Note (100,000) to coin"));
+        Assert.False(home.Logged("no note is left"));
+    }
+
+    [Fact]
+    public void M6_2_d_the_creation_stack_stays_coin_and_the_floor_is_what_one_full_trip_spends()
+    {
+        var home = new Home("holtburg-outskirts", 10_000); // what the climber starts with (starterGear.json): under the float of one coin stack (M6 14 pack rules; the 30,000 floor of M6 8 I before), so nothing above it
+        var run = home.Start(new ResupplyOptions(true));
+
+        Assert.Equal(ScenarioStatus.Succeeded, home.Run(run));
+
+        Assert.Equal(0, run.NotesBought);
+        Assert.True(home.Logged("purse: coin 10000, floor 25000 (float 25000: the trip's own spend 0 "));
+        Assert.True(home.Logged("), above 0, notes of 10000 and up"));
+        Assert.True(home.Logged("no notes: the coin above the floor is under the smallest such note's price (Trade Note (10,000) at 11500); it stays coin"));
+
+        // the floor is a full restock from nothing (every stock line at its keep, the vendors' prices) plus the floor's Wand and Faran Robe, rounded up to the next hundred
+        var ground = home.Ground;
+        var restock = ground.Supplies.Stock.Sum(l => (long)l.Keep * ground.PriceOf(l.Wcid)!.Value);
+        var trip = restock + ground.PriceOf(2472)!.Value + ground.PriceOf(5851)!.Value;
+        Assert.Equal(16_091, restock); // M6 14 (m6-life-through): 21 for Mandrake (14) and Hemlock Talisman (7) at keep 1; M6 14 T: 264 for two more of each of the twelve full-formula lines (keep 4); M6 8 (the owner, 2026-11-11): 11,270 for forty-nine more Mana Potions at 230, a top-up bought last inside the trip budget; M6 7 AR: 1,014 for two more Copper, Silver, and one more Red and Indigo; M6 7 AN: 21 for Alder Talisman and Damiana; M6 7 AK: 849 for the 21 new component lines at keep 1, bought last, inside the trip's budget (m6-buff-components-early); M6 7 lead: four more Iron Scarabs (keep 6) at 68; M6 7 X: 89 for the four protective lines at keep 1; M6 7 AD: 21 for Saffron and Quicksilver at keep 1
+        Assert.Equal(16_429, trip); // M6 8: with the fifty Mana Potions; M6 14 T: and the twelve lines at keep 4; M6 14 (m6-life-through): and Harm Other's two components
+        Assert.Equal(30_000, ground.Supplies.Purse.Coin); // M6 8 I: the floor is the purse's coin, 30,000 as the Burrow and the Lodge; it covers a full trip (16,429) nearly twice
+        Assert.InRange(ground.Supplies.Purse.Coin - trip, 0, 30_000);
+
+        // the coin a death can take is under half the floor plus the smallest note's price (8,000); the default 25,000 would leave 30,000 exposed
+        var exposed = (ground.Supplies.Purse.Coin + (long)Math.Ceiling((1.15f * ground.Supplies.Purse.MinNote) - 0.1)) / 2;
+        Assert.Equal(10_000, ground.Supplies.Purse.MinNote); // M6 8 I: ACE takes half of loose coin and no trade note (Player_Death.cs:675-685), so the coin above the floor is converted from the 10,000 note up; exposed is half of the floor and one note's price
+        Assert.InRange(exposed, 1, 150_000);
+    }
+
+    /// <summary>M6 8 I: the coin a climber of the first bands carried when the purse rule was read live (round 1 of 2026-11-09, level 11, the outskirts: 89,190 pyreals, and the purse said "no notes").</summary>
+    private const long CoinHeldAtLevel11 = 89_190;
+
+    /// <summary>The coin a climber of a band holds: the live figure at level 11 scaled by the band's first level over 11 (an estimate that grows with the level; TODO(m6-band-coin): read the real figure from a gate's log).</summary>
+    private static long CoinHeldAtTheBand(int bandFrom) => CoinHeldAtLevel11 * Math.Max(11, bandFrom) / 11;
+
+    [Fact]
+    public void M6_8_I_the_purse_rule_binds_at_every_rung_of_the_ladder_at_the_coin_a_climber_holds()
+    {
+        var failures = new List<string>();
+        foreach (var rung in LadderLoader.WarMage.Rungs)
+        {
+            foreach (var key in rung.GroundKey is null ? [] : new[] { rung.GroundKey }.Concat(rung.Alternates.Where(a => !a.Pending).Select(a => a.GroundKey)).Distinct())
+            {
+                var ground = GroundCatalog.Get(key);
+                var purse = ground.Supplies.Purse;
+                var sold = purse.Notes.Where(n => ground.VendorSelling(n.Wcid) is not null).ToList();
+                var offers = sold.Count == 0 ? [] : PurseNotes.All.Where(n => n.Value >= purse.MinNote).Select(n => new PurseNotes.Offer(n, PurseNotes.PriceOf(n.Value))).ToList();
+                var picks = PurseNotes.Greedy(CoinHeldAtTheBand(rung.Band.From) - purse.Coin, offers).Picks;
+                if (picks.Count == 0)
+                {
+                    failures.Add($"{rung.Key} ({key}): coin {CoinHeldAtTheBand(rung.Band.From)} buys no note: floor {purse.Coin}, min_note {purse.MinNote}, a home vendor sells a purse note: {sold.Count > 0}, the smallest offer {(offers.Count == 0 ? "none" : offers.Min(o => o.Price).ToString(System.Globalization.CultureInfo.InvariantCulture))}");
+                }
+            }
+        }
+
+        Assert.True(failures.Count == 0, "the purse rule cannot bind at: " + string.Join("; ", failures));
     }
 }

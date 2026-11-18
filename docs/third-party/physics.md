@@ -8,6 +8,7 @@ Code: `src/Lifestone.Data/Physics/`, `src/Lifestone.Client/Movement/`. Tests: `t
 | Source | Version | Licence | How it is used |
 |---|---|---|---|
 | ACEmulator/ACE | v1.78.4816, `95ef426d` (full SHA in server/versions.json) | AGPL-3.0 | **Ported**, file by file as listed below, from `Source/ACE.Server/Physics/`. Each ported file carries a `Ported from` header naming its sources and its changes. Where ACE differs from the retail client, Lifestone follows retail; every such fix is listed under "ACE deviations" and the behavioural ones have a test-only `PhysicsCompat` switch ([../physics.md](../physics.md) §2). |
+| ACE build under `server/runtime/ace` (same commit) | v1.78.4816, `95ef426d` | AGPL-3.0 | **Linked, not ported**, by `tools/ace-compare` (world walk W7), a local helper outside the solution: it holds no ACE source and only calls ACE's physics to compare it with ours |
 | Retail client decompile (Mag-nus/acclient-AI-RE) | 11.4186 (PDB-named) | reference only | Behaviour was read in the per-module files under `2013-09 11.4186/acclient-src/src/` and is cited by function name and address next to the code. **No decompiled code is in the repository.** |
 | `symbol_transplant_11.6096.tsv` (same repository, pinned in `cache/research/` by the lead, owner decision D4) | 11.6096 | reference only | The 11.6096 address of each cited function. Where the table has none, the code says `TODO(physics): 11.6096`. |
 

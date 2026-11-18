@@ -37,6 +37,11 @@ public static class Log
     private static readonly FileRollWriter RollWriter = new();
     private static int _mainThreadId = -1;
     private static int _logKeep = 1; // --log-keep: rolled files kept (1 = lifestone.1.log only, 0 = all; M5 7 F17)
+    private const string ActionLinePrefix = "action #"; // the session's action log line (ActionApi), counted for the long-frame line
+    private static long _linesWritten; // under FileLock
+    private static long _actionLines; // under FileLock
+    private static long _mainThreadWriteTicks; // the game thread only
+    private static long _mainThreadPrintTicks; // the game thread only
 
     /// <summary>Minimum level written (default Info; <c>--log-level=debug</c> lowers it).</summary>
     public static LogLevel MinimumLevel { get; set; } = LogLevel.Info;
@@ -147,25 +152,49 @@ public static class Log
             return;
         }
 
+        var onMain = System.Environment.CurrentManagedThreadId == _mainThreadId;
+        var began = onMain ? System.Diagnostics.Stopwatch.GetTimestamp() : 0L; // M6 16 Eperf2: the game thread's time in here, for the long-frame line's log_ms
         var line = Format(level, category, message, fields);
         lock (FileLock)
         {
             WriteToFile(line);
+            _linesWritten++;
+            if (message.StartsWith(ActionLinePrefix, StringComparison.Ordinal))
+            {
+                _actionLines++;
+            }
+
             if (level >= LogLevel.Warning)
             {
                 _file?.Flush();
             }
         }
 
-        if (System.Environment.CurrentManagedThreadId == _mainThreadId)
+        if (onMain)
         {
+            var printing = System.Diagnostics.Stopwatch.GetTimestamp();
             ToGodot(level, line);
+            var done = System.Diagnostics.Stopwatch.GetTimestamp();
+            _mainThreadWriteTicks += done - began;
+            _mainThreadPrintTicks += done - printing;
         }
         else
         {
             PendingGodot.Enqueue((level, line));
         }
     }
+
+    /// <summary>M6 16 Eperf2: the lines written so far, every thread's (a running total; the long-frame line reads its difference over a frame).</summary>
+    public static long LinesWritten => Volatile.Read(ref _linesWritten);
+
+    /// <summary>M6 16 Eperf2: the action lines among them (the session's <c>action #</c> lines: one an action's outcome).</summary>
+    public static long ActionLines => Volatile.Read(ref _actionLines);
+
+    /// <summary>M6 16 Eperf2: the time the game thread has spent in <see cref="Write"/> so far (the format, the file write, the console print), in <see cref="System.Diagnostics.Stopwatch"/> ticks. Read on the game thread.</summary>
+    public static long MainThreadWriteTicks => _mainThreadWriteTicks;
+
+    /// <summary>M6 16 Eperf2: the part of <see cref="MainThreadWriteTicks"/> spent in the console print (Godot's output; a launcher may have pointed it at a file). The rest is the format and lifestone.log's write.</summary>
+    public static long MainThreadPrintTicks => _mainThreadPrintTicks;
 
     /// <summary>Prints queued worker-thread entries to Godot's output and flushes the file. Main thread, once per frame.</summary>
     public static void FlushToGodot()

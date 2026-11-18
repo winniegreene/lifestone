@@ -107,6 +107,7 @@ public sealed class AmbientScanCadenceTests
     }
 
     [Fact]
+    [Trait("Tier", "Timing")] // m5-ambientscan-cadence-flake: the one test of the class that waits on the thread pool (the cadence tests count frames, not time)
     public void The_background_terrain_reads_on_a_pool_thread_returns_null_until_it_is_read_and_bumps_the_revision()
     {
         var home = AmbientSoundPlayerTests.Home;

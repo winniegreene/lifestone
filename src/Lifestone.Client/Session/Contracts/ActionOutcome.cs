@@ -136,6 +136,12 @@ public enum ActionReason : byte
 
     /// <summary>M5 7 D139 (l): the magic combat mode needs a caster in the hands and none is held (the before-check), or the server answered the magic mode with peace while none is held (ACE <c>Player_Combat.cs</c> 872-882).</summary>
     NoCasterHeld,
+
+    /// <summary>
+    /// M6 14 airborne: the body was in the air (ACE's 0x04EB YouCantDoThatWhileInTheAir: <c>Player.IsJumping</c>, no OnWalkable, <c>Player.cs</c>:49-62 @95ef426d; a cast, a melee or missile attack, a heal, a drink). The moment's
+    /// reason, not the action's: a wait for the landing, then the same action again.
+    /// </summary>
+    InTheAir,
 }
 
 /// <summary>M5 7 D141: the reasons the server's codes carry (the WeenieErrors whose meaning is one <see cref="ActionReason"/> whatever the action).</summary>
@@ -154,6 +160,7 @@ public static class ActionReasons
         0x0406 or 0x0550 => ActionReason.OutOfRange, // MagicTargetOutOfRange, MissileOutOfRange
         0x0427 => ActionReason.NotSameItem, // YouCannotMergeDifferentStacks
         0x042C => ActionReason.TargetGone, // TargetNotAcquired
+        0x04EB => ActionReason.InTheAir, // YouCantDoThatWhileInTheAir (M6 14 airborne)
         0x04FC => ActionReason.NotTrained, // YouArentTrainedInHealing
         _ => ActionReason.None,
     };

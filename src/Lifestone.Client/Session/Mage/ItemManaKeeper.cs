@@ -20,7 +20,9 @@ public readonly record struct WornMana(uint Guid, string Name, int Mana, int Max
 /// <param name="Name">Its name.</param>
 /// <param name="Mana">ItemCurMana, or null for an empty stone.</param>
 /// <param name="Efficiency">ItemEfficiency (PropertyFloat 87, an assessment property): the share of a drained item's mana the stone takes (ManaStone.cs:108); 0 when not known.</param>
-public readonly record struct HeldStone(uint Guid, string Name, int? Mana, double Efficiency = 0)
+/// <param name="DestroyChance">M6 item 14: ManaStoneDestroyChance (PropertyFloat 137): the chance a use destroys the stone (ManaStone.cs:235-252; a Mana Charge's is 1); 0 when not known.</param>
+/// <param name="Value">M6 item 14: the stone's Value in pyreals (what its loss costs), 0 when not known.</param>
+public readonly record struct HeldStone(uint Guid, string Name, int? Mana, double Efficiency = 0, double DestroyChance = 0, long Value = 0)
 {
     /// <summary>True when it holds mana.</summary>
     public bool Charged => Mana is > 0;
@@ -57,10 +59,11 @@ public enum ItemManaAct
 /// <param name="Stone">The stone used.</param>
 /// <param name="Target">The target (the player for a refill, the item for a capture).</param>
 /// <param name="Why">Why.</param>
-public readonly record struct ItemManaStep(ItemManaAct Act, uint Stone, uint Target, string Why)
+/// <param name="Caster">M6 2 c: the held caster's decision (<see cref="CasterManaRule"/>) when the caller passed the caster; null otherwise. A swap, a rewield or a want is the caller's to do (the step is <see cref="ItemManaAct.None"/>).</param>
+public readonly record struct ItemManaStep(ItemManaAct Act, uint Stone, uint Target, string Why, CasterManaDecision? Caster = null)
 {
     /// <summary>The step as the log prints it.</summary>
-    public override string ToString() => Act switch
+    public override string ToString() => Caster is { } c && Act == ItemManaAct.None && c.Act is CasterManaAct.SwapToSpare or CasterManaAct.Rewield ? c.ToString() : Act switch
     {
         ItemManaAct.Refill => string.Create(CultureInfo.InvariantCulture, $"gear mana: refill: the stone 0x{Stone:X8} on the player: {Why}"),
         ItemManaAct.Capture => string.Create(CultureInfo.InvariantCulture, $"gear mana: capture: the empty stone 0x{Stone:X8} on 0x{Target:X8}: {Why}"),
@@ -70,6 +73,8 @@ public readonly record struct ItemManaStep(ItemManaAct Act, uint Stone, uint Tar
 
 /// <summary>
 /// M5 7 D125: the worn items' own mana, kept as retail plays it with mana stones. Pure over appraisals; one step at a time (the caller sends it, appraises again and asks for the next).
+/// M6 item 14: the home visit's refill is <see cref="WornManaRefill"/>'s now (due by the time to the next visit, the means by cost); this keeper's <see cref="Next"/> is no longer the trip's rule, and its stone keep
+/// (<see cref="Shed"/>, <see cref="StonesWanted"/>) and its tables stay in use.
 /// </summary>
 /// <remarks>
 /// <para><b>The drain.</b> ACE burns a worn item's mana while its spells are on, <c>-ManaRate</c> a second accumulated on the ~5 s heartbeat (<c>ManaConsumersTick</c>, Player_Tick.cs:624-660 @95ef426d), warns "Your X is low on Mana." under 120 s
@@ -131,22 +136,49 @@ public static class ItemManaKeeper
         return shed;
     }
 
+    /// <summary>
+    /// M6 14 (the lead, 2026-11-16: the stones the kit keeps stay kept; the ones beyond its target are sell loot): the <see cref="StoneTarget"/> stones the kit keeps, the charged ones first (the most mana first), then the empty ones by
+    /// <see cref="Shed"/>'s order (the highest efficiency, the kit pack's, the lowest guid). Every other appraised stone is beyond the target.
+    /// </summary>
+    /// <param name="stones">The appraised stones held.</param>
+    /// <param name="inKit">True for a stone in the kit pack.</param>
+    public static HashSet<uint> Kept(IReadOnlyList<HeldStone> stones, Func<uint, bool> inKit)
+    {
+        ArgumentNullException.ThrowIfNull(stones);
+        ArgumentNullException.ThrowIfNull(inKit);
+        var charged = stones.Where(s => s.Charged).OrderByDescending(s => s.Mana).ThenBy(s => s.Guid);
+        var empty = stones.Where(s => !s.Charged).OrderByDescending(s => s.Efficiency).ThenByDescending(s => inKit(s.Guid)).ThenBy(s => s.Guid);
+        return [.. charged.Concat(empty).Take(StoneTarget).Select(s => s.Guid)];
+    }
+
     /// <summary>The next step.</summary>
     /// <param name="worn">The worn pieces with their mana (only the ones with a maximum).</param>
     /// <param name="stones">The stones held.</param>
     /// <param name="junk">The main pack's sale items with mana (from their appraisals).</param>
     /// <param name="player">The player's id (the refill's target).</param>
     /// <param name="decisions">M5 7 S2b: filled with one line per junk item weighed for a capture (the mana's worth against the payout), or null.</param>
-    public static ItemManaStep Next(IReadOnlyList<WornMana> worn, IReadOnlyList<HeldStone> stones, IReadOnlyList<DrainTarget> junk, uint player, List<string>? decisions = null)
+    /// <param name="caster">M6 2 c: the held caster, its spare casters and the profile's wares, or null: the keeper asks <see cref="CasterManaRule"/> first. A swap to a spare or a rewield comes back as a None step carrying the decision (the caller wields); a caster due by the rule is refilled even when the half-of-maximum test would not catch it; a want rides on the step.</param>
+    public static ItemManaStep Next(IReadOnlyList<WornMana> worn, IReadOnlyList<HeldStone> stones, IReadOnlyList<DrainTarget> junk, uint player, List<string>? decisions = null, CasterManaInput? caster = null)
     {
         ArgumentNullException.ThrowIfNull(worn);
         ArgumentNullException.ThrowIfNull(stones);
         ArgumentNullException.ThrowIfNull(junk);
+        CasterManaDecision? ruled = caster is null ? null : CasterManaRule.Decide(caster, stones);
+        if (ruled is { Act: CasterManaAct.SwapToSpare or CasterManaAct.Rewield } early)
+        {
+            return new ItemManaStep(ItemManaAct.None, 0, 0, early.Reason, early);
+        }
+
         var low = worn.Where(w => w.MaxMana > 0 && (w.Mana < w.MaxMana * RefillBelow || w.SecondsLeft < RefillHorizonSeconds)).ToList();
+        if (ruled is { Act: CasterManaAct.RefillDue } && caster?.Held is { } heldCaster && low.All(w => w.Guid != heldCaster.Guid))
+        {
+            low.Add(heldCaster); // the rule asked first: the held caster is due though it is not in the worn list or the half test missed it
+        }
+
         var charged = stones.Where(s => s.Charged).ToList();
         if (low.Count > 0 && charged.Count > 0)
         {
-            var need = worn.Where(w => w.MaxMana > 0).Sum(w => (long)Math.Max(0, w.MaxMana - w.Mana));
+            var need = worn.Concat(low.Where(l => worn.All(w => w.Guid != l.Guid))).Where(w => w.MaxMana > 0).Sum(w => (long)Math.Max(0, w.MaxMana - w.Mana));
             var stone = charged.Where(s => s.Mana >= need).OrderBy(s => s.Mana).ThenBy(s => s.Guid).FirstOrDefault();
             if (stone.Guid == 0)
             {
@@ -154,7 +186,7 @@ public static class ItemManaKeeper
             }
 
             var lows = string.Join(", ", low.Select(w => string.Create(CultureInfo.InvariantCulture, $"'{w.Name}' {w.Mana}/{w.MaxMana}{(w.ManaRate < 0 ? $" ({w.SecondsLeft / 60:0} min left at {-w.ManaRate:0.####}/s)" : string.Empty)}")));
-            return new ItemManaStep(ItemManaAct.Refill, stone.Guid, player, string.Create(CultureInfo.InvariantCulture, $"{lows} (under {RefillBelow:P0} or {RefillHorizonSeconds / 3600:0.#} h); the worn items need {need}, the stone '{stone.Name}' holds {stone.Mana} ({charged.Count} charged)"));
+            return new ItemManaStep(ItemManaAct.Refill, stone.Guid, player, string.Create(CultureInfo.InvariantCulture, $"{lows} (under {RefillBelow:P0} or {RefillHorizonSeconds / 3600:0.#} h); the worn items need {need}, the stone '{stone.Name}' holds {stone.Mana} ({charged.Count} charged)"), ruled);
         }
 
         if (worn.Any(w => w.MaxMana > 0) && charged.Count < ChargedWanted && stones.Where(s => !s.Charged).OrderByDescending(s => s.Efficiency).ThenBy(s => s.Guid).FirstOrDefault() is { Guid: not 0 } empty)
@@ -177,14 +209,14 @@ public static class ItemManaKeeper
 
             if (best is { } pick)
             {
-                return new ItemManaStep(ItemManaAct.Capture, empty.Guid, pick.Target.Guid, string.Create(CultureInfo.InvariantCulture, $"{charged.Count} charged of {ChargedWanted} wanted; the stone '{empty.Name}' (efficiency {empty.Efficiency:0.##}); {pick.Why}"));
+                return new ItemManaStep(ItemManaAct.Capture, empty.Guid, pick.Target.Guid, string.Create(CultureInfo.InvariantCulture, $"{charged.Count} charged of {ChargedWanted} wanted; the stone '{empty.Name}' (efficiency {empty.Efficiency:0.##}); {pick.Why}"), ruled);
             }
         }
 
         var why = low.Count > 0
-            ? string.Create(CultureInfo.InvariantCulture, $"{low.Count} worn piece(s) low but no charged stone is held (TODO(m5-stone-short))")
+            ? string.Create(CultureInfo.InvariantCulture, $"{low.Count} worn piece(s) low but no charged stone is held ({(ruled is { Act: CasterManaAct.WantStone } want ? want.Reason : "TODO(m5-stone-short)")})")
             : string.Create(CultureInfo.InvariantCulture, $"every worn piece over {RefillBelow:P0} and {RefillHorizonSeconds / 3600:0.#} h; {charged.Count} charged stone(s), {stones.Count - charged.Count} empty");
-        return new ItemManaStep(ItemManaAct.None, 0, 0, why);
+        return new ItemManaStep(ItemManaAct.None, 0, 0, why, ruled);
     }
 
     /// <summary>

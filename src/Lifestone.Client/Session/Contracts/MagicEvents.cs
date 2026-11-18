@@ -59,3 +59,13 @@ public enum SpellbookChange
 /// <param name="Count">How many spells the book holds now.</param>
 /// <param name="IsNew">For <see cref="SpellbookChange.Learned"/>: false when the book already held the spell (nothing changed); always true for a description.</param>
 public readonly record struct SpellbookChanged(SpellbookChange Change, uint SpellId, int Count, bool IsNew) : IGameEvent;
+
+/// <summary>
+/// M6 item 15 (the player's rules on the automation): an automation cast went out, and this is the spell bar it is cast from. The spellcasting panel (<c>gmSpellcastingUI</c>) opens the bar's tab and selects the spell, the state a
+/// person's own cast leaves (a double click selects the cell and casts: <c>SpellCastSubMenu::SetSelected</c>, 11.6096 0x004C66F0, then <c>gmSpellcastingUI::Cast</c>, 0x004C6C40). Published by the Action API as the cast is sent, only
+/// while the rule is on (<c>--autopilot-player-rules</c>); a person's own cast publishes nothing (the panel already shows it).
+/// </summary>
+/// <param name="SpellId">The spell.</param>
+/// <param name="Bar">The bar it is on (0 is tab I).</param>
+/// <param name="Index">Its position on the bar.</param>
+public readonly record struct SpellBarCast(uint SpellId, int Bar, int Index) : IGameEvent;

@@ -434,6 +434,27 @@ public interface IAcSession : IDisposable
     OutboundTicket SendTeleToMarketPlace() =>
         throw new NotSupportedException("IAcSession.SendTeleToMarketPlace is not implemented by this session (M5 6)");
 
+    /// <summary>
+    /// Sends GameAction 0x021C BuyHouse {guardian, the items placed in the guardian window's purchase pane} (in world only; M6 villa).
+    /// ACE checks the items against the price and takes what it needs (<c>Player_House.HandleActionBuyHouse</c>).
+    /// </summary>
+    /// <exception cref="ArgumentException">An empty list; nothing is sent.</exception>
+    OutboundTicket SendBuyHouse(uint guardian, IReadOnlyList<uint> items) =>
+        throw new NotSupportedException("IAcSession.SendBuyHouse is not implemented by this session (M6 villa)");
+
+    /// <summary>Sends GameAction 0x0221 RentHouse {guardian, the items placed in the rent pane} (in world only; M6 villa; <c>Player_House.HandleActionRentHouse</c>).</summary>
+    /// <exception cref="ArgumentException">An empty list; nothing is sent.</exception>
+    OutboundTicket SendRentHouse(uint guardian, IReadOnlyList<uint> items) =>
+        throw new NotSupportedException("IAcSession.SendRentHouse is not implemented by this session (M6 villa)");
+
+    /// <summary>Sends GameAction 0x021E HouseQuery (no payload; in world only; M6 villa): ACE answers HouseData 0x0225 or HouseStatus 0x0226.</summary>
+    OutboundTicket SendHouseQuery() =>
+        throw new NotSupportedException("IAcSession.SendHouseQuery is not implemented by this session (M6 villa)");
+
+    /// <summary>Sends GameAction 0x0262 TeleToHouse (no payload; in world only; <c>/house recall</c>; M6 villa; <c>Player_Location.HandleActionTeleToHouse</c>).</summary>
+    OutboundTicket SendTeleToHouse() =>
+        throw new NotSupportedException("IAcSession.SendTeleToHouse is not implemented by this session (M6 villa)");
+
     /// <summary>Sends GameAction 0x01DF Emote {String16L text} (in world only), retail <c>CM_Communication::Event_Emote</c> (11.6096 0x006A4F40).</summary>
     /// <exception cref="ArgumentException">A character Windows-1252 lacks, or a text that is too long; nothing is sent.</exception>
     OutboundTicket SendEmote(ReadOnlySpan<char> text) =>
@@ -443,6 +464,16 @@ public interface IAcSession : IDisposable
     /// <exception cref="ArgumentException">A character Windows-1252 lacks, or a text that is too long; nothing is sent.</exception>
     OutboundTicket SendSetInscription(uint item, ReadOnlySpan<char> inscription) =>
         throw new NotSupportedException("IAcSession.SendSetInscription is not implemented by this session (M5 7)");
+
+    /// <summary>
+    /// Sends GameAction 0x0032 TalkDirect {String16L message, u32 target} (in world only; M6 14): a tell to an object by its id, the message first, as ACE's
+    /// <c>GameActionTalkDirect</c> reads it (<c>GameActionTalkDirect.cs:18-19</c>, @95ef426d). Retail's sender is the <c>Event_TalkDirect</c> docs/retail-ui.md names; its body and address were not read.
+    /// </summary>
+    /// <param name="target">The object told.</param>
+    /// <param name="text">The message.</param>
+    /// <exception cref="ArgumentException">A target of 0, a message that is not ASCII (ACE counts UTF-8 characters, so anything else would shift the target), or one that is too long; nothing is sent.</exception>
+    OutboundTicket SendTalkDirect(uint target, ReadOnlySpan<char> text) =>
+        throw new NotSupportedException("IAcSession.SendTalkDirect is not implemented by this session (M6 14)");
 
     /// <summary>Sends GameAction 0x000F SetAfkMode {u32 afk} (in world only), retail <c>CM_Communication::Event_SetAFKMode</c> (11.6096 0x006A4D00).</summary>
     OutboundTicket SendSetAfkMode(bool afk) =>

@@ -1,5 +1,7 @@
+using Lifestone.Client.Movement.Wayfinding;
 using Lifestone.Client.Navigation;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Data.World;
 
 namespace Lifestone.Client.Session.Scenarios.Journey;
 
@@ -69,7 +71,10 @@ public enum TravelStatus
 /// <param name="ObjectGuid">An object goal (a creature, a vendor, a portal), or 0 for a point goal.</param>
 /// <param name="Range">For an object goal: arrive within this range, in metres.</param>
 /// <param name="NeedSight">For an object goal: arrive with a clear line of sight to it (the missile pick: closes <c>m4-missile-clear-line</c>).</param>
-public sealed record TravelRequest(TeleportDestination Destination, TravelPurpose Purpose, uint ObjectGuid = 0, double Range = 0, bool NeedSight = false);
+/// <param name="KeepOff">M6 7 AI: for a walk to a portal, the other portals its plans keep clear of (<see cref="RungPortal.KeepOffTheOthers"/>), or null. Only a walk reads it.</param>
+/// <param name="Way">M6 8 B1: the points of a way the room graph cannot plan (<see cref="AuthoredWaySource"/>), or null: the planner plans the walk.</param>
+/// <param name="Use">The hub walk (2026-11-18): the object the walk ends by Using (<see cref="NavRunner.UseTarget"/>): the walk hands over to the server's walk-to-use once the line to it is clear. Null: walked to the end.</param>
+public sealed record TravelRequest(TeleportDestination Destination, TravelPurpose Purpose, uint ObjectGuid = 0, double Range = 0, bool NeedSight = false, PortalKeepOff? KeepOff = null, IReadOnlyList<CellFrame>? Way = null, NavUseTarget? Use = null);
 
 /// <summary>
 /// One travel in progress. The scenario steps it every frame until it ends.
@@ -119,6 +124,17 @@ public interface IJourneyTravel
 
     /// <summary>True while a leg this seam started is running.</summary>
     bool Busy { get; }
+
+    /// <summary>M6 8 K: the survival layer holds the activity: the walk in flight, if any, lets go of the keys and keeps its route (<see cref="ITravelLeg.Pause"/>). Every walk starts here, so no station needs code of its own for a hold. A seam that does not walk does nothing.</summary>
+    void HoldWalk()
+    {
+    }
+
+    /// <summary>M6 8 K: the hold is over: the same walk goes on (<see cref="ITravelLeg.Resume"/>; a run replans when she is off its route).</summary>
+    /// <param name="now">The session clock.</param>
+    void ReleaseWalk(double now)
+    {
+    }
 }
 
 /// <summary>The default travel seam: today's <c>Tools.Place</c> for every request (no budget, no runner). One per scenario (<see cref="Busy"/> is its own leg's).</summary>

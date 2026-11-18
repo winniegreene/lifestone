@@ -137,7 +137,7 @@ public sealed partial class DeathLegRunner : Node
     private HuntingGround _ground = null!;
     private readonly CombatModeWatch _modeWatch = new(); // M4 3.1 g: mode_mismatch=, report-only, printed last on the leg line
     private double _wholeSeconds = WholeCheckSeconds;
-    private Task<(SpellTableData Table, GearKit Kit, RoomGraph Planner, double BuildMilliseconds, double PlannerMilliseconds)>? _loading;
+    private Task<(SpellTableData Table, GearKit Kit, RoomGraph Planner, double BuildMilliseconds, double PlannerMilliseconds, BuffOptions Buff)>? _loading;
     private DeathScenario? _scenario;
     private string? _optionError;
     private ActionHandle? _pending;
@@ -223,7 +223,8 @@ public sealed partial class DeathLegRunner : Node
             {
                 var table = SpellTableData.Load(dats);
                 var built = System.Diagnostics.Stopwatch.GetTimestamp();
-                var kit = GearKit.Build(table.Spells, LoginName(key), ground: runner._ground);
+                var login = LoginName(key);
+                var kit = GearKit.Build(table.Spells, login, ground: runner._ground);
                 var buildMs = System.Diagnostics.Stopwatch.GetElapsedTime(built).TotalMilliseconds;
                 var planning = System.Diagnostics.Stopwatch.GetTimestamp();
                 var planner = GroundRooms.Load(dats, runner._ground);
@@ -231,7 +232,7 @@ public sealed partial class DeathLegRunner : Node
                 var warm = System.Diagnostics.Stopwatch.GetTimestamp();
                 var prepared = PrepareDeathMethods();
                 Log.Info(LogCategory, "death: the death loop's methods were prepared on the loading worker", ("methods", prepared), ("ms", System.Diagnostics.Stopwatch.GetElapsedTime(warm).TotalMilliseconds));
-                return (table, kit, planner, buildMs, plannerMs);
+                return (table, kit, planner, buildMs, plannerMs, runner._buffOptions with { AccountName = login }); // M6 1 w: the account's formula for the gear's first cast and the composed fight (the carrier is the buff options, never printed)
             },
             CancellationToken.None,
             TaskCreationOptions.LongRunning,
@@ -549,11 +550,11 @@ public sealed partial class DeathLegRunner : Node
 
     private void BeginScenario(IGameSessionView session)
     {
-        var (table, kit, planner, buildMilliseconds, plannerMilliseconds) = _loading!.Result;
+        var (table, kit, planner, buildMilliseconds, plannerMilliseconds, buff) = _loading!.Result;
         Log.Info(LogCategory, "death: the gear kit and the den's floor were built on the loading worker, off the game thread", ("build_ms", buildMilliseconds), ("planner_ms", plannerMilliseconds), ("floor_cells", planner.Cells.Cells.Count));
         var walk = new GameFightWalk(_walkHost, planner, _ground, GodotLogSink.Instance, setupExtent: _setupExtent);
         var approach = new GameApproachWalk(_walkHost, GodotLogSink.Instance);
-        _scenario = new DeathScenario(kit, table.Spells, _options, walk, GodotLogSink.Instance, LoginScenario.DefaultArrivalSeconds, endSession: false, DeathStages.All, approach, _buffOptions, _fightOptions);
+        _scenario = new DeathScenario(kit, table.Spells, _options, walk, GodotLogSink.Instance, LoginScenario.DefaultArrivalSeconds, endSession: false, DeathStages.All, approach, buff, _fightOptions);
         _avatars = _mode.Avatars;
         _deathSampler.Start(session);
         _modeWatch.Start(session); // M4 3.1 g: counts the moments the combat mode and the wielded weapon disagree, whoever caused them; report-only

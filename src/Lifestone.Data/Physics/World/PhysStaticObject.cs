@@ -56,6 +56,31 @@ public sealed record PhysPart(CellFrame Position, GfxObjShape Shape, Vector3 Gfx
 
         return TransitionState.OK;
     }
+
+    /// <summary>
+    /// Whether a sphere of <paramref name="radius"/> at <paramref name="center"/> (in the part's landblock-local space) would be refused by this part if
+    /// placed there: the placement branch of <see cref="FindObjCollisions"/> as a query without a transition. The sphere is taken into the part's space
+    /// scaled by its height scale (as <c>SpherePath.CacheLocalSpaceSphere</c>), passes the physics-sphere test of <c>CGfxObj::find_obj_collisions</c>
+    /// (11.6096 0x00535440), then <c>BSPTREE::find_collisions</c>'s placement test (11.6096 0x0053B1A0): <c>BSPNODE::sphere_intersects_solid</c>
+    /// (11.6096 0x0053D850) with the centre check (outdoors there is no building check), so a sphere touching a physics polygon or with its centre in a
+    /// solid leaf collides. False for a part without a physics shape. For the wayfinder's tile (M6 4 w5: a tilted part's footprint at walking height).
+    /// </summary>
+    /// <param name="center">The sphere's centre in the landblock-local space of <see cref="Position"/>.</param>
+    /// <param name="radius">The sphere's radius in metres.</param>
+    public bool PlacementCollides(Vector3 center, float radius)
+    {
+        if (Shape.Physics is not { } physics)
+        {
+            return false;
+        }
+
+        var inverse = 1.0f / GfxObjScale.Z;
+        var local = new PhysSphere(inverse * Position.Frame.GlobalToLocal(center), inverse * radius);
+        var physicsSphere = physics.Bsp.Sphere;
+        var radiusSum = physicsSphere.Radius + local.Radius;
+        return (physicsSphere.Center - local.Center).LengthSquared() - (radiusSum * radiusSum) < PhysicsGlobals.Epsilon
+            && physics.Bsp.Root.SphereIntersectsSolid(local, centerCheck: true);
+    }
 }
 
 /// <summary>

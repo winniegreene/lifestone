@@ -88,6 +88,10 @@ public sealed partial class AutopilotHost
             Log.Info(LogCategory, "autopilot: the stop file exists (" + _logic.Mode.ToString().ToLowerInvariant() + "): the autopilot is asked to stop (it recalls home first; " + (_unattendedRun ? "then the game logs off and quits" : "the game stays open") + ")");
             _logic.Stop(AutopilotHostLogic.StopFileReason);
         }
+        else if (_desk is { Open: true } && _logic.Mode is AutopilotMode.Off or AutopilotMode.Done)
+        {
+            _logic.Leave(AutopilotHostLogic.StopFileReason); // the steer contract: with the desk open the stop file also ends an idle client, so a gate can always be yielded to
+        }
     }
 
     /// <summary>

@@ -1,4 +1,5 @@
 using Lifestone.Client.Session.Autopilot;
+using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Session.Scenarios.Journey;
 using Xunit.Abstractions;
@@ -116,9 +117,33 @@ public sealed class AutopilotStopRecallTests(ITestOutputHelper output)
         Assert.Contains(w.Lines, l => l.Contains("the recall home before the stop failed", StringComparison.Ordinal) && l.Contains("it is tried once more", StringComparison.Ordinal));
         Assert.Contains(w.Lines, l => l.Contains("failed twice", StringComparison.Ordinal) && l.Contains("so it does not log off here: the recall is tried again in 30 s", StringComparison.Ordinal));
         Assert.Contains(w.Lines, l => l.Contains("the recall home before the stop failed twice", StringComparison.Ordinal) && l.Contains("the stop goes on with the mage away from home", StringComparison.Ordinal));
-        Assert.Contains(w.Lines, l => l.Contains("TODO(m5-autopilot-stop-recall)", StringComparison.Ordinal)); // named, loud
+        Assert.Contains(w.Lines, l => l.Contains("the way home by portals was not open or failed, the mage is not home", StringComparison.Ordinal)); // named, loud (M6 6 ME: the TODO became a sentence)
+        Assert.Contains(w.Lines, l => l.Contains("no way home by portals from", StringComparison.Ordinal) && l.Contains("either", StringComparison.Ordinal)); // the last try looked and found none
         Assert.False(Home(w));
         Assert.StartsWith("autopilot done ok=yes ", autopilot.Lines[^1], StringComparison.Ordinal);
+    }
+
+    /// <summary>M6 6 ME (<c>m5-autopilot-stop-recall</c>): when the two recalls and every retry failed and the travel file has a way home from where the mage stands, one last try runs the way home by portals, and the stop goes on from home.</summary>
+    [Fact]
+    public void After_the_recalls_and_the_retries_failed_one_last_try_goes_home_by_portals_when_a_way_exists()
+    {
+        var w = new ApWorld(Temple, output, atHome: false) { Prime = c => { c.Facts.LifestoneTied = true; c.Facts.SetPortalTie(Temple, PortalTie.Tied); } };
+        w.OwnKit();
+        w.Factory.FailWith = spec => spec.Kind == StationKinds.RecallHome ? "scripted: the cast fizzled" : null;
+        w.Factory.Script = spec => spec.Kind == StationKinds.RungChange
+            ? new ScriptedRun(spec.Name, _ => { w.Trip.Vendor.StandAt(w.Ground.Home.LifestoneCell, w.Ground.Home.LifestonePoint); return ScenarioStatus.Succeeded; }, () => $"ground={w.Ground.Key} ok=yes fail=none direction=home")
+            : null;
+        var autopilot = w.Autopilot(new AutopilotOptions());
+        w.Run(autopilot, a => a.State == AutopilotState.Fight && a.CurrentRun is IStoppableFight { Kills: >= 1 });
+        w.Trip.Vendor.StandAt(0xF6820033, new System.Numerics.Vector3(150, 60, 20)); // the Refuge on the island: a routed place with a way home by portals
+        autopilot.RequestStop("test");
+
+        Assert.Equal(ScenarioStatus.Succeeded, w.Run(autopilot));
+        Assert.Equal("request:test", autopilot.StopName);
+        Assert.Contains(w.Lines, l => l.Contains("one last try by the way home by portals", StringComparison.Ordinal));
+        Assert.Equal("rung-change-home", Kinds(w)[^1]);
+        Assert.True(Home(w));
+        Assert.DoesNotContain(w.Lines, l => l.Contains("the mage is not home", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -134,7 +159,7 @@ public sealed class AutopilotStopRecallTests(ITestOutputHelper output)
         Assert.Equal(ScenarioStatus.Succeeded, w.Run(autopilot));
         Assert.Equal(4, Kinds(w).Count(k => k == "recall-home"));
         Assert.True(Home(w));
-        Assert.DoesNotContain(w.Lines, l => l.Contains("TODO(m5-autopilot-stop-recall)", StringComparison.Ordinal));
+        Assert.DoesNotContain(w.Lines, l => l.Contains("the mage is not home", StringComparison.Ordinal));
         Assert.Contains(w.Lines, l => l.Contains("the recall is tried again in 30 s", StringComparison.Ordinal));
     }
 

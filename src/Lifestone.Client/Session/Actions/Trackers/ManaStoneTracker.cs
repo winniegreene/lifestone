@@ -52,10 +52,25 @@ internal sealed partial class ManaStoneTracker(ActionHandle handle, uint stone, 
             return Refuse(ActionReason.NotHeld, "the mana stone " + ActionText.Hex(stone) + " is not held by the player");
         }
 
-        return target == api.State.Self.Guid || inventory.Find(target).Held
-            ? null
-            : Refuse(ActionReason.NotHeld, "the stone's target " + ActionText.Hex(target) + " is neither the player nor an item the player holds");
+        if (target != api.State.Self.Guid && !inventory.Find(target).Held)
+        {
+            return Refuse(ActionReason.NotHeld, "the stone's target " + ActionText.Hex(target) + " is neither the player nor an item the player holds");
+        }
+
+        // M6 item 14: an empty stone used on an item drains it and destroys it, a worn one too (ManaStone.cs:84-113 @95ef426d). So automation's use of a stone on a WORN item is sent only when the stone is known to hold mana: its
+        // appraisal's ItemCurMana is above 0, or it is a Mana Charge (sold full, destroyed by its one use). A player's own use (ActionSource.Host) stays the player's to make.
+        if (Handle.Source == ActionSource.Automation && target != api.State.Self.Guid && inventory.Find(target).Kind == InventoryPlaceKind.Equipped && !KnownCharged(api))
+        {
+            return Refuse(ActionReason.ContraryResult, "the mana stone " + ActionText.Hex(stone) + " is not known to hold mana (no appraisal says so and it is no Mana Charge): used on the worn item " + ActionText.Hex(target) + " an empty stone would drain and destroy it, so automation does not send it");
+        }
+
+        return null;
     }
+
+    /// <summary>True when the stone is known to hold mana: the session's appraisal of it reads an ItemCurMana above 0, or its weenie is a Mana Charge's.</summary>
+    private bool KnownCharged(ActionApi api) =>
+        (api.State.Appraisals.TryGet(stone, out var appraisal) && appraisal.ItemMana is > 0)
+        || (api.State.Objects.TryGet(stone, out var o) && Lifestone.Client.Session.Mage.CasterManaRule.ChargeMana.ContainsKey(o.Weenie.WeenieClassId));
 
     /// <inheritdoc/>
     internal override ActionOutcome? Send(IAcSession? session, ActionApi api)

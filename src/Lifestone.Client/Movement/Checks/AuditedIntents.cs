@@ -45,6 +45,9 @@ public sealed class AuditedIntents : IPlayerMovementIntents, IDisposable
     public bool OnGround => _controller.OnGround;
 
     /// <inheritdoc/>
+    public bool InTheAir => _controller.InTheAir;
+
+    /// <inheritdoc/>
     public int ServerMoveToStuckEnds => _controller.ServerMoveToStuckEnds;
 
     /// <inheritdoc/>
@@ -52,6 +55,12 @@ public sealed class AuditedIntents : IPlayerMovementIntents, IDisposable
 
     /// <inheritdoc/>
     public bool? IsHeld(uint command) => _controller.IsHeld(command);
+
+    /// <inheritdoc/>
+    public bool? ServerMoving => _controller.ServerMoving;
+
+    /// <inheritdoc/>
+    public string? MotionText => _controller.MotionText;
 
     /// <inheritdoc/>
     public void HandleCommand(uint command, bool start, float speed = 1f)

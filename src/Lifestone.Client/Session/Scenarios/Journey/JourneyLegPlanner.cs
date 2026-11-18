@@ -1,8 +1,10 @@
 using System.Numerics;
 using Lifestone.Client.Diagnostics;
+using Lifestone.Client.Movement.Routes;
 using Lifestone.Client.Movement.Wayfinding;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Grounds;
+using Lifestone.Client.Session.Travel;
 using Lifestone.Data.Dat;
 using Lifestone.Data.Terrain;
 using Lifestone.Data.World;
@@ -26,6 +28,8 @@ public sealed class JourneyLegPlanner
     private readonly Dictionary<uint, LandblockCellSet> _cells = [];
     private CellStructureLibrary? _structures;
     private readonly Dictionary<string, RoomGraph> _graphs = [];
+    private readonly Dictionary<string, RoomGraph> _legGraphs = []; // M6 7 U: the grounds' graphs with the exit portal's cell in
+    private readonly Dictionary<uint, CellRoutePlanner.Memo> _memos = []; // M6 14 hub plan: the indoor-outdoor legs' rooms' work, kept from leg to leg
 
     /// <summary>A planner over the dats.</summary>
     /// <param name="dats">The dats (the terrain's heights, the landblocks' cells), or null for a planner that plans only point goals with a height and the host's ground graph (tests).</param>
@@ -55,6 +59,19 @@ public sealed class JourneyLegPlanner
         return graph;
     }
 
+    /// <summary>The graph of a leg with an end in the ground's exit portal's cell (<see cref="GroundRooms.LegGraphOf"/>), built once per ground from the dats.</summary>
+    /// <param name="ground">The ground.</param>
+    private RoomGraph LegGraph(HuntingGround ground)
+    {
+        if (!_legGraphs.TryGetValue(ground.Key, out var graph))
+        {
+            graph = GroundRooms.LegGraphOf(CellsOf(GroundRooms.CoordOf(ground).LandBlockId), ground);
+            _legGraphs[ground.Key] = graph;
+        }
+
+        return graph;
+    }
+
     /// <summary>The cells of <paramref name="cellId"/>'s landblock, loaded once.</summary>
     /// <param name="cellId">A cell of the landblock.</param>
     public LandblockCellSet CellsOf(uint cellId)
@@ -67,6 +84,58 @@ public sealed class JourneyLegPlanner
         }
 
         return cells;
+    }
+
+    /// <summary>
+    /// M6 14 hub plan: the memo of the indoor-outdoor legs' room graphs over <paramref name="cellId"/>'s landblock (<see cref="CellsOf"/>, the buildings' lean <see cref="RoomGraph.BuildingDoorwayLean"/>), made once: each leg makes its own source
+    /// and room graph (a graph can leave cells out for its leg alone), and through the memo it starts from what the legs before it in the landblock worked out of the doorways and the physics. Live, every pass through the Town
+    /// Network (0x0007) planned its first walk for 10 to 14 s, the game's frames held the while (2026-11-16 16:54:52 to 16:55:04 UTC).
+    /// </summary>
+    /// <param name="cellId">A cell of the landblock.</param>
+    public CellRoutePlanner.Memo RoomsMemoOf(uint cellId)
+    {
+        var landblock = cellId >> 16;
+        if (!_memos.TryGetValue(landblock, out var memo))
+        {
+            _memos[landblock] = memo = new CellRoutePlanner.Memo(CellsOf(cellId), RoomGraph.BuildingDoorwayLean, RoomGraph.DefaultHeadSlackMetres);
+        }
+
+        return memo;
+    }
+
+    /// <summary>
+    /// M6 14 hub plan: the work a host may run on a worker before a leg plans (<see cref="IJourneyLegBody.OffThread"/>), so the leg's plans on the game's thread find the rooms already worked out: for a leg from a room to a room
+    /// of the same landblock planned over the indoor-outdoor source (the Town Network's and the Facility Hub's walks), the rooms' plan from <paramref name="from"/> to the goal over a graph of its own on the landblock's memo
+    /// (<see cref="RoomsMemoOf"/>), bare and with <paramref name="keepOff"/>. It reads the rooms alone (no nav map, no tile) and fills only the memo, which is safe on several threads; the leg's own plans still
+    /// decide the route. Null when the leg plans over a dungeon ground's rooms, has an end outdoors, or its ends lie in two landblocks: the work it would do is not this one.
+    /// </summary>
+    /// <param name="from">The body's position.</param>
+    /// <param name="goal">The leg's goal (<see cref="GoalOf"/>).</param>
+    /// <param name="keepOff">The portals the leg's runner keeps clear of (its own reach set), or null.</param>
+    public Action? RoomsWarmUp(in CellFrame from, NavGoal goal, PortalKeepOff? keepOff)
+    {
+        ArgumentNullException.ThrowIfNull(goal);
+        var fromCell = from.CellId;
+        if (goal.CellId is not { } toCell || !LandDefs.IsEnvCell(fromCell) || !LandDefs.IsEnvCell(toCell) || fromCell >> 16 != toCell >> 16
+            || (JourneyGrounds.DungeonOf(toCell, _ground) ?? JourneyGrounds.DungeonOf(fromCell, _ground)) is not null)
+        {
+            return null;
+        }
+
+        var memo = RoomsMemoOf(fromCell); // on the game's thread: the cells are loaded here
+        var start = from.Origin;
+        var end = goal.Point.Local;
+        var ignore = goal.Guid ?? 0;
+        return () =>
+        {
+            var graph = new RoomGraph(memo.Cells, memo.MaxLean, memo.HeadSlack, memo);
+            _ = graph.Plan(fromCell, start, toCell, end, ignore);
+            if (keepOff is not null)
+            {
+                graph.KeepOff = keepOff;
+                _ = graph.Plan(fromCell, start, toCell, end, ignore);
+            }
+        };
     }
 
     /// <summary>
@@ -127,8 +196,9 @@ public sealed class JourneyLegPlanner
     /// <see cref="SourceFor(uint, uint, NavMap?)"/> with the choice named for the leg's log line (<paramref name="why"/>). The indoor-outdoor source's rooms are the goal's landblock's when
     /// the goal is a room, else the start's when the start is a room: an outdoor goal is planned to its landblock id (<see cref="GoalCellOf"/>, low word 0, neither an outdoor cell nor a room),
     /// and before M5 7 P7k that id took the rooms, so a start in a room of another landblock was "not one of the rooms" (live check 2, 2026-10-30: Cindrue's entry hall 0xA9B40117 to the
-    /// Scrivener of Item Magic outdoors in 0xA9B3; <c>indoor-start-unreachable</c>). A room start and a room goal in two landblocks have no source that joins them (TODO(cross-landblock-rooms):
-    /// the goal's rooms are taken, and the plan fails by its own name, <see cref="IndoorOutdoorPathSource.IndoorStartOtherLandblock"/>).
+    /// Scrivener of Item Magic outdoors in 0xA9B3; <c>indoor-start-unreachable</c>). A room start and a room goal in two landblocks (M6 4 W1, cross-landblock-rooms; live, M6 item 1: Holtburg's healer
+    /// 0xA9B40111 to the Apprentice Scrivener of Life Magic in 0xA9B3) take both landblocks' rooms: out through the start room's door, outdoors, then in to the goal's room
+    /// (<see cref="IndoorOutdoorPathSource(PathPlanner, LandblockCellSet, LandblockCellSet, float, float)"/>).
     /// </summary>
     /// <param name="fromCell">The body's cell.</param>
     /// <param name="toCell">The goal's cell (<see cref="GoalCellOf"/>).</param>
@@ -138,6 +208,12 @@ public sealed class JourneyLegPlanner
     {
         if ((JourneyGrounds.DungeonOf(toCell, _ground) ?? JourneyGrounds.DungeonOf(fromCell, _ground)) is { } dungeon)
         {
+            if (GroundRooms.IsExitCell(dungeon, toCell) || GroundRooms.IsExitCell(dungeon, fromCell))
+            {
+                why = $"rooms of the ground '{dungeon.Key}' with its exit portal's cell (M6 7 U): an end is in it";
+                return new RoomPathSource(LegGraph(dungeon));
+            }
+
             why = $"rooms of the ground '{dungeon.Key}': an end is in it";
             return new RoomPathSource(GroundGraph(dungeon));
         }
@@ -149,9 +225,14 @@ public sealed class JourneyLegPlanner
             if (LandDefs.IsEnvCell(toCell))
             {
                 indoor = toCell;
+                if (LandDefs.IsEnvCell(fromCell) && fromCell >> 16 != toCell >> 16)
+                {
+                    why = $"indoor-outdoor over two landblocks' rooms: out of the start's room 0x{fromCell:X8} in landblock 0x{fromCell >> 16:X4}, outdoors, then in to the goal's room in 0x{toCell >> 16:X4} (M6 4 W1, cross-landblock-rooms)";
+                    return new IndoorOutdoorPathSource(planner, RoomsMemoOf(toCell), RoomsMemoOf(fromCell)) { WaysOut = TravelRoutes.Default.WaysOut };
+                }
+
                 why = !LandDefs.IsEnvCell(fromCell) ? "indoor-outdoor over the goal room's landblock: the goal is a room"
-                    : fromCell >> 16 == toCell >> 16 ? "indoor-outdoor over the landblock of both rooms"
-                    : $"indoor-outdoor over the goal room's landblock; the start's room 0x{fromCell:X8} is in another landblock (TODO(cross-landblock-rooms))";
+                    : "indoor-outdoor over the landblock of both rooms";
             }
             else if (LandDefs.IsEnvCell(fromCell))
             {
@@ -165,7 +246,7 @@ public sealed class JourneyLegPlanner
                 why = "indoor-outdoor over the goal's landblock: an outdoor goal (its landblock id) from outdoors, planned outdoors";
             }
 
-            return new IndoorOutdoorPathSource(planner, CellsOf(indoor));
+            return new IndoorOutdoorPathSource(planner, RoomsMemoOf(indoor)) { WaysOut = TravelRoutes.Default.WaysOut }; // M6 8 M: a room the graph cannot leave walks the file's way out first
         }
 
         why = "outdoor: both ends are outdoor cells";

@@ -71,6 +71,7 @@ public sealed class HuntFollow : IHuntFollow
     private IDisposable? _motionSubscription;
     private OfflineWalker? _walker;
     private MoveIntents? _move;
+    private MoveLease? _lease;
     private SessionTargetWorld? _targets;
     private bool _placed;
     private bool _disposed;
@@ -112,7 +113,7 @@ public sealed class HuntFollow : IHuntFollow
         _world.SetTime(now);
         _walker = OfflineWalker.Create(_dats, _world, _log, weenie, _geometry, id: self.Guid, sink: sink);
         _move = session.Actions.Move; // scripted movement goes through IActionApi.Move (the human's keys, R2)
-        _move.Bind(_walker.Controller, _walker.Controller.Options.RunByDefault);
+        _lease = _move.BindOver(_walker.Controller, _walker.Controller.Options.RunByDefault); // M6 14 motes: the play host's controller is bound again at the end
         _targets = new SessionTargetWorld(session.State, _dats, _geometry, () => _world.CurrentTime, _walker.Physics);
         _walker.Physics.TargetWorld = _targets;
         _movesSubscription = session.Events.Subscribe<ObjectMoved>((in ObjectMoved e) =>
@@ -160,7 +161,7 @@ public sealed class HuntFollow : IHuntFollow
         _disposed = true;
         if (_move is not null && _walker is not null)
         {
-            _move.Unbind(_walker.Controller);
+            _move.Release(_lease!); // M6 14 motes
         }
 
         _movesSubscription?.Dispose();

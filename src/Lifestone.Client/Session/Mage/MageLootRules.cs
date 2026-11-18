@@ -60,14 +60,41 @@ public enum MageLootVerdict
 /// </summary>
 public sealed record MageLootThresholds
 {
-    /// <summary>The default floor: one pyreal of value for each unit of burden. Lifestone's own start value; <c>TODO(m5-loot-floor-measure)</c>: item 3's measured den loot value sets it.</summary>
+    /// <summary>The default floor: one pyreal of value for each unit of burden. Lifestone's own start value; <c>m5-loot-floor-measure (closed)</c>: item 3's measured den loot value sets it.</summary>
     public const double DefaultMinValuePerBurden = 1.0;
 
     /// <summary>The default load line: the whole capacity the inventory page reads (the share of it the burden may reach with the item taken, in percent; 0 is no limit).</summary>
     public const int DefaultLoadLinePercent = 100;
 
+    /// <summary>
+    /// M6 14 pit-hold: the highest load line on a ground with jumps (<see cref="Lifestone.Client.Session.Grounds.HuntingGround.Jumps"/>): 100%. Retail's load modifier is 1 up to a load of 1.0 and falls as 2 - load past it
+    /// (<c>EncumbranceSystem::LoadMod</c>, 11.6096 0x004FD810), and it scales both the run rate and the jump's height (<c>MovementSystem::GetRunRate</c> 0x006B1820, <c>GetJumpHeight</c> 0x006B1880), so up to 100% the flight the
+    /// runner checks against a jump's need is her whole one, and past it the flight falls about as the load's 1.5th power: Qwinnie's buffed 11.54 m (Run 103, Jump 178) falls under the Abode's need of 10.75 m at about 107%
+    /// (<see cref="Lifestone.Client.Movement.Routes.JumpReach.FlightMetres(int, int, float)"/>). The loot never carries her past it there.
+    /// </summary>
+    public const int JumpLoadLinePercent = 100;
+
     /// <summary>The default for the slots kept free in the main pack: none.</summary>
     public const int DefaultSlotsKeptFree = 0;
+
+    /// <summary>
+    /// M6 14 pit-hold: <paramref name="loadLinePercent"/> held to <see cref="JumpLoadLinePercent"/> on a ground with jumps (0, no limit, becomes the jump line too); unchanged on any other ground.
+    /// </summary>
+    /// <param name="loadLinePercent">The load line before the jumps (0: no limit).</param>
+    /// <param name="hasJumps">True when the ground's walk takes a running jump.</param>
+    public static int JumpCapped(int loadLinePercent, bool hasJumps) =>
+        hasJumps && (loadLinePercent == 0 || loadLinePercent > JumpLoadLinePercent) ? JumpLoadLinePercent : loadLinePercent;
+
+    /// <summary>
+    /// M6 14 pit-hold: the load line the fight's loot keeps under on <paramref name="ground"/> with the run's thresholds at their defaults: the ground's <c>loot.load_line_percent</c> when it names one, else
+    /// <see cref="DefaultLoadLinePercent"/>, held to <see cref="JumpLoadLinePercent"/> on a ground with jumps (<c>FightOptions.EffectiveLootThresholds</c>' rule, for the audit's line).
+    /// </summary>
+    /// <param name="ground">The ground.</param>
+    public static int LoadLineOf(Lifestone.Client.Session.Grounds.HuntingGround ground)
+    {
+        ArgumentNullException.ThrowIfNull(ground);
+        return JumpCapped(ground.Loot is { LoadLinePercent: > 0 } loot ? loot.LoadLinePercent : DefaultLoadLinePercent, ground.Jumps.Count > 0);
+    }
 
     /// <summary>The least value per burden unit an item must have to be kept (pyreals excepted).</summary>
     public double MinValuePerBurden { get; init; } = DefaultMinValuePerBurden;
@@ -126,6 +153,12 @@ public sealed record MageLootThresholds
     /// <summary>M5 7 F30: the keep-aside rule (the ground's <c>loot.keep_aside</c> block), or null for none.</summary>
     public KeepAsideRule? KeepAside { get; init; }
 
+    /// <summary>
+    /// M6 item 1's scroll keep rule (the hook item 2 lands for it): the reason a found scroll is kept to be read, or null when it is not.
+    /// A reason is the <see cref="MageLootVerdict.KeepAside"/> verdict, so the sale never sells it; null keeps no scroll.
+    /// </summary>
+    public Func<WorldObject, string?>? KeepScroll { get; init; }
+
     /// <summary>The thresholds in one phrase, for the log.</summary>
     public override string ToString() => string.Create(
         CultureInfo.InvariantCulture,
@@ -141,11 +174,21 @@ public sealed record MageLootThresholds
 /// <param name="Held">True when the player already holds the item.</param>
 /// <param name="KeepAside">M5 7 F30: why the keep-aside rule keeps the item (its bonus or cantrips), or null when it does not.</param>
 /// <param name="Wcid">M5 7 D121: the item's weenie class id, which the pack layout's rules read (a stock line, a kit line); 0 when not known.</param>
-/// <param name="Gear">M5 7 D149: the self-equip judge's decision on a heavy find worth a look (<see cref="MageLootRules.IsHeavy"/>), made on the corpse with the loot's appraisal; null when not judged (a light find, or none asked).</param>
-public readonly record struct MageLootItem(uint Guid, string Name, uint ItemType, long? Value, long Burden, bool Held = false, string? KeepAside = null, uint Wcid = 0, SelfEquipChoice? Gear = null)
+/// <param name="Gear">M5 7 D149: the self-equip judge's decision on a heavy find worth a look (<see cref="MageLootRules.IsHeavy"/>), made on the corpse with the loot's appraisal; M6 14 (<c>m6-lore-cantrips</c>): and on every other appraised
+/// caster or wearable the keep-aside rule does not keep (a wear upgrade is ranked first); null when not judged (a light find worth a look, or none asked).</param>
+/// <param name="Look">M6 14 (<c>m6-lore-cantrips</c>): true when <paramref name="KeepAside"/> is the keep-aside rule's own match (a wand's bonus, a great cantrip): the soak line's <c>worth_a_look=</c> counts these alone, not a scroll the scroll rule keeps or a quest's want.</param>
+/// <param name="GreatCantrip">
+/// M6 14 keep every great cantrip (the owner, 2026-11-15): true when the keep-aside rule's match casts one of its cantrips at Major or above (<see cref="KeepAsideRule.GreatCantrips"/>; M6 14 useful cantrips, the owner 2026-11-16: a useful
+/// one, <see cref="CantripJudge"/>, the same predicate as <see cref="CantripRoom.IsUsefulGreatPiece(GameState, uint, Func{uint, string}, CantripPlan, Action{string}, string)"/>): the piece outranks every piece of sell loot, the heavy rule
+/// never leaves it, and the plan makes room for it from the sell loot she carries (<see cref="MageLootRules.Plan"/>). A wand kept for its War Magic bonus alone is not one.
+/// </param>
+public readonly record struct MageLootItem(uint Guid, string Name, uint ItemType, long? Value, long Burden, bool Held = false, string? KeepAside = null, uint Wcid = 0, SelfEquipChoice? Gear = null, bool Look = false, bool GreatCantrip = false)
 {
     /// <summary>True for money (pyreals): the rule always takes it.</summary>
     public bool IsMoney => (ItemType & SellRules.ItemTypeMoney) != 0;
+
+    /// <summary>M6 14 (<c>m6-lore-cantrips</c>): true for a find the self-equip judge would put on (a wear in a free slot, a swap for the held caster, a replace of a worn piece): ranked first with the keep-aside finds.</summary>
+    public bool IsWearUpgrade => Gear is { Kind: SelfEquipKind.Wear or SelfEquipKind.Swap or SelfEquipKind.Replace };
 
     /// <summary>The value per burden unit: infinite for a weightless item with a value, 0 for one without.</summary>
     public double ValuePerBurden => Value is not > 0 ? 0 : Burden <= 0 ? double.PositiveInfinity : (double)Value.Value / Burden;
@@ -247,30 +290,42 @@ public sealed class MageLootRules
     /// <param name="appraisal">The appraisal the session holds of it, or null.</param>
     /// <param name="held">True when the player already holds it.</param>
     /// <param name="judgeWear">M5 7 D149: the self-equip judge for a heavy find worth a look; null judges none (such a find is then left, named "not judged").</param>
-    public MageLootItem ItemFor(WorldObject item, Appraisal? appraisal, bool held, Func<GearCandidate, SelfEquipChoice>? judgeWear = null)
+    /// <param name="cantrips">M6 14 useful cantrips (the owner, 2026-11-16): the judge of her cantrips (<see cref="CantripJudge.Of"/>, her skills live): only a useful great cantrip is kept aside and outranks sell loot; null:
+    /// <see cref="CantripJudge.Stateless"/>.</param>
+    public MageLootItem ItemFor(WorldObject item, Appraisal? appraisal, bool held, Func<GearCandidate, SelfEquipChoice>? judgeWear = null, CantripJudge? cantrips = null)
     {
         var plain = ItemOf(item, appraisal, held);
-        if (Thresholds.KeepAside is not { } keep || plain.IsMoney)
+        if (!plain.IsMoney && Thresholds.KeepScroll?.Invoke(item) is { } scroll)
+        {
+            return plain with { KeepAside = scroll };
+        }
+
+        if (plain.IsMoney)
         {
             return plain;
         }
 
-        var aside = plain with { KeepAside = keep.Match(item.ItemType, appraisal, SpellName) };
-        return aside.KeepAside is not null && IsHeavy(aside) && judgeWear is not null ? aside with { Gear = judgeWear(SelfEquipJudge.CandidateOf(item, appraisal)) } : aside;
+        var match = Thresholds.KeepAside?.Match(item.ItemType, appraisal, SpellName, cantrips);
+        var aside = plain with { KeepAside = match, Look = match is not null, GreatCantrip = match is not null && Thresholds.KeepAside!.GreatCantrips(item.ItemType, appraisal, SpellName, cantrips).Count > 0 }; // M6 14 keep every great cantrip; M6 14 useful cantrips: the useful ones only
+        if (judgeWear is null || appraisal is not { IsNotFound: false } || !KeepAsideRule.NeedsAppraisal(item.ItemType))
+        {
+            return aside;
+        }
+
+        // M5 7 D149: a heavy find worth a look is kept only as a wearable upgrade (a light one is kept aside unasked, F30 unchanged); M6 14 (m6-lore-cantrips): any other caster or wearable is judged too, so a wear upgrade is ranked first
+        return match is null || IsHeavy(aside) ? aside with { Gear = judgeWear(SelfEquipJudge.CandidateOf(item, appraisal)) } : aside;
     }
+
+    /// <summary>M6 5 q4 (D57): the keep-aside verdict of an item the fight wants for a quest (<c>quest: want &lt;wcid&gt;</c>, the fight scenario's hook over <c>FightOptions.Want</c>): the heavy rule never leaves it (a tusk weighs 100), the slots and the load line still bound it.</summary>
+    public const string QuestWantPrefix = "quest: want ";
+
+    /// <summary>M6 5 q4 (D57): true when the item's keep-aside verdict is a quest want (<see cref="QuestWantPrefix"/>).</summary>
+    /// <param name="item">The corpse's item.</param>
+    public static bool IsQuestWant(in MageLootItem item) => item.KeepAside is { } why && why.StartsWith(QuestWantPrefix, StringComparison.Ordinal);
 
     /// <summary>M5 7 F29 (D96), D149: true when the item alone is heavier than <see cref="MageLootThresholds.MaxItemBurden"/> (never with the cap off, 0).</summary>
     /// <param name="item">The corpse's item.</param>
     public bool IsHeavy(in MageLootItem item) => Thresholds.MaxItemBurden > 0 && item.Burden > Thresholds.MaxItemBurden;
-
-    /// <summary>The main pack's free slots now: its capacity (the player weenie's <c>ItemsCapacity</c> when it was sent, else <see cref="GearKit.PackCapacity"/>) less the ordinary items it holds (a side pack and what is in it are not main-pack slots).</summary>
-    /// <param name="state">The session's read model.</param>
-    public static int FreeSlots(GameState state)
-    {
-        ArgumentNullException.ThrowIfNull(state);
-        var capacity = state.Objects.TryGet(state.Self.Guid, out var self) && self.Weenie.ItemsCapacity is > 0 ? (int)self.Weenie.ItemsCapacity.Value : GearKit.PackCapacity;
-        return Math.Max(0, capacity - state.Self.Inventory.Pack.Count);
-    }
 
     /// <summary>Plans one corpse: which of its items the mage keeps, in the order they are taken.</summary>
     /// <param name="corpseName">The corpse's name.</param>
@@ -278,19 +333,30 @@ public sealed class MageLootRules
     /// <param name="items">The corpse's items, in its order.</param>
     /// <param name="burden">The burden now.</param>
     /// <param name="capacity">The capacity (<see cref="LootContext.Capacity"/>); 0 with a load line is a load refusal for everything but pyreals, as <see cref="LootRules"/>'s.</param>
-    /// <param name="freeSlots">The main pack's free slots now (<see cref="FreeSlots"/>).</param>
+    /// <param name="freeSlots">The main pack's free slots now (<see cref="Quartermaster.PackView.MainPackFree"/>).</param>
     /// <param name="layout">M5 7 D121: the packs' jobs and free slots, or null for the main pack alone: a kept item whose job has a side pack with a free slot goes there (counted against that pack, not the main pack's slots); a full side pack falls back to the main pack.</param>
     /// <param name="packRules">M5 7 D121: the rules that give a kept item its job (with <paramref name="layout"/>).</param>
     /// <param name="stonesWanted">M5 7 S2b: the mana stones the kit still wants (<see cref="ItemManaKeeper.StonesWanted"/>): that many of the corpse's stones are kept whatever the floors say (<see cref="MageLootVerdict.KitStone"/>); the excess goes by the value rules.</param>
-    public MageLootPlan Plan(string? corpseName, string? playerName, IReadOnlyList<MageLootItem> items, int burden, int capacity, int freeSlots, PackLayout? layout = null, PackRules? packRules = null, int stonesWanted = 0)
+    /// <param name="sellLoot">
+    /// M6 14 keep every great cantrip (the owner, 2026-11-15): the sell loot she carries in her main pack that may be dropped to make room (<see cref="CantripRoom.SellLoot"/>), or null for none. A great-cantrip piece
+    /// (<see cref="MageLootItem.GreatCantrip"/>) the load line or the slots would refuse is kept by dropping from it the lowest value per burden first, until the piece fits under the line and a slot is free (<see cref="MageLootPlan.Drops"/>);
+    /// when dropping all of it cannot make room, nothing is dropped and the piece is left with its reason (<see cref="MageLootPlan.Shorts"/>).
+    /// M6 14 hour load (the owner's ruling, 2026-11-16: she is not married to something just because she picked it up): the same list makes room for plain sell loot the line or the slots would refuse, by a swap (<see cref="MageLootPlan.Swaps"/>):
+    /// only sell loot of a lower value per burden than the find's is dropped, the lowest first, and the swap never makes her heavier than the line or than she is now; when it cannot make room nothing is dropped and the find is left
+    /// (<see cref="MageLootPlan.SwapShorts"/>).
+    /// </param>
+    /// <param name="loadLinePercent">M6 14 hour load: the load line for this plan (the cycle's rising line, <see cref="CycleLoad.LineFor"/>), or null for the thresholds' own (<see cref="MageLootThresholds.LoadLinePercent"/>).</param>
+    public MageLootPlan Plan(string? corpseName, string? playerName, IReadOnlyList<MageLootItem> items, int burden, int capacity, int freeSlots, PackLayout? layout = null, PackRules? packRules = null, int stonesWanted = 0, IReadOnlyList<CarriedLoot>? sellLoot = null, int? loadLinePercent = null)
     {
         ArgumentNullException.ThrowIfNull(items);
+        var line = loadLinePercent ?? Thresholds.LoadLinePercent;
+        ArgumentOutOfRangeException.ThrowIfNegative(line);
         var verdicts = new MageLootVerdict[items.Count];
         var order = new List<int>(items.Count);
         if (IsOwnCorpse(corpseName, playerName))
         {
             Array.Fill(verdicts, MageLootVerdict.OwnCorpse);
-            return new MageLootPlan(this, items, verdicts, order, burden, capacity, freeSlots, ownCorpse: true, []);
+            return new MageLootPlan(this, items, verdicts, order, burden, capacity, freeSlots, ownCorpse: true, [], loadLinePercent: line);
         }
 
         var ranked = new List<int>(items.Count);
@@ -316,13 +382,15 @@ public sealed class MageLootRules
                 stonesWanted--; // M5 7 S2b: round 12 left 38 mana stones under the value floors (22 Moderate, 12 Mana Stone, 3 Lesser, 1 Minor) while the kit wanted them
                 kitStones.Add(i);
             }
-            else if (item.KeepAside is not null && IsHeavy(item) && item.Gear is not { IsUpgrade: true })
+            else if (item.KeepAside is not null && IsHeavy(item) && item.Gear is not { IsUpgrade: true } && item.Gear?.LoreNeed is null && !IsQuestWant(item) && !item.GreatCantrip) // M6 5 q4 (D57): a quest want is no gear: the heavy rule does not apply; M6 14 keep every great cantrip (the owner, 2026-11-15, amends D149): nor to a piece with a great cantrip
             {
                 verdicts[i] = MageLootVerdict.HeavyNotUpgrade; // M5 7 D149 (the owner): a heavy find is kept aside only as a wearable upgrade; the long run of 2026-10-30 pinned its load over the trip line with heavy armour it could not wear
             }
-            else if (item.KeepAside is not null)
+            else if (item.KeepAside is not null || item.IsWearUpgrade)
             {
-                aside.Add(i); // M5 7 F30 (the owner): kept whatever the value, burden and payout floors say; the slots and the load line still bound it (D149: a heavy one only as an upgrade)
+                // M5 7 F30 (the owner): kept whatever the value, burden and payout floors say; the slots and the load line still bound it (D149: a heavy one only as an upgrade, or, M6 14 (m6-lore-cantrips; the owner, 2026-11-14), one her
+                // Arcane Lore alone keeps dark: the lore will rise). M6 14: a find the self-equip would put on is ranked with them, first, as plain loot for the station's pick (sold if it is not worn).
+                aside.Add(i);
             }
             else if (item.Value is null)
             {
@@ -351,9 +419,9 @@ public sealed class MageLootRules
         }
 
         ranked.Sort((a, b) => Compare(items, a, b));
-        aside.Sort((a, b) => Compare(items, a, b));
-        ranked.InsertRange(0, aside); // the keep-aside items are taken first, while the pack has room
-        ranked.InsertRange(0, kitStones); // M5 7 S2b: the kit's stones before them
+        aside.Sort((a, b) => IsQuestWant(items[a]) != IsQuestWant(items[b]) ? (IsQuestWant(items[a]) ? -1 : 1) : items[a].GreatCantrip != items[b].GreatCantrip ? (items[a].GreatCantrip ? -1 : 1) : Compare(items, a, b)); // M6 14 want room: the quest's wanted items first of all; M6 14 keep every great cantrip: then the great-cantrip pieces
+        ranked.InsertRange(0, kitStones); // M5 7 S2b: the kit's stones before the ranked loot
+        ranked.InsertRange(0, aside); // M6 14 (m6-lore-cantrips; the owner, 2026-11-14): the keep-aside finds and the wear upgrades first of all, so no lighter loot of the corpse takes the room under the load line or the last slot before them
         var sideFree = new int[4];
         if (layout is not null)
         {
@@ -364,21 +432,87 @@ public sealed class MageLootRules
         }
 
         var into = new Dictionary<uint, (PackJob Job, uint Container)>();
+        var drops = new List<RoomDrop>();
+        var shorts = new List<RoomShort>();
+        var swapShorts = new List<RoomShort>();
+        var dropped = new HashSet<uint>();
+        var droppedRatio = 0.0; // M6 14 hour load: the highest value per burden this corpse's room drops leave on the ground
         foreach (var i in ranked)
         {
             var item = items[i];
             var job = PackJob.Main;
             if (layout is not null && packRules is not null)
             {
-                var wanted = packRules.JobOf(new PackItem(item.Guid, item.Name, item.Wcid, item.ItemType, 0), item.KeepAside is not null, rotation: false);
+                var wanted = packRules.JobOf(new PackItem(item.Guid, item.Name, item.Wcid, item.ItemType, 0), item.GreatCantrip, rotation: false); // the review pack: great-cantrip pieces only (the owner, 2026-11-16: evaluate the armour out of the main pack)
                 job = wanted != PackJob.Main && sideFree[(int)wanted] > 0 ? wanted : PackJob.Main; // M5 7 D121: a full side pack falls back to the main pack
             }
 
-            if (job == PackJob.Main && slots <= 0)
+            var noSlot = job == PackJob.Main && slots <= 0;
+            var overLine = line > 0 && (capacity <= 0 || (carried + item.Burden) * 100 > (long)capacity * line);
+            if (!noSlot && !overLine && droppedRatio > 0 && IsSwappable(item, kitStones.Contains(i)) && item.ValuePerBurden < droppedRatio)
+            {
+                // M6 14 hour load: the room a drop freed is never filled with loot worth less a burden than what was dropped for it
+                overLine = true;
+                swapShorts.Add(new RoomShort(item.Guid, item.Name, item.Burden, MageLootVerdict.Load, string.Create(CultureInfo.InvariantCulture, $"its value per burden {CantripRoom.Ratio(item.ValuePerBurden)} is under the {CantripRoom.Ratio(droppedRatio)} of the sell loot this corpse's room drops leave on the ground: the room they freed is not filled with worse")));
+            }
+            else if ((noSlot || overLine) && !item.GreatCantrip && !IsQuestWant(item) && sellLoot is not null && IsSwappable(item, kitStones.Contains(i)))
+            {
+                // M6 14 hour load (the owner's ruling, 2026-11-16: she is not married to something just because she picked it up): sell loot of a lower value per burden she carries makes way for a better find, on every ground and at every load.
+                // M6 14 (live ladder42 19:51:19 UTC: 0 of 102 slots free at 108% burden, under the line 136%): where the slots bind and the burden does not, a slot is worth its item's value: the lowest value she carries makes way
+                var bySlot = noSlot && !overLine;
+                if (MakeRoom(item, job == PackJob.Main, carried, slots, capacity, line, sellLoot, dropped, out var swapped, out var refused, belowRatio: bySlot ? double.PositiveInfinity : item.ValuePerBurden, noHeavier: true, belowValue: bySlot ? item.Value ?? 0 : long.MaxValue))
+                {
+                    foreach (var loot in swapped)
+                    {
+                        drops.Add(new RoomDrop(loot, item.Guid, item.Name, Swap: true, ForRatio: item.ValuePerBurden, BySlot: bySlot, ForValue: item.Value ?? 0));
+                        dropped.Add(loot.Guid);
+                        if (!bySlot)
+                        {
+                            droppedRatio = Math.Max(droppedRatio, loot.ValuePerBurden); // a slot swap's freed slot is the find's: no room is left to fill
+                        }
+
+                        carried -= loot.Burden;
+                        slots++; // a main-pack item: its slot is free once it lies on the ground
+                    }
+
+                    noSlot = overLine = false;
+                }
+                else
+                {
+                    swapShorts.Add(new RoomShort(item.Guid, item.Name, item.Burden, noSlot ? MageLootVerdict.Slots : MageLootVerdict.Load, refused));
+                }
+            }
+
+            var want = IsQuestWant(item);
+            if ((noSlot || overLine) && (item.GreatCantrip || want))
+            {
+                // M6 14 keep every great cantrip (the owner, 2026-11-15): the piece outranks every piece of sell loot: room is made from what she carries, the lowest value per burden first.
+                // M6 14 want room (live 2026-11-17 09:58:23 and 10:01:59, ladder57: three Pyreal Motes the Atlan wand's hunt wanted were left "over the load line" and "no free slot" while the pack held 65 pieces of sell loot): a quest's wanted
+                // item outranks every sell loot line by the same rule; it is left only when dropping all of it cannot make room, loudly (an error).
+                if (MakeRoom(item, job == PackJob.Main, carried, slots, capacity, line, sellLoot, dropped, out var picked, out var why))
+                {
+                    foreach (var loot in picked)
+                    {
+                        drops.Add(new RoomDrop(loot, item.Guid, item.Name, Want: want));
+                        dropped.Add(loot.Guid);
+                        droppedRatio = Math.Max(droppedRatio, loot.ValuePerBurden);
+                        carried -= loot.Burden;
+                        slots++; // a main-pack item: its slot is free once it lies on the ground
+                    }
+
+                    noSlot = overLine = false;
+                }
+                else
+                {
+                    shorts.Add(new RoomShort(item.Guid, item.Name, item.Burden, noSlot ? MageLootVerdict.Slots : MageLootVerdict.Load, why, want));
+                }
+            }
+
+            if (noSlot)
             {
                 verdicts[i] = MageLootVerdict.Slots;
             }
-            else if (Thresholds.LoadLinePercent > 0 && (capacity <= 0 || (carried + item.Burden) * 100 > (long)capacity * Thresholds.LoadLinePercent))
+            else if (overLine)
             {
                 verdicts[i] = MageLootVerdict.Load;
             }
@@ -401,7 +535,83 @@ public sealed class MageLootRules
         }
 
         // The pyreals' burden counts toward nothing the rule checks (money is weightless to it); the plan's burden is what the kept items add.
-        return new MageLootPlan(this, items, verdicts, order, burden, capacity, freeSlots, ownCorpse: false, into);
+        return new MageLootPlan(this, items, verdicts, order, burden, capacity, freeSlots, ownCorpse: false, into, drops, shorts, swapShorts, line);
+    }
+
+    /// <summary>
+    /// M6 14 hour load: true for a find the swap may make room for: sell loot (no keep-aside verdict, not the kit's stone, not money) with a value. A wear upgrade is one (it is plain loot for the station's pick, sold if not worn, M6 14
+    /// <c>m6-lore-cantrips</c>): it is ranked first and makes room by the same rule. A keep-aside piece keeps its own rule (a great cantrip's room, or none).
+    /// </summary>
+    private static bool IsSwappable(in MageLootItem item, bool kitStone) => !kitStone && !item.IsMoney && item.KeepAside is null && item.Value is > 0;
+
+    /// <summary>
+    /// M6 14 keep every great cantrip: the sell loot to drop so that <paramref name="piece"/> fits under the load line and, when it goes to the main pack (<paramref name="mainSlot"/>), finds a free slot: from <paramref name="sellLoot"/> not
+    /// already dropped, the lowest value per burden first (a tie to the lower value, then the heavier, then the guid), until it fits. False, with nothing picked, when dropping all of it cannot make room (or the capacity is not read, or
+    /// she carries none); <paramref name="why"/> then says so with the numbers.
+    /// M6 14 hour load (the swap): with <paramref name="belowRatio"/> only sell loot of a value per burden strictly under it may be dropped; with <paramref name="noHeavier"/> the piece fits when the burden after it is at or under the
+    /// line or at or under the burden now (a line the rising line fell back under never makes her shed loot: the swap only trades).
+    /// </summary>
+    /// M6 14 (the slots): with <paramref name="belowValue"/> only sell loot of a value strictly under it may be dropped, the lowest value first (where the slots bind, a slot is worth its item's value).
+    private static bool MakeRoom(in MageLootItem piece, bool mainSlot, long carried, int slots, int capacity, int line, IReadOnlyList<CarriedLoot>? sellLoot, HashSet<uint> dropped, out List<CarriedLoot> picked, out string why, double belowRatio = double.PositiveInfinity, bool noHeavier = false, long belowValue = long.MaxValue)
+    {
+        picked = [];
+        if (line > 0 && capacity <= 0)
+        {
+            why = "the capacity is not read, so no room under the load line can be measured";
+            return false;
+        }
+
+        var bySlot = belowValue != long.MaxValue;
+        var swap = !double.IsPositiveInfinity(belowRatio) || bySlot;
+        var candidates = (sellLoot ?? []).Where(c => !dropped.Contains(c.Guid) && c.ValuePerBurden < belowRatio && c.Value < belowValue).ToList();
+        candidates.Sort((a, b) =>
+        {
+            if (bySlot && a.Value != b.Value)
+            {
+                return a.Value.CompareTo(b.Value); // the slots bind: the lowest value first
+            }
+
+            var byRatio = a.ValuePerBurden.CompareTo(b.ValuePerBurden);
+            if (byRatio != 0)
+            {
+                return byRatio;
+            }
+
+            var byValue = a.Value.CompareTo(b.Value);
+            return byValue != 0 ? byValue : b.Burden.CompareTo(a.Burden) is var byBurden && byBurden != 0 ? byBurden : a.Guid.CompareTo(b.Guid);
+        });
+
+        long freed = 0;
+        var count = 0;
+        var pieceBurden = piece.Burden;
+        var limit = line <= 0 ? 0 : noHeavier ? Math.Max((long)capacity * line, carried * 100) : (long)capacity * line;
+        bool Fits() => (line <= 0 || (carried - freed + pieceBurden) * 100 <= limit) && (!mainSlot || slots + count > 0);
+        foreach (var loot in candidates)
+        {
+            if (Fits())
+            {
+                break;
+            }
+
+            picked.Add(loot);
+            freed += loot.Burden;
+            count++;
+        }
+
+        if (Fits())
+        {
+            why = string.Empty;
+            return true;
+        }
+
+        picked.Clear();
+        var lineBurden = line <= 0 ? 0 : (long)capacity * line / 100;
+        var which = bySlot ? string.Create(CultureInfo.InvariantCulture, $" of a value under its {belowValue} (the slots bind: a slot is worth its item's value)") : swap ? string.Create(CultureInfo.InvariantCulture, $" of a value per burden under its {CantripRoom.Ratio(belowRatio)}") : string.Empty;
+        var against = noHeavier && line > 0 && carried > lineBurden ? string.Create(CultureInfo.InvariantCulture, $" (or the burden now, {carried}: a swap never makes her heavier)") : string.Empty;
+        why = string.Create(
+            CultureInfo.InvariantCulture,
+            $"dropping all {candidates.Count} sell loot item(s) she carries{which} (burden {candidates.Sum(c => c.Burden)}, value {candidates.Sum(c => c.Value)}) cannot make room: burden {carried} + {pieceBurden} against the load line {(line <= 0 ? "(none)" : line + "% = " + lineBurden)}{against}, {Math.Max(0, slots)} free slot(s){(mainSlot ? " (the piece goes to the main pack)" : string.Empty)}");
+        return false;
     }
 
     private static int Compare(IReadOnlyList<MageLootItem> items, int a, int b)
@@ -427,18 +637,26 @@ public sealed class MageLootPlan : LootRules
     private readonly Dictionary<uint, (PackJob Job, uint Container)> _into;
     private readonly Dictionary<uint, MageLootVerdict> _byGuid;
     private readonly int[] _counts = new int[Enum.GetValues<MageLootVerdict>().Length];
+    private readonly MageLootVerdict[] _verdicts;
+    private readonly List<uint> _kept;
+    private readonly Dictionary<uint, string> _withdrawn = [];
 
-    internal MageLootPlan(MageLootRules rules, IReadOnlyList<MageLootItem> items, MageLootVerdict[] verdicts, List<int> order, int burden, int capacity, int freeSlots, bool ownCorpse, Dictionary<uint, (PackJob Job, uint Container)> into)
+    internal MageLootPlan(MageLootRules rules, IReadOnlyList<MageLootItem> items, MageLootVerdict[] verdicts, List<int> order, int burden, int capacity, int freeSlots, bool ownCorpse, Dictionary<uint, (PackJob Job, uint Container)> into, List<RoomDrop>? drops = null, List<RoomShort>? shorts = null, List<RoomShort>? swapShorts = null, int? loadLinePercent = null)
         : base(LootOptions.AllTypes, 0, long.MaxValue, 0)
     {
         _rules = rules;
         _into = into;
+        LoadLinePercent = loadLinePercent ?? rules.Thresholds.LoadLinePercent;
+        SwapShorts = swapShorts ?? [];
         OwnCorpse = ownCorpse;
         Burden = burden;
         Capacity = capacity;
         FreeSlots = freeSlots;
         Items = items;
+        _verdicts = verdicts;
         Verdicts = verdicts;
+        Drops = drops ?? [];
+        Shorts = shorts ?? [];
         _byGuid = new Dictionary<uint, MageLootVerdict>(items.Count);
         for (var i = 0; i < items.Count; i++)
         {
@@ -446,19 +664,180 @@ public sealed class MageLootPlan : LootRules
             _counts[(int)verdicts[i]]++;
         }
 
-        var kept = new List<uint>(order.Count);
+        _kept = new List<uint>(order.Count);
         long value = 0;
         long weight = 0;
         foreach (var i in order)
         {
-            kept.Add(items[i].Guid);
+            _kept.Add(items[i].Guid);
             value += items[i].Value ?? 0;
             weight += items[i].Burden;
         }
 
-        Kept = kept;
+        Kept = _kept;
         KeptValue = value;
         KeptBurden = weight;
+    }
+
+    /// <summary>
+    /// M6 14 keep every great cantrip (the owner, 2026-11-15): the sell loot the plan drops from her main pack to make room for its great-cantrip pieces, in the order to drop (the lowest value per burden first, piece by piece). The loot step drops
+    /// them, checks each, and only then takes the corpse's items (<see cref="Refit"/> with what it reads after).
+    /// </summary>
+    public IReadOnlyList<RoomDrop> Drops { get; }
+
+    /// <summary>M6 14 keep every great cantrip: the great-cantrip pieces the plan could not make room for (dropping all her sell loot would not), each with its reason: left, loudly, and the full-pack trip is due.</summary>
+    public IReadOnlyList<RoomShort> Shorts { get; }
+
+    /// <summary>The burden the plan's drops free.</summary>
+    public long DroppedBurden => Drops.Sum(d => d.Loot.Burden);
+
+    /// <summary>The Value the plan's drops leave on the ground.</summary>
+    public long DroppedValue => Drops.Sum(d => d.Loot.Value);
+
+    /// <summary>The pieces the plan made room for (the pieces its drops are for: the great-cantrip pieces and the swaps' finds), in the order they are taken.</summary>
+    public IEnumerable<uint> RoomMadeFor => Drops.Select(d => d.ForGuid).Distinct();
+
+    /// <summary>M6 14 hour load: the finds of sell loot the plan swapped in (the pieces its swap drops are for), in the order they are taken.</summary>
+    public IEnumerable<uint> Swaps => Drops.Where(d => d.Swap).Select(d => d.ForGuid).Distinct();
+
+    /// <summary>M6 14 hour load: the plain sell loot the line or the slots refused and no swap could make room for, each with the reason (every sell loot she carries is worth as much a burden or more, or dropping it cannot make room).</summary>
+    public IReadOnlyList<RoomShort> SwapShorts { get; }
+
+    /// <summary>M6 14 hour load: the load line the plan used, in percent of the capacity (the cycle's rising line, or the thresholds' own; 0 is no limit).</summary>
+    public int LoadLinePercent { get; }
+
+    /// <summary>
+    /// M6 14 keep every great cantrip (check, act, check): takes a kept item off the plan after the loot step's check read that it no longer fits (the room was not made, or the burden or the slots read after the drops are short): its verdict
+    /// becomes <paramref name="verdict"/> (<see cref="MageLootVerdict.Load"/> or <see cref="MageLootVerdict.Slots"/>), it leaves <see cref="Kept"/>, and the looter skips it. False when the plan does not keep it.
+    /// </summary>
+    /// <param name="guid">The item.</param>
+    /// <param name="verdict">The verdict it is left with.</param>
+    /// <param name="why">Why, for the log (<see cref="WithdrawnWhy"/>).</param>
+    public bool Withdraw(uint guid, MageLootVerdict verdict, string why)
+    {
+        if (!_kept.Remove(guid))
+        {
+            return false;
+        }
+
+        for (var i = 0; i < Items.Count; i++)
+        {
+            if (Items[i].Guid == guid)
+            {
+                _counts[(int)_verdicts[i]]--;
+                _verdicts[i] = verdict;
+                _counts[(int)verdict]++;
+                KeptValue -= Items[i].Value ?? 0;
+                KeptBurden -= Items[i].Burden;
+                break;
+            }
+        }
+
+        _byGuid[guid] = verdict;
+        _withdrawn[guid] = why;
+        return true;
+    }
+
+    /// <summary>Why <paramref name="guid"/> was taken off the plan (<see cref="Withdraw"/>), or null when it was not.</summary>
+    /// <param name="guid">The item.</param>
+    public string? WithdrawnWhy(uint guid) => _withdrawn.TryGetValue(guid, out var why) ? why : null;
+
+    /// <summary>
+    /// M6 14 keep every great cantrip (the check after the drops): the plan's keeps fitted again to the burden and the free slots read now, in the order the plan ranked them (pyreals first, then the great-cantrip pieces, then the rest): each
+    /// kept while it fits under the load line and, going to the main pack, a free slot remains; the others are withdrawn (<see cref="Withdraw"/>). Pyreals take a slot and are never withdrawn. The guids withdrawn, in that order.
+    /// </summary>
+    /// <param name="burden">The burden read now.</param>
+    /// <param name="capacity">The capacity read now.</param>
+    /// <param name="freeSlots">The main pack's free slots read now (<see cref="Quartermaster.PackView.MainPackFree"/>).</param>
+    /// <param name="apply">False: only say which would be withdrawn, and withdraw none.</param>
+    public List<uint> Refit(int burden, int capacity, int freeSlots, bool apply = true)
+    {
+        var withdrawn = new List<uint>();
+        var line = LoadLinePercent;
+        var limit = Math.Max((long)capacity * line, (long)Burden * 100); // M6 14 hour load: a swap planned at a burden over the line never made her heavier; the check holds it to the same bound
+        var slots = Math.Max(0, freeSlots - _rules.Thresholds.SlotsKeptFree);
+        var carried = (long)burden;
+        foreach (var guid in _kept.ToArray())
+        {
+            var item = Items.First(i => i.Guid == guid);
+            var main = JobOf(guid) == PackJob.Main;
+            if (item.IsMoney)
+            {
+                slots--;
+                continue;
+            }
+
+            if (main && slots <= 0)
+            {
+                if (apply)
+                {
+                    Withdraw(guid, MageLootVerdict.Slots, string.Create(CultureInfo.InvariantCulture, $"no free slot when read again ({freeSlots} free, {_rules.Thresholds.SlotsKeptFree} kept free)"));
+                }
+
+                withdrawn.Add(guid);
+            }
+            else if (line > 0 && (capacity <= 0 || (carried + item.Burden) * 100 > limit))
+            {
+                if (apply)
+                {
+                    Withdraw(guid, MageLootVerdict.Load, string.Create(CultureInfo.InvariantCulture, $"over the load line when read again (burden {carried} + {item.Burden} against {line}% of {capacity})"));
+                }
+
+                withdrawn.Add(guid);
+            }
+            else
+            {
+                carried += item.Burden;
+                if (main)
+                {
+                    slots--;
+                }
+            }
+        }
+
+        return withdrawn;
+    }
+
+    /// <summary>
+    /// M6 14 keep every great cantrip: one line per great-cantrip piece the plan makes room for (<c>loot: make room for '&lt;piece&gt;' ...: drop &lt;n&gt; sell loot item(s) ...</c>), with every drop it plans by name, value, burden and value per
+    /// burden; and one loud line per piece it could not (<c>loot: NO ROOM for the great cantrip '&lt;piece&gt;' ...</c>).
+    /// </summary>
+    public IEnumerable<string> RoomLines()
+    {
+        var line = LoadLinePercent;
+        var lineText = line <= 0 ? "no load line" : string.Create(CultureInfo.InvariantCulture, $"load line {line}% = {(long)Capacity * line / 100}");
+        foreach (var piece in RoomMadeFor)
+        {
+            var item = Items.First(i => i.Guid == piece);
+            var mine = Drops.Where(d => d.ForGuid == piece).ToList();
+            var list = string.Join(", ", mine.Select(d => string.Create(CultureInfo.InvariantCulture, $"'{d.Loot.Name}' 0x{d.Loot.Guid:X8} value {d.Loot.Value} burden {d.Loot.Burden} v/b {CantripRoom.Ratio(d.Loot.ValuePerBurden)}")));
+            if (mine[0].Swap)
+            {
+                // M6 14 hour load (the owner, 2026-11-16): the swap, with every number (M6 14: by value where the slots bind)
+                yield return string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"loot: swap: take '{item.Name}' 0x{item.Guid:X8} (value {item.Value ?? 0}, burden {item.Burden}, v/b {CantripRoom.Ratio(item.ValuePerBurden)}): burden {Burden} of {Capacity} ({lineText}), {FreeSlots} free slot(s): drop {mine.Count} sell loot item(s) {(mine[0].BySlot ? "of a lower value (the slots bind, the burden does not: a slot is worth its item's value)" : "of a lower value per burden")}, burden {mine.Sum(d => d.Loot.Burden)}, value {mine.Sum(d => d.Loot.Value)}, the lowest first: {list}");
+                continue;
+            }
+
+            yield return string.Create(
+                CultureInfo.InvariantCulture,
+                $"loot: make room for {(mine[0].Want ? "the wanted item" : "the great cantrip")} '{item.Name}' 0x{item.Guid:X8} ({item.KeepAside}; value {item.Value ?? 0}, burden {item.Burden}): burden {Burden} of {Capacity} ({lineText}), {FreeSlots} free slot(s): drop {mine.Count} sell loot item(s), burden {mine.Sum(d => d.Loot.Burden)}, value {mine.Sum(d => d.Loot.Value)}, the lowest value per burden first: {list}");
+        }
+
+        foreach (var s in Shorts)
+        {
+            var item = Items.First(i => i.Guid == s.Guid);
+            yield return s.Want
+                ? string.Create(CultureInfo.InvariantCulture, $"loot: NO ROOM for the wanted item '{s.Name}' 0x{s.Guid:X8} ({item.KeepAside}; burden {s.Burden}): {s.Why}; nothing droppable is left, so it is left on the corpse ({(s.Verdict == MageLootVerdict.Slots ? "no free slot" : "over the load line")}) and the full-pack trip is due (m6-want-room)")
+                : string.Create(CultureInfo.InvariantCulture, $"loot: NO ROOM for the great cantrip '{s.Name}' 0x{s.Guid:X8} ({item.KeepAside}; burden {s.Burden}): {s.Why}; it is left on the corpse ({(s.Verdict == MageLootVerdict.Slots ? "no free slot" : "over the load line")}) and the full-pack trip is due (m6-pack-room)");
+        }
+
+        foreach (var s in SwapShorts)
+        {
+            var item = Items.First(i => i.Guid == s.Guid);
+            yield return string.Create(CultureInfo.InvariantCulture, $"loot: no swap for '{s.Name}' 0x{s.Guid:X8} (value {item.Value ?? 0}, burden {s.Burden}, v/b {CantripRoom.Ratio(item.ValuePerBurden)}): {s.Why}; it is left ({(s.Verdict == MageLootVerdict.Slots ? "no free slot" : "over the load line")})");
+        }
     }
 
     /// <summary>The rule that made the plan.</summary>
@@ -486,10 +865,10 @@ public sealed class MageLootPlan : LootRules
     public IReadOnlyList<uint> Kept { get; }
 
     /// <summary>The sum of the kept items' Values.</summary>
-    public long KeptValue { get; }
+    public long KeptValue { get; private set; }
 
     /// <summary>The sum of the kept items' burdens.</summary>
-    public long KeptBurden { get; }
+    public long KeptBurden { get; private set; }
 
     /// <summary>The items left for <paramref name="verdict"/>.</summary>
     public int Count(MageLootVerdict verdict) => _counts[(int)verdict];
@@ -561,13 +940,19 @@ public sealed class MageLootPlan : LootRules
     /// <inheritdoc/>
     public override string Describe() => string.Create(
         CultureInfo.InvariantCulture,
-        $"mage rule ({_rules.Thresholds}): keeps {Kept.Count} of {Items.Count} (value {KeptValue}, burden {KeptBurden}){(OwnCorpse ? "; the corpse is the player's own: left to the death handler" : string.Empty)}");
+        $"mage rule ({_rules.Thresholds}{(LoadLinePercent != _rules.Thresholds.LoadLinePercent ? $"; the hour's load line {LoadLinePercent}%" : string.Empty)}): keeps {Kept.Count} of {Items.Count} (value {KeptValue}, burden {KeptBurden}){(OwnCorpse ? "; the corpse is the player's own: left to the death handler" : string.Empty)}");
 
-    /// <summary>M5 7 F30: the items the plan keeps aside (<see cref="MageLootVerdict.KeepAside"/>): the wands and cantrip pieces worth a look.</summary>
-    public int WorthALookCount => Count(MageLootVerdict.KeepAside);
+    /// <summary>
+    /// M5 7 F30: the items the plan keeps aside as worth a look: the wands and cantrip pieces the keep-aside rule matched. M6 14 (<c>m6-lore-cantrips</c>, the count kept honest): a scroll the scroll rule keeps and a quest's want are kept aside too
+    /// (<see cref="KeptAsideGuids"/>) but are not worth a look.
+    /// </summary>
+    public int WorthALookCount => WorthALookGuids.Count();
 
-    /// <summary>The guids of the items the plan keeps aside, in the order they are taken.</summary>
-    public IEnumerable<uint> WorthALookGuids => Kept.Where(g => VerdictOf(g) == MageLootVerdict.KeepAside);
+    /// <summary>The guids of the items the plan keeps aside as worth a look (the keep-aside rule's matches), in the order they are taken.</summary>
+    public IEnumerable<uint> WorthALookGuids => Kept.Where(g => VerdictOf(g) == MageLootVerdict.KeepAside && Items.Any(i => i.Guid == g && i.Look));
+
+    /// <summary>M6 14 (<c>m6-lore-cantrips</c>): the guids of every item the plan keeps aside (<see cref="MageLootVerdict.KeepAside"/>: the rule's matches, the scrolls kept and the quests' wants), in the order they are taken: what the sale never offers.</summary>
+    public IEnumerable<uint> KeptAsideGuids => Kept.Where(g => VerdictOf(g) == MageLootVerdict.KeepAside);
 
     /// <summary>
     /// M5 7 F30: one line per item the keep-aside rule matched, whether the plan takes it or not: <c>loot: worth a look: '&lt;name&gt;' 0x&lt;guid&gt; (&lt;bonus or cantrips&gt;)</c>, with <c>; left: &lt;why&gt;</c> when a full pack or the load line stops it.
@@ -590,15 +975,22 @@ public sealed class MageLootPlan : LootRules
                 continue;
             }
 
-            var heavy = _rules.IsHeavy(Items[i]) ? string.Create(CultureInfo.InvariantCulture, $"; heavy (burden {Items[i].Burden} over {_rules.Thresholds.MaxItemBurden}) but an upgrade: {gear}") : string.Empty;
+            // M6 14 keep every great cantrip (the owner, 2026-11-15, amends D149): a heavy great-cantrip piece is kept whatever the self-equip says; the line says which of the two kept it
+            var heavyWhy = Items[i].Gear is { IsUpgrade: true } || !Items[i].GreatCantrip ? "but an upgrade" : "and not an upgrade, but kept for its great cantrip (the owner, 2026-11-15)";
+            var heavy = _rules.IsHeavy(Items[i]) ? string.Create(CultureInfo.InvariantCulture, $"; heavy (burden {Items[i].Burden} over {_rules.Thresholds.MaxItemBurden}) {heavyWhy}: {gear}") : string.Empty;
+            var guid = Items[i].Guid;
+            var mine = Drops.Where(d => d.ForGuid == guid).ToList();
+            var room = mine.Count == 0 ? string.Empty : string.Create(CultureInfo.InvariantCulture, $"; room made: {mine.Count} sell loot item(s) dropped first (burden {mine.Sum(d => d.Loot.Burden)}, value {mine.Sum(d => d.Loot.Value)})");
+            var noRoom = Shorts.Any(s => s.Guid == guid) ? ", no room could be made (a great cantrip): the full-pack trip is due" : string.Empty;
+            var withdrawn = WithdrawnWhy(guid) is { } off ? "; " + off : string.Empty;
             var left = Verdicts[i] switch
             {
-                MageLootVerdict.Slots => "; left: no free slot",
-                MageLootVerdict.Load => "; left: over the load line",
+                MageLootVerdict.Slots => "; left: no free slot" + noRoom,
+                MageLootVerdict.Load => "; left: over the load line" + noRoom,
                 MageLootVerdict.AlreadyHeld => "; already held",
                 _ => string.Empty,
             };
-            yield return string.Create(CultureInfo.InvariantCulture, $"loot: worth a look: '{Items[i].Name}' 0x{Items[i].Guid:X8} ({why}){heavy}{left}");
+            yield return string.Create(CultureInfo.InvariantCulture, $"loot: worth a look: '{Items[i].Name}' 0x{guid:X8} ({why}){heavy}{room}{left}{withdrawn}");
         }
     }
 
@@ -635,6 +1027,29 @@ public sealed class MageLootPlan : LootRules
                 MageLootVerdict.HeavyNotUpgrade => ", worth a look but heavy and not an upgrade",
                 _ => string.Empty,
             };
+            if (item.KeepAside is null && item.IsWearUpgrade)
+            {
+                why += ", a wear upgrade ranked first (" + item.Gear!.Verb + ")"; // M6 14 (m6-lore-cantrips)
+            }
+
+            if (!item.GreatCantrip && Drops.Count(d => d.Swap && d.ForGuid == item.Guid) is > 0 and var swappedFor)
+            {
+                why += string.Create(CultureInfo.InvariantCulture, $", a swap: room made by dropping {swappedFor} sell loot item(s) {(Drops.First(d => d.Swap && d.ForGuid == item.Guid).BySlot ? "of a lower value (the slots bind)" : "of a lower value per burden")}"); // M6 14 hour load
+            }
+            else if (!item.GreatCantrip && SwapShorts.Any(s => s.Guid == item.Guid))
+            {
+                why += ", no swap could make room";
+            }
+
+            if (item.GreatCantrip)
+            {
+                // M6 14 keep every great cantrip: the room made for it, or that none could be
+                var guid = item.Guid;
+                var dropsFor = Drops.Count(d => d.ForGuid == guid);
+                why += dropsFor > 0 ? string.Create(CultureInfo.InvariantCulture, $", a great cantrip: room made by dropping {dropsFor} sell loot item(s)")
+                    : Shorts.Any(s => s.Guid == guid) ? ", a great cantrip: NO ROOM could be made" : ", a great cantrip";
+            }
+
             var thresholds = _rules.Thresholds;
             var payout = thresholds.MinPayout > 0 || thresholds.Buyers.Count > 0 ? string.Create(CultureInfo.InvariantCulture, $" payout {(item.IsMoney ? item.Value ?? 0 : thresholds.PayoutOf(item.ItemType, item.Value ?? 0))}") : string.Empty;
             var limits = (thresholds.MinPayout > 0 ? string.Create(CultureInfo.InvariantCulture, $", min payout {thresholds.MinPayout}") : string.Empty) + (thresholds.MaxItemBurden > 0 ? string.Create(CultureInfo.InvariantCulture, $", max burden {thresholds.MaxItemBurden}") : string.Empty);
@@ -662,6 +1077,6 @@ public sealed class MageLootPlan : LootRules
 
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"keep {Kept.Count} of {Items.Count} (pyreals={Count(MageLootVerdict.Pyreals)} ranked={Count(MageLootVerdict.Keep)} value_per_burden={Count(MageLootVerdict.ValuePerBurden)} unknown_value={Count(MageLootVerdict.ValueUnknown)} not_sold={Count(MageLootVerdict.NotSold)} load={Count(MageLootVerdict.Load)} slots={Count(MageLootVerdict.Slots)} held={Count(MageLootVerdict.AlreadyHeld)} own_corpse={Count(MageLootVerdict.OwnCorpse)} too_heavy={Count(MageLootVerdict.TooHeavy)} payout_floor={Count(MageLootVerdict.Payout)} worth_a_look={WorthALookCount}{(Count(MageLootVerdict.HeavyNotUpgrade) > 0 ? $" heavy_not_upgrade={Count(MageLootVerdict.HeavyNotUpgrade)}" : string.Empty)}{(Count(MageLootVerdict.KitStone) > 0 ? $" kit_stones={Count(MageLootVerdict.KitStone)}" : string.Empty)}); value {KeptValue}, burden {KeptBurden}{(list.Length == 0 ? string.Empty : ": " + list)}");
+            $"keep {Kept.Count} of {Items.Count} (pyreals={Count(MageLootVerdict.Pyreals)} ranked={Count(MageLootVerdict.Keep)} value_per_burden={Count(MageLootVerdict.ValuePerBurden)} unknown_value={Count(MageLootVerdict.ValueUnknown)} not_sold={Count(MageLootVerdict.NotSold)} load={Count(MageLootVerdict.Load)} slots={Count(MageLootVerdict.Slots)} held={Count(MageLootVerdict.AlreadyHeld)} own_corpse={Count(MageLootVerdict.OwnCorpse)} too_heavy={Count(MageLootVerdict.TooHeavy)} payout_floor={Count(MageLootVerdict.Payout)} worth_a_look={WorthALookCount}{(Count(MageLootVerdict.HeavyNotUpgrade) > 0 ? $" heavy_not_upgrade={Count(MageLootVerdict.HeavyNotUpgrade)}" : string.Empty)}{(Count(MageLootVerdict.KitStone) > 0 ? $" kit_stones={Count(MageLootVerdict.KitStone)}" : string.Empty)}{(Drops.Count > 0 ? $" room_drops={Drops.Count} room_dropped_burden={DroppedBurden}" : string.Empty)}{(Swaps.Any() ? $" swaps={Swaps.Count()} swap_dropped_value={Drops.Where(d => d.Swap).Sum(d => d.Loot.Value)}" : string.Empty)}{(SwapShorts.Count > 0 ? $" no_swap={SwapShorts.Count}" : string.Empty)}{(Shorts.Count > 0 ? $" no_room={Shorts.Count}" : string.Empty)}); value {KeptValue}, burden {KeptBurden}{(list.Length == 0 ? string.Empty : ": " + list)}");
     }
 }

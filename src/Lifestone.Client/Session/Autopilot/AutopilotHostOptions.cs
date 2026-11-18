@@ -38,6 +38,20 @@ public sealed record AutopilotHostOptions
     /// </summary>
     public string? StopFile { get; init; }
 
+    /// <summary>
+    /// <c>--autopilot-steer-dir=PATH</c> (the play host only): the run folder of the steer desk, the file-based way an outside process asks the autopilot for something (the steer contract). The path is the output-path rule's; null: no desk, and every hook falls through.
+    /// </summary>
+    public string? SteerDirectory { get; init; }
+
+    /// <summary><c>--autopilot-steer-observe</c> (the play host only): the desk answers only the probes (ping, sheet, capture); every other order is refused by name (<c>observe-only</c>) and logged.</summary>
+    public bool SteerObserveOnly { get; init; }
+
+    /// <summary>
+    /// <c>--autopilot-steer-orders</c> (the play host only, 2026-11-17): the desk takes the command orders (<c>command</c> with a <c>line</c>, <c>trip</c>, <c>run_quest</c>) and hands them to the same command runner the chat's <c>/trip</c>,
+    /// <c>/rebuff</c>, <c>/quest</c> and <c>/ladder</c> use, observe-only or not; off, they are refused by name (<c>orders-off</c>, or <c>observe-only</c>). The controls stay under <see cref="SteerObserveOnly"/>.
+    /// </summary>
+    public bool SteerOrders { get; init; }
+
     /// <summary>The parse errors (empty when every option parsed).</summary>
     public IReadOnlyList<string> Errors { get; init; } = [];
 
@@ -81,6 +95,23 @@ public sealed record AutopilotHostOptions
                         o = o with { StopFile = argument.Value.Trim() };
                     }
 
+                    break;
+                case "--autopilot-steer-dir":
+                    if (string.IsNullOrWhiteSpace(argument.Value))
+                    {
+                        errors.Add($"{argument.Name}: needs a folder (--name=VALUE)");
+                    }
+                    else
+                    {
+                        o = o with { SteerDirectory = argument.Value.Trim() };
+                    }
+
+                    break;
+                case "--autopilot-steer-observe":
+                    o = o with { SteerObserveOnly = OptionValues.Switch(argument, errors, o.SteerObserveOnly) };
+                    break;
+                case "--autopilot-steer-orders":
+                    o = o with { SteerOrders = OptionValues.Switch(argument, errors, o.SteerOrders) };
                     break;
                 case "--autopilot-control-drill":
                     if (string.IsNullOrWhiteSpace(argument.Value))
@@ -141,5 +172,5 @@ public sealed record AutopilotHostOptions
     /// <summary>The hand-off as the run logs it.</summary>
     public override string ToString() => string.Create(
         CultureInfo.InvariantCulture,
-        $"test_interrupt_at={(InterruptAtSeconds is { } i ? i.ToString("0.#", CultureInfo.InvariantCulture) + " s" : "off")} test_handback_after={(HandBackAfterSeconds is { } h ? h.ToString("0.#", CultureInfo.InvariantCulture) + " s" : "off")} start={(StartAtLogin ? "on" : "off")} control_drill={(ControlDrillDirectory is null ? "off" : "on")}");
+        $"test_interrupt_at={(InterruptAtSeconds is { } i ? i.ToString("0.#", CultureInfo.InvariantCulture) + " s" : "off")} test_handback_after={(HandBackAfterSeconds is { } h ? h.ToString("0.#", CultureInfo.InvariantCulture) + " s" : "off")} start={(StartAtLogin ? "on" : "off")} control_drill={(ControlDrillDirectory is null ? "off" : "on")} steer_dir={(SteerDirectory is null ? "off" : "on")} steer_orders={(SteerOrders ? "on" : "off")}");
 }

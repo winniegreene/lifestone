@@ -16,6 +16,12 @@ public static class AppraisalIds
     /// <summary>PropertyFloat 152 ElementalDamageMod (a caster's bonus to elemental damage: 1.03 is +3%; M5 7 F30).</summary>
     public const uint ElementalDamageMod = 152;
 
+    /// <summary>PropertyFloat 157 ResistanceModifier (a quest weapon's fixed resistance cleaving: ACE strikes with 1 plus this as the target's vulnerability to <see cref="ResistanceModifierType"/>; M6 16 E5e3).</summary>
+    public const uint ResistanceModifier = 157;
+
+    /// <summary>PropertyInt 263 ResistanceModifierType (the DamageType bits <see cref="ResistanceModifier"/> cleaves).</summary>
+    public const uint ResistanceModifierType = 263;
+
     /// <summary>PropertyInt 5 EncumbranceVal (the burden).</summary>
     public const uint Burden = 5;
 
@@ -33,6 +39,9 @@ public static class AppraisalIds
 
     /// <summary>PropertyInt 28 ArmorLevel.</summary>
     public const uint ArmorLevel = 28;
+
+    /// <summary>PropertyInt 36 ResistMagic (an AssessmentProperty, so an appraisal carries it): 9999 or more and ACE never enchants the object (<c>IsEnchantable</c>, WorldObjects/WorldObject_Weapon.cs:532 @95ef426d).</summary>
+    public const uint ResistMagic = 36;
 
     /// <summary>PropertyInt 44 Damage (a weapon's).</summary>
     public const uint Damage = 44;
@@ -377,11 +386,16 @@ public sealed class Appraisal
 /// The latest appraisal per guid (<see cref="GameState.Appraisals"/>), bounded: at most <see cref="Capacity"/> guids are kept and the one answered longest ago is dropped for a new guid (an answer for a kept guid replaces
 /// it and is the newest). 256 holds every object a hunt or an examine panel looks at in a session many times over (a few KB each, about a megabyte at the bound) and keeps a long-running host from growing. The counters
 /// count every answer since the session began, whatever was dropped. Game thread only; the reducer writes it.
+/// <para>M6 14 (live ladder42, 2026-11-16 19:51:19 UTC): an appraisal of a piece she wears is never the one dropped (<see cref="Keep"/>): the loot step appraised 257 other guids in the 41 minutes after the Chevron Cloak's
+/// (worn, ResistMagic 9999), the 257th dropped it, the armour lines counted the cloak again, read it bare, and logged Impenetrability and Bludgeon Bane EXPIRED 207 s before they ran out.</para>
 /// </summary>
 public sealed class AppraisalCache
 {
     /// <summary>The most guids kept.</summary>
     public const int Capacity = 256;
+
+    /// <summary>M6 14: true for a guid whose appraisal is kept past the bound (a piece she wears: <see cref="GameState"/> sets it); null keeps none. The oldest answer of any other guid is dropped instead.</summary>
+    public Func<uint, bool>? Keep { get; set; }
 
     private readonly Dictionary<uint, LinkedListNode<Appraisal>> _byGuid = [];
     private readonly LinkedList<Appraisal> _order = new(); // oldest answer first
@@ -442,8 +456,14 @@ public sealed class AppraisalCache
         }
         else if (_byGuid.Count >= Capacity)
         {
-            var oldest = _order.First!;
-            _order.RemoveFirst();
+            var oldest = _order.First;
+            while (oldest is not null && Keep is { } keep && keep(oldest.Value.Guid))
+            {
+                oldest = oldest.Next; // a worn piece's appraisal stays
+            }
+
+            oldest ??= _order.First!; // every kept guid is worn (more than the bound): the oldest goes after all
+            _order.Remove(oldest);
             _byGuid.Remove(oldest.Value.Guid);
         }
 

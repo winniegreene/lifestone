@@ -48,7 +48,7 @@ public sealed partial class AutopilotHostTests
         Assert.False(rig.Moves.KeyLock.Locked); // the keys are the person's: after /stop, W moves him
         Assert.False(rig.View.Actions.KillSwitch); // a stop, not the switch: the person's actions go on being accepted
         Assert.DoesNotContain(chat, static l => l.StartsWith("Lifestone:", StringComparison.Ordinal)); // /stop's own answer says it; no second line
-        Assert.Contains(rig.World.Lines, static l => l.Contains("stopped by /stop where he stands (no recall, no log off)", StringComparison.Ordinal));
+        Assert.Contains(rig.World.Lines, static l => l.Contains("stopped by /stop where it stands (no recall, no log off)", StringComparison.Ordinal));
         Assert.DoesNotContain("recall-home", AutopilotRig.Kinds(rig.World));
 
         rig.Frame(); // the check one frame after: nothing held, nothing queued, the keys unlocked
@@ -147,5 +147,43 @@ public sealed partial class AutopilotHostTests
         faulted.Host.Dispose();
         Assert.False(faulted.Moves.KeyLock.Locked);
         Assert.Contains(faulted.World.Lines, static l => l.Contains("autopilot keys: unlocked (the autopilot was disposed (running))", StringComparison.Ordinal));
+    }
+
+    // M6 6 MD1: m5-autopilot-test-chat, the scripted hand-off's bounded and logged wait for a main chat (the host's AutopilotTestHandOff asks it before each typing; it never calls into the logic).
+    [Fact]
+    public void M6_6_MD1_test_chat_the_wait_names_itself_once_ends_when_a_main_chat_is_up_and_says_how_long()
+    {
+        var wait = new ChatWait(10);
+        Assert.Equal(ChatWaitResult.Waiting, wait.Poll(1, false, out var first));
+        Assert.Contains("waiting up to 10 s before typing", first, StringComparison.Ordinal);
+        Assert.Equal(ChatWaitResult.Waiting, wait.Poll(1, false, out var second));
+        Assert.Null(second); // one line a wait, not one a frame
+        Assert.Equal(ChatWaitResult.Ready, wait.Poll(1, true, out var ready));
+        Assert.Contains("is up after 2 s; typing", ready, StringComparison.Ordinal);
+        Assert.Equal(ChatWaitResult.Ready, wait.Poll(1, true, out var quiet));
+        Assert.Null(quiet); // a chat that was up all along says nothing
+    }
+
+    [Fact]
+    public void M6_6_MD1_test_chat_the_wait_is_bounded_and_gives_up_by_its_named_todo()
+    {
+        var wait = new ChatWait(3);
+        Assert.Equal(ChatWaitResult.Waiting, wait.Poll(1, false, out _));
+        Assert.Equal(ChatWaitResult.Waiting, wait.Poll(1, false, out _));
+        Assert.Equal(ChatWaitResult.GaveUp, wait.Poll(1, false, out var line));
+        Assert.Contains("TODO(m5-autopilot-test-chat)", line, StringComparison.Ordinal);
+        Assert.Contains("within 3 s", line, StringComparison.Ordinal);
+        Assert.Equal(0, wait.Waited); // the next wait (the hand-back's) starts from nothing
+        Assert.Equal(ChatWaitResult.Waiting, wait.Poll(1, false, out var again));
+        Assert.NotNull(again);
+    }
+
+    [Fact]
+    public void M6_6_MD1_test_chat_a_screen_that_comes_back_in_time_restarts_the_count_for_the_next_wait()
+    {
+        var wait = new ChatWait(5);
+        Assert.Equal(ChatWaitResult.Waiting, wait.Poll(4, false, out _));
+        Assert.Equal(ChatWaitResult.Ready, wait.Poll(1, true, out _));
+        Assert.Equal(ChatWaitResult.Waiting, wait.Poll(4, false, out _)); // 4 s of a new wait, not 8 s of one
     }
 }

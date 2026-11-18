@@ -8,6 +8,7 @@ using Lifestone.Client.Session.Actions.Trackers;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
 using Lifestone.Client.Session.Mage;
+using Lifestone.Client.Session.Quests;
 using Lifestone.Client.Session.Tools;
 using Lifestone.Client.World;
 using Lifestone.Client.Session.Vitals;
@@ -42,6 +43,11 @@ public enum FightStages
     All = Gear | Buffs | Place | Mode,
 }
 
+/// <summary>M6 6 F3 (<c>m6-resume-loot-queue</c>): a kill's corpse, by guid and the creature's name (the corpse is "Corpse of &lt;name&gt;").</summary>
+/// <param name="Guid">The corpse's guid.</param>
+/// <param name="Name">The creature's name.</param>
+public readonly record struct KillCorpse(uint Guid, string Name);
+
 /// <summary>
 /// M3 3.1's fight scenario (<c>--scenario=fight</c>, plan section 4.7 lane fa; BSD Mage and nobody else): the character has the gear on, is topped up with the profile's buffs, is sent to the ground's arrival (the Black Spawn Den's by default)
 /// (<see cref="FightOptions.Ground"/>), enters the magic combat mode and casts Flame Bolt at the nearest tusker on the arrival's floor until <see cref="FightOptions.Kills"/> kills (the server's 0x01AD notices, counted by
@@ -59,7 +65,7 @@ public enum FightStages
 /// <c>WorldObjectTable.NearestCreature</c> over the ground's target creatures (<see cref="GroundRules.TargetWcids"/>) on its walkable cells (<see cref="HuntingGround.IsWalkable"/>) within the cast's range: ACE's
 /// <c>min(BaseRangeConstant + (Init + Ranks) * BaseRangeMod, MaxRadarRange_Outdoors)</c> (<c>Player_Magic.cs</c> 495-505, which reads the skill's start level plus its ranks, not the buffed value; beyond it ACE answers UseDone
 /// <c>MissileOutOfRange</c> 0x0550). Each cast is a miss unless it is Confirmed (the projectile exists) <i>and</i> a damage line or the kill follows within the hit wait (<see cref="HitWaitFor(double, float)"/>: the projectile's
-/// flight to the target at its CreateObject velocity plus <see cref="HitWaitMarginSeconds"/>, at least <see cref="HitWaitSeconds"/> and at most <see cref="HitWaitMaxSeconds"/>); <see cref="MissesBeforeWalking"/> misses in
+/// flight to the target at its CreateObject velocity plus <see cref="HitWaitMarginSeconds"/>, at most <see cref="HitWaitMaxSeconds"/>; a resist line ends it at once, and the emergency reads every frame of it, M6 7 AA); <see cref="MissesBeforeWalking"/> misses in
 /// a row, an out-of-range answer, or no target in range send the player along the floor to the next waypoint (<see cref="IFightWalk"/>). ACE turns the caster to a targeted spell's target itself (<c>Player_Magic.cs</c> about 827,
 /// <c>CreateTurnToChain2</c>), so the scenario never turns the player to cast.</para>
 /// <para><b>The mana</b> (M5 1 F1; D15, D27; <see cref="ManaOrder"/>, the mage's profile): the bolt is sent from its try floor (<see cref="ManaOrder.FloorOf"/>) with the Mana Conversion tries (<see cref="CastRules.WithManaTries"/>; a
@@ -93,11 +99,16 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
     /// <summary>The limit on the teleport, in seconds (portal space takes 5 s or more).</summary>
     public const double TeleportSeconds = RoutePlay.TeleportSeconds;
 
-    /// <summary>The least seconds a confirmed projectile may take to produce a damage line or a kill before the cast is a miss: the floor of the hit wait (a target beside the player, and the damage line's own trip).</summary>
+    /// <summary>
+    /// The hit wait when the object table gives no flight time (no projectile or no position in it). Until M6 7 AA it was the floor of every wait: a target beside the player then sat 3 s after a bolt of a tenth of a second, the fight blind (r3c: a resisted bolt at 2.6 m while two tuskers took 22 health to 5).
+    /// </summary>
     public const double HitWaitSeconds = 3.0;
 
-    /// <summary>Added to the projectile's flight time in the hit wait (<see cref="HitWaitFor(double, float)"/>): ACE's collision at the target, the damage line's trip to the client and a target that steps back.</summary>
-    public const double HitWaitMarginSeconds = 2.0;
+    /// <summary>
+    /// Added to the projectile's flight time in the hit wait (<see cref="HitWaitFor(double, float)"/>). M6 7 AA, measured: over the climb's logs and four den soak rounds, 1,123 confirmed bolts with a real speed, the damage, resist or kill line came at most 0.07 s after distance over speed (the median 0.06 s before it: the tusker runs at the bolt). So the wait protects two things and this margin keeps both: a line still on its way is no miss (0.1 s over the worst measured), and a bolt
+    /// stopped at the end of its flight still gets its <see cref="WallGraceSeconds"/> before the wall verdict (the wait must outlast the grace).
+    /// </summary>
+    public const double HitWaitMarginSeconds = WallGraceSeconds + 0.1;
 
     /// <summary>
     /// The cap of the hit wait. A Flame Bolt flies at the weenie's MaximumVelocity (<c>WorldObject_Magic.cs</c> 1898-1920), about 15 m/s live (session.md section 31), so the farthest target (<see cref="MaxRange"/>) is hit after
@@ -113,6 +124,18 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
 
     /// <summary>The most nearest-tusker candidates the clear-line rule tries before it walks on.</summary>
     public const int MaxLinePicks = 6;
+
+    /// <summary>M6 7 Y: the seconds between two logged <c>blocked:</c> lines for one creature (Lifestone's own; the picks are still counted).</summary>
+    public const double BlockedLogSeconds = 5;
+
+    /// <summary>M6 7 Y: the seconds between two looks for a target during a tour's leg (Lifestone's own: a few sweeps a second, about a metre of a low mage's run).</summary>
+    public const double WalkSightSeconds = 0.25;
+
+    private const int BlockedLogCap = 256;
+    private readonly Dictionary<uint, (double At, int HeldBack)> _blockedLogged = [];
+    private bool _walkSight;
+    private bool _pickLeaving;
+    private double _walkSightAt;
 
     /// <summary>The seconds a bolt may sit stopped before the damage line must have come (ACE sends the Explode and the zero velocity before the damage line), else the stop is a wall hit.</summary>
     public const double WallGraceSeconds = 0.6;
@@ -150,6 +173,9 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
     /// </summary>
     public const double DanceAsideSeconds = 60;
 
+    /// <summary>The presses of a dance with no Mana Conversion (M6 7 AD; Lifestone's own): one, and one more after a fizzle. A press is refused only for a mana short of the base, so ACE's roll has nothing to give a third.</summary>
+    public const int PressesUntrained = 2;
+
     /// <summary>
     /// The seconds the rest in peace for stamina is set aside after a health fall ended one (M5 1 fix A, 1-R3): something is hitting the mage, and a rest in peace beside it would end on the next blow, flip the combat mode
     /// each time and never bolt. Lifestone's own: long enough for the mage to bolt or the blows to stop, short enough to rest again when nothing hits. The order waits in the magic mode instead (a bolt or a dance as the mana allows).
@@ -172,6 +198,8 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         Drain, // M5 7 F7 (D88): a Drain Health Other or Heal Self cast of the drain rule in flight (FightScenario.Drain.cs)
         Opener, // M5 7 F8 (D89): the opener's cast in flight (FightScenario.Opener.cs)
         Refresh, // M5 7 F23: the buff refresh's pass between kills (FightScenario.Refresh.cs)
+        PullRest, // M6 7 AB: the rest before the next pull (FightScenario.PullRest.cs)
+        Combine, // M6 14 combine: the no-roll combines of the until's chain at a safe moment (FightScenario.Combine.cs)
     }
 
     /// <summary>The mana phase's own step (the new order; <c>--cast-mana-tries 0</c> keeps the ceiling wait).</summary>
@@ -180,6 +208,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         Decide,
         Dancing,
         Drinking,
+        DrinkBusy, // M6 8: the server was too busy for the drink (0x1D): a short wait, then the drink again
         PotionVital,
         ToRest,
         Resting,
@@ -198,7 +227,68 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
     private readonly FightStages _stages;
     private readonly ILogSink _log;
     private readonly FightTally _tally = new();
+
+    /// <summary>M6 1 F2: the session the scroll keep hook reads (the book and the qualities at each loot decision); set at each step, null before the first.</summary>
+    private IGameSessionView? _hookSession;
+
+    /// <summary>M6 1 F2: <see cref="ScrollKeepRule.Hook"/> over the session of the step; keeps nothing before the first step. M6 5 q4 (D57): composed with the fight's wants (<see cref="WantHook"/>).</summary>
+    private Func<WorldObject, string?> KeepScrollHook(string groundKey, IReadOnlyDictionary<uint, SpellInfo> spells)
+    {
+        var hook = ScrollKeepRule.Hook(LadderLoader.WarMage, groundKey, spells, () => _hookSession!.State.Self.Spellbook, () => _hookSession!.State.Self.Qualities, botCovers: () => BuffBotCover.For(_hookSession!.State).Covering); // M6 item 14 S3: no scroll of a line the buff bot casts is kept
+        return WantHook(_options.Want, _wantRefused, item => _hookSession is null ? null : hook(item));
+    }
+
+    /// <summary>
+    /// M6 5 q4 (D57): the wanted wcids whose pick-up the server refused: the plan kept a quest-want item of the wcid, it is not held now and the chat lines since the pick-ups began carry the server's refusal (<see cref="QuestSolvedTooText"/>).
+    /// A want that arrived (held) is never named; no refusal line names none.
+    /// </summary>
+    /// <param name="said">The chat texts since the pick-ups began.</param>
+    /// <param name="plan">The corpse's plan.</param>
+    /// <param name="held">True when the guid is in the pack now.</param>
+    internal static IReadOnlyList<uint> RefusedWants(IReadOnlyList<string?> said, MageLootPlan plan, Func<uint, bool> held)
+    {
+        if (!said.Any(t => t?.StartsWith(QuestSolvedTooText, StringComparison.Ordinal) == true))
+        {
+            return [];
+        }
+
+        return [.. plan.Kept.Select(g => plan.Items.First(i => i.Guid == g)).Where(i => MageLootRules.IsQuestWant(i) && i.Wcid != 0 && !held(i.Guid)).Select(i => i.Wcid).Distinct()];
+    }
+
+    /// <summary>The wcids whose pick-up the server refused in this fight (the quest's 20 h gate): no longer wanted, so the next corpse's plan leaves them (M6 5 q4).</summary>
+    private readonly HashSet<uint> _wantRefused = [];
+
+    /// <summary>M6 5 q4 (D57): the chat total at the fight's start (the <see cref="FightOptions.Until"/> chat form reads the lines since).</summary>
+    private long _untilMark;
+
+    /// <summary>M6 5 q4: true once the <see cref="FightOptions.Until"/> ended the fight.</summary>
+    private bool _untilMet;
+
+    /// <summary>M6 5 F1 (review 5-R4): the server's refusal line when the item the fight's <see cref="FightOptions.Until"/> waits for was refused at the pick-up (it can never be met), or null.</summary>
+    private string? _untilRefused;
+
+    /// <summary>True once the malformed-argument stop was raised (<see cref="FightOptions.SpecError"/>).</summary>
+    private bool _specErrorRaised;
+
+    /// <summary>
+    /// M6 5 q4 (D57): the loot's keep hook over the wanted wcids: an item of one that was not refused is kept aside with the verdict <c>quest: want &lt;wcid&gt;</c> (<see cref="MageLootRules.QuestWantPrefix"/>), under every value floor; any other item goes to
+    /// <paramref name="next"/> (the scroll rule).
+    /// </summary>
+    /// <param name="want">The wanted wcids.</param>
+    /// <param name="refused">The wcids the server refused in this fight.</param>
+    /// <param name="next">The hook for every other item.</param>
+    internal static Func<WorldObject, string?> WantHook(IReadOnlyList<uint> want, IReadOnlySet<uint> refused, Func<WorldObject, string?> next) =>
+        want.Count == 0 ? next : item => want.Contains(item.Weenie.WeenieClassId) && !refused.Contains(item.Weenie.WeenieClassId)
+            ? MageLootRules.QuestWantPrefix + item.Weenie.WeenieClassId.ToString(CultureInfo.InvariantCulture)
+            : next(item);
+
+    /// <summary>
+    /// The start of the server's refusal of a pick-up inside a quest's timer: "You have solved this quest too recently!" (or "... too many times!" at the quest's max solves); ACE sends it as a system chat line with the error
+    /// (<c>QuestManager.HandleSolveError</c> @95ef426d Managers/QuestManager.cs:558-578, called from Player_Inventory.cs:1257-1259).
+    /// </summary>
+    internal const string QuestSolvedTooText = "You have solved this quest too ";
     private readonly Func<uint, bool>? _cellFilter;
+    private readonly Func<uint, bool>? _huntFilter;
     private readonly Func<uint, bool> _nextStoreyFilter;
     private readonly Func<uint, bool> _otherStoreyFilter;
     private int _pickNextStorey = -1;
@@ -206,6 +296,8 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
     private readonly List<uint> _killed = [];
     private readonly uint[] _levelIds = new uint[Levels];
     private readonly HuntingGround _ground;
+    private bool _wantsChecked;
+    private readonly KillFirstPick _killFirstPick; // M6 3 a2: the pick takes a kill-first creature of the ground first
     private readonly GearKit _kit;
     private readonly IReadOnlyList<uint> _targetWcids;
     private readonly TeleportDestination _destination;
@@ -276,12 +368,14 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
     private double _deadSince;
     private bool _died;
     private FightStopReason? _stopRequest;
+    private string? _lootHold; // M6 14 recall unblock (m6-loot-hold): why no corpse is opened any more, or null
     private string? _deathText;
     private double _fightEnd = double.NaN;
 
     // M5 1 F1: the mana order, the level's re-choice, the waits and the rates.
     private readonly CastRules _boltRules;
     private readonly CastRules? _danceRules;
+    private readonly CastRules? _pressRules; // M6 7 AD: the dance of a caster with no Mana Conversion: a fizzle pressed once more, no more
     private readonly CastTally _castTally = new();
     private readonly DanceLevel[] _danceLevels = new DanceLevel[7];
     private readonly int[] _danceIndex = new int[7];
@@ -292,6 +386,8 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
     private bool _drinkStamina; // M5 7 F5: the potion in hand is a Stamina Potion (the refill's), not a Mana Potion
     private bool _staminaPotionsAside;
     private ActionHandle? _manaPending;
+    private int _manaDrinkBusy; // M6 8: the busy refusals of the drink in hand
+    private double _manaDrinkAt;
     private ManaPhase _manaPhase;
     private ManaDecision _decision;
     private int _danceCount;
@@ -338,7 +434,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
     /// <param name="endSession">True: log off and quit when done. False: end at <c>done</c> in the world.</param>
     /// <param name="stages">The stages to run before the fight (<see cref="FightStages.All"/>).</param>
     public FightScenario(IReadOnlyDictionary<uint, SpellInfo> spells, string account, BuffOptions buff, FightOptions fight, IFightWalk? walk, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, FightStages stages = FightStages.All)
-        : this(GearKit.Build(spells ?? throw new ArgumentNullException(nameof(spells)), account, ground: fight?.GroundProfile), spells, buff, fight!, walk, log, arrivalSeconds, endSession, stages) // M5 3 m1: the fight's ground's kit (D46)
+        : this(GearKit.BuildFor(spells ?? throw new ArgumentNullException(nameof(spells)), account, fight?.GroundProfile), spells, buff is null ? buff! : buff with { AccountName = account }, fight!, walk, log, arrivalSeconds, endSession, stages) // M5 3 m1: the fight's ground's kit (D46); M6 0 F3: the bare kit for an outdoor ground with none
     {
     }
 
@@ -365,23 +461,27 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         _kit = kit;
         _ground = fight.GroundProfile; // an unknown key was reported by FightOptions.FromArguments; one set by hand fails here, naming the known keys
         _storeysSeen = new bool[_ground.Storeys.Count];
+        _killFirstPick = new KillFirstPick(_ground);
         if (walk?.Tour is GroundTour tour)
         {
             tour.StoreysMin = fight.StoreysMin; // --fight-storeys-min (g6)
             tour.BodyStoreysVisited = 0; // M5 7 P7v: a journey's tour is the ground's one (JourneyGroundTours), kept from an earlier fight; this fight's body has stood on no storey yet
         }
-        _targetWcids = _ground.TargetWcids();
+        _targets = FightTargets.Of(_ground); // M6 0 a5: a dungeon's profile targets as before; an outdoor ground's outdoor.creatures within its band
+        _targetWcids = _targets.Select(t => t.Wcid).ToArray();
         _destination = _ground.ArrivalDestination(); // M5 2 g2b: the profile's arrival, not the Places row
-        _cellFilter = fight.ArenaHere ? null : _ground.IsWalkable; // the walkable cells are the storeys' without the no-go cells: a creature in a no-go cell is never a target
-        InitFloors(); // M5 7 P7s (D148): the carried lines whose floor drops the war options that need them
-        _nextStoreyFilter = c => _ground.IsWalkable(c) && _ground.StoreyOf(c) == _pickNextStorey; // 2-R2: the pick while the tour wants to leave a storey; cached, a lambda per pick allocates
-        _otherStoreyFilter = c => _ground.IsWalkable(c) && _ground.StoreyOf(c) is var storey && storey >= 0 && storey != _pickHereStorey;
-        _usable = id => (_usableBook is null || _usableBook.Knows(id)) && _spells.ContainsKey(id); // a level down may use the levels the spellbook holds and the SpellTable has (the old drop's rule); cached: a lambda per request allocates
-        _buffOptions = buff with { RebuffMarginSeconds = TopUpSeconds };
-        _gear = (stages & FightStages.Gear) != 0 ? new GearScenario(kit, log, arrivalSeconds, endSession: false, cast: false, spells) : null;
+        _cellFilter = fight.ArenaHere ? null : FightTargets.CellFilter(_ground); // a dungeon's walkable cells are the storeys' without the no-go cells (a creature in a no-go cell is never a target); M6 0 a5: an outdoor ground's, its landblocks' outdoor cells
+        InitFloors(buff.AccountName); // M5 7 P7s (D148): the carried lines whose floor drops the war options that need them
+        _huntFilter = _cellFilter is null ? null : c => _cellFilter(c) && !_keptOut.Contains(c); // M6 7 AR: the pick's cells; the emergency and the fight back keep _cellFilter (FightScenario.Hunt.cs)
+        _nextStoreyFilter = c => _ground.IsWalkable(c) && !_keptOut.Contains(c) && _ground.StoreyOf(c) == _pickNextStorey; // 2-R2: the pick while the tour wants to leave a storey; cached, a lambda per pick allocates
+        _otherStoreyFilter = c => _ground.IsWalkable(c) && !_keptOut.Contains(c) && _ground.StoreyOf(c) is var storey && storey >= 0 && storey != _pickHereStorey;
+        _usable = id => (_usableBook is null || _usableBook.Knows(id)) && _spells.ContainsKey(id) && !_droppedSpells.Contains(id); // a level down may use the levels the spellbook holds and the SpellTable has (the old drop's rule); cached: a lambda per request allocates
+        _buffOptions = buff with { RebuffMarginSeconds = TopUpSeconds, FieldDamageTypes = buff.FieldDamageTypes ?? ArmourBanes.FieldMask(_ground) }; // M6 14 (m6-banes): a fight is the field: its top-up and its refresh want one of the six other banes only where the ground's targets deal its damage type
+        _gear = (stages & FightStages.Gear) != 0 ? new GearScenario(kit, log, arrivalSeconds, endSession: false, cast: false, spells) { Account = buff.AccountName } : null; // M6 1 w: the first cast's floor on the account's formula
         var travel = fight.Travel ?? new PlaceTravel(); // M4 P5b: one seam per scenario, shared by the place and the den exit
         _seam = new SeamLeg(travel);
-        _loot = fight.Loot ? new LootStep(log, new MageLootRules(fight.EffectiveLootThresholds, spells), this) : null;
+        // M6 1 F2 (e's wiring, 1-R2): a scroll of the plan's next level, or any VII, is kept aside (ScrollKeepRule); the loot step's keep-aside record is the sale's skip (SaleMemory.Shared.KeptAside).
+        _loot = fight.Loot ? new LootStep(log, new MageLootRules(fight.EffectiveLootThresholds with { KeepScroll = KeepScrollHook(_ground.Key, spells) }, spells), this) : null;
         if (_loot is not null && fight.EffectiveLootThresholds.KeepAside is { } keepAside)
         {
             foreach (var missing in keepAside.NamesMissingFrom(spells))
@@ -394,11 +494,16 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         // M5 1 F1: made once (the forms build a name string). --cast-mana-tries 0 keeps K3's BoltD14 exactly.
         _boltRules = fight.Mana.On ? CastRules.BoltD14.WithManaTries(fight.Mana.Tries, fight.Mana.TrySpacingSeconds) : CastRules.BoltD14;
         _danceRules = fight.Mana.On ? CastRules.ManaDance(fight.Mana.DancePresses, fight.Mana.TrySpacingSeconds) : null;
+        _pressRules = fight.Mana.On ? CastRules.ManaDance(Math.Min(fight.Mana.DancePresses, PressesUntrained), fight.Mana.TrySpacingSeconds) : null;
         _drain = new FightDrain(spells, log, fight.DrainUnderPercent, fight.DrainUntilPercent);
         _tally.HitNotice = NoteHit; // M5 7 F16: each hit's amount in the log
-        _tally.KillNotice = NoteKillClaim; // M5 7 P7b (D139 i): every kill of the mage's is a claim on a corpse (FightScenario.LootWalks.cs)
+        _tally.KillNotice = text =>
+        {
+            NoteKillCasts(text); // M6 0 a5: each kill's line carries the casts since the kill before
+            NoteKillClaim(text); // M5 7 P7b (D139 i): every kill of the mage's is a claim on a corpse (FightScenario.LootWalks.cs)
+        };
         _emergency = new FightEmergency(fight.EmergencyFloorPercent, fight.EmergencySafePercent, fight.EmergencyMarginPercent); // M5 7 F16 (D91)
-        _refill = new FightRefill(spells, log, fight.Mana.On ? fight.StaminaFullPercent : 0); // --cast-mana-tries 0 is today's ceiling order exactly: no refill
+        _refill = new FightRefill(spells, log, fight.Mana.On ? fight.StaminaFullPercent : 0, buff.AccountName); // --cast-mana-tries 0 is today's ceiling order exactly: no refill
         var line = ArenaProfile.LineNamed(ArenaProfile.WarLineName) ?? throw new InvalidOperationException("the profile has no " + ArenaProfile.WarLineName + " line");
         for (var i = 0; i < Levels; i++)
         {
@@ -458,6 +563,32 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
 
         _stopRequest = reason;
         _log.Info(LogCategory, $"the fight is asked to stop ({reason.Name}): it ends at its next safe point");
+        if (LeavesTheGround(reason))
+        {
+            HoldLoot($"the fight is asked to stop ({reason.Name}): she leaves the ground by a trip, a retreat or the stop's recall");
+        }
+    }
+
+    /// <summary>
+    /// M6 14 recall unblock (m6-loot-hold): true for a stop after which she leaves the ground (a trip, a retreat, the stop's recall home): under it no corpse is opened, so the way out never waits behind a corpse's Use. The other stops
+    /// (the quest's end, a trial's or a fight-back's end, a scripted death) keep the clean stop's rule: the loot in hand finishes first.
+    /// </summary>
+    internal static bool LeavesTheGround(FightStopReason reason) =>
+        reason == FightStopReason.LogisticsTrip || reason == FightStopReason.ForcedTrip || reason == FightStopReason.LogisticsStop || reason == FightStopReason.StopRule || reason == RetreatRule.StopReason;
+
+    /// <inheritdoc />
+    public string? LootHeld => _lootHold;
+
+    /// <inheritdoc />
+    public void HoldLoot(string why)
+    {
+        if (_loot is null || _lootHold is not null)
+        {
+            return;
+        }
+
+        _lootHold = why;
+        _log.Info(LogCategory, $"loot: held: {why}: no corpse is opened from now on; a loot in hand stands down (its walk cut, its open view closed) and the corpses wait for the next ground visit (m6-loot-hold)");
     }
 
     /// <summary>The Flame Bolt level in use as a numeral (<c>I</c> to <c>VII</c>), or <c>n/a</c> before the fight chose one.</summary>
@@ -526,7 +657,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
     /// <summary>The longest mana wait, in seconds (<c>mana_wait_max_s=</c>; what a wait is: <see cref="ManaWaitSeconds"/>; one still open counts to now).</summary>
     public double ManaWaitMaxSeconds => Math.Max(_manaWaitMax, OpenSeconds(_manaWaitSince));
 
-    /// <summary>The seconds with no target to pick: the walks after "no tusker is in range" or "no clear line", to the next target picked.</summary>
+    /// <summary>The seconds with no target to pick: the walks after "no creature of the ground is in range" or "no clear line", to the next target picked.</summary>
     public double IdleSeconds => _idleTotal + OpenSeconds(_idleSince);
 
     /// <summary>The kills over the whole fight time, per hour (NaN before the fight).</summary>
@@ -548,7 +679,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
     /// <param name="withLevel">False: without the leading <c>level=</c> (<see cref="VerdictFields"/>, which prints it earlier).</param>
     public string ManaFields(bool withLevel = true) => string.Create(
         CultureInfo.InvariantCulture,
-        $"{(withLevel ? "level=" + Level + " " : string.Empty)}mana_wait_max_s={ManaWaitMaxSeconds:0.#} mana_wait_s={ManaWaitSeconds:0.#} kills_per_hour={Rate(KillsPerHour)} kills_per_hour_burst={Rate(KillsPerHourBurst)} {_castTally.Fields} {_refill.Fields} {_drain.Fields} mana_presses={_manaPresses} dances={_dances} dances_landed={_dancesLanded}");
+        $"{(withLevel ? "level=" + Level + " " : string.Empty)}mana_wait_max_s={ManaWaitMaxSeconds:0.#} mana_wait_s={ManaWaitSeconds:0.#} kills_per_hour={Rate(KillsPerHour)} kills_per_hour_burst={Rate(KillsPerHourBurst)} {_castTally.Fields} {_refill.Fields} {_drain.Fields} {ManaLoopFields()} mana_presses={_manaPresses} dances={_dances} dances_landed={_dancesLanded}");
 
     private static string Rate(double v) => double.IsNaN(v) ? "n/a" : v.ToString("0.#", CultureInfo.InvariantCulture);
 
@@ -572,14 +703,14 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
     public BuffCycle? Cycle => _cycle;
 
     /// <summary>
-    /// The hit wait of a confirmed cast: the projectile's flight time, <paramref name="distanceMetres"/> over <paramref name="speedMetresPerSecond"/>, plus <see cref="HitWaitMarginSeconds"/>, clamped to <see cref="HitWaitSeconds"/>
-    /// and <see cref="HitWaitMaxSeconds"/>; a speed under <see cref="MinProjectileSpeed"/> gives the cap (M3 3.2 review, package 2 finding 6: the fixed 3 s was shorter than a bolt's flight past about 45 m, so a hit at range was a
+    /// The hit wait of a confirmed cast: the projectile's flight time, <paramref name="distanceMetres"/> over <paramref name="speedMetresPerSecond"/>, plus <see cref="HitWaitMarginSeconds"/>, at most
+    /// <see cref="HitWaitMaxSeconds"/> (M6 7 AA: no floor); a speed under <see cref="MinProjectileSpeed"/> gives the cap (M3 3.2 review, package 2 finding 6: the fixed 3 s was shorter than a bolt's flight past about 45 m, so a hit at range was a
     /// miss credited to the next cast).
     /// </summary>
     /// <param name="distanceMetres">The distance from the projectile's origin to the target, in metres.</param>
     /// <param name="speedMetresPerSecond">The projectile's speed from its CreateObject velocity, in m/s.</param>
     public static double HitWaitFor(double distanceMetres, float speedMetresPerSecond) =>
-        speedMetresPerSecond < MinProjectileSpeed || double.IsNaN(distanceMetres) ? HitWaitMaxSeconds : Math.Clamp((distanceMetres / speedMetresPerSecond) + HitWaitMarginSeconds, HitWaitSeconds, HitWaitMaxSeconds);
+        speedMetresPerSecond < MinProjectileSpeed || double.IsNaN(distanceMetres) ? HitWaitMaxSeconds : Math.Min((distanceMetres / speedMetresPerSecond) + HitWaitMarginSeconds, HitWaitMaxSeconds);
 
     /// <summary>ACE's cast range for <paramref name="spell"/> at the skill's start level plus ranks <paramref name="initPlusRanks"/> (see the class remarks).</summary>
     /// <param name="spell">The spell.</param>
@@ -654,7 +785,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         var seconds = FightSeconds;
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"{Token(_gearFields, "gear")} {Token(_gearFields, "worn")} buffs={_buffsNote} kills={_tally.Kills} damage_dealt={_tally.DamageDealt} spells_cast={_tally.Casts} misses={_tally.Misses} blocked_picks={_tally.BlockedPicks} wall_hits={_tally.WallHits} xp_gained={_tally.XpGained} damage_taken={_tally.DamageTaken} hits_taken={_tally.HitsTaken} evades={_tally.Evades} level={Level} range_m={_range:0.#} projectiles={_projectiles} walks={_walks} fight_s={(double.IsNaN(seconds) ? "n/a" : seconds.ToString("0", CultureInfo.InvariantCulture))} target_kills={_tally.TargetKills} defended={_defended} fizzles={_castTally.Fizzles} hit_max={_tally.HitMax} target_died_mid_cast={_tally.TargetDiedMidCast} doomed_skips={DoomedSkips} {OpenerFields()} {PickField()} {ManaFields(withLevel: false)} {TourFields()} {LootFields()}{(BuffsExpired > 0 ? " buffs_expired=" + BuffsExpired.ToString(CultureInfo.InvariantCulture) : string.Empty)}{(_stopRequest is { } stop ? " stop=" + stop.Name : string.Empty)}");
+            $"{Token(_gearFields, "gear")} {Token(_gearFields, "worn")} buffs={_buffsNote} kills={_tally.Kills} damage_dealt={_tally.DamageDealt} spells_cast={_tally.Casts} misses={_tally.Misses} blocked_picks={_tally.BlockedPicks} wall_hits={_tally.WallHits} {Shots.Fields} xp_gained={_tally.XpGained} damage_taken={_tally.DamageTaken} hits_taken={_tally.HitsTaken} evades={_tally.Evades} level={Level} range_m={_range:0.#} projectiles={_projectiles} walks={_walks} fight_s={(double.IsNaN(seconds) ? "n/a" : seconds.ToString("0", CultureInfo.InvariantCulture))} target_kills={_tally.TargetKills} defended={_defended} fizzles={_castTally.Fizzles} hit_max={_tally.HitMax} target_died_mid_cast={_tally.TargetDiedMidCast} doomed_skips={DoomedSkips} {OpenerFields()} {CastWalkFields()} {PickField()} {PullRestFields()} {ManaFields(withLevel: false)} {TourFields()} {LootFields()}{LivePositionFields()}{LifeThroughFields()}{(BuffsExpired > 0 ? " buffs_expired=" + BuffsExpired.ToString(CultureInfo.InvariantCulture) : string.Empty)}{(_stopRequest is { } stop ? " stop=" + stop.Name : string.Empty)}{(_options.Until is null ? string.Empty : _untilMet ? " until=met" : _untilRefused is not null ? " until=refused" : " until=not-met")}");
     }
 
     /// <summary>F3: <c>--fight-storeys-min</c> asks for 2 or more storeys, so the fight leg's review frames (first, bolt, hit, kill) wait for their trigger on a storey other than the arrival's (<see cref="FightShotPlan.WaitsForOtherStorey"/>).</summary>
@@ -708,10 +839,10 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             return maxLevel;
         }
 
-        if (!string.Equals(row.Family, ArenaProfile.WarLineName, StringComparison.Ordinal))
+        if (BoltElement.ElementOf(row.Family) is null)
         {
-            note = $"the ground's plan names {row.Family} for level {characterLevel}, not the bolt line {ArenaProfile.WarLineName} (TODO(ground-plan-family)); levels up to {top}";
-            return maxLevel;
+            note = $"the ground's plan names {row.Family} for level {characterLevel}, no bolt line (TODO(ground-plan-family)); levels up to {top}";
+            return maxLevel; // M6 14 the element line: every element's bolt line has the same levels, so a plan that names any of them caps the bolt in hand
         }
 
         var cap = Math.Clamp(Math.Min(row.SpellLevel, maxLevel), 1, Levels);
@@ -721,10 +852,39 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         return cap;
     }
 
-    /// <summary>The cap for the player's level now (<see cref="PlanCap"/>), logged when it changes.</summary>
+    /// <summary>
+    /// M6 14 (the owner, 2026-11-13: the climber casts the highest bolt her live skill lands at the plan chance): the cap the fight casts by under <paramref name="options"/>. With <see cref="FightOptions.LiveCap"/> (the level
+    /// up job's ladder fight, whose <see cref="FightOptions.MaxLevel"/> is the ladder's cap on her current, buffed War Magic) that cap governs: the ground's plan row, the projection on the projected base skill with no buff, does
+    /// not lower it and is named in <paramref name="note"/>. Without it (BSD Mage's den job, a command line's <c>--fight-max-level</c>, every fight without the ladder's cap) <see cref="PlanCap(HuntingGround, int, int, out string)"/>
+    /// exactly as before. The fight, its opener and the mana dance read this one cap; a level whose components the pack does not hold is still skipped by the fight's own check.
+    /// </summary>
+    /// <param name="ground">The ground.</param>
+    /// <param name="characterLevel">The character's level.</param>
+    /// <param name="options">The fight's options (<see cref="FightOptions.MaxLevel"/>, <see cref="FightOptions.LiveCap"/>).</param>
+    /// <param name="note">What capped it, for the log.</param>
+    /// <returns>The highest level the fight may choose, 1 to 7.</returns>
+    public static int PlanCap(HuntingGround ground, int characterLevel, FightOptions options, out string note)
+    {
+        ArgumentNullException.ThrowIfNull(ground);
+        ArgumentNullException.ThrowIfNull(options);
+        if (!options.LiveCap)
+        {
+            return PlanCap(ground, characterLevel, options.MaxLevel, out note);
+        }
+
+        var cap = Math.Clamp(options.MaxLevel, 1, Levels);
+        var row = ground.PlanFor(characterLevel);
+        var projection = row is null
+            ? $"the ground's plan has no row for level {characterLevel}"
+            : $"the ground's plan row, the projection on the base skill, names {row.Family} {Numerals[Math.Clamp(row.SpellLevel, 1, Levels) - 1]} for level {characterLevel}{(row.SpellLevel < cap ? " and does not lower it" : string.Empty)}";
+        note = $"the ladder's live cap governs: {ArenaProfile.WarLineName} up to {Numerals[cap - 1]} (the highest level at the plan chance on the current War Magic); {projection}";
+        return cap;
+    }
+
+    /// <summary>The cap for the player's level now (<see cref="PlanCap(HuntingGround, int, FightOptions, out string)"/>), logged when it changes.</summary>
     private int LevelCapFor(PlayerQualities q)
     {
-        var cap = PlanCap(_ground, q.Level, _options.MaxLevel, out var note);
+        var cap = PlanCap(_ground, q.Level, _options, out var note);
         if (cap != _planCapLogged)
         {
             _planCapLogged = cap;
@@ -772,7 +932,34 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
     public ScenarioStatus Step(IGameSessionView session, double now)
     {
         ArgumentNullException.ThrowIfNull(session);
+        _hookSession = session;
         _lastClock = session.Clock.Now;
+        PackPeakSample(session, _lastClock); // M6 7 finish: report-only
+        LivePositionWatch(session, _lastClock); // M6 14 (m6-live-position): report-only
+        ThreatShadowStep(session, _lastClock); // M6 16 E2b: the self-defence list beside the threat board, report-only
+        IdleWatch(session, _lastClock); // M6 8: report-only
+        if (Failure is null && !_specErrorRaised && _options.SpecError is { } badSpec)
+        {
+            _specErrorRaised = true;
+            return Fail(session, "fight: " + badSpec); // M6 5 q4: a malformed station argument is a loud stop at the station's start, never a guess
+        }
+
+        if (Failure is null && !_wantsChecked)
+        {
+            _wantsChecked = true;
+            var state = session.State;
+            var wants = GroundWants.Check(_ground, state.Self.Qualities.Level, state.Self.Spellbook.Knows, wcid => HardestOn(state, wcid)); // M6 14 the element line: a target no line she casts can hurt is the stop
+            foreach (var line in wants.Lines)
+            {
+                _log.Warn(LogCategory, line);
+            }
+
+            if (wants.Failure is { } refused)
+            {
+                return Fail(session, $"{NoCastableFailure}: {refused}"); // M6 8 B1, M6 14: a target every line she casts does nothing to is a loud stop, never a silent bolt
+            }
+        }
+
         if (Failure is not null)
         {
             if (_failLeave)
@@ -916,7 +1103,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
                         return Fail(session, "quitting: " + Describe(quit));
                     }
 
-                    _log.Info(LogCategory, "verdict " + VerdictFields());
+                    LogVerdict(session);
                     Stage = "done";
                     Dispose();
                     return ScenarioStatus.Succeeded;
@@ -945,6 +1132,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         _createdSubscription?.Dispose();
         _movedSubscription?.Dispose();
         DisposeDefence(); // M5 7 F4
+        EndThreatShadow(); // M6 16 E2b: the fight's line of its shadow's asks, report-only
         _volleyCasts?.CloseAll(); // M5 7 F24
         _ringCasts?.CloseAll(); // M5 7 F22: the ring casts still counting their hits are closed and logged
         DisposeHeals(); // M5 7 F19
@@ -960,7 +1148,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             return ScenarioStatus.Running;
         }
 
-        _cycle ??= new BuffCycle(session, _spells, _buffOptions, _log, ArmourBuffLedger.For(session.State)); // the session's armour memory (M4 4.1 lane c): a top-up after a login seeds it by appraisal
+        _cycle ??= new BuffCycle(session, _spells, _buffOptions, _log, ArmourBuffLedger.For(session.State), profile: _options.BuffProfile); // the session's armour memory (M4 4.1 lane c): a top-up after a login seeds it by appraisal
         var due = _cycle.RebuffDue(clock, TopUpSeconds);
         if (due.Count == 0)
         {
@@ -1156,18 +1344,33 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         }
         else
         {
-            _level = ChooseLevel(self.Qualities, self.Spellbook, _buffOptions.CastChance, out skill, out why, LevelCapFor(self.Qualities)); // D41: the ground's plan, then --fight-max-level
+            ReadShortStock(session); // M6 14 cap: a short carried line leaves out the war spells that burn it, before the line and the level are chosen
+            StartElement(session); // M6 14 the element line: the ground's planned line when the book can cast it, else the Flame Bolt; each target then takes its hardest line (FightScenario.Element.cs)
+            ElementsUsed.For(session.State).Note(_boltElement); // M6 14: the line in hand at the start (the caster keep's)
+            _level = ChooseOnLine(self.Qualities, self.Spellbook, out skill, out why, LevelCapFor(self.Qualities)); // D41: the ground's plan, then --fight-max-level
+        }
+
+        if (_level < 0 && _stockCapNotes.Count > 0)
+        {
+            return Fail(session, $"{NoCastableFailure}: {StockCapEndWords()}; no level of the {_boltLineName} is left that the pack pays for over the lines ({why})"); // M6 14 cap: the named end when nothing can be paid
         }
 
         if (_level < 0)
         {
-            return Fail(session, "fight: no " + (_options.SpellId != 0 ? "spell" : "Flame Bolt level") + " to cast: " + why);
+            return Fail(session, "fight: no " + (_options.SpellId != 0 ? "spell" : _boltLineName + " level") + " to cast: " + why);
+        }
+
+        if (!TakeCastableAtStart(session, out var castableWhy, out var lack))
+        {
+            return EndNoCastable(session, castableWhy, lack); // M6 7 K: the pack pays for no level of the bolt
         }
 
         if (!_spells.TryGetValue(_levelIds[_level], out var info))
         {
             return Fail(session, $"fight: the SpellTable has no spell {_levelIds[_level]}");
         }
+
+        LogStockCap(); // M6 14 cap
 
         uint initPlusRanks;
         if (_options.ArenaHere)
@@ -1196,6 +1399,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
 
         _tally.Start(session);
         _fightStart = clock;
+        _untilMark = session.State.Chat.Total; // M6 5 q4: the until's chat form reads the lines since here
         _target = 0;
         _missesInARow = 0;
         _phase = Phase.Choose;
@@ -1204,6 +1408,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             string.Create(
                 CultureInfo.InvariantCulture,
                 $"the fight begins: {info.Name} ({info.Id}) at chance {GearCasts.Chance(skill, info.Power):0.0000} from War Magic {skill}, range {_range:0.#} m (init+ranks {initPlusRanks}, base {info.BaseRangeConstant} + {info.BaseRangeMod} per point), mana up to {_manaNeeded}{(_options.Mana.On ? $" (try floor {_manaFloor} at Mana Conversion {_manaConversion}; the mana order, {_danceCount} Stamina to Mana Self level(s) to dance)" : " (--cast-mana-tries 0: the ceiling wait)")}; {(_options.UnlimitedKillCount ? "no kill limit" : _options.Kills.ToString(CultureInfo.InvariantCulture) + " kill(s)")}{(_options.Minutes > 0 ? $", a clean end at {_options.Minutes:0.#} min" : string.Empty)} within {_options.FailSeconds:0.#} s{(_options.MaxLevel < Levels ? $"; levels up to {Numerals[_options.MaxLevel - 1]}" : string.Empty)}"));
+        ApplyHuntKeepOut(session); // M6 7 AR: before the seed, so the slots kept out are not counted standing
         _walk?.Tour?.Seed(session.State.Objects, clock); // F4: the creatures already standing in their slots' cells were created before the fight (OnCreated hears only the fight's own), so their kills would pair by the death cell alone
         Enter("fight", clock);
         return ScenarioStatus.Running;
@@ -1211,7 +1416,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
 
     /// <summary>
     /// M5 3 m1 (D8, D48): the counts read at the fight's start, before the first cast. Every CARRIED stock line of the ground's supplies (no home vendor sells it: <see cref="HuntingGround.IsCarried"/>) that the kit holds and whose count in the pack is under its
-    /// <c>stop_under</c> stops the fight, named (<c>m5-platinum-stock: the Platinum Scarab stack is 2, under its stop line 3; the vendors of ... sell none (D8)</c>; <c>m5-mage-foci</c> when a school's focus is not held, the foci formula's precondition);
+    /// <c>stop_under</c> stops the fight, named (the carried-stock stop, <c>TODO(m6-buy-trip-autopilot)</c> since M6 1 d (D44: the buy-trip station makes the restock, no plan runs it yet; <c>GearKit</c>'s stop text opens with the same tag): the Platinum Scarab stack is 2, under its stop line 3; the vendors of ... sell none (D8); <c>m5-mage-foci</c> when a school's focus is not held, the foci formula's precondition);
     /// a sold line under its line is only logged (the counters are m4's). A kit without the line (a test's hand-made one) is not checked; the stand-in arena has no stock.
     /// </summary>
     /// <returns>The stop in words, or null when every carried line holds.</returns>
@@ -1234,7 +1439,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             return string.Create(CultureInfo.InvariantCulture, $"m5-mage-foci: {unsettled} held items have no world object yet, so the stock cannot be counted before the first cast");
         }
 
-        return GearKit.FightStartStop(_ground, _kit, held, text => _log.Info(LogCategory, text));
+        return GearKit.FightStartStop(_ground, _kit, held, text => _log.Info(LogCategory, text), _floorOnlyLines, _cappedLines); // M6 14 motes: a floor-only line (the ring's Diamond Scarab) leaves its options out, it stops nothing (D148)
     }
 
     private ScenarioStatus FightStep(IGameSessionView session, double now, double clock)
@@ -1255,13 +1460,14 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         if (!_options.ArenaHere)
         {
             NoteStorey(session.State.Self.Position?.CellId ?? 0);
+            NoteCrossingProgress(session.State.Self.Position?.CellId ?? 0, clock); // M6 7 D (m6-gate-den-storey-race)
             if (session.State.Self.Position is { } seenFrom)
             {
                 _walk?.Tour?.Look(seenFrom.CellId, session.State.Objects, clock); // F5 (D47): the tour learns from what the player sees (seen-empty slots, the targets the table holds)
             }
         }
 
-        if (_target != 0 && session.State.Objects.TryGet(_target, out var seen) && seen.Position is { } seenAt)
+        if (_target != 0 && session.State.Objects.TryGet(_target, out var seen) && StandsAt(session, seen) is { } seenAt)
         {
             (_seenTarget, _seenWcid, _seenCell) = (_target, seen.Weenie.WeenieClassId, seenAt.CellId);
             if (_loot is not null)
@@ -1293,10 +1499,35 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             return Fail(session, "fight: the walk failed: " + _walk!.Failure);
         }
 
+        if (AirborneHolds(session, clock))
+        {
+            return ScenarioStatus.Running; // M6 14 airborne: the walk's jump is in flight: every rule below waits for its landing check (FightScenario.Airborne.cs)
+        }
+
+        if (_lootHold is { } held && _loot is { Active: true })
+        {
+            _loot.Abandon(session, "under the loot's hold (" + held + ")"); // M6 14 recall unblock (m6-loot-hold): no corpse is opened, and the stop below does not wait for one
+        }
+
         if (_stopRequest is { } stopAsked && !LootBusy && !SplashPending && _killPendingAt < 0 && _phase != Phase.Refresh && !LeaveRefreshHolds(session, clock)) // D126 (a): a trip's stop waits for the lines due within its length // M5 7 F23: a buff refresh pass cannot be cut; the stop waits for its end // M5 7 F15 (7-F1): a kill notice the table has not yet confirmed (at most KillNoticeSeconds) is settled first, so the tour hears the last kill
         {
             // M5 4 a1 (D57): the external stop, at the clean minutes stop's point: the kill notices have reached the tour above, and no loot step is in flight.
             return EndFight(session, clock, $"the fight was asked to stop ({stopAsked.Name})");
+        }
+
+        if (_options.Until is { } until && !LootBusy && !SplashPending && _killPendingAt < 0 && _phase != Phase.Refresh && UntilHolds(session, until) is { } untilWhat)
+        {
+            // M6 5 q4 (D57): the quest's own end, at the same safe point as the external stop: no loot in flight, the kill notices settled.
+            _untilMet = true;
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"fight: until met: {untilWhat} after kills={_tally.Kills} s={clock - _fightStart:0}"));
+            return EndFight(session, clock, "until met: " + untilWhat);
+        }
+
+        if (_options.Until is { Chat: null } itemUntil && _untilRefused is { } refusal && !LootBusy && !SplashPending && _killPendingAt < 0 && _phase != Phase.Refresh)
+        {
+            // M6 5 F1 (review 5-R4): the server refused the only item that would end the fight: it can never be met, so the fight ends by name (the quest station stops hunt-until:refused:<wcid>); no hunt for hours.
+            _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"fight: until: refused: {itemUntil.ItemWcid} ({refusal}); the until can not be met, the fight ends after kills={_tally.Kills} s={clock - _fightStart:0}"));
+            return EndFight(session, clock, string.Create(CultureInfo.InvariantCulture, $"until: refused: {itemUntil.ItemWcid} ({refusal})"));
         }
 
         if (_options.Minutes > 0 && clock - _fightStart >= _options.Minutes * 60)
@@ -1320,9 +1551,9 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             }
         }
 
-        if (clock - _fightStart > _options.FailSeconds)
+        if (clock - _fightStart > _options.FailSeconds && !CrossingOutlivesTheBudget(session, clock)) // M6 7 D (m6-gate-den-storey-race): an owed crossing that still progresses is not cut by the clock
         {
-            return Fail(session, string.Create(CultureInfo.InvariantCulture, $"fight: {_options.FailSeconds:0.#} s passed with kills={_tally.Kills} of {_options.Kills} and damage_dealt={_tally.DamageDealt} (casts={_tally.Casts} misses={_tally.Misses} walks={_walks} phase={_phase})"));
+            return Fail(session, string.Create(CultureInfo.InvariantCulture, $"fight: {_options.FailSeconds:0.#} s passed with kills={_tally.Kills} of {_options.Kills} and damage_dealt={_tally.DamageDealt} (casts={_tally.Casts} misses={_tally.Misses} walks={_walks} phase={_phase}){_crossingEndNote}"));
         }
 
         if (_health is { Outcome: not null })
@@ -1340,16 +1571,33 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             _drain.Note(healthHeld); // M5 7 F7: health_min=
         }
 
+        var walkCut = _loot is not null && _loot.WalkCutStep(session, clock); // M6 14 (m6-loot-walk-cut): the after-check of a corpse's walk ended with a key, read in every phase
+        CastWaitWatch(session, clock); // M6 14 (m6-cast-wait): report-only
+        ExpiryWatch(clock); // M6 14 upkeep mana: a buff line's lapse is named in every phase, not only at a decision
         switch (_phase)
         {
             case Phase.Choose:
                 _loot?.Sweep(session, clock); // M5 7 loot retry: a put-off corpse whose window passed, or that is gone, is given up
-                if (_loot is { Active: true } && _loot.Step(session, clock))
+                if (walkCut)
                 {
+                    return ScenarioStatus.Running; // M6 14: the Use whose walk was just ended is not answered yet (at most LootWalkCutSeconds): no cast is asked behind it
+                }
+
+                if (_lootHold is null && _loot is { Active: true } && _loot.Step(session, clock))
+                {
+                    _lootStepAt = clock; // M6 14 combine2: the loot step's last frame of work (its last pick-up's animation runs on past it on the server)
                     return ScenarioStatus.Running; // M5 3 m2: the kill's corpse first (the walk, the open, the rule's pick-ups, the close), then the next target
                 }
 
+                if (BeginCombines(session, clock) is { } combining)
+                {
+                    return combining; // M6 14 combine: between kills, safe: the until's pairs are combined first
+                }
+
                 return Choose(session, clock);
+
+            case Phase.Combine:
+                return CombineStep(session, clock);
 
             case Phase.Mana:
                 if (_options.Mana.On)
@@ -1376,7 +1624,10 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
                 return OpenerAnswer(session, clock);
 
             case Phase.Refresh:
-                return RefreshPassStep(clock);
+                return RefreshPassStep(session, clock);
+
+            case Phase.PullRest:
+                return PullRestRun(session, clock);
 
             case Phase.Hit:
                 return HitWait(session, clock);
@@ -1399,9 +1650,9 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
                 return ScenarioStatus.Running;
 
             case Phase.Walk:
-                if (EmergencyDropsWalk(session, clock) || DefenceDropsWalk(session, clock) || RefreshDropsWalk(session, clock))
+                if (EmergencyDropsWalk(session, clock) || DefenceDropsWalk(session, clock) || RefreshDropsWalk(session, clock) || SightDropsWalk(session, clock))
                 {
-                    return ScenarioStatus.Running; // M5 7 F4: an attacker is in range with a clear line now; D126 (a): a line under the hard floor is recast before the walk goes on
+                    return ScenarioStatus.Running; // M5 7 F4: an attacker is in range with a clear line now; D126 (a): a line under the hard floor is recast before the walk goes on; M6 7 Y: a target came into range and line
                 }
 
                 NoteBreadcrumb(session); // M5 7 P7i: the way in, for a walk out of a stuck spot
@@ -1458,10 +1709,29 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         PruneStaminaYield(session.State.Objects);
         PruneLiveHealth(session.State.Objects);
         Picker.Rates.NoteIncoming(clock, _tally.DamageTaken); // M5 7 F16: the incoming rate is read every decision, the emergency line is worked out from it
+        _finishGuid = 0;
+        _walkSight = false;
+        if (ReserveStep(session, clock, recallOnly: true))
+        {
+            return ScenarioStatus.Running; // M6 8: the retreat waits for the recall's mana: the potion comes before the heal
+        }
+
         if (EmergencyStep(session, clock, in here))
         {
             NoteRefreshBlocked("the emergency heal came first"); // M5 7 F24
             return ScenarioStatus.Running; // M5 7 F16 (D91): the emergency drain outranks every other move: Drain Health Other I at the fullest tusker in reach
+        }
+
+        if (_finishGuid != 0)
+        {
+            NoteRefreshBlocked("the emergency's finishing bolt came first");
+            _defendingGuid = _finishGuid;
+            return BeginTarget(session, clock, in here, _finishGuid, DefenceMove.Cast, leaving: false); // M6 7 Y: the bolt that kills the only attacker beats the emergency's heal (FightScenario.Emergency.cs)
+        }
+
+        if (ReserveStep(session, clock, recallOnly: false))
+        {
+            return ScenarioStatus.Running; // M6 8: with potions in use the mana is kept at the line and one bolt over it, before any bolt
         }
 
         if (RefreshStep(session, clock))
@@ -1502,7 +1772,18 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
                 return ScenarioStatus.Running; // M5 7 F15 (7-F5): Heal Self before the walk
             }
 
-            return StartWalk(session, clock, SelfDefenceNoLine);
+            return StartDefenceWalk(session, clock, defender); // M6 6 B2 (m5-defend-walk-to): a leg toward it, to a spot with range and a line; else the tour's next leg, named (FightScenario.SelfDefence.cs)
+        }
+
+        if (defence == DefenceMove.Life)
+        {
+            if (HealDecide(session, clock))
+            {
+                NoteDrainStart(session, clock);
+                return ScenarioStatus.Running; // Heal Self first while the health is under the drain line, as before the walk it stands in for
+            }
+
+            return LifeThroughBegin(session, clock, in here); // M6 14 (m6-life-through): Drain Health Other or Harm Other at the attacker no bolt reaches, in place of the walk (FightScenario.LifeThrough.cs)
         }
 
         _defendingGuid = defence == DefenceMove.Cast ? defender : 0;
@@ -1513,9 +1794,34 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
 
         _pickExcluded.Clear();
         _pickExcluded.AddRange(_killed);
+        ExcludeWallBlocked(session, clock); // M6 7 AM: a target the bolt could not reach three times waits out its block
+        if (found && Shots.IsDropped(guid, clock) && LifeThroughPlans(session, clock, in here, guid))
+        {
+            // M6 14 (m6-life-through): an attacker the shot rule dropped (its bolts came to nothing) is fought with a life spell while the drop stands, before the close-attacker rule takes the drop back for more bolts.
+            if (HealDecide(session, clock))
+            {
+                NoteDrainStart(session, clock);
+                return ScenarioStatus.Running;
+            }
+
+            return LifeThroughBegin(session, clock, in here);
+        }
+
+        if (found && ShotDropHolds(session, guid, clock))
+        {
+            (guid, found, _defendingGuid) = (0, false, 0); // M6 8 L: an attacker the shot rule dropped is not shot at again until its time is up, or until it stands close
+        }
+
         if (ExcludeDoomed(session, clock) && found && _pickExcluded.Contains(guid))
         {
             (guid, found, _defendingGuid) = (0, false, 0); // M5 7 D124 (S1b): an attacker the projectiles in flight will kill is left to them (FightScenario.InFlight.cs)
+        }
+
+        if (found && defence == DefenceMove.Cast && guid != _target && KeepsCurrent(session, clock, in here, guid))
+        {
+            // M6 14 tactics (live ladder56 08:33:02.349 UTC): the attacker is weighed against the target she is on, by each one's seconds to kill and damage a second on her; the one that costs her less health first is
+            // finished first (FightScenario.TargetSwitch.cs), so a hurt wisp is not left to bolt her while a fresh one is taken
+            (guid, _defendingGuid) = (_target, IsAttacker(_target) ? _target : 0);
         }
 
         var killGrace = KillInGrace();
@@ -1524,24 +1830,34 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             _pickExcluded.Add(_killPendingGuid); // M5 7 F15 (7-F1): the notice may be this creature's own death, not yet in the table
         }
 
+        if (!found && !killGrace && _doomedThisPick == 0 && PullRestBegins(session, clock, in here))
+        {
+            return ScenarioStatus.Running; // M6 7 AB: no attacker, and a vital under the ground's floor: the rest comes before the pick and before any walk (FightScenario.PullRest.cs)
+        }
+
+        if (!found && PullBarHolds(session, in here))
+        {
+            return ScenarioStatus.Running; // M6 7 AN (the owner): under the ground's fullness bar no pick and no walk, whatever kept the rest from beginning this frame
+        }
+
         // 2-R2: while the tour wants the player off this storey (--fight-storeys-min: one kill made here, fewer storeys visited than the minimum, a next storey with a slot standing), the pick takes a target off it, the tour's next
         // storey first, and none in range means a walk; else the pick is the nearest target on any walkable cell.
         var leaving = !_options.ArenaHere && _walk?.Tour is GroundTour tour && tour.WantsToLeave(here.CellId, clock, out _pickNextStorey);
+        _pickLeaving = leaving;
         _pickHereStorey = _ground.StoreyOf(here.CellId);
         for (var tier = 0; tier < (leaving ? 2 : 1) && !found; tier++)
         {
-            var filter = leaving ? (tier == 0 ? _nextStoreyFilter : _otherStoreyFilter) : _cellFilter;
+            var filter = leaving ? (tier == 0 ? _nextStoreyFilter : _otherStoreyFilter) : _huntFilter;
             for (var tries = 0; tries < MaxLinePicks; tries++)
             {
-                found = session.State.Objects.NearestCreature(_targetWcids, in here, _range, filter, _pickExcluded, out guid);
+                found = _killFirstPick.Nearest(session.State.Objects, PickWcids(session, in here), in here, _range, filter, _pickExcluded, out guid, session.Live); // M6 0 a5: the character's band on an outdoor ground; M6 3 a2: a kill-first creature in reach first
                 if (!found || _options.IgnoreLine || LineIsClear(session, in here, guid))
                 {
                     break;
                 }
 
                 // TODO(m3-fight-los-approximation): the line is a sphere sweep through the collision, not the bolt's own transition. The pick is the loop's judgement: retail checks no line (CastSpell 0x00568DE0).
-                _tally.NoteBlockedPick();
-                _log.Info(LogCategory, $"blocked: no clear line to 0x{guid:X8} (pick {tries + 1})");
+                NoteBlocked(guid, tries + 1, clock);
                 _pickExcluded.Add(guid);
                 found = false;
             }
@@ -1565,19 +1881,30 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
                 return ScenarioStatus.Running; // M5 7 D124 (S1b): the targets in reach are about to die to projectiles in flight: hold until they land, no walk
             }
 
-            if (_loot is not null && _loot.TryRetry(session, clock))
+            if (_lootHold is null && _loot is not null && _loot.TryRetry(session, clock))
             {
                 return ScenarioStatus.Running; // M5 7 loot retry: between pulls (no target in reach), the oldest put-off corpse that nothing is in the way of is looted now
             }
 
-            if (StartWalkBack(session, clock))
+            if (_lootHold is null && StartWalkBack(session, clock))
             {
                 return ScenarioStatus.Running; // M5 7 P7b (D139 j): a put-off corpse lost from view is walked back to before the tour walks on
+            }
+
+            if (PullStep(session, clock, in here, defence) is { } pulled)
+            {
+                return pulled; // M6 7 AX: the wanted trophy's pull, before the tour walks on (FightScenario.Pull.cs)
             }
 
             return StartWalk(session, clock, _pickExcluded.Count > _killed.Count ? NoClearLine : leaving ? TourLeaves : NoTargetInRange);
         }
 
+        return BeginTarget(session, clock, in here, guid, defence, leaving);
+    }
+
+    /// <summary>A target is chosen (the pick's, self-defence's or the emergency's finishing bolt): it is selected, the mana order and the picker decide, and the bolt or the war option starts.</summary>
+    private ScenarioStatus BeginTarget(IGameSessionView session, double clock, in CellFrame here, uint guid, DefenceMove defence, bool leaving)
+    {
         if (!double.IsNaN(_idleSince))
         {
             _idleTotal += clock - _idleSince; // a target to pick again: the time with none ends
@@ -1592,9 +1919,19 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             var reason = defence == DefenceMove.Cast ? "self-defence: it attacked the player" : leaving ? "the tour leaves this storey: the next storey's nearest" : previous == 0 ? "the first pick: the nearest profile target in range with a clear line" : TargetGone(session.State.Objects, previous) || _killed.Contains(previous) ? "the last target is dead or gone: the nearest profile target in range with a clear line" : "the last target is out of the pick (out of range, no clear line, or not the nearest): the nearest profile target in range with a clear line";
             _log.Info(LogCategory, $"target 0x{guid:X8} ({chosen?.Name ?? "unknown"}), was 0x{previous:X8}: {reason}");
             SelectTarget(session, guid, clock); // M5 7 F20: selected, so ACE pushes its health on every change
+            ElementFor(session, guid); // M6 14 the element line: the bolt line that hits this creature hardest from her book (FightScenario.Element.cs)
         }
 
-        if (!_options.Mana.On)
+        if (WayOutHoldsBolt(session, clock, in here, guid))
+        {
+            return ScenarioStatus.Running; // M6 7 BE: the mana is the way out's: a press in the bolt's place, or the autopilot leaves (FightScenario.WayOut.cs)
+        }
+
+        if (_finishGuid != 0)
+        {
+            // M6 7 Y: the finishing bolt's mana was read before it was chosen (FinishStep); no refill comes before it
+        }
+        else if (!_options.Mana.On)
         {
             if (ManaShort(session))
             {
@@ -1620,6 +1957,11 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             EndManaWait(clock);
         }
 
+        if (!_warActive && _level >= 0 && ShotRefused(session, clock, guid, _levelIds[_level]))
+        {
+            return ScenarioStatus.Running; // M6 8 L: the shot is checked before it is paid for (FightScenario.ShotCheck.cs)
+        }
+
         _triesSpent = false;
 
         _damageMark = _tally.DamageLinesDealt;
@@ -1636,12 +1978,79 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             new CastRequest { Levels = castLevels, Index = castIndex, Target = _target, Rules = _boltRules, Purpose = "fight bolt", TargetGone = _targetGoneFn ??= TargetDeadOrGone, Usable = _usable, FizzlesSpent = _fizzlesSpent, LevelsDownSpent = _fizzleDropped ? 1 : 0, ManaTryFloor = _options.Mana.On ? _manaFloor : 0 },
             clock);
         NoteCasts();
+        NoteManaLoopBolt(); // M6 8 H: the bolts between the mana casts
         return ScenarioStatus.Running;
+    }
+
+    /// <summary>
+    /// One pick the line rule skipped: counted every time (<c>blocked_picks</c>), logged at most once per creature every <see cref="BlockedLogSeconds"/> with the count held back. r2b's hold on a projectile in flight wrote the same six lines every frame
+    /// (78 lines in 0.2 s).
+    /// </summary>
+    private void NoteBlocked(uint guid, int pick, double clock)
+    {
+        _tally.NoteBlockedPick();
+        var heldBack = 0;
+        if (_blockedLogged.TryGetValue(guid, out var last))
+        {
+            if (clock - last.At < BlockedLogSeconds)
+            {
+                _blockedLogged[guid] = (last.At, last.HeldBack + 1);
+                return;
+            }
+
+            heldBack = last.HeldBack;
+        }
+
+        if (_blockedLogged.Count >= BlockedLogCap)
+        {
+            _blockedLogged.Clear(); // the hours-long fight does not grow it; a creature forgotten is logged once more
+        }
+
+        _blockedLogged[guid] = (clock, 0);
+        _log.Info(LogCategory, $"blocked: no clear line to 0x{guid:X8} (pick {pick}{(heldBack > 0 ? $"; {heldBack} more not logged" : string.Empty)})");
+    }
+
+    /// <summary>
+    /// M6 7 Y (r2b's arrival): the tour's leg is dropped the moment the pick would find a target from where the mage stands. A leg begins because no target had a line; the walk read only attackers, so the mage ran the whole leg up to a tusker that
+    /// may have come into line and range on the way, and the first thing to end the leg was its first hit (at 3.5 m, the leg 13.4 s old). The same pick as <c>Choose</c>: the band, the filter, the range and the line. Read every
+    /// <see cref="WalkSightSeconds"/>, on a leg of the tour only (<c>_walkSight</c>): never a loot walk, a walk back, a leg that leaves the storey or a hold.
+    /// </summary>
+    private bool SightDropsWalk(IGameSessionView session, double clock)
+    {
+        if (!_walkSight || clock < _walkSightAt || session.State.Self.Position is not { } here)
+        {
+            return false;
+        }
+
+        _walkSightAt = clock + WalkSightSeconds;
+        _pickExcluded.Clear();
+        _pickExcluded.AddRange(_killed);
+        ExcludeWallBlocked(session, clock); // M6 7 AM
+        ExcludeDoomed(session, clock);
+        for (var tries = 0; tries < MaxLinePicks; tries++)
+        {
+            if (!_killFirstPick.Nearest(session.State.Objects, PickWcids(session, in here), in here, _range, _huntFilter, _pickExcluded, out var guid, session.Live))
+            {
+                return false;
+            }
+
+            if (_options.IgnoreLine || LineIsClear(session, in here, guid))
+            {
+                _walk?.Abandon();
+                _log.Info(LogCategory, $"sight: the walk is dropped; 0x{guid:X8} is in range with a clear line");
+                _phase = Phase.Choose;
+                return true;
+            }
+
+            _pickExcluded.Add(guid);
+        }
+
+        return false;
     }
 
     /// <summary>True when the walker finds the line from the player to creature <paramref name="guid"/> clear (true when there is no walker or a position is unknown).</summary>
     private bool LineIsClear(IGameSessionView session, in CellFrame here, uint guid) =>
-        _walk is null || !session.State.Objects.TryGet(guid, out var o) || o.Position is not { } at || _walk.HasClearLine(in here, in at);
+        _walk is null || !session.State.Objects.TryGet(guid, out var o) || StandsAt(session, o) is not { } at || _walk.HasClearLine(in here, in at);
 
     /// <summary>M5 7 F27: true when the walker finds the line from <paramref name="here"/> to <paramref name="at"/> clear (the fight's shot line test; true when there is no walker or <c>--fight-ignore-line</c> is on).</summary>
     private bool LineIsClearTo(in CellFrame here, in CellFrame at) => _options.IgnoreLine || _walk is null || _walk.HasClearLine(in here, in at);
@@ -1659,7 +2068,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
 
         foreach (var o in session.State.Objects.All)
         {
-            if (o.Guid == except || o.Position is not { } p || o.Health is <= 0f || o.Motion is { Forward: WorldObjectTable.DeadMotionLowWord } || _killed.Contains(o.Guid) || !IsTargetWcid(o.Weenie.WeenieClassId))
+            if (o.Guid == except || StandsAt(session, o) is not { } p || o.Health is <= 0f || o.Motion is { Forward: WorldObjectTable.DeadMotionLowWord } || _killed.Contains(o.Guid) || !IsTargetWcid(o.Weenie.WeenieClassId))
             {
                 continue;
             }
@@ -1672,6 +2081,28 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         }
 
         return best;
+    }
+
+    /// <summary>M6 7 AN: a creature of this ground: a target of the list, or on an outdoor ground any creature its generators spawn, in band or not (the attacker out of band is drained and watched for as well).</summary>
+    private bool IsFightCreature(uint wcid)
+    {
+        if (IsTargetWcid(wcid))
+        {
+            return true;
+        }
+
+        if (_ground.Outdoor is { } outdoor)
+        {
+            for (var i = 0; i < outdoor.Creatures.Count; i++)
+            {
+                if (outdoor.Creatures[i].Wcid == wcid)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private bool IsTargetWcid(uint wcid)
@@ -1705,13 +2136,13 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         return true;
     }
 
-    private const string NoTargetInRange = "no tusker is in range on the floor";
-    private const string NoClearLine = "no tusker has a clear line";
+    private const string NoTargetInRange = "no creature of the ground is in range on the floor"; // M6 14 motes: the ground's creatures, not only the den's tuskers
+    private const string NoClearLine = "no creature of the ground has a clear line";
     private const string SelfDefenceNoLine = "self-defence: no attacker is in range with a clear line";
-    private const string TourLeaves = "the tour leaves this storey (--fight-storeys-min) and no tusker off it is in range";
+    private const string TourLeaves = "the tour leaves this storey (--fight-storeys-min) and no creature of the ground off it is in range";
 
     /// <summary>
-    /// The mana order before a bolt (M5 1 F1): the pre-emptive transfer when <see cref="ManaOrder.PreemptTransfer"/> holds (D27), else true (the mana phase entered) while the mana is under the try floor, or under the ceiling
+    /// The mana order before a bolt (M5 1 F1): the pre-emptive transfer when <see cref="ManaOrder.PreemptTransfer"/> holds (D27; M6 7 AD: with no Mana Conversion, <see cref="KeepOnePress"/> in its place), else true (the mana phase entered) while the mana is under the try floor, or under the ceiling
     /// once the tries are spent. Allocation-free.
     /// </summary>
     private bool BoltNeedsMana(IGameSessionView session, double clock)
@@ -1723,9 +2154,22 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         }
 
         var drainFirst = DrainFirst(session, clock); // M5 7 F15 (7-F3): under the drain line the drain comes before the stamina refill and the early transfer
-        if (!drainFirst && _danceCount > 0 && clock >= _danceAsideUntil && ManaOrder.PreemptTransfer(s, sMax, m, mMax))
+        _policyDecided = false; // M6 14 (m6-vitals-policy): set by the policy's step below when it decided
+        if (!drainFirst && ManaLoopStep(session, clock, m, mMax, s, sMax))
         {
-            var index = ManaOrder.DanceLevelOf(_danceLevels.AsSpan(0, _danceCount), m, _manaConversion, _options.Mana.TryChance);
+            return true; // M6 7 AN: the fight's mana loop (FightScenario.ManaLoop.cs)
+        }
+
+        if (!drainFirst && !_policyDecided && _danceCount > 0 && clock >= _danceAsideUntil && _manaConversion == 0 && KeepOnePress(session, clock, m, mMax, s, sMax))
+        {
+            return true; // M6 7 AD: with no Mana Conversion a press costs what a bolt costs: the press before the bolt that would leave none
+        }
+
+        if (!drainFirst && !_policyDecided && !_manaLoopHoldsPress && _danceCount > 0 && clock >= _danceAsideUntil && _manaConversion > 0 && ManaOrder.PreemptTransfer(s, sMax, m, mMax)) // M6 7 AD: D27's constants are level 80's (100 missing against a landing of 200): with no Mana Conversion the press is KeepOnePress's or the rest's; M6 14: not over the climber's loop holding a press that would overflow, nor behind the policy's decision (m6-vitals-policy)
+        {
+            var index = CharacterPolicy.For(session.State.Self.Name).ManaBySum // the owner's ruling, 2026-11-08: pick by the sum
+                ? ManaOrder.PressLevelOf(_danceLevels.AsSpan(0, _danceCount), s, m, _manaConversion, _options.Mana.TryChance, out _)
+                : ManaOrder.DanceLevelOf(_danceLevels.AsSpan(0, _danceCount), m, _manaConversion, _options.Mana.TryChance);
             if (index >= 0)
             {
                 _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: the pre-emptive transfer (D27): stamina {s} of {sMax} (at least {ManaOrder.PreemptStaminaShare:0.##} of it) and {mMax - m} mana missing (at least {ManaOrder.PreemptMinMissingMana}): the dance before the bolt"));
@@ -1740,7 +2184,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         if (m >= boltMana)
         {
             // M5 7 F5 (D88): between kills, the stamina under the share and the mana paying a Revitalize Self with the bolt still in hand: the stamina first (the order decides the level; no mana wait: the bolt is not short of mana).
-            if (!drainFirst && _refill.PercentAt(clock) > 0 && ManaOrder.StaminaUnder(s, sMax, _refill.Percent) && ManaOrder.RevitalizeLevelOf(_refill.Levels, m, boltMana == 0 ? _manaNeeded : boltMana) >= 0) // the reserve is the order's target (ManaOrder.Decide), so the hook and the decision agree
+            if (!drainFirst && _refill.PercentAt(clock) > 0 && ManaOrder.StaminaUnder(s, sMax, _refill.Percent) && ManaOrder.RevitalizeLevelOf(_refill.Levels, m, _wayOut is { } wayOut ? wayOut.Line + _manaNeeded : boltMana == 0 ? _manaNeeded : boltMana) >= 0) // the reserve is the order's target (ManaOrder.Decide), so the hook and the decision agree; M6 7 BE: and it keeps the way out's line
             {
                 _manaPhase = ManaPhase.Decide;
                 _phase = Phase.Mana;
@@ -1753,6 +2197,31 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         BeginManaWait(clock);
         _manaPhase = ManaPhase.Decide;
         _phase = Phase.Mana;
+        return true;
+    }
+
+    /// <summary>
+    /// M6 7 AD: the press before the bolt (<see cref="ManaOrder.KeepPress"/>): the bolt can be paid, the press after it could not, and the press nets at least half a bolt. Named on the log, and spent like the pre-emptive transfer: back to the pick after it. True when the press was sent.
+    /// </summary>
+    private bool KeepOnePress(IGameSessionView session, double clock, uint mana, uint manaMax, uint stamina, uint staminaMax)
+    {
+        var boltMana = _triesSpent ? _manaNeeded : _manaFloor;
+        if (mana < boltMana)
+        {
+            return false; // the order's: ManaOrder.Decide presses when it can
+        }
+
+        var levels = _danceLevels.AsSpan(0, _danceCount);
+        var index = ManaOrder.BestNetLevel(levels, stamina, mana, _manaConversion, _options.Mana.TryChance, out var net);
+        if (index < 0 || !ManaOrder.KeepPress(mana, boltMana, in levels[index], net))
+        {
+            return false;
+        }
+
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: a press before the bolt: mana {mana} of {manaMax} pays the bolt's {boltMana} but not a press after it ({levels[index].BaseMana}); stamina {stamina} of {staminaMax} nets {net:0.#}"));
+        _preempting = true;
+        _phase = Phase.Mana;
+        StartDance(session, index, mana, manaMax, stamina, staminaMax, clock);
         return true;
     }
 
@@ -1814,6 +2283,17 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
                 }
 
                 _manaPending = null;
+                if (!drunk.Succeeded && drunk.Code == PullDrinkBusyCode && _manaDrinkBusy < PullDrinkBusyTries)
+                {
+                    // M6 8: as the drink before a pull (live 2026-11-11 10:05 UTC): ACE answers a use sent while the last motion still runs with YoureTooBusy. Busy is a wait, not a failure of the potions.
+                    _manaDrinkBusy++;
+                    _manaDrinkAt = clock;
+                    _manaPhase = ManaPhase.DrinkBusy;
+                    _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: the server was too busy for the {(_drinkStamina ? "Stamina" : "Mana")} Potion (try {_manaDrinkBusy} of {PullDrinkBusyTries}); again in {PullDrinkBusySeconds:0.#} s"));
+                    return ScenarioStatus.Running;
+                }
+
+                _manaDrinkBusy = 0;
                 if (!drunk.Succeeded)
                 {
                     if (_drinkStamina)
@@ -1841,6 +2321,23 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
 
                 _phaseSince = clock;
                 _manaPhase = ManaPhase.PotionVital;
+                return ScenarioStatus.Running;
+
+            case ManaPhase.DrinkBusy:
+                if (clock - _manaDrinkAt < PullDrinkBusySeconds)
+                {
+                    return ScenarioStatus.Running;
+                }
+
+                uint again = 0;
+                if (_drinkStamina ? VitalsMeans.FindStaminaPotions(session.State, _scratch, out again, out _) : VitalsMeans.FindManaPotions(session.State, _scratch, out again, out _))
+                {
+                    _manaPending = session.Actions.Drink(again, ActionSource.Automation);
+                    _manaPhase = ManaPhase.Drinking;
+                    return ScenarioStatus.Running;
+                }
+
+                _manaPhase = ManaPhase.Decide; // none is held any more: the order decides again
                 return ScenarioStatus.Running;
 
             case ManaPhase.PotionVital:
@@ -1982,6 +2479,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             StaminaFloor = _staminaFloor,
             StaminaFullPercent = refillPercent,
             StaminaPotions = staminaPotions,
+            BestNetPress = _manaConversion == 0 || CharacterPolicy.For(session.State.Self.Name).ManaBySum, // the owner's ruling, 2026-11-08: pick by the sum: the ladder's character at any Mana Conversion
         };
         var decision = ManaOrder.Decide(in input, _danceLevels.AsSpan(0, clock < _danceAsideUntil ? 0 : _danceCount), _options.Mana, _refill.Levels);
         _decision = decision;
@@ -2075,11 +2573,11 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             LogCategory,
             string.Create(
                 CultureInfo.InvariantCulture,
-                $"mana: the dance: {(_spells.TryGetValue(level.SpellId, out var info) ? info.Name : "spell")} ({level.SpellId}) pressed until it lands ({_danceRules!.Name}), mana {mana} of {manaMax}, stamina {stamina} of {staminaMax}{(_preempting ? " (pre-emptive)" : string.Empty)}"));
+                $"mana: the dance: {(_spells.TryGetValue(level.SpellId, out var info) ? info.Name : "spell")} ({level.SpellId}) pressed until it lands ({(_manaConversion == 0 ? _pressRules : _danceRules)!.Name}), mana {mana} of {manaMax}, stamina {stamina} of {staminaMax}, net {ManaOrder.NetYield(in level, stamina, _manaConversion, mana):0.#}{(_preempting ? " (pre-emptive)" : string.Empty)}"));
         // M5 1 fix A: the press carries the chat proof, so a landed Stamina to Mana Self ends Landed (proved by ACE's own line, "You cast <spell> on yourself and lose N points of stamina and also gain M points of mana", WorldObject_Magic.cs 835
         // @95ef426d, chat type Magic) and counts in mana_landed= and proved= as well as dances_landed=. The pre-emptive transfer starts here too.
         _danceProof ??= new CastChatProof(session.State, _spells);
-        _manaCast.Start(new CastRequest { Levels = VitalsMeans.StaminaToManaSelf, Index = _danceIndex[index], Rules = _danceRules, Purpose = "fight mana dance", Proof = _danceProof }, clock);
+        _manaCast.Start(new CastRequest { Levels = VitalsMeans.StaminaToManaSelf, Index = _danceIndex[index], Rules = (_manaConversion == 0 ? _pressRules : _danceRules)!, Purpose = "fight mana dance", Proof = _danceProof }, clock); // M6 7 AD: with no Mana Conversion every press costs the base, and one refused says the mana is short: no 40 presses
     }
 
     /// <summary>
@@ -2145,6 +2643,10 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             NoteDanceLanded(mana, clock);
             _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: the dance landed on press {report.Tries} ({report.ManaRefusals} refused, {report.Fizzles} fizzled); mana {mana} now"));
         }
+        else if (end == CastEnd.InTheAir)
+        {
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: the dance was held in the air ({report.Why}); not set aside, the order decides again (M6 14 airborne)"));
+        }
         else if (!_preempting && _staminaFloor > 0 && report.ManaRefusals + report.Fizzles > 0 && session.State.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxStamina, out var staminaLeft, out _) && staminaLeft >= _staminaFloor)
         {
             // M5 7 F5 (D88): uptime is the goal, so a dance whose presses were all refused or fizzled is pressed again at once while the stamina is there to transfer (no cap that gives up early; a refused press charges nothing).
@@ -2156,6 +2658,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: the dance did not land in {report.Tries} presses ({report.ManaRefusals} refused, {report.Fizzles} fizzled; {end.Name()}: {report.Why}); the dance is set aside {DanceAsideSeconds:0} s (the server's costs are not the model's): the order's potion, rest or wait instead"));
         }
 
+        NoteManaLoopAfter(session, "press", end.Succeeded()); // M6 8 H: the check after the act: what it really moved
         ReadRefill(session); // M5 7 F5: the scarabs the press used are gone from the pack: the payable levels read again
         _manaPhase = ManaPhase.Decide;
         if (_preempting)
@@ -2207,7 +2710,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         }
 
         ManaOrder.TryManaConversion(q, out _manaConversion);
-        var held = _options.ArenaHere || _view is null ? null : LevelFloor.HeldFor(_view.State, DatReaderWriter.Enums.MagicSchool.LifeMagic); // M5 7 F5 (D88): the highest level the pack's scarabs allow, for the transfer and the refill
+        var held = _options.ArenaHere || _view is null ? null : LevelFloor.HeldForAccount(_view.State, DatReaderWriter.Enums.MagicSchool.LifeMagic, _buffOptions.AccountName); // M6 1 h1: the account's formula for a school without its focus; M5 7 F5 (D88): the highest level the pack's scarabs allow, for the transfer and the refill
         _danceCount = _options.ArenaHere ? 0 : FillDanceLevels(q, book, held, LevelCapFor(q)); // the arena-here run's stand-in teaches no transfer line
         if (!_options.ArenaHere)
         {
@@ -2249,7 +2752,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         }
 
         var self = session.State.Self;
-        var held = LevelFloor.HeldFor(session.State, DatReaderWriter.Enums.MagicSchool.LifeMagic);
+        var held = LevelFloor.HeldForAccount(session.State, DatReaderWriter.Enums.MagicSchool.LifeMagic, _buffOptions.AccountName); // M6 1 h1
         var cap = LevelCapFor(self.Qualities);
         _danceCount = FillDanceLevels(self.Qualities, self.Spellbook, held, cap);
         _refill.Fill(self.Qualities, self.Spellbook, held, _buffOptions.CastChance, cap);
@@ -2331,7 +2834,8 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
     {
         var q = self.Qualities;
         NoteSignature(q);
-        var level = ChooseLevel(q, self.Spellbook, _buffOptions.CastChance, out var skill, out var why, LevelCapFor(q));
+        var level = ChooseOnLine(q, self.Spellbook, out var skill, out var why, LevelCapFor(q)); // M6 14 the element line: on the line in hand
+        level = _view is { } view ? CastableRechosen(view.State, level) : level; // M6 7 K: never back up to a level the pack cannot pay for or a refusal dropped
         if (level < 0)
         {
             _log.Warn(LogCategory, $"the level could not be chosen again ({why}); {Level} stays");
@@ -2447,6 +2951,11 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             return ScenarioStatus.Running;
         }
 
+        if (end == CastEnd.InTheAir)
+        {
+            return AirEnded("the bolt", in report); // M6 14 airborne: the moment's, not the spell's: no miss, no refusal counted toward M6 7 K's drop, no walk
+        }
+
         if (end == CastEnd.TargetDied)
         {
             // M5 7 F28: the kill landed during the wind-up and the release found no target (0x042C). Not a miss and no walk: the dead guid is kept out of the pick and the next target is chosen at once.
@@ -2468,8 +2977,16 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             // cast was sent: a close target can be hit in the frame the outcome arrives).
             _awaitSince = clock;
             _hitWait = HitWaitFor(session, in confirmedOutcome);
+            _boltResistMark = _boltResists; // M6 7 AA: taken here, not at the send: a resist of an earlier bolt during this one's wind-up says nothing of this one
+            _finishHoldNoted = false;
+            _refusalRun = default;
             _phase = Phase.Hit;
             return ScenarioStatus.Running;
+        }
+
+        if (end == CastEnd.NoComponents)
+        {
+            return ComponentRefusal(session, in report); // M6 7 K: dropped for the fight, the next castable, or the fight's named end; no miss, no walk
         }
 
         if (!fizzleEnd)
@@ -2479,9 +2996,24 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             _log.Info(LogCategory, $"miss: the cast was not confirmed: {(last is { } outcome ? Describe(outcome) : end + ": " + report.Why)} (misses in a row {_missesInARow})");
         }
 
+        if (end == CastEnd.ServerError && RefusedForGood(in report))
+        {
+            // M6 7 K: a permanent refusal never repeats every frame: the third in a row of the same code on the same spell drops it for the fight
+            DropWarSpell(report.SpellId, string.Create(CultureInfo.InvariantCulture, $"ACE refused it {RefusalRepeats} times in a row (0x{report.Code:X4}: {report.Why})"), component: false);
+            if (!GoOnAfterDrop(session, out var failed))
+            {
+                return failed;
+            }
+        }
+
         if (last is { Kind: ActionOutcomeKind.ServerError, Code: MissileOutOfRange })
         {
             return StartWalk(session, clock, "the server answered MissileOutOfRange (0x0550)");
+        }
+
+        if (last is { Kind: ActionOutcomeKind.ServerError, Reason: ActionReason.NoEffect } && _tally.DamageLinesDealt == _damageMark && WastedDrops(session, clock, "the cast ended with no bolt: " + Describe(last.Value)))
+        {
+            return ScenarioStatus.Running; // M6 8 L: a target the server will not let a bolt reach (below a ledge: no wall hit is ever seen) is dropped at the shared count
         }
 
         if (_missesInARow >= MissesBeforeWalking)
@@ -2528,8 +3060,11 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
 
     private ScenarioStatus HitWait(IGameSessionView session, double clock)
     {
+        _finishInFlight = false;
         if (_tally.Kills > _killMark)
         {
+            _wallHitsOn.Remove(_target); // M6 7 AM
+            Shots.NoteDamage(_target); // M6 8 L
             _log.Info(LogCategory, $"kill {_tally.Kills}: {_tally.LastKillText}");
             NoteKill(session, clock);
             _missesInARow = 0;
@@ -2539,6 +3074,8 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
 
         if (_tally.DamageLinesDealt > _damageMark)
         {
+            _wallHitsOn.Remove(_target); // M6 7 AM: a bolt that reached it ends the count of wall hits on it
+            Shots.NoteDamage(_target); // M6 8 L: a target that takes damage is kept
             _missesInARow = 0;
             _health = session.Actions.QueryHealth(_target, ActionSource.Host);
             _phase = Phase.Choose;
@@ -2553,12 +3090,34 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             return ScenarioStatus.Running;
         }
 
+        if (_boltResists > _boltResistMark)
+        {
+            return ResistEndsWait(session, clock); // M6 7 AA: the bolt's answer is in: nothing more can come of it
+        }
+
+        if (EmergencyEndsWait(session, clock))
+        {
+            _phase = Phase.Choose; // M6 7 AA: the hit wait never blinds the fight: the emergency acts now, the bolt stays in the in-flight ledger and no miss is read
+            return ScenarioStatus.Running;
+        }
+
         if (WallHit(session, clock))
         {
             _tally.NoteMiss();
             _tally.NoteWallHit();
             _missesInARow++;
             _log.Info(LogCategory, $"wall hit: the bolt stopped {clock - _awaitSince:0.0#} s after the cast, short of the target, with no damage line");
+            Shots.NoteDisagreement(_target, NameOfTarget(session, _target), "the bolt hit the world short of it"); // M6 8 L
+            if (WallStay(session, clock))
+            {
+                return ScenarioStatus.Running; // M6 7 AM: outdoors the fight stays on the target: a step to a better line, or the target blocked for a time (FightScenario.WallStay.cs); each try is from a new spot, so its three stand
+            }
+
+            if (WastedDrops(session, clock, "the bolt hit the world short of it"))
+            {
+                return ScenarioStatus.Running; // M6 8 L: in a dungeon too a target the bolts cannot reach is dropped at the shared count
+            }
+
             return StartWalk(session, clock, "a bolt hit a wall");
         }
 
@@ -2566,7 +3125,12 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         {
             _tally.NoteMiss();
             _missesInARow++;
-            _log.Info(LogCategory, $"miss: the projectile was confirmed but no damage line or kill came within {_hitWait:0.#} s (misses in a row {_missesInARow})");
+            _log.Info(LogCategory, $"miss: the projectile was confirmed but no damage line or kill came within {_hitWait:0.##} s (misses in a row {_missesInARow})");
+            if (WastedDrops(session, clock, string.Create(CultureInfo.InvariantCulture, $"the bolt flew and no damage landed within {_hitWait:0.##} s")))
+            {
+                return ScenarioStatus.Running; // M6 8 L
+            }
+
             if (_missesInARow >= MissesBeforeWalking)
             {
                 return StartWalk(session, clock, $"{_missesInARow} misses in a row");
@@ -2595,7 +3159,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             _boltStopAt = clock;
         }
 
-        if (clock - _boltStopAt < WallGraceSeconds || _tally.Resists > _resistMark || !session.State.Objects.TryGet(_target, out var victim) || victim.Position is not { } at)
+        if (clock - _boltStopAt < WallGraceSeconds || _tally.Resists > _resistMark || !session.State.Objects.TryGet(_target, out var victim) || StandsAt(session, victim) is not { } at)
         {
             return false;
         }
@@ -2624,7 +3188,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         }
 
         var from = bolt.Position ?? session.State.Self.Position;
-        if (from is not { } origin || !objects.TryGet(_target, out var victim) || victim.Position is not { } at)
+        if (from is not { } origin || !objects.TryGet(_target, out var victim) || StandsAt(session, victim) is not { } at)
         {
             _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"hit wait: the projectile 0x{guid:X8} or the target 0x{_target:X8} has no position in the object table; the floor of {HitWaitSeconds:0.#} s applies"));
             return HitWaitSeconds;
@@ -2642,7 +3206,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             LogCategory,
             string.Create(
                 CultureInfo.InvariantCulture,
-                $"cast confirmed: projectile 0x{guid:X8} at {speed:0.0} m/s, the target 0x{_target:X8} {distance:0.0} m from it: hit wait {wait:0.#} s (flight plus {HitWaitMarginSeconds:0.#} s, at least {HitWaitSeconds:0.#}, at most {HitWaitMaxSeconds:0.#}{(speed < MinProjectileSpeed ? "; the velocity is not a speed to divide by, so the cap" : string.Empty)})"));
+                $"cast confirmed: projectile 0x{guid:X8} at {speed:0.0} m/s, the target 0x{_target:X8} {distance:0.0} m from it: hit wait {wait:0.##} s (flight plus {HitWaitMarginSeconds:0.#} s, at most {HitWaitMaxSeconds:0.#}{(speed < MinProjectileSpeed ? "; the velocity is not a speed to divide by, so the cap" : string.Empty)})"));
         return wait;
     }
 
@@ -2716,7 +3280,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
 
         _fedTarget = guid;
 
-        if (_view.State.Objects.TryGet(guid, out var o) && o.Position is { } at)
+        if (_view.State.Objects.TryGet(guid, out var o) && StandsAt(_view, o) is { } at)
         {
             tour.Killed(o.Weenie.WeenieClassId, at.CellId, _view.Clock.Now, guid);
         }
@@ -2732,6 +3296,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
 
     private ScenarioStatus StartWalk(IGameSessionView session, double clock, string why)
     {
+        PullWalkAsked(session, why); // M6 7 AX: FightScenario.Pull.cs
         if (_walk is null)
         {
             return Fail(session, "fight: the loop must walk (" + why + ") but has no walker; TODO(m3-fight-no-walker)");
@@ -2765,6 +3330,8 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         }
 
         _holdingLogged = holding;
+        _walkSight = !holding && !_pickLeaving && why is NoClearLine or NoTargetInRange; // M6 7 Y: read by SightDropsWalk
+        _walkSightAt = clock + WalkSightSeconds;
         _phase = Phase.Walk;
         return ScenarioStatus.Running;
     }
@@ -2805,9 +3372,30 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
     private static bool TargetGone(WorldObjectTable objects, uint guid) =>
         !objects.TryGet(guid, out var o) || o.Health is <= 0f || o.Motion is { Forward: WorldObjectTable.DeadMotionLowWord };
 
+    /// <summary>M6 5 q4 (D57): what the fight's <see cref="FightOptions.Until"/> reads as met now (<c>item 7 x1 held 1</c>, <c>chat "..."</c>), or null while it is not.</summary>
+    private string? UntilHolds(IGameSessionView session, FightUntil until)
+    {
+        if (until.Chat is { } chat)
+        {
+            // M6 5 F1 (review 5-R14): system chat only (the server's kill counter and quest lines), never a player's or an NPC's words.
+            return QuestReads.Since(session.State.Chat, _untilMark).Any(l => l.Kind == ChatKind.System && l.Text.Contains(chat, StringComparison.Ordinal)) ? $"chat \"{chat}\"" : null;
+        }
+
+        var held = UntilUnits(session.State, until); // M6 14 combine: along the chain, in the item's equivalents
+        return held >= until.Count ? string.Create(CultureInfo.InvariantCulture, $"item {until.ItemWcid} held {held} of {until.Count}{(until.Chain.Count > 1 ? " (its equivalents along the no-roll combine chain)" : string.Empty)}") : null;
+    }
+
+    private readonly List<uint> _untilScratch = [];
+
     private ScenarioStatus EndFight(IGameSessionView session, double clock, string why)
     {
         _fightEnd = clock;
+        if (session.State.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxMana, out var manaAtEnd, out var manaMaxAtEnd))
+        {
+            (_manaEnd, _manaEndMax) = (manaAtEnd, manaMaxAtEnd); // M6 8 H: mana_end= mana_end_pct=, the bar the owner reads
+        }
+
+        PullRestAbandon(session, clock, why); // M6 7 AB: a rest the stop cut stands her up and keeps its seconds in the verdict
         if (_manaCast is { IsRunning: true })
         {
             // M5 1 fix A, 1-R11: a dance in progress at the stop keeps its presses in the line's counts.
@@ -2830,6 +3418,8 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             var drainReport = drainCast.Report;
             _castTally.Add(in drainReport);
         }
+
+        LifeThroughAtStop(); // M6 14: a life cast whose kill ended the fight is counted as landed (FightScenario.LifeThrough.cs)
 
         if (_openerCast is { IsRunning: true } openerCast)
         {
@@ -2949,7 +3539,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
     {
         if (!_endSession)
         {
-            _log.Info(LogCategory, "verdict " + VerdictFields());
+            LogVerdict(session);
             Stage = "done";
             Dispose();
             return ScenarioStatus.Succeeded;
@@ -2991,15 +3581,24 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         return ScenarioStatus.Running;
     }
 
+    /// <summary>
+    /// M6 14 motes (live 2026-11-17 00:07:58: the mote hunt's fight ended on its first frame and the run's log held no line saying why: a failure's own line is an error, which the live capture writes to another stream, out of order): a failed
+    /// fight also names its why at Info in the fight's stream, <c>fight end: failed: &lt;why&gt;</c>, just before its verdict. A clean end (<see cref="EndFight"/>) already opens its Info line with its why. The verdict's fields are not
+    /// touched: their readers pin its tail and its order (the loot fields, the tour fields, the station's until).
+    /// </summary>
+    private void NoteFailedEnd(string why) => _log.Info(LogCategory, "fight end: failed: " + why);
+
     private ScenarioStatus Fail(IGameSessionView session, string why)
     {
         Failure = why;
+        NoteFailedEnd(why);
         _fightEnd = double.IsNaN(_fightEnd) ? session.Clock.Now : _fightEnd;
+        PullRestAbandon(session, session.Clock.Now, why); // M6 7 AB
         _walk?.Abandon();
         _seam.Abandon(); // a travel leg still running releases its keys
         _loot?.Abandon(session);
         _log.Error(LogCategory, why);
-        _log.Info(LogCategory, "verdict " + VerdictFields());
+        LogVerdict(session);
         if (session.State.Phase == SessionPhase.InWorld && Stage is not ("logging-off" or "quitting"))
         {
             // Out of the den first, whatever endSession is (best effort, GroundExit; not in the arena-here run): a mage left in the den by this run, logged off by it or by the game's leg as soon as this returns Failed, meets the
@@ -3062,7 +3661,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
     public string LootFields() =>
         _loot is null
             ? "loot=off looted=0 kept=0 loot_value=0"
-            : string.Create(CultureInfo.InvariantCulture, $"loot=on looted={_loot.Looted} kept={_loot.Kept} loot_value={_loot.Value} loot_opened={_loot.Opened} loot_skipped_unreached={_loot.SkippedUnreached} loot_skipped_hostile={_loot.SkippedHostile} loot_walk_s={_loot.WalkedSeconds:0.#} loot_plan_kept={_loot.PlanKept} loot_plan_left={_loot.PlanLeft} loot_plan_value={_loot.PlanValue} corpses_opened={_loot.Opened} loot_left_aggro={_loot.AggroLeft} loot_left_decayed={_loot.DecayedLeft} worth_a_look={_loot.WorthALook} stack_merges={_loot.StackMerges} loot_busy_waits={_loot.BusyWaits} loot_left_busy={_loot.BusyLeft}");
+            : string.Create(CultureInfo.InvariantCulture, $"loot=on looted={_loot.Looted} kept={_loot.Kept} loot_value={_loot.Value} loot_opened={_loot.Opened} loot_skipped_unreached={_loot.SkippedUnreached} loot_skipped_hostile={_loot.SkippedHostile} loot_walk_s={_loot.WalkedSeconds:0.#} loot_plan_kept={_loot.PlanKept} loot_plan_left={_loot.PlanLeft} loot_plan_value={_loot.PlanValue} corpses_opened={_loot.Opened} loot_left_aggro={_loot.AggroLeft} loot_left_decayed={_loot.DecayedLeft} worth_a_look={_loot.WorthALook} stack_merges={_loot.StackMerges} loot_busy_waits={_loot.BusyWaits} loot_left_busy={_loot.BusyLeft}{(_loot.GreatTaken + _loot.GreatLeft + _loot.RoomDrops > 0 ? $" great_cantrips_taken={_loot.GreatTaken} great_cantrips_left={_loot.GreatLeft} loot_room_drops={_loot.RoomDrops} loot_room_dropped_value={_loot.RoomDroppedValue}" : string.Empty)}{(_loot.SwapsMade + _loot.SwapsShort > 0 ? $" loot_swaps={_loot.SwapsMade} loot_swaps_short={_loot.SwapsShort}" : string.Empty)}");
 
     /// <summary>
     /// The guids the loot step picked up and saw held (M5 item 3 c2a, closes <c>TODO(m5-resupply-kept-list)</c>): the list the logistics station hands the resupply to sell. Read-only, in the order the items were kept; empty with looting off.
@@ -3078,21 +3677,77 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
     /// <summary>True while the loot step has a kill to loot or a corpse in hand (always false with looting off).</summary>
     public bool LootBusy => _loot is { Active: true };
 
+    /// <summary>M6 6 F3 (<c>m6-resume-loot-queue</c>): the kills of this fight whose corpse is found and not yet looted (a read-only export: guid and the corpse's name), for the autopilot's checkpoint. Empty with looting off.</summary>
+    public IReadOnlyList<KillCorpse> KillCorpses => _loot?.Pending() ?? [];
+
+    /// <summary>
+    /// M6 6 F3 (<c>m6-resume-loot-queue</c>): queues the corpses a stopped run's last kills left (<paramref name="corpses"/>, the checkpoint's) for this fight's loot step. Check before: the object is in view, is a corpse of the recorded name, is not
+    /// the player's own, is not held or handled already and lies within the loot radius; any other is dropped, named. Returns the corpses queued.
+    /// </summary>
+    /// <param name="session">The session.</param>
+    /// <param name="corpses">The recorded kill/corpse pairs.</param>
+    public int SeedLoot(IGameSessionView session, IReadOnlyList<KillCorpse> corpses)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(corpses);
+        var queued = 0;
+        foreach (var pair in corpses)
+        {
+            string? drop = null;
+            if (_loot is null)
+            {
+                drop = "looting is off";
+            }
+            else if (!session.State.Objects.TryGet(pair.Guid, out var o) || (o.DescriptionFlags & WorldObjectTable.CorpseFlag) == 0 || o.Position is not { } at)
+            {
+                drop = "not in view";
+            }
+            else if (!string.Equals(o.Name, CorpsePrefix + pair.Name, StringComparison.Ordinal))
+            {
+                drop = $"it is '{o.Name}' now, not the corpse of '{pair.Name}'";
+            }
+            else if (MageLootRules.IsOwnCorpse(o.Name, session.State.Self.Name))
+            {
+                drop = "the player's own corpse";
+            }
+            else if (_loot.Holds(pair.Guid))
+            {
+                drop = "already queued or looted";
+            }
+            else if (session.State.Self.Position is not { } own || at.ToGlobal().DistanceTo(own.ToGlobal()) is var d && d > LootRadius)
+            {
+                drop = "beyond the loot radius";
+            }
+            else
+            {
+                _loot.NoteKill(pair.Name, at, 0, session.Clock.Now, pair.Guid);
+                queued++;
+                continue;
+            }
+
+            _log.Warn(LogCategory, $"loot: the resumed run's corpse 0x{pair.Guid:X8} of '{pair.Name}' is dropped ({drop})");
+        }
+
+        return queued;
+    }
+
     /// <summary>The kill notice named the target: the loot step is told which creature died and where it lay (its last known name and position), so it can look for the corpse. Returns the name queued, or null when none was.</summary>
     private string? NoteLootKill(IGameSessionView session, uint target)
     {
         var guid = target == 0 ? _seenTarget : target;
         string? name = null;
         CellFrame? at = null;
+        var wcid = 0u;
         if (guid != 0 && session.State.Objects.TryGet(guid, out var body))
         {
-            (name, at) = (body.Name, body.Position);
+            (name, at, wcid) = (body.Name, StandsAt(session, body), body.Weenie.WeenieClassId);
         }
 
         if (guid != 0 && guid == _seenTarget)
         {
             name ??= _seenName;
             at ??= _seenAt;
+            wcid = wcid != 0 ? wcid : _seenWcid;
         }
 
         if (name is null || at is not { } where)
@@ -3101,7 +3756,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             return null;
         }
 
-        _loot!.NoteKill(name, where, guid, session.Clock.Now);
+        _loot!.NoteKill(name, where, guid, session.Clock.Now, wcid: wcid);
         return name;
     }
 
@@ -3115,7 +3770,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
     /// target in reach (<see cref="TryRetry"/>) and the rule passes, in the order of the kills, until <see cref="FightOptions.LootRetryWindowSeconds"/> after the kill, then is given up (counted as left to decay). A creature that attacks while the walk or the open is
     /// in hand closes the corpse (when open) and puts it back in the queue: the fight goes first.
     /// </summary>
-    private sealed class LootStep(ILogSink log, MageLootRules rules, FightScenario owner) : IDisposable
+    private sealed partial class LootStep(ILogSink log, MageLootRules rules, FightScenario owner) : IDisposable
     {
         /// <summary>The seconds the corpse may take to appear after the step began looking (ACE shows it after the death animation; the hunt's value).</summary>
         public const double CorpseAppearSeconds = HuntScenario.CorpseAppearSeconds;
@@ -3159,12 +3814,24 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
 
             /// <summary>M5 7 P7s (D148): the fight's own walk toward a corpse whose straight approach crosses a no-go cell (<see cref="OwnWalk"/>).</summary>
             OwnWalk,
+
+            /// <summary>M6 6 B2 (<c>m5-loot-walk-for-los</c>): the fight's own walk to a floor spot with a clear line to a corpse that has none from where the mage stands (<see cref="LosWalk"/>).</summary>
+            LosWalk,
+
+            /// <summary>M6 14 keep every great cantrip (the owner, 2026-11-15): the sell loot the plan drops to make room for a great-cantrip piece, dropped and checked before the take (<see cref="MakingRoom"/>).</summary>
+            MakingRoom,
+
+            /// <summary>M6 14 want loot: the fight's own walk to the corpse of a creature whose create list can hold a wanted item, beyond the loot radius or with no line (<see cref="WantWalk"/>).</summary>
+            WantWalk,
         }
 
         /// <summary>A kill whose corpse the step looks for: the creature's name and last position, the session clock the kill notice came, the corpse once found and whether it was ever put off.</summary>
-        private sealed class LootKill(string name, CellFrame at, uint guid, double killedAt)
+        private sealed class LootKill(string name, CellFrame at, uint guid, double killedAt, uint wcid = 0)
         {
             public string Name { get; } = name;
+
+            /// <summary>M6 14 want loot: the creature's weenie class id when the kill knew it (0: a splash kill or a resumed corpse, matched by name).</summary>
+            public uint Wcid { get; } = wcid;
 
             public CellFrame At { get; } = at;
 
@@ -3217,6 +3884,15 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         private CellFrame _ownWalkSpot;
         private bool _traceTodoLogged;
         private int _busyRefusals; // M5 7 D123: the corpse in hand's 0x001D answers so far
+        private bool _losWalked; // M6 6 B2 (m5-loot-walk-for-los): the walk for a line went once for the corpse in hand
+        private bool _losWalkStarted;
+        private CellFrame _losWalkSpot;
+        private string _losWalkNote = string.Empty;
+        private bool _seekYieldLogged; // M6 6 B2 (m5-defend-loot-first): the wait for a corpse not yet there gave the frame to the fight (logged once a kill)
+        private uint _closeSent; // M6 6 B2 (m5-defend-loot-first): the corpse whose close the aggro rule sent, until the view confirms it (check, act, check)
+        private double _closeSentAt;
+        private bool _wearWaitLogged; // M6 6 FXD3 (6-D9): the wait for an in-flight wield is logged once
+        private uint _wearingGuid; // the find the wield in flight was sent for
 
         /// <summary>True while a kill waits for its corpse or a corpse is in hand.</summary>
         public bool Active => _stage != Stage.Idle || _kills.Count > 0;
@@ -3269,8 +3945,10 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         /// <summary>The Value of the items the rule's plans kept (M5 7 F28).</summary>
         public long PlanValue { get; private set; }
 
-        /// <summary>M5 7 F30 (the owner): the wands and cantrip pieces the keep-aside rule took, worth a look.</summary>
+        /// <summary>M5 7 F30 (the owner): the wands and cantrip pieces the keep-aside rule took, worth a look (M6 14: each once, when held after the pick-up).</summary>
         public int WorthALook { get; private set; }
+
+        private readonly HashSet<uint> _looked = [];
 
         /// <summary>M5 7 P7s (D148, report-only): the corpses skipped with no Use because they lie in a no-go cell or ACE's straight approach to them crosses one (also counted in <see cref="SkippedUnreached"/>).</summary>
         public int NoGoSkipped { get; private set; }
@@ -3278,10 +3956,39 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         /// <summary>M5 7 F27 (report-only): the session-clock seconds spent waiting on ACE's walk to a corpse (from the Use sent to the open, or to giving the corpse up).</summary>
         public double WalkedSeconds { get; private set; }
 
-        /// <summary>A kill is told: its creature's name and where it lay; M5 7 P7b (D139 i): with <paramref name="corpse"/> set (a splash kill paired with its corpse), that corpse and no other is the kill's.</summary>
-        public void NoteKill(string name, CellFrame at, uint guid, double clock, uint corpse = 0)
+        /// <summary>M6 6 F3 (<c>m6-resume-loot-queue</c>): the kills whose corpse the step has found and has not handled: the one in hand, the put-off ones and the queued ones that hold a corpse, in the order of the kills.</summary>
+        public List<KillCorpse> Pending()
         {
-            _kills.Enqueue(new LootKill(name, at, guid, clock) { Corpse = corpse, CorpseAt = corpse != 0 ? at : null });
+            var list = new List<KillCorpse>();
+            void Add(LootKill k)
+            {
+                if (k.Corpse != 0 && !_handled.Contains(k.Corpse) && !list.Exists(c => c.Guid == k.Corpse))
+                {
+                    list.Add(new KillCorpse(k.Corpse, k.Name));
+                }
+            }
+
+            if (_stage != Stage.Idle)
+            {
+                Add(_kill);
+            }
+
+            _retry.ForEach(Add);
+            foreach (var k in _kills)
+            {
+                Add(k);
+            }
+
+            return list;
+        }
+
+        /// <summary>M6 6 F3: true when the corpse is already spoken for or handled (the seed leaves it).</summary>
+        public bool Holds(uint guid) => _handled.Contains(guid) || _corpse == guid && _stage != Stage.Idle || Bound(guid, null);
+
+        /// <summary>A kill is told: its creature's name and where it lay; M5 7 P7b (D139 i): with <paramref name="corpse"/> set (a splash kill paired with its corpse), that corpse and no other is the kill's.</summary>
+        public void NoteKill(string name, CellFrame at, uint guid, double clock, uint corpse = 0, uint wcid = 0)
+        {
+            _kills.Enqueue(new LootKill(name, at, guid, clock, wcid) { Corpse = corpse, CorpseAt = corpse != 0 ? at : null });
             log.Info(LogCategory, corpse != 0 ? $"loot: the splash kill of '{name}' (its corpse 0x{corpse:X8}) waits for the loot step ({_kills.Count} waiting)" : $"loot: the kill of '{name}' 0x{guid:X8} waits for the loot step ({_kills.Count} waiting)");
         }
 
@@ -3336,17 +4043,22 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
                 _corpse = 0;
                 _busyRefusals = 0;
                 _ownWalked = false;
+                _losWalked = false;
+                _wantLegs = 0; // M6 14 want loot
+                _seekYieldLogged = false;
+                _roomSpent = 0; // M6 14 keep every great cantrip: the drops' seconds are the corpse's own extra
             }
-            else if (clock - _corpseStart > CorpseSeconds)
+            else if (clock - _corpseStart > CorpseSeconds + RoomSeconds(clock))
             {
                 Give(session, string.Create(CultureInfo.InvariantCulture, $"the corpse 0x{_corpse:X8} took over {CorpseSeconds:0} s"));
                 return true;
             }
 
-            if (_stage is Stage.Opening or Stage.BusyWait or Stage.Resolve or Stage.Appraise && owner._options.LootAggroMetres > 0 && owner.AttackerNow(session, clock) is { } attacker)
+            // M6 6 B2 (m5-defend-loot-first, D88): a hit while the corpse is sought, looted or its finds judged is answered too, not only while it is reached or read (the corpse put off, its open view closed first).
+            if (_stage is Stage.Seek or Stage.Opening or Stage.BusyWait or Stage.Resolve or Stage.Appraise or Stage.MakingRoom or Stage.Looting or Stage.Wearing && owner._options.LootAggroMetres > 0 && owner.AttackerNow(session, clock) is { } attacker
+                && AttackerFirst(session, clock, attacker) is { } answered)
             {
-                Requeue(session, clock, string.Create(CultureInfo.InvariantCulture, $"{attacker.Name} 0x{attacker.Guid:X8} attacked the mage {clock - attacker.LastAt:0.#} s ago while the corpse was being reached or read"));
-                return true;
+                return answered;
             }
 
             switch (_stage)
@@ -3361,31 +4073,51 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
                     return Resolve(session, clock);
                 case Stage.Appraise:
                     return Appraise(session, clock);
+                case Stage.MakingRoom:
+                    return MakingRoom(session, clock);
                 case Stage.Looting:
                     return Looting(session, clock);
                 case Stage.Wearing:
                     return Wearing(session, clock);
                 case Stage.OwnWalk:
                     return OwnWalk(session, clock);
+                case Stage.LosWalk:
+                    return LosWalk(session, clock);
+                case Stage.WantWalk:
+                    return WantWalk(session, clock);
                 default:
                     return Closing(clock);
             }
         }
 
-        /// <summary>The fight ends or fails: a walk stops, a loop in hand is abandoned and an open corpse is closed (fire and forget).</summary>
-        public void Abandon(IGameSessionView session)
+        /// <summary>
+        /// The fight ends or fails, or its loot is held (<see cref="HoldLoot"/>, <paramref name="when"/> names it): a walk stops, a loop in hand is abandoned and an open corpse is closed (fire and forget). M6 14 recall unblock: the open
+        /// view of a put-off corpse (a cut walk that had arrived: "its view stays for the retry") is closed too, so no corpse's open holds the Use lane the way out needs; the kills not yet looked at are left with the put-off ones.
+        /// </summary>
+        public void Abandon(IGameSessionView session, string when = "at the fight's end")
         {
             if (_stage != Stage.Idle)
             {
-                log.Info(LogCategory, $"loot: abandoned at the fight's end (stage {_stage.ToString().ToLowerInvariant()}, corpse 0x{_corpse:X8})");
+                log.Info(LogCategory, $"loot: abandoned {when} (stage {_stage.ToString().ToLowerInvariant()}, corpse 0x{_corpse:X8})");
+                CutWalk(session, session.Clock.Now, "the fight ends", wait: false); // M6 14: what comes after the fight (a recall, a heal) does not wait behind the corpse's walk
                 Finish(session, true);
             }
+            else if (session.State.Containers.ViewedGuid is var open and not 0 && (open == _corpse || _retry.Exists(k => k.Corpse == open)))
+            {
+                _ = session.Actions.CloseContainer(open, ActionSource.Automation);
+                log.Info(LogCategory, $"loot: the open view of the put-off corpse 0x{open:X8} is closed {when} (the close is sent; the way out's own check reads the view again, m6-loot-hold)");
+            }
 
-            _kills.Clear();
+            if (_kills.Count > 0)
+            {
+                log.Info(LogCategory, $"loot: {_kills.Count} kill(s) not yet looked at are left {when}");
+                _kills.Clear();
+            }
+
             if (_retry.Count > 0)
             {
                 Left += _retry.Count;
-                log.Info(LogCategory, $"loot: {_retry.Count} corpse(s) still put off at the fight's end are left ({string.Join(", ", _retry.ConvertAll(k => "0x" + k.Corpse.ToString("X8", CultureInfo.InvariantCulture) + (k.OutOfView ? " (lost from view)" : string.Empty)))})");
+                log.Info(LogCategory, $"loot: {_retry.Count} corpse(s) still put off {when} are left ({string.Join(", ", _retry.ConvertAll(k => "0x" + k.Corpse.ToString("X8", CultureInfo.InvariantCulture) + (k.OutOfView ? " (lost from view)" : string.Empty)))})");
                 _retry.Clear();
             }
         }
@@ -3400,6 +4132,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         /// </remarks>
         public void Sweep(IGameSessionView session, double clock)
         {
+            CloseChecked(session, clock);
             for (var i = _retry.Count - 1; i >= 0; i--)
             {
                 var k = _retry[i];
@@ -3498,10 +4231,13 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
                 }
 
                 var away = own.ToGlobal().DistanceTo(lies.ToGlobal());
-                if (away > LootWalkBackMaxMetres)
+                var wanted = WantedBy(k);
+                if (away > LootWalkBackMaxMetres && (wanted is null || !owner._ground.InLandblocks(lies.CellId)))
                 {
                     _retry.RemoveAt(i--);
-                    Decay(k, clock, string.Create(CultureInfo.InvariantCulture, $"lost from view {clock - k.LostAt:0} s ago, and where it lay is {away:0.#} m off, beyond the walk back's {LootWalkBackMaxMetres:0} m (FightScenario.LootWalkBackMaxMetres)"));
+                    Decay(k, clock, wanted is null
+                        ? string.Create(CultureInfo.InvariantCulture, $"lost from view {clock - k.LostAt:0} s ago, and where it lay is {away:0.#} m off, beyond the walk back's {LootWalkBackMaxMetres:0} m (FightScenario.LootWalkBackMaxMetres)")
+                        : string.Create(CultureInfo.InvariantCulture, $"lost from view {clock - k.LostAt:0} s ago, {away:0.#} m off, and where it lay (0x{lies.CellId:X8}) is off the ground {owner._ground.Name}: {WantWhy(wanted)}, but no walk back leaves the ground"));
                     continue;
                 }
 
@@ -3517,7 +4253,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
                 }
 
                 (corpse, spot) = (k.Corpse, lies);
-                note = string.Create(CultureInfo.InvariantCulture, $"the corpse 0x{k.Corpse:X8} of '{k.Name}', killed {clock - k.KilledAt:0} s ago, lost from view {clock - k.LostAt:0} s ago at 0x{lies.CellId:X8} [{lies.Origin.X:0.#} {lies.Origin.Y:0.#} {lies.Origin.Z:0.#}], {away:0.#} m off");
+                note = string.Create(CultureInfo.InvariantCulture, $"the corpse 0x{k.Corpse:X8} of '{k.Name}', killed {clock - k.KilledAt:0} s ago, lost from view {clock - k.LostAt:0} s ago at 0x{lies.CellId:X8} [{lies.Origin.X:0.#} {lies.Origin.Y:0.#} {lies.Origin.Z:0.#}], {away:0.#} m off{(wanted is null ? string.Empty : "; " + WantWhy(wanted) + ", walked back whatever the distance on the ground")}");
                 return true;
             }
 
@@ -3564,14 +4300,15 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         /// </summary>
         public bool TryRetry(IGameSessionView session, double clock)
         {
-            if (_stage != Stage.Idle || _kills.Count > 0 || _retry.Count == 0 || session.State.Self.Position is null)
+            if (_stage != Stage.Idle || _kills.Count > 0 || _retry.Count == 0 || session.State.Self.Position is not { } own)
             {
                 return false;
             }
 
             foreach (var k in _retry)
             {
-                if (!session.State.Objects.TryGet(k.Corpse, out var corpse) || corpse.Position is not { } lies || Blocked(session, clock, lies.ToGlobal(), k.Guid, out _))
+                if (!session.State.Objects.TryGet(k.Corpse, out var corpse) || corpse.Position is not { } lies || Blocked(session, clock, lies.ToGlobal(), k.Guid, out _)
+                    || WalkHeld(session, clock, in own, own.ToGlobal().DistanceTo(lies.ToGlobal()), k.Guid, out _)) // M6 14 (m6-loot-walk-waits): the same check the retry's own look would make
                 {
                     continue;
                 }
@@ -3583,6 +4320,9 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
                 _corpse = 0;
                 _busyRefusals = 0;
                 _ownWalked = false;
+                _losWalked = false;
+                _wantLegs = 0; // M6 14 want loot
+                _seekYieldLogged = false;
                 log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"loot: the corpse 0x{k.Corpse:X8} of '{k.Name}' put off {clock - k.KilledAt:0} s after its kill is retried: no target in reach and nothing in the way ({_retry.Count} more put off)"));
                 return Seek(session, clock);
             }
@@ -3632,20 +4372,26 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         /// </summary>
         private void Requeue(IGameSessionView session, double clock, string why)
         {
+            CutWalk(session, clock, "the corpse is put off", wait: true); // M6 14 (m6-loot-walk-cut): ACE's walk to it ends now, so the fight's cast does not wait behind the Use
             if (_stage == Stage.Opening && _aceWalk)
             {
                 WalkedSeconds += Math.Max(0, clock - _stageStart);
+            }
+
+            if (_stage == Stage.Looting && _looter is { } partial && _plan is not null)
+            {
+                // M6 6 B2 (m5-defend-loot-first): the pick-ups already confirmed are kept and counted now (the resupply's sale list); the retry plans what the corpse still holds.
+                var (kept, value) = TallyKept(session, partial);
+                Kept += kept;
+                Value += value;
+                log.Info(LogCategory, $"loot: the corpse 0x{_corpse:X8} was being looted: kept {kept} of {_plan.Kept.Count} planned so far (value {value}); the retry plans what it still holds");
             }
 
             StackMerges += _looter?.StackMerges ?? 0;
             _looter?.Abandon("fight-moved-on");
             _looter = null;
             _identifies.Clear();
-            if (_corpse != 0 && session.State.Containers.Viewed is { } view && view.Guid == _corpse)
-            {
-                _ = session.Actions.CloseContainer(_corpse, ActionSource.Automation);
-            }
-
+            CloseFirst(session, clock);
             _pending = null;
             _stage = Stage.Idle;
             _corpse = 0;
@@ -3667,6 +4413,149 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             var at = _retry.FindIndex(k => k.KilledAt > _kill.KilledAt);
             _retry.Insert(at < 0 ? _retry.Count : at, _kill);
             log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"loot: the corpse 0x{_kill.Corpse:X8} of '{_kill.Name}' is put off: {why}; it stays queued ({_retry.Count} put off), retried when the fight has no target and nothing is in the way, until {FightOptions.LootRetryWindowSeconds:0} s after the kill; the fight goes first"));
+        }
+
+        /// <summary>
+        /// M6 6 B2 (<c>m5-defend-loot-first</c>, D88): a creature attacked the mage while the corpse in hand was sought, reached, read, looted or its finds judged: the fight answers first. Sought with no corpse yet, the frame goes to
+        /// the fight (false) while the corpse is still waited for (the miss after <see cref="CorpseAppearSeconds"/> is the seek's own, null); once it is there it is bound and put off. Looted, with only the finds' judging left, it is
+        /// closed and done (nothing is left in it to retry), the finds not yet judged staying in the pack. Else it is put off (<see cref="Requeue"/>). True or false: the frame is answered; null: the stage goes on.
+        /// </summary>
+        private bool? AttackerFirst(IGameSessionView session, double clock, Attacker attacker)
+        {
+            var who = string.Create(CultureInfo.InvariantCulture, $"{attacker.Name} 0x{attacker.Guid:X8} attacked the mage {clock - attacker.LastAt:0.#} s ago");
+            switch (_stage)
+            {
+                case Stage.Seek when _kill.Corpse == 0:
+                    if (!Find(session, out var found))
+                    {
+                        if (clock - _stageStart > CorpseAppearSeconds)
+                        {
+                            return null; // the seek names the miss
+                        }
+
+                        if (!_seekYieldLogged)
+                        {
+                            _seekYieldLogged = true;
+                            log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"loot: the corpse of '{_kill.Name}' has not appeared yet and {who}: the fight answers it first; the corpse is still waited for (up to {CorpseAppearSeconds:0} s)"));
+                        }
+
+                        return false;
+                    }
+
+                    _corpse = _kill.Corpse = found.Guid;
+                    _kill.CorpseAt = found.Position ?? _kill.CorpseAt;
+                    break;
+                case Stage.Wearing when _swap is { } swap && clock - swap.Start <= SwapSeconds:
+                    // M6 14 capacity: a replace in hand finishes before the fight goes first (a piece taken off is never left off): its own steps run on, up to SwapSeconds
+                    if (!_wearWaitLogged)
+                    {
+                        _wearWaitLogged = true;
+                        log.Info(LogCategory, $"loot: {who} while a {swap.Name} of '{swap.Choice.Name}' 0x{swap.Choice.Guid:X8} was in hand: it finishes first (up to {SwapSeconds:0} s), then the fight goes first");
+                    }
+
+                    return null;
+                case Stage.Wearing:
+                    // M6 6 FXD3 (6-D9; check, act, check, M5 D141): a wield already sent is read before the stage ends (up to ActionSeconds), so the fight's magic-mode ask never races a wield still in flight, and what was worn is logged.
+                    if (_pending is { Outcome: null } && clock - _stageStart <= ActionSeconds)
+                    {
+                        if (!_wearWaitLogged)
+                        {
+                            _wearWaitLogged = true;
+                            log.Info(LogCategory, $"loot: {who} while a wield (0x{_wearingGuid:X8}) was in flight: its outcome is read first (up to {ActionSeconds:0} s), then the fight goes first");
+                        }
+
+                        return true;
+                    }
+
+                    _wearWaitLogged = false;
+                    SwapCut(session, who); // M6 16 E5e4: a swap still in hand past its seconds: what it has off is named, loudly
+                    if (_pending is not null)
+                    {
+                        log.Info(LogCategory, $"loot: gear: the wield ended {(_pending.Outcome is { } ended ? Describe(ended) : "unanswered")} (read before the fight went first)");
+                        if (_pending.Outcome is { Kind: ActionOutcomeKind.Confirmed })
+                        {
+                            PackTally.AddEquip();
+                        }
+                    }
+
+                    log.Warn(LogCategory, $"loot: {who} while the finds of the corpse 0x{_corpse:X8} were judged for the self-equip: the corpse is looted and done; {_wear.Count} find(s) not yet judged stay in the pack; the fight goes first");
+                    _wear.Clear();
+                    CloseFirst(session, clock);
+                    _pending = null;
+                    Done();
+                    return true;
+                case Stage.MakingRoom when RoomAttacked(session, clock, who):
+                    return true; // M6 14 keep every great cantrip: a drop in flight is read to its end first
+            }
+
+            var what = _stage switch
+            {
+                Stage.Seek => "sought",
+                Stage.MakingRoom => "readied (room made for a great cantrip)",
+                Stage.Looting => "looted",
+                _ => "reached or read",
+            };
+            Requeue(session, clock, $"{who} while the corpse was being {what}{(WantedBy(_kill) is { } want ? "; " + WantWhy(want) + ", so it is walked to once nothing is in the way" : string.Empty)}"); // M6 14 want loot: the put-off names the want
+            return true;
+        }
+
+        /// <summary>
+        /// M6 6 B2 (<c>m5-defend-loot-first</c>; check, act, check, M5 D141): the corpse in hand's view is closed before the fight goes first. Check: the view shows it open; act: the close is sent (fire and forget, the fight does not
+        /// wait); check: <see cref="CloseChecked"/> reads the view on the next frames. Nothing is sent when no view of it is open.
+        /// </summary>
+        private void CloseFirst(IGameSessionView session, double clock)
+        {
+            if (_corpse == 0 || session.State.Containers.Viewed is not { } view || view.Guid != _corpse)
+            {
+                return;
+            }
+
+            _ = session.Actions.CloseContainer(_corpse, ActionSource.Automation);
+            (_closeSent, _closeSentAt) = (_corpse, clock);
+            log.Info(LogCategory, $"loot: the open corpse 0x{_corpse:X8} is closed first (its view was open; the close is sent, the view is read again)");
+        }
+
+        /// <summary>M6 6 B2: the after-check of <see cref="CloseFirst"/>: the view no longer shows the corpse (confirmed, logged), or after <see cref="ActionSeconds"/> it still does (named; nothing is sent again: the next open replaces the view).</summary>
+        private void CloseChecked(IGameSessionView session, double clock)
+        {
+            if (_closeSent == 0)
+            {
+                return;
+            }
+
+            if (session.State.Containers.Viewed is not { } view || view.Guid != _closeSent)
+            {
+                log.Info(LogCategory, $"loot: the corpse 0x{_closeSent:X8} is closed (the view confirms it)");
+                _closeSent = 0;
+            }
+            else if (clock - _closeSentAt > ActionSeconds)
+            {
+                log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"loot: the corpse 0x{_closeSent:X8} is still open {ActionSeconds:0} s after its close was sent; not sent again (the next open of a corpse replaces the view)"));
+                _closeSent = 0;
+            }
+        }
+
+        /// <summary>The plan's keeps the looter's pick-ups made held (or merged wholly into a held stack), added to <see cref="KeptGuids"/>: the count and their Value.</summary>
+        private (int Kept, long Value) TallyKept(IGameSessionView session, CorpseLooter looter)
+        {
+            var kept = 0;
+            long value = 0;
+            foreach (var guid in _plan!.Kept)
+            {
+                if (session.State.Self.Inventory.Find(guid).Held)
+                {
+                    kept++;
+                    value += _plan.ValueOf(guid);
+                    KeptGuids.Add(guid);
+                }
+                else if (looter.WasMergedAway(guid))
+                {
+                    kept++; // picked up, then wholly merged into a held stack: the guid is gone, the items are held
+                    value += _plan.ValueOf(guid);
+                }
+            }
+
+            return (kept, value);
         }
 
         /// <inheritdoc/>
@@ -3723,12 +4612,17 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
 
             var away = own.ToGlobal().DistanceTo(lies.ToGlobal());
             var options = owner._options;
-            if (away > options.LootRadiusMetres)
+            if (WantedBy(_kill) is { } want && away > HuntScenario.CorpseReachMetres && (away > owner.LootRadius || !owner.LineIsClearTo(in own, in lies)))
+            {
+                return WantWalkFrom(session, clock, corpse.Guid, in own, in lies, away, want); // M6 14 want loot: a carrier's corpse is walked to whatever its distance on the ground
+            }
+
+            if (away > owner.LootRadius)
             {
                 SkippedUnreached++;
                 LootTally.AddLeftUnreached();
                 Left++;
-                log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"loot: the corpse 0x{corpse.Guid:X8} of '{_kill.Name}' is {away:0.#} m away, beyond the loot radius ({options.LootRadiusMetres:0.#} m, --fight-loot-radius-m); left, not walked to"));
+                log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"loot: the corpse 0x{corpse.Guid:X8} of '{_kill.Name}' is {away:0.#} m away, beyond the loot radius ({owner.LootRadius:0.#} m, --fight-loot-radius-m); left, not walked to"));
                 Finish(session, false);
                 return true;
             }
@@ -3736,6 +4630,13 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             if (Blocked(session, clock, lies.ToGlobal(), _kill.Guid, out var blockedBy))
             {
                 Requeue(session, clock, blockedBy);
+                return true;
+            }
+
+            if (WalkHeld(session, clock, in own, away, _kill.Guid, out var heldBy))
+            {
+                WalkWaits++; // M6 14 (m6-loot-walk-waits): no walk to a corpse begins with a hostile in reach of her; the corpse waits like any put-off one
+                Requeue(session, clock, heldBy);
                 return true;
             }
 
@@ -3750,10 +4651,27 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
 
             if (!los)
             {
+                // M6 6 B2 (m5-loot-walk-for-los): before the corpse is left for its line, the fight's own walk goes once to a floor spot within the loot radius that has one (the step's sweep, FightScenario.SelfDefence.cs).
+                var noWalk = "the walk for a line went, and it still has none";
+                if (!_losWalked)
+                {
+                    _losWalked = true;
+                    if (owner.LootLosSpot(in own, in lies, out var spot, out var spotNote))
+                    {
+                        (_losWalkStarted, _losWalkSpot, _losWalkNote) = (false, spot, spotNote);
+                        _stage = Stage.LosWalk;
+                        _stageStart = clock;
+                        log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"loot: the corpse 0x{corpse.Guid:X8} of '{_kill.Name}' is {away:0.#} m away with no clear line of sight to it ({losText}): the fight's own walk goes first (once) to {spotNote}; then it is looked at again (m5-loot-walk-for-los)"));
+                        return true;
+                    }
+
+                    noWalk = "no walk for a line: " + spotNote;
+                }
+
                 SkippedUnreached++;
                 LootTally.AddLeftUnreached();
                 Left++;
-                log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"loot: the corpse 0x{corpse.Guid:X8} of '{_kill.Name}' is {away:0.#} m away with no clear line of sight to it ({losText}); left, not walked to (ACE's straight-line walk could run the mage into a wall)"));
+                log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"loot: the corpse 0x{corpse.Guid:X8} of '{_kill.Name}' is {away:0.#} m away with no clear line of sight to it ({losText}); {noWalk}; left, not walked to by ACE (its straight-line walk could run the mage into a wall)"));
                 Finish(session, false);
                 return true;
             }
@@ -3860,7 +4778,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             {
                 _ownWalkStarted = true;
                 var note = string.Create(CultureInfo.InvariantCulture, $"the corpse 0x{_corpse:X8} of '{_kill.Name}' at 0x{_ownWalkSpot.CellId:X8} [{_ownWalkSpot.Origin.X:0.#} {_ownWalkSpot.Origin.Y:0.#} {_ownWalkSpot.Origin.Z:0.#}]");
-                if (!owner.BeginLootWalk(session, clock, _corpse, in _ownWalkSpot, note, out var why))
+                if (!owner.BeginLootWalk(session, clock, _corpse, in _ownWalkSpot, note, OwnWalkWhy, out var why))
                 {
                     SkipNoGo(session, "ACE's straight approach may cross a no-go cell and no walk of the fight's own could be planned to it: " + why);
                 }
@@ -3874,8 +4792,44 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             return Seek(session, clock);
         }
 
+        private const string OwnWalkWhy = "ACE's straight approach would cross a no-go cell, so the fight's own walk goes round over the walkable cells (D141, m5-8-loot-no-go-corpse)";
+
+        private const string LosWalkWhy = "the corpse has no clear line of sight from where the mage stood, so the fight's own walk goes to a spot with one (m5-loot-walk-for-los)";
+
+        /// <summary>
+        /// M6 6 B2 (<c>m5-loot-walk-for-los</c>): the fight's own walk to the spot with a line (<see cref="FightScenario.LootLosSpot"/>), once a corpse, as <see cref="OwnWalk"/>: the first frame begins the leg (the Walk phase runs it;
+        /// an attacker or a heal may drop it); the next frame the step is given looks at the corpse again from where the mage stands. A leg that cannot be planned leaves the corpse, named.
+        /// </summary>
+        private bool LosWalk(IGameSessionView session, double clock)
+        {
+            if (!_losWalkStarted)
+            {
+                _losWalkStarted = true;
+                if (!owner.BeginLootWalk(session, clock, _corpse, in _losWalkSpot, $"the corpse 0x{_corpse:X8} of '{_kill.Name}': {_losWalkNote}", LosWalkWhy, out var why))
+                {
+                    SkippedUnreached++;
+                    LootTally.AddLeftUnreached();
+                    Left++;
+                    log.Warn(LogCategory, $"loot: the corpse 0x{_corpse:X8} of '{_kill.Name}' has no clear line of sight and the walk for a line could not be planned ({why}); left, not walked to");
+                    Finish(session, false);
+                }
+
+                return true;
+            }
+
+            log.Info(LogCategory, $"loot: the walk for a line to the corpse 0x{_corpse:X8} of '{_kill.Name}' ended; it is looked at again from where the mage stands");
+            _stage = Stage.Seek;
+            _stageStart = clock;
+            return Seek(session, clock);
+        }
+
         private void Open(IGameSessionView session, bool aceWalk)
         {
+            if (_closeSent == _corpse)
+            {
+                _closeSent = 0; // opened again before the close's check: the new open owns the view
+            }
+
             _aceWalk = aceWalk;
             _pending = session.Actions.OpenContainer(_corpse, ActionSource.Automation);
             _stage = Stage.Opening;
@@ -4060,19 +5014,29 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             var worn = SelfEquipJudge.Worn(state);
             var skills = new QualitiesSkills(state.Self.Qualities);
             var items = new List<MageLootItem>(view.Entries.Count);
+            var cantrips = CantripJudge.Of(state); // M6 14 useful cantrips (the owner, 2026-11-16): a great cantrip keeps its piece only when it is useful to her, her skills read live
             foreach (var entry in view.Entries)
             {
                 if (entry.Resolved && state.Objects.TryGet(entry.Guid, out var item))
                 {
-                    items.Add(rules.ItemFor(item, state.Appraisals.TryGet(entry.Guid, out var appraisal) ? appraisal : null, state.Self.Inventory.Find(entry.Guid).Held, c => gearJudge.Judge(c, worn, skills)));
+                    var appraised = state.Appraisals.TryGet(entry.Guid, out var appraisal) ? appraisal : null;
+                    items.Add(rules.ItemFor(item, appraised, state.Self.Inventory.Find(entry.Guid).Held, c => gearJudge.Judge(c, worn, skills), cantrips));
+                    if (KeepAsideRule.NeedsAppraisal(item.ItemType) && cantrips.GreatOf(appraised, rules.SpellName) is { Count: > 0 } verdicts && CantripVerdictLog.Once(entry.Guid, item.Name, verdicts, "the corpse") is { } line)
+                    {
+                        log.Write(CantripVerdictLog.HasUnread(verdicts) ? LogSeverity.Warning : LogSeverity.Info, LogCategory, line, []);
+                    }
                 }
             }
 
             var context = LootContext.Of(state);
             _packRules ??= new PackRules(owner._ground);
-            var layout = PackLayout.Of(state, _packRules, SaleMemory.Shared.KeptAside.Contains, PackMemory.Shared.Rotation.Contains); // M5 7 D121: each kept item to the pack of its job
+            var layout = PackLayout.Of(state, _packRules, g => CantripRoom.IsGreatPiece(state, g, owner._spells), PackMemory.Shared.Rotation.Contains); // M5 7 D121: each kept item to the pack of its job; the review pack holds the great-cantrip pieces only (the owner, 2026-11-16)
             layout.Publish();
-            _plan = rules.Plan(_corpseName, state.Self.Name, items, context.Burden, context.Capacity, MageLootRules.FreeSlots(state), layout, _packRules, ItemManaKeeper.StonesWanted(state)); // M5 7 S2b: the kit's stones are kept under the floors
+            var sellLoot = RoomCandidates(state, items); // M6 14 keep every great cantrip and the hour load's swap: the sell loot she may drop to make room, read for a corpse with a find that may need it
+            var baseLine = rules.Thresholds.LoadLinePercent;
+            var cycle = CycleLoad.For(state);
+            var loadLine = cycle.LineFor(baseLine, owner._ground.Jumps.Count > 0, session.Clock.Now); // M6 14 hour load: the cycle's rising line on a comfortable ground, else the base line
+            _plan = rules.Plan(_corpseName, state.Self.Name, items, context.Burden, context.Capacity, Quartermaster.PackView.MainPackFree(state), layout, _packRules, ItemManaKeeper.StonesWanted(state), sellLoot, loadLine); // M5 7 S2b: the kit's stones are kept under the floors
             foreach (var line in _plan.DecisionLines())
             {
                 log.Info(LogCategory, line);
@@ -4083,20 +5047,17 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
                 log.Info(LogCategory, line);
             }
 
-            foreach (var guid in _plan.WorthALookGuids)
+            foreach (var guid in _plan.KeptAsideGuids)
             {
-                if (SaleMemory.Shared.KeptAside.Add(guid)) // M5 7 F30: the sale never offers it
-                {
-                    KeepAsideTally.Add();
-                }
+                SaleMemory.Shared.KeptAside.Add(guid); // M5 7 F30: the sale never offers it (M6 14: the scrolls kept and the quests' wants too; the soak line counts the rule's finds alone, once held: the done stage)
             }
-
-            WorthALook += _plan.WorthALookCount;
             PlanKept += _plan.KeptCount;
             PlanLeft += _plan.LeftCount;
             LootTally.Add(_plan.KeptCount, _plan.LeftCount); // M5 7 F29 (D96): the soak line's loot_kept= and loot_left=
+            PackRoomMemory.For(state).NoteLoot(_plan); // M6 14 pack room (m6-pack-room): the items left over the load line call the full-pack trip; with the kept burden they are the loot's room at the next visit
             PlanValue += _plan.KeptValue;
-            log.Info(LogCategory, $"loot: plan for 0x{_corpse:X8} ({rules.Thresholds}; burden {context.Burden} of {context.Capacity}, {_plan.FreeSlots} free slot(s); {layout.SlotsLine()}): {_plan.Summary()}{_plan.RouteSummary()}");
+            log.Info(LogCategory, $"loot: plan for 0x{_corpse:X8} ({rules.Thresholds}; burden {context.Burden} of {context.Capacity}, {_plan.FreeSlots} free slot(s); {layout.SlotsLine()}{(cycle.Begun ? "; " + cycle.LineWhy(baseLine, loadLine, session.Clock.Now) : string.Empty)}): {_plan.Summary()}{_plan.RouteSummary()}");
+            LogRoom(state, sellLoot);
             if (_plan.Count(MageLootVerdict.ValueUnknown) > 0 && !_unknownNamed)
             {
                 _unknownNamed = true;
@@ -4110,9 +5071,36 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
                 return true;
             }
 
-            _looter = new CorpseLooter(log, LogCategory, _corpse, _plan);
-            _stage = Stage.Looting;
-            return true;
+            return _plan.Drops.Count > 0 ? BeginRoom(session, clock) : StartLooting(session); // M6 14 keep every great cantrip: the room is made before the take, on the same visit
+        }
+
+        /// <summary>M6 5 q4: the chat total when the pick-ups began (the refusal's line is read since).</summary>
+        private long _lootChatMark;
+
+        /// <summary>
+        /// M6 5 q4 (D57): a wanted item the plan took that is not held after the loop was refused by the server when its chat says so ("You have solved this quest too recently!", the 20 h pick-up gate of the tusk's own Quest string):
+        /// logged by wcid with the server's text, and the wcid is no longer wanted in this fight (<see cref="WantHook"/>), so no later corpse is tried for it and there is no loop. Check, act, check: the pick-up was the act, the held state and the chat the check.
+        /// </summary>
+        private void NoteWantRefusals(IGameSessionView session)
+        {
+            if (owner._options.Want.Count == 0 || _plan is null)
+            {
+                return;
+            }
+
+            var said = QuestReads.Since(session.State.Chat, _lootChatMark).Select(l => l.Text).ToList();
+            foreach (var wcid in RefusedWants(said, _plan, guid => session.State.Self.Inventory.Find(guid).Held))
+            {
+                if (owner._wantRefused.Add(wcid))
+                {
+                    var line = said.First(t => t?.StartsWith(QuestSolvedTooText, StringComparison.Ordinal) == true)!;
+                    log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"loot: want {wcid} refused by the server: {line}; the item is left and not tried again in this fight"));
+                    if (owner._options.Until is { Chat: null } until && until.ItemWcid == wcid)
+                    {
+                        owner._untilRefused = line; // M6 5 F1 (review 5-R4): the until's only item is refused: the fight ends at its safe point
+                    }
+                }
+            }
         }
 
         private bool Looting(IGameSessionView session, double clock)
@@ -4124,36 +5112,29 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
 
             var looter = _looter;
             _looter = null;
-            var kept = 0;
-            long value = 0;
-            foreach (var guid in _plan!.Kept)
-            {
-                if (session.State.Self.Inventory.Find(guid).Held)
-                {
-                    kept++;
-                    value += _plan.ValueOf(guid);
-                    KeptGuids.Add(guid);
-                }
-                else if (looter.WasMergedAway(guid))
-                {
-                    kept++; // picked up, then wholly merged into a held stack: the guid is gone, the items are held
-                    value += _plan.ValueOf(guid);
-                }
-            }
-
+            NoteWantRefusals(session);
+            var (kept, value) = TallyKept(session, looter);
             StackMerges += looter.StackMerges;
+            CheckGreatTaken(session, looter); // M6 14 keep every great cantrip: each piece looked for in her pack
 
             Looted++;
             Kept += kept;
             Value += value;
             var named = looter.StoppedBy is "pack-full" or "burden" ? $"; the loop stopped on {looter.StoppedBy}, the rest of the corpse is left" : string.Empty;
-            log.Info(LogCategory, $"loot: corpse 0x{_corpse:X8} done: kept {kept} of {_plan.Kept.Count} planned (value {value}); {looter.Summary}{named}");
+            log.Info(LogCategory, $"loot: corpse 0x{_corpse:X8} done: kept {kept} of {_plan!.Kept.Count} planned (value {value}); {looter.Summary}{named}");
+            owner.NoteUntilCount(session, _kill.Name, _corpse, WantedBy(_kill)); // M6 14 want loot: hunt-until: N of 16
             _wear.Clear();
             foreach (var guid in _plan.WorthALookGuids)
             {
-                if (session.State.Self.Inventory.Find(guid).Held)
+                if (session.State.Self.Inventory.Find(guid).Held && !_plan.Items.Any(i => i.Guid == guid && MageLootRules.IsQuestWant(i))) // M6 5 q4: a quest item is no gear
                 {
                     _wear.Enqueue(guid); // M5 7 D125: a find worth a look is judged for the self-equip before the corpse closes
+                    if (_looked.Add(guid))
+                    {
+                        WorthALook++; // M6 14 (m6-lore-cantrips, the count kept honest): a wand or cantrip piece the rule matched, counted once and only when it is in her packs (not a planned pick-up the loop did not make, not a scroll, not a quest item)
+                    }
+
+                    KeepAsideTally.Add(guid); // the soak line's, once over the process
                 }
             }
 
@@ -4168,6 +5149,16 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         /// </summary>
         private bool Wearing(IGameSessionView session, double clock)
         {
+            if (_swap is not null)
+            {
+                if (SwapStep(session, clock))
+                {
+                    return true;
+                }
+
+                _stageStart = clock;
+            }
+
             if (_pending is not null)
             {
                 if (_pending.Outcome is null && clock - _stageStart <= ActionSeconds)
@@ -4192,7 +5183,8 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
                     continue;
                 }
 
-                var choice = GearJudge(session).Judge(SelfEquipJudge.CandidateOf(session.State, item), SelfEquipJudge.Worn(session.State), new QualitiesSkills(session.State.Self.Qualities));
+                var worn = SelfEquipJudge.Worn(session.State);
+                var choice = LootJudge(session).Judge(SelfEquipJudge.CandidateOf(session.State, item), worn, new QualitiesSkills(session.State.Self.Qualities)); // M6 14 capacity: the gear phase's wear pick on her live load, when one is held
                 if (choice.Kind == SelfEquipKind.None)
                 {
                     continue;
@@ -4201,10 +5193,56 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
                 log.Info(LogCategory, "loot: " + choice + (choice.Kind == SelfEquipKind.Swap ? " (the swap waits for the home visit, in peace)" : string.Empty));
                 if (choice.Kind == SelfEquipKind.Wear)
                 {
-                    _pending = session.Actions.Wield(guid, (EquipMask)choice.Location, ActionSource.Automation);
+                    _pending = Quartermaster.Wardrobe.Send(session, new Quartermaster.WieldRequest(guid) { Name = item.Name, Location = choice.Location }, new Quartermaster.WieldResult()); // M6 16 E5e1: the one wield routine's send (the find was read held and not worn just above); the check after is this step's own
+                    _wearingGuid = guid;
                     _stageStart = clock;
                     return true;
                 }
+
+                if (choice.Kind == SelfEquipKind.Replace)
+                {
+                    // M6 14 capacity (live ladder58 12:23:21: a decided replace was only logged): carried out now, between kills with no attacker on her, check, act, check; else it waits for the next visit's gear phase, named
+                    var displaced = (choice.Displaced.Count > 0 ? choice.Displaced : [choice.Replaces]).Select(g => worn.FirstOrDefault(w => w.Guid == g)).ToList();
+                    if (displaced.Any(d => d is null))
+                    {
+                        log.Info(LogCategory, $"loot: gear: replace with '{choice.Name}' 0x{choice.Guid:X8} waits for the next visit: a piece it displaces is not worn now");
+                        continue;
+                    }
+
+                    if (BeginSwap(session, clock, choice, displaced!, relight: false, out var waits))
+                    {
+                        _stageStart = clock;
+                        return SwapStep(session, clock) || Wearing(session, clock);
+                    }
+
+                    log.Info(LogCategory, $"loot: gear: replace with '{choice.Name}' 0x{choice.Guid:X8} waits for the next visit's gear phase: {waits}");
+                    continue;
+                }
+
+                if (choice is { Kind: SelfEquipKind.Review, LoreNeed: { } need })
+                {
+                    owner.LoreWanted?.Invoke(string.Create(CultureInfo.InvariantCulture, $"the find '{choice.Name}' 0x{choice.Guid:X8} waits on Arcane Lore {need}")); // M6 14 own lore: the spend raises it now, not at the next level-up
+                }
+            }
+
+            if (PutBackLeftOff(session, clock)) // M6 16 E5e4: a piece an earlier swap left off goes back on before anything else comes off
+            {
+                _stageStart = clock;
+                return SwapStep(session, clock) || Wearing(session, clock);
+            }
+
+            // M6 14 own lore: a worn piece whose spells are off and whose lore she now meets is re-wielded once (ACE reads the lore only at the wield)
+            if (RelightCandidate(session, SelfEquipJudge.Worn(session.State)) is { } dark)
+            {
+                var relight = new SelfEquipChoice(SelfEquipKind.Replace, dark.Guid, dark.Name, dark.Location, dark.Guid, "its spells are off and her Arcane Lore now meets its ItemDifficulty: off and on again lights them");
+                log.Info(LogCategory, $"loot: gear: re-wield '{dark.Name}' 0x{dark.Guid:X8}: {relight.Why}");
+                if (BeginSwap(session, clock, relight, [dark], relight: true, out var waits))
+                {
+                    _stageStart = clock;
+                    return SwapStep(session, clock) || Wearing(session, clock);
+                }
+
+                log.Info(LogCategory, $"loot: gear: re-wield '{dark.Name}' 0x{dark.Guid:X8} waits: {waits}");
             }
 
             Close(session);
@@ -4213,7 +5251,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
 
         /// <summary>M5 7 D125, D149: the self-equip judge of the loot step: the keep-aside block's cantrips and the war element of the plan at the mage's level.</summary>
         private SelfEquipJudge GearJudge(IGameSessionView session) =>
-            new(rules.Thresholds.KeepAside?.SpellNames ?? [], SelfEquipJudge.ElementOf(owner._ground.PlanFor(session.State.Self.Qualities.Level)?.Family), rules.SpellName);
+            Quartermaster.Wardrobe.For(session.State).JudgeWithTerms(owner._ground, owner._spells, out _); // M6 16 E5e2: the session's one wear judge, the trip's; Q10c: with the wear pick's terms of her now, as the trip's pick reads them
 
         private void Close(IGameSessionView session)
         {
@@ -4248,6 +5286,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
 
         private void Finish(IGameSessionView session, bool close)
         {
+            CutWalk(session, session.Clock.Now, "the corpse is left", wait: true); // M6 14: a corpse left while ACE still walks her to it (the step's own time limits)
             StackMerges += _looter?.StackMerges ?? 0;
             _looter?.Abandon("fight-moved-on");
             _looter = null;

@@ -957,6 +957,19 @@ internal sealed class FakeAceSession
                         ? (AceWireWriters.TellEvent(PlayerGuid!.Value, GameEventSequence++, tellText, PlayerName, PlayerGuid.Value, PlayerGuid.Value, 3), UiQueue)
                         : (AceWireWriters.WeenieError(PlayerGuid!.Value, GameEventSequence++, 0x052B), UiQueue));  // CharacterNotAvailable
                     break;
+                case 0x0032:  // TalkDirect (GameActionTalkDirect.cs 18-50): message, then the target's id; the only creature on the landblock here is the player itself
+                    var directText = AceClientReaders.ReadString16L(payload);
+                    var directTarget = payload.ReadUInt32();
+                    if (directTarget != PlayerGuid!.Value)
+                    {
+                        EnqueueSend((AceWireWriters.WeenieError(PlayerGuid.Value, GameEventSequence++, 0x052B), UiQueue));  // CharacterNotAvailable
+                        break;
+                    }
+
+                    // The confirmation line first (ChatMessageType.OutgoingTell = 4), then, the target being a player, its incoming tell.
+                    EnqueueSend((AceWireWriters.ServerMessage($"You tell {PlayerName}, \"{directText}\"", 4), UiQueue));
+                    EnqueueSend((AceWireWriters.TellEvent(PlayerGuid.Value, GameEventSequence++, directText, PlayerName, PlayerGuid.Value, PlayerGuid.Value, 3), UiQueue));
+                    break;
                 default:
                     Counters.UnhandledMessages++;
                     break;

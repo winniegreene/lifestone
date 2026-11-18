@@ -33,7 +33,7 @@ namespace Lifestone.Net.Session;
 /// 11.6096 0x00547440); F7E6 on the database queue (5, <c>Proto_UI::SendToDatabase</c>, 11.4186 0x00546960, 11.6096
 /// 0x00547520). ACE ignores the queue of client fragments.</para>
 /// <para><b>The world sends</b> (N7) need <see cref="SessionPhase.InWorld"/>: MoveToState, AutonomousPosition and Jump
-/// (<see cref="MovementActionCodecs"/>), Use and QueryHealth (<see cref="ObjectActionCodecs"/>), Talk and Tell
+/// (<see cref="MovementActionCodecs"/>), Use and QueryHealth (<see cref="ObjectActionCodecs"/>), Talk, Tell and TalkDirect
 /// (<see cref="ChatActionCodecs"/>); each codec cites the retail sender it follows. Each takes the next GameAction
 /// sequence and goes on the weenie queue, as every one of those senders does (<c>Proto_UI::SendToWeenie</c>, above).
 /// Input a codec refuses (a RawMotionState with more than 31 actions, a non-ASCII Tell, a string too long for its count)
@@ -445,6 +445,48 @@ internal sealed partial class SessionMachine
         return SendAction(connection, writer);
     }
 
+    public OutboundTicket SendBuyHouse(uint guardian, IReadOnlyList<uint> items)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendBuyHouse");
+        HouseActionCodecs.ValidateItems(items);
+        var connection = _connection!;
+        var writer = BeginMessage();
+        HouseActionCodecs.WriteBuyHouse(writer, connection.NextActionSequence, guardian, items);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendRentHouse(uint guardian, IReadOnlyList<uint> items)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendRentHouse");
+        HouseActionCodecs.ValidateItems(items);
+        var connection = _connection!;
+        var writer = BeginMessage();
+        HouseActionCodecs.WriteRentHouse(writer, connection.NextActionSequence, guardian, items);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendHouseQuery()
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendHouseQuery");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        HouseActionCodecs.WriteHouseQuery(writer, connection.NextActionSequence);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendTeleToHouse()
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendTeleToHouse");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        HouseActionCodecs.WriteTeleToHouse(writer, connection.NextActionSequence);
+        return SendAction(connection, writer);
+    }
+
     public OutboundTicket SendTeleToMarketPlace()
     {
         EnterGameThread(capture: false);
@@ -512,6 +554,16 @@ internal sealed partial class SessionMachine
         var connection = _connection!;
         var writer = BeginMessage();
         ChatActionCodecs.WriteTell(writer, connection.NextActionSequence, target, text);
+        return SendAction(connection, writer);
+    }
+
+    public OutboundTicket SendTalkDirect(uint target, ReadOnlySpan<char> text)
+    {
+        EnterGameThread(capture: false);
+        RequirePhase(SessionPhase.InWorld, "SendTalkDirect");
+        var connection = _connection!;
+        var writer = BeginMessage();
+        ChatActionCodecs.WriteTalkDirect(writer, connection.NextActionSequence, target, text);
         return SendAction(connection, writer);
     }
 

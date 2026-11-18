@@ -236,7 +236,7 @@ public sealed class HeadlessBody(DatSet dats, ILogSink log, string category, Fun
     /// <param name="name">The runner's name.</param>
     /// <param name="confirmBudgetMilliseconds">The confirmation budget per step.</param>
     public NavRunner NewRunner(INavPathSource source, string name, double confirmBudgetMilliseconds) =>
-        new(Move!, new ControllerNavBody(Walker!.Controller), source, Confirmer, Audit, new NavRunnerOptions { Name = name, ConfirmBudgetMilliseconds = confirmBudgetMilliseconds }, _log, _creatures);
+        new(Move!, new ControllerNavBody(Walker!.Controller), source, Confirmer, Audit, new NavRunnerOptions { Name = name, ConfirmBudgetMilliseconds = confirmBudgetMilliseconds, PredictiveSteering = true, PredictiveOutdoors = true }, _log, _creatures);
 
     /// <summary>Feeds the streamer the landblocks ahead on the runner's route; true when the corridor changed.</summary>
     /// <param name="runner">The runner.</param>

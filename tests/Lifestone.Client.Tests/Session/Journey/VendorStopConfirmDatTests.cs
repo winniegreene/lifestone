@@ -43,7 +43,7 @@ namespace Lifestone.Client.Tests.Session.Journey;
 /// Test data, read-only from the pinned world database (ACE-World-Database-v0.9.296), as <see cref="F6RenaldMoveToDatTests"/>: Renald the Elder 0x7A9B4021 at (139.23, 18.33, 94.01) in
 /// cell 0xA9B40141 with UseRadius 5; the shop's front door 0x7A9B4015 (Setup 0x020019FF at (132.56, 17.115, 94), turned 180 degrees); Monyra the Jeweler 0x7A9B4020 at
 /// (157.19, 135.30, 66.12) in 0xA9B40117 (Archmage Cindrue's entry hall) and Ecutha the Tailor 0x7A9B4025 at (56.52, 132.0, 66.12) in 0xA9B4012A, the two Holtburg vendors no
-/// profile names, checked so no other shop hides the same fault: Monyra's own point confirms; Ecutha's leg is refused in her lobby, at a pillar on the room graph's line (<see cref="Gaps"/>).
+/// profile names, checked so no other shop hides the same fault: both own points confirm (Ecutha's lobby holds the pillar of Holtburg's scriveners' hall on a portal's centre: the room graph crosses beside it since M6 7 G, <see cref="HoltburgWalkOutDatTests"/>).
 /// </remarks>
 [Trait("Tier", "Exhaustive")]
 public sealed class VendorStopConfirmDatTests(DatSetFixture fixture, ITestOutputHelper output) : IClassFixture<DatSetFixture>
@@ -70,15 +70,11 @@ public sealed class VendorStopConfirmDatTests(DatSetFixture fixture, ITestOutput
     [
         ("Monyra the Jeweler", 0xA9B40117, new Vector3(157.19f, 135.298f, 66.12f)),
         ("Ecutha the Tailor", 0xA9B4012A, new Vector3(56.52f, 132f, 66.12f)),
+        ("Sedor Wystan the Blacksmith", 0xA9B40100, new Vector3(87.48f, 131.04f, 66.005f)), // M6 item 14: the leather set's vendor (pathwarden.json's leather block; landblock_instance guid 0x7A9B4026)
     ];
 
     /// <summary>The vendors whose own point the pre-check refuses, with a piece of the first refused sample's text; a fixed one fails here until its row goes.</summary>
-    private static readonly Dictionary<string, string> Gaps = new()
-    {
-        // TODO(nav-static-footprint): the room graph's line through Ecutha's lobby 0xA9B40127, doorway to doorway, passes the pillar 0x0200020E at (55.4, 133.6), a 1 m band of no
-        // floor for the foot sphere; the ground probe refuses the plan there (not at her point, which stands). No profile names her; one that does needs a stop point or a route round the pillar.
-        ["Ecutha the Tailor"] = "cell 0xA9B40127",
-    };
+    private static readonly Dictionary<string, string> Gaps = [];
 
     private DatSet Dats => fixture.Dats;
 
@@ -96,7 +92,6 @@ public sealed class VendorStopConfirmDatTests(DatSetFixture fixture, ITestOutput
             output.WriteLine($"{vendor.Name}: stop 0x{vendor.StopCell:X8} {stop}: {status} {rig.Confirmer.ConfirmedMetres:F1} m, {rig.Confirmer.GroundSamples} probes, {rig.Confirmer.Placements} placements; {rig.Confirmer.Failure}");
             if (Gaps.TryGetValue(vendor.Name, out var gap))
             {
-                // M5 7 F13 put Ecutha in the profile (a vendor of the kit only, no trip walks to her): her named gap holds here too.
                 Assert.NotEqual(RouteConfirmStatus.Confirmed, status);
                 Assert.Contains(gap, rig.Confirmer.Failure?.ToString() ?? string.Empty, StringComparison.Ordinal);
                 continue;
@@ -263,6 +258,41 @@ public sealed class VendorStopConfirmDatTests(DatSetFixture fixture, ITestOutput
         Assert.True(distance <= 3.0 + 1.0, "within his reach (UseRadius 3 in the world database, plus the close rule's margin)");
         Assert.True(cylinder <= 3.0, $"within ACE's use radius, cylinder to cylinder: {cylinder:F2} m");
         Assert.Equal(0, runner.Rungs);
+    }
+
+    /// <summary>
+    /// M6 14 grocer (the owner, 2026-11-13: sell the empty flasks): the walk to Fispur Ansel the Grocer (714) as the station sends it from Holtburg's lifestone, the home of every Holtburg profile that lists him. His stop cell is his
+    /// own, so the request is his own point with <see cref="ShopLeg.UnseenVendorReachMetres"/> as the range (<c>ResupplyRun.RoomRequest</c>): the plan enters his shop 0xA9B4016A through the room 0xA9B4016E, ends on his floor within
+    /// that range of his point, and the walker's pre-check confirms it. What this does not show: the shop's doors (0x7A9B401E and 0x7A9B401F, world objects the dats do not hold) and his body, which a live round walks
+    /// (<c>TODO(m6-grocer-stop-point)</c>).
+    /// </summary>
+    [RequiresDatsFact]
+    public void The_stations_walk_from_the_lifestone_to_the_Grocer_enters_his_shop_and_passes_the_pre_check()
+    {
+        var ground = GroundCatalog.Get("holtburg-outskirts");
+        var grocer = ground.VendorOf(714)!;
+        Assert.Equal((grocer.Cell, (Vector3?)null), (grocer.StopCell, grocer.StopPoint));
+        var rig = Rig(ground);
+        var request = new TravelRequest(new TeleportDestination(grocer.Name, [], new WorldLocation(grocer.Name, new CellPosition(grocer.StopCell, grocer.Point), HasHeight: true, HeadingDegrees: 0), "grocer test"), TravelPurpose.Vendor, Range: ShopLeg.UnseenVendorReachMetres);
+        var goal = rig.Planner.GoalOf(rig.View.View, request);
+        Assert.False(goal.IsObject);
+        Assert.Equal((float)ShopLeg.UnseenVendorReachMetres, goal.StopTolerance);
+
+        var path = rig.Planner.SourceFor(rig.Home.CellId, JourneyLegPlanner.GoalCellOf(goal), rig.Map).Plan(rig.Home, goal, new NavScars());
+        var end = path.Waypoints.Count > 0 ? path.Waypoints[^1].At : rig.Home;
+        var reach = Vector2.Distance(new Vector2(end.Origin.X, end.Origin.Y), new Vector2(grocer.Point.X, grocer.Point.Y));
+        output.WriteLine($"lifestone -> {grocer.Name}: {path.Status} {path.Reason}, {path.Waypoints.Count} waypoints, cells entered {string.Join(" ", path.CellsEntered.Select(c => c.ToString("X8", System.Globalization.CultureInfo.InvariantCulture)))}; ends 0x{end.CellId:X8} {end.Origin}, {reach:F2} m from his point");
+        Assert.Equal(NavPathStatus.Found, path.Status);
+        Assert.Equal(rig.Home.CellId, path.Waypoints[0].At.CellId);
+        Assert.Equal([0xA9B4016Eu, 0xA9B4016Au], path.CellsEntered);
+        Assert.Equal(0xA9B4016Au, end.CellId);
+        Assert.InRange(reach, 0f, (float)ShopLeg.UnseenVendorReachMetres + 0.01f);
+        Assert.InRange(MathF.Abs(end.Origin.Z - grocer.Point.Z), 0f, NavRunner.ArrivalHeightMetres);
+
+        var status = rig.Confirmer.ConfirmAll(path.Waypoints, goal.StopTolerance);
+        output.WriteLine($"pre-check: {status} {rig.Confirmer.ConfirmedMetres:F1} m, {rig.Confirmer.GroundSamples} probes, {rig.Confirmer.Placements} placements; {rig.Confirmer.Failure}");
+        Assert.Equal(RouteConfirmStatus.Confirmed, status);
+        AssertRingStands(rig.World, rig.Foot, grocer.StopCell, grocer.Point, goal.StopTolerance, grocer.Name, wholeRing: false);
     }
 
     [RequiresDatsFact]
@@ -457,6 +487,7 @@ public sealed class VendorStopConfirmDatTests(DatSetFixture fixture, ITestOutput
     /// <summary>The journeys' leg planner from the home lifestone over the Holtburg collision, with the walker's confirmer on the human body.</summary>
     private sealed record LegRig(JourneyLegPlanner Planner, J1JourneyRig View, NavMap Map, CellFrame Home, PhysicsWorld World, RouteConfirmer Confirmer, PhysSphere Foot)
     {
+
         /// <summary>The point request the resupply station sends for a stop (<c>ResupplyRun.Meet</c>: the stop cell and point, no object, no range), planned from the lifestone.</summary>
         public (NavPath Path, NavGoal Goal) Plan(string name, uint stopCell, Vector3 stop) => Plan(Home, name, stopCell, stop);
 

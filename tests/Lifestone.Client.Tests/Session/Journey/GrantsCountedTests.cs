@@ -59,6 +59,66 @@ public sealed partial class GrantsCountedTests(DatSetFixture fixture) : IClassFi
     }
 
     [Fact]
+    public void The_climber_is_refused_every_grant_and_place_by_name_unless_the_session_opted_in_M6_0_F5()
+    {
+        var rig = new J3aStationRig();
+        rig.R.H.State.Self.Name = MageTemplate.ClimberName;
+        var tools = rig.View.Tools;
+
+        var handles = new[]
+        {
+            tools.SpawnItem(628, null, ActionSource.Host).Outcome,
+            tools.AddXp(1000, ActionSource.Host).Outcome,
+            tools.Place(Somewhere(), ActionSource.Host).Outcome,
+            tools.RotCorpses(ActionSource.Host).Outcome,
+            tools.LearnSpells([1, 2, 3], ActionSource.Host).Outcome,
+        };
+
+        Assert.All(handles, o =>
+        {
+            Assert.Equal(ActionOutcomeKind.Refused, o!.Value.Kind);
+            Assert.Contains("TODO(m6-climber-no-grant)", o.Value.Detail, StringComparison.Ordinal);
+        });
+        Assert.Equal(default, tools.Verbs.Counts); // refused at the gate: nothing is sent and nothing is counted
+        Assert.Contains(rig.R.H.Log.Entries, e => e.Message.Contains("TODO(m6-climber-no-grant)", StringComparison.Ordinal));
+
+        // The requests that change nothing are not refused, and any other character is not either.
+        tools.Status(ActionSource.Host);
+        rig.R.H.State.Self.Name = "Someone Else";
+        tools.SpawnItem(628, null, ActionSource.Host);
+        Assert.Equal(1, tools.Verbs.Counts.Item);
+
+        // The named opt-in (--allow-climber-grant) lets the one Alchemy grant of item 8 through.
+        rig.R.H.State.Self.Name = MageTemplate.ClimberName;
+        rig.R.H.Api.AllowClimberGrant = true;
+        tools.SpawnItem(628, null, ActionSource.Host);
+        Assert.Equal(2, tools.Verbs.Counts.Item);
+    }
+
+    [Fact]
+    public void The_models_climber_is_refused_every_grant_and_place_by_the_same_guard_so_granted_zero_means_the_same_for_her()
+    {
+        var rig = new J3aStationRig();
+        rig.R.H.State.Self.Name = MageTemplate.ModelClimberName;
+        var tools = rig.View.Tools;
+        var handles = new[]
+        {
+            tools.SpawnItem(628, null, ActionSource.Host).Outcome,
+            tools.AddXp(1000, ActionSource.Host).Outcome,
+            tools.Place(Somewhere(), ActionSource.Host).Outcome,
+            tools.RotCorpses(ActionSource.Host).Outcome,
+            tools.LearnSpells([1, 2, 3], ActionSource.Host).Outcome,
+        };
+
+        Assert.All(handles, o =>
+        {
+            Assert.Equal(ActionOutcomeKind.Refused, o!.Value.Kind);
+            Assert.Contains("TODO(m6-climber-no-grant)", o.Value.Detail, StringComparison.Ordinal);
+        });
+        Assert.Equal(default, tools.Verbs.Counts);
+    }
+
+    [Fact]
     public void A_request_refused_before_it_is_sent_counts_nothing_and_each_item_request_counts_one()
     {
         var rig = new J3aStationRig();

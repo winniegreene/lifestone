@@ -39,11 +39,12 @@
 
 .PARAMETER Record
     Record the game window for the hero video (M5 7, D97; the owner's yes of 2026-10-29). Adds --video-sync-marker to the game arguments (one white frame and its log line
-    'video_sync_marker t=<unix_ms>', 2 s after the world shows, so a cut lines up with the log's clock to the frame). Once the game's window exists (polled up to 180 s), starts
-    ffmpeg (the one on PATH) with gdigrab over the window's client area on the desktop: 30 fps, no cursor, x264 ultrafast on one thread at about 1.8 Mbps, cut into
-    -RecordSegmentSeconds files <run folder>\record\rec-NNN.ts (MPEG-TS: it needs no index, so a crash or a kill loses nothing written) with record\segments.csv (each file's start and end in
-    seconds from the recording's start) and record\record.txt (the start in UTC, the area, the command). ffmpeg's output goes to record\ffmpeg.log, never the console. It reads
-    the screen only: the window must stay visible and on top (a window over it, or a locked screen, is what is recorded then). Stopped in the finally (q on its input, then
+    'video_sync_marker t=<unix_ms>', 2 s after the world shows, so a cut lines up with the log's clock to the frame). Once this run's game window exists and has been stable for
+    5 s (polled up to 180 s; matched by its command line, so another Godot window is never taken), starts ffmpeg (the one on PATH, 8 or later) on the window itself through
+    tools\WindowCapture.psm1 (gfxcapture, Windows Graphics Capture: a window on top of the game is not recorded; the owner, 2026-11-16): 30 fps, no cursor, x264 ultrafast on
+    one thread at about 1.8 Mbps, cut into -RecordSegmentSeconds files <run folder>\record\rec-NNN.ts (MPEG-TS: it needs no index, so a crash or a kill loses nothing written)
+    with record\segments.csv (each file's start and end in seconds from the recording's start) and record\record.txt (the start in UTC, the window, the command). ffmpeg's
+    output goes to record\ffmpeg.log, never the console. A minimised window gives no new frames (the video holds the last one). Stopped in the finally (q on its input, then
     killed after 5 s: ffmpeg did not stop on q from a pipe in the test, and the files survive a kill); a hard kill of this script still ends it at the play timeout plus 600 s (-t). The report gains a line recording= with the folder, the files and the bytes.
 
 .PARAMETER RecordSegmentSeconds
@@ -264,9 +265,11 @@ Write-Host "[soak] game arguments: $gameArgs"
 Write-Host "[soak] after the game: copy every lifestone*.log from $godotLogs into the run folder, then tools\soak-report.ps1 -RunFolder $runFolder"
 Write-Host "[soak] lock: $lockFile"
 if ($Record) {
-    $ffmpeg = Get-Command ffmpeg -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $ffmpeg) { $problems.Add('-Record: ffmpeg is not on PATH') }
-    Write-Host "[soak] recording: the game window's client area by ffmpeg gdigrab, 30 fps, x264 ultrafast one thread ~1.8 Mbps, $RecordSegmentSeconds s files in $recordFolder; --video-sync-marker in the game arguments"
+    Import-Module (Join-Path $PSScriptRoot 'WindowCapture.psm1') -Force
+    $ffmpegCheck = Test-WindowCaptureFfmpeg
+    foreach ($p in $ffmpegCheck.Problems) { $problems.Add($p) }
+    $ffmpeg = [pscustomobject]@{ Source = $ffmpegCheck.Path }
+    Write-Host "[soak] recording: the game window itself by ffmpeg gfxcapture (tools\WindowCapture.psm1), 30 fps, x264 ultrafast one thread ~1.8 Mbps, $RecordSegmentSeconds s files in $recordFolder; --video-sync-marker in the game arguments"
 }
 if ($problems.Count -eq 0) { Write-Host '[soak] preconditions: all met' }
 else { foreach ($p in $problems) { Write-Host "[soak] precondition not met: $p" -ForegroundColor Yellow } }
@@ -279,80 +282,22 @@ if ($Plan) {
 if ($problems.Count -gt 0) { Stop-Refused ($problems -join "`n  ") }
 
 # --- The recording (-Record, D97). ---
+if ($Record) { Import-Module (Join-Path $PSScriptRoot 'WindowCapture.psm1') -Force } # every recording is a window capture (the owner, 2026-11-16)
 function Find-SoakGameWindow([int] $Seconds) {
-    # The game's top window and its client area in physical pixels (the thread made per-monitor DPI aware first), polled until it exists and lies wholly on the
-    # virtual screen (godot.ps1 -Offscreen starts it at -20000,-20000; the game brings it on screen, and a grab of an off-screen area would record nothing).
-    if (-not ('SoakRec.Win' -as [type])) {
-        Add-Type -Namespace SoakRec -Name Win -MemberDefinition @'
-[DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out RECT r);
-[DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref POINT p);
-[DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr c);
-[StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
-[StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
-'@
-    }
-    [SoakRec.Win]::SetThreadDpiAwarenessContext([IntPtr](-4)) | Out-Null
-    Add-Type -AssemblyName System.Windows.Forms
-    $screen = [System.Windows.Forms.SystemInformation]::VirtualScreen
-    $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
-    while ([DateTime]::UtcNow -lt $deadline) {
-        foreach ($g in @(Get-Process -Name 'Godot*' -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero -and $_.ProcessName -notlike '*console*' })) {
-            $c = New-Object SoakRec.Win+RECT
-            $p = New-Object SoakRec.Win+POINT
-            if ([SoakRec.Win]::GetClientRect($g.MainWindowHandle, [ref]$c) -and [SoakRec.Win]::ClientToScreen($g.MainWindowHandle, [ref]$p) -and $c.R -ge 320 -and $c.B -ge 240 -and
-                $p.X -ge $screen.Left -and $p.Y -ge $screen.Top -and ($p.X + $c.R) -le $screen.Right -and ($p.Y + $c.B) -le $screen.Bottom) {
-                return [pscustomobject]@{ Pid = $g.Id; X = $p.X; Y = $p.Y; Width = ($c.R - ($c.R % 2)); Height = ($c.B - ($c.B % 2)) }
-            }
-        }
-        Start-Sleep -Seconds 2
-    }
-    return $null
+    # This run's game window (its command line names this run's stop file), stable for 5 s: Godot re-creates its window at start-up. A window capture records the
+    # window's own frames, so godot.ps1 -Offscreen's off-screen start and windows on top of it do not matter.
+    return Find-LifestoneGameWindow -CommandLineLike "--autopilot-stop-file=$runRelative/stop" -StableSeconds 5 -TimeoutSeconds $Seconds
 }
 
 function Start-SoakRecording($Window, [int] $LimitSeconds) {
-    New-Item -ItemType Directory -Force -Path $recordFolder | Out-Null
-    $ffArgs = @('-hide_banner', '-loglevel', 'warning', '-stats', '-stats_period', '60', '-y', '-f', 'gdigrab', '-framerate', '30', '-draw_mouse', '0',
-        '-offset_x', "$($Window.X)", '-offset_y', "$($Window.Y)", '-video_size', "$($Window.Width)x$($Window.Height)", '-i', 'desktop', '-t', "$LimitSeconds",
-        '-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '1', '-x264-params', 'threads=1', '-b:v', '1800k', '-maxrate', '2000k', '-bufsize', '4000k',
-        '-pix_fmt', 'yuv420p', '-g', '300', '-f', 'segment', '-segment_time', "$RecordSegmentSeconds", '-reset_timestamps', '1',
-        '-segment_list', (Join-Path $recordFolder 'segments.csv'), '-segment_list_type', 'csv', (Join-Path $recordFolder 'rec-%03d.ts'))
-    $psi = [System.Diagnostics.ProcessStartInfo]::new($ffmpeg.Source)
-    foreach ($a in $ffArgs) { $psi.ArgumentList.Add($a) }
-    $psi.UseShellExecute = $false
-    $psi.RedirectStandardInput = $true
-    $psi.RedirectStandardError = $true
-    $psi.CreateNoWindow = $true
-    $started = [DateTime]::UtcNow
-    $proc = [System.Diagnostics.Process]::Start($psi)
-    # ffmpeg's messages and its progress line (once a minute) are copied to the file by .NET itself: no PowerShell code runs on another thread.
-    $log = [IO.File]::Create((Join-Path $recordFolder 'ffmpeg.log'))
-    $copy = $proc.StandardError.BaseStream.CopyToAsync($log)
-    [IO.File]::WriteAllText((Join-Path $recordFolder 'record.txt'), ("start_utc={0} unix_ms={1} area={2}x{3}+{4}+{5} game_pid={6} ffmpeg_pid={7} segment_s={8}`nffmpeg {9}`n" -f $started.ToString('yyyy-MM-ddTHH:mm:ss.fffZ'), ([DateTimeOffset]$started).ToUnixTimeMilliseconds(), $Window.Width, $Window.Height, $Window.X, $Window.Y, $Window.Pid, $proc.Id, $RecordSegmentSeconds, ($ffArgs -join ' ')))
-    Write-Host "[soak] recording started at $($started.ToString('HH:mm:ss')) UTC (ffmpeg pid $($proc.Id), area $($Window.Width)x$($Window.Height) at $($Window.X),$($Window.Y)) into $recordFolder"
-    return [pscustomobject]@{ Process = $proc; Log = $log; Copy = $copy }
+    return Start-WindowRecording -FfmpegPath $ffmpeg.Source -Window $Window -LimitSeconds $LimitSeconds -SegmentSeconds $RecordSegmentSeconds -Folder $recordFolder -Label 'soak'
 }
 
-function Stop-SoakRecording($Recording) {
-    if (-not $Recording) { return }
-    $proc = $Recording.Process
-    try {
-        if (-not $proc.HasExited) {
-            try { $proc.StandardInput.WriteLine('q'); $proc.StandardInput.Flush() } catch { }
-            if (-not $proc.WaitForExit(5000)) { $proc.Kill($true); $proc.WaitForExit(5000) | Out-Null; Write-Host '[soak] recording: ffmpeg did not stop on q within 5 s and was killed (MPEG-TS files need no index, so the last one still plays)' -ForegroundColor Yellow }
-        }
-        $proc.WaitForExit()
-    }
-    catch { }
-    try { $Recording.Copy.Wait(5000) | Out-Null } catch { }
-    try { $Recording.Log.Dispose() } catch { }
-    Write-Host "[soak] recording stopped (ffmpeg exit $(try { $proc.ExitCode } catch { 'unknown' }))"
-}
+function Stop-SoakRecording($Recording) { Stop-WindowRecording -Recording $Recording -Label 'soak' }
 
 function Get-SoakRecordingLine {
-    $files = @(Get-ChildItem -LiteralPath $recordFolder -File -Filter 'rec-*.ts' -ErrorAction SilentlyContinue)
-    $bytes = ($files | Measure-Object -Property Length -Sum).Sum
-    if (-not $bytes) { $bytes = 0 }
-    return "recording=$runRelative/record files=$($files.Count) bytes=$bytes gb=$([math]::Round($bytes / 1GB, 2))"
+    $found = Get-WindowRecordingFiles -Folder $recordFolder
+    return "recording=$runRelative/record files=$($found.Count) bytes=$($found.Bytes) gb=$([math]::Round($found.Bytes / 1GB, 2))"
 }
 
 # --- 4. The run. ---

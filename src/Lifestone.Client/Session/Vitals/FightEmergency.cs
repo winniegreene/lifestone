@@ -119,6 +119,10 @@ public sealed class FightEmergency
         return _active && clock >= _asideUntil;
     }
 
+    /// <summary>M6 8: true while the emergency holds (the health is under its line) and is set aside after its casts failed: no cast is tried, but a health drink costs no cast and no mana, so the fight still asks for one.</summary>
+    /// <param name="clock">The session clock.</param>
+    public bool AsideNow(double clock) => Enabled && _active && clock < _asideUntil;
+
     /// <summary>The log line when the line has moved by more than <see cref="LogMovePoints"/> points of the share since it was last logged (or was never logged), else null.</summary>
     /// <param name="healthMax">The maximum health.</param>
     /// <param name="incomingPerSecond">The measured damage a second.</param>
@@ -184,7 +188,7 @@ public sealed class FightEmergency
     /// <param name="count">How many candidates.</param>
     public static int Fullest(ReadOnlySpan<float> healthFractions, ReadOnlySpan<float> distances, ReadOnlySpan<bool> excluded, int count)
     {
-        var best = -1;
+        var pick = new Threat.FullestPick(Threat.FullestRule.EmergencyDrain); // M6 16 E2d: the one comparison, by this pick's rule (the most, the nearest among those within a hundredth of it)
         for (var i = 0; i < count; i++)
         {
             if (i < excluded.Length && excluded[i])
@@ -192,12 +196,9 @@ public sealed class FightEmergency
                 continue;
             }
 
-            if (best < 0 || healthFractions[i] > healthFractions[best] + 0.01f || (healthFractions[i] >= healthFractions[best] - 0.01f && distances[i] < distances[best]))
-            {
-                best = i;
-            }
+            pick.Offer(i, 0, healthFractions[i], distances[i]);
         }
 
-        return best;
+        return pick.Index;
     }
 }

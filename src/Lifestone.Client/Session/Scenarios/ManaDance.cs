@@ -56,6 +56,9 @@ internal sealed class ManaDance
     private readonly string _category;
     private readonly FightRefill _refill;
     private readonly List<uint> _scratch = [];
+    private readonly DanceLevel[] _pressLevels = new DanceLevel[VitalsMeans.StaminaToManaSelf.Count];
+    private readonly int[] _pressIndex = new int[VitalsMeans.StaminaToManaSelf.Count];
+    private string _pressNote = string.Empty;
     private CastAttempt? _cast;
     private CastChatProof? _proof;
     private ActionHandle? _pending;
@@ -66,8 +69,15 @@ internal sealed class ManaDance
     public ManaDance(IReadOnlyDictionary<uint, SpellInfo> spells, HuntingGround ground, FightOptions fight, BuffOptions buff, ILogSink log, string category)
     {
         (_spells, _ground, _fight, _buff, _log, _category) = (spells, ground, fight, buff, log, category);
-        _refill = new FightRefill(spells, log, 100);
+        _refill = new FightRefill(spells, log, 100, buff.AccountName);
     }
+
+    /// <summary>
+    /// M6 14 (the owner, 2026-11-13): the level cap the dance's transfer and refill levels read: the fight's own (<see cref="FightScenario.PlanCap(HuntingGround, int, FightOptions, out string)"/>), so in the level up job's fight the
+    /// ladder's live cap, which the ground's plan row does not lower, and elsewhere the row's cap as before.
+    /// </summary>
+    /// <param name="characterLevel">The character's level.</param>
+    internal int CapAt(int characterLevel) => FightScenario.PlanCap(_ground, characterLevel, _fight, out _);
 
     /// <summary>The transfers pressed (each a cast attempt to its end).</summary>
     public int Transfers { get; private set; }
@@ -137,9 +147,9 @@ internal sealed class ManaDance
             return DanceStep.Wait;
         }
 
-        var cap = FightScenario.PlanCap(_ground, q.Level, _fight.MaxLevel, out _);
-        var held = LevelFloor.HeldFor(session.State, DatReaderWriter.Enums.MagicSchool.LifeMagic);
-        var transfer = TransferIndex(q, self.Spellbook, held, cap, mana);
+        var cap = CapAt(q.Level);
+        var held = LevelFloor.HeldForAccount(session.State, DatReaderWriter.Enums.MagicSchool.LifeMagic, _buff.AccountName); // M6 1 h1
+        var transfer = TransferIndex(q, self.Spellbook, held, cap, mana, stamina, CharacterPolicy.For(self.Name).ManaBySum);
         _refill.Fill(q, self.Spellbook, held, _buff.CastChance, cap);
         var revitalize = -1;
         var revitalizeCost = 0u;
@@ -173,7 +183,7 @@ internal sealed class ManaDance
                 Transfers++;
                 _cast ??= new CastAttempt(session.Actions, session.State, _log, _spells);
                 _proof ??= new CastChatProof(session.State, _spells);
-                _log.Info(_category, string.Create(CultureInfo.InvariantCulture, $"mana: the dance for {purpose} (no wait, D92): {Name(VitalsMeans.StaminaToManaSelf[transfer])} pressed until it lands, mana {mana} of {manaMax} (goal {manaGoal}), stamina {stamina} of {staminaMax}"));
+                _log.Info(_category, string.Create(CultureInfo.InvariantCulture, $"mana: the dance for {purpose} (no wait, D92): {Name(VitalsMeans.StaminaToManaSelf[transfer])} pressed until it lands, mana {mana} of {manaMax} (goal {manaGoal}), stamina {stamina} of {staminaMax}{_pressNote}"));
                 _cast.Start(new CastRequest { Levels = VitalsMeans.StaminaToManaSelf, Index = transfer, Rules = CastRules.ManaDance(_fight.Mana.DancePresses, _fight.Mana.TrySpacingSeconds), Purpose = "dance for " + purpose, Source = ActionSource.Automation, Proof = _proof }, now);
                 break;
             case DanceStep.Revitalize:
@@ -248,12 +258,16 @@ internal sealed class ManaDance
         return false;
     }
 
-    /// <summary>The highest Stamina to Mana Self level (index into <see cref="VitalsMeans.StaminaToManaSelf"/>) the cap, the spellbook, the cast chance and the pack allow, preferring one whose mana is held; -1 for none.</summary>
-    private int TransferIndex(PlayerQualities q, Spellbook? book, IReadOnlyDictionary<uint, int>? held, int cap, uint mana)
+    /// <summary>
+    /// The Stamina to Mana Self level (index into <see cref="VitalsMeans.StaminaToManaSelf"/>) of the levels the cap, the spellbook, the cast chance and the pack allow, -1 for none. With <paramref name="byNet"/> (the owner's rule of picking by the sum, 2026-11-08: the ladder's
+    /// character) the level that nets the most at the stamina and the mana held (<see cref="ManaOrder.PressLevelOf"/>), and none when no press can land or the best nets no mana. Else the highest, preferring one whose mana is held.
+    /// </summary>
+    private int TransferIndex(PlayerQualities q, Spellbook? book, IReadOnlyDictionary<uint, int>? held, int cap, uint mana, uint stamina, bool byNet)
     {
         var ids = VitalsMeans.StaminaToManaSelf;
         var best = -1;
         var bestHeld = -1;
+        var count = 0;
         for (var i = 0; i < ids.Count && i < cap; i++)
         {
             if ((book is not null && !book.Knows(ids[i])) || !_spells.TryGetValue(ids[i], out var info) || !GearCasts.TryCurrentSkill(q, GearCasts.SkillOf(info.School), out var skill, out _))
@@ -271,9 +285,29 @@ internal sealed class ManaDance
             {
                 bestHeld = i;
             }
+
+            if (BuffStatMods.TransferOf(ids[i]) is { } row)
+            {
+                _pressLevels[count] = new DanceLevel(info.Id, GearCasts.ManaCeiling(info, 0), info.Power, row);
+                _pressIndex[count++] = i;
+            }
         }
 
-        return bestHeld >= 0 ? bestHeld : best; // a level the mana pays outright, else the highest, pressed on Mana Conversion's roll as the fight's dance is
+        _pressNote = string.Empty;
+        if (!byNet)
+        {
+            return bestHeld >= 0 ? bestHeld : best; // a level the mana pays outright, else the highest, pressed on Mana Conversion's roll as the fight's dance is
+        }
+
+        ManaOrder.TryManaConversion(q, out var conversion);
+        var level = ManaOrder.PressLevelOf(_pressLevels.AsSpan(0, count), stamina, mana, conversion, _fight.Mana.TryChance, out var net);
+        if (level < 0 || net <= 0)
+        {
+            return -1; // no press can land, or the best of them would net no mana (ManaOrder.Decide's rule): Revitalize Self, a potion or the wait
+        }
+
+        _pressNote = string.Create(CultureInfo.InvariantCulture, $", net {net:0.#} (the level by the sum)");
+        return _pressIndex[level];
     }
 
     private string Name(uint id) => _spells.TryGetValue(id, out var info) ? info.Name : "spell " + id.ToString(CultureInfo.InvariantCulture);

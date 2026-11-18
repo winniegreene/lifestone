@@ -122,16 +122,20 @@ public sealed class KitWiredTests(DatSetFixture fixture) : IClassFixture<DatSetF
     public void The_fight_leg_the_buff_leg_and_the_cast_facts_station_pass_their_fight_ground_to_the_kit_M5_3_w1()
     {
         var fightLeg = Game("FightLegRunner.cs");
-        Assert.Contains("GearKit.Build(table.Spells, LoginName(key), ground: ground)", fightLeg, StringComparison.Ordinal);
+        Assert.Contains("var login = LoginName(key);", fightLeg, StringComparison.Ordinal); // M6 1 w: read once; the kit and the fight's buff options (the account's formula) take it
+        Assert.Contains("GearKit.Build(table.Spells, login, ground: ground)", fightLeg, StringComparison.Ordinal);
+        Assert.Contains("new BuffOptions { AccountName = login }", fightLeg, StringComparison.Ordinal);
         Assert.Contains("var ground = options.GroundProfile;", fightLeg, StringComparison.Ordinal); // the leg's --fight-ground
 
         var buffLeg = Game("BuffLegRunner.cs");
-        Assert.Contains("GearKit.Build(table.Spells, LoginName(key), ground: ground)", buffLeg, StringComparison.Ordinal);
+        Assert.Contains("var login = LoginName(key);", buffLeg, StringComparison.Ordinal);
+        Assert.Contains("GearKit.Build(table.Spells, login, ground: ground)", buffLeg, StringComparison.Ordinal);
+        Assert.Contains("buffOptions with { AccountName = login }", buffLeg, StringComparison.Ordinal);
         Assert.Contains("var ground = fight.GroundProfile;", buffLeg, StringComparison.Ordinal);
         Assert.Contains("--fight-ground:", buffLeg, StringComparison.Ordinal); // a bad key is the leg's option error, not a silent default
 
         var heal = Source("Lifestone.Client", "Session", "Scenarios", "Journey", "HealStations.cs");
-        Assert.Contains("GearKit.Build(Context.Spells, _account, ground: Context.Dungeon)", heal, StringComparison.Ordinal);
+        Assert.Contains("GearKit.Build(Context.Spells, _account, ground: Context.Dungeon, holdsFocus: school => AccountFormula.HoldsFocus(heldNow, school))", heal, StringComparison.Ordinal);
 
         foreach (var leg in new[] { fightLeg, buffLeg })
         {

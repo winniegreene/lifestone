@@ -41,10 +41,10 @@ public sealed class BuffScenarioTests
 
     private sealed class Rig
     {
-        public Rig(uint mana = 426, uint stamina = 275, BuffOptions? options = null, bool magic = false)
+        public Rig(uint mana = 426, uint stamina = 275, BuffOptions? options = null, bool magic = false, IReadOnlyCollection<uint>? known = null)
         {
             R = new WorldActionRig();
-            Caster = new ScriptedCaster(R, mana, stamina);
+            Caster = new ScriptedCaster(R, mana, stamina, known: known);
             Options = options ?? new BuffOptions();
             View = new View(R);
             if (!magic)
@@ -105,6 +105,37 @@ public sealed class BuffScenarioTests
 
         /// <summary>The buff-line casts (not the mana lines) the scripted ACE answered so far.</summary>
         public int BuffCasts() => Caster.Answered.Count(a => ArenaProfile.Lines.Any(l => l.IsBuff && l.Spells.Any(x => x.Id == a.Spell)));
+    }
+
+    /// <summary>
+    /// M6 7 H (the live round 1): a Lifestone Throwaway built with the climber's book at a low level. The cycle's own choice by the name is the arena profile, whose Item Enchantment line stops it: <c>Impenetrability: skill 32 is not trained</c>. With the climb's own profile
+    /// (<c>JourneyPlan.BuffProfile</c>, <see cref="BuffProfiles.Climber"/>) the same character casts what its book holds, and a line the book holds of an untrained school is no stop: this is also why the climber itself cannot stop on that text (<c>BuffCycle.Wants</c>).
+    /// </summary>
+    [Fact]
+    public void M6_7_H_the_climbs_profile_casts_the_lines_the_book_holds_and_an_untrained_school_stops_nothing()
+    {
+        static Rig Low(IReadOnlyCollection<uint>? known)
+        {
+            var t = new Rig(known: known);
+            t.R.H.State.Self.Name = "Lifestone Throwaway";
+            t.R.Server((p, seq) => Lifestone.Tests.Shared.Net.AceM3Writers.MagicUpdateSpell(p, seq, 24)); // Armor Self I, the creation's
+            t.R.Server((p, seq) => Lifestone.Tests.Shared.Net.AceM3Writers.MagicUpdateSpell(p, seq, (ushort)ArenaProfile.LineNamed("Impenetrability")!.Spells[0].Id));
+            var q = t.R.H.State.Self.Qualities;
+            q.Skills[MageTemplate.ItemEnchantment] = q.Skills[MageTemplate.ItemEnchantment] with { AdvancementClass = HeadlessCharacter.UntrainedSkill };
+            return t;
+        }
+
+        var byName = Low(known: null); // M6 15: the arena profile's own book (the player's rule casts no spell the book lacks), so its cycle reaches the Item Enchantment line that stops it
+        var arena = new BuffScenario(byName.Kit, byName.Caster.Table, byName.Options, byName.R.H.Log, endSession: false);
+        Assert.Equal(ScenarioStatus.Failed, byName.Run(arena));
+        Assert.Contains(byName.R.H.Log.Lines, l => l.Contains("skill 32 is not trained", StringComparison.Ordinal));
+
+        var t = Low(known: []); // the climber's book at a low level: the two spells Low teaches, nothing else
+        var climbing = new BuffScenario(t.Kit, t.Caster.Table, t.Options, t.R.H.Log, endSession: false, profile: BuffProfiles.Climber);
+        Assert.True(t.Run(climbing) == ScenarioStatus.Succeeded, climbing.Failure);
+        Assert.Equal([24u], t.Caster.Landed.Where(id => ArenaProfile.Lines.Any(l => l.IsBuff && l.Spells.Any(s => s.Id == id))).Distinct());
+        Assert.Contains(t.R.H.Log.Lines, l => l.Contains("Impenetrability: ", StringComparison.Ordinal) && l.Contains("the line is not wanted until the skill is trained", StringComparison.Ordinal));
+        Assert.Equal(1, climbing.CycleResult!.Wanted);
     }
 
     [Fact]
@@ -385,12 +416,17 @@ public sealed class BuffScenarioTests
     public void A_missed_line_fails_the_run_and_a_run_without_a_session_to_end_reports_the_failure_at_once()
     {
         var t = new Rig();
-        t.Caster.SilencePiece("Leather Boots"); // ACE names no piece the armour lines enchanted: both armour lines are misses
+        foreach (var piece in ScriptedCaster.PieceNames)
+        {
+            t.Caster.SilencePiece(piece); // ACE names no piece the armour lines enchanted: nothing named, nothing learned (BuffCycle.SilentCastsToLearn needs the others named): both armour lines are misses
+        }
+
         var scenario = t.Scenario();
         Assert.Equal(ScenarioStatus.Failed, t.Run(scenario));
-        Assert.Contains("lines were missed (Impen:no-piece:Leather_Boots;BludB:no-piece:Leather_Boots)", scenario.Failure, StringComparison.Ordinal);
+        const string Pieces = "Leather_Cap;Leather_Vest;Leather_Gloves;Leather_Boots;Leather_Leggings";
+        Assert.Contains("lines were missed (Impen:no-piece:" + Pieces + ";BludB:no-piece:" + Pieces + ")", scenario.Failure, StringComparison.Ordinal);
         Assert.Contains(" buffs=22/24 ", scenario.VerdictFields(), StringComparison.Ordinal);
-        Assert.Contains(" misses=Impen:no-piece:Leather_Boots;BludB:no-piece:Leather_Boots", scenario.VerdictFields(), StringComparison.Ordinal);
+        Assert.Contains(" misses=Impen:no-piece:" + Pieces + ";BludB:no-piece:" + Pieces, scenario.VerdictFields(), StringComparison.Ordinal);
         Assert.Matches(Verdict, scenario.VerdictFields());
         Assert.Equal(0, t.Sent(FakeSendKind.LogOff)); // endSession: false leaves the session to its owner
     }
@@ -433,6 +469,7 @@ public sealed class BuffScenarioTests
 
         Assert.Equal("cycle", scenario.Stage);
         Assert.Equal(BuffCycle.StageManaWait, scenario.Cycle!.Stage);
+        Assert.Equal("the buff pass's mana wait", scenario.Waiting); // M6 7 BD: what the autopilot's one rule reads
         scenario.Step(t.View, t.Now);
         long allocated = 0;
         for (var i = 0; i < 300; i++)

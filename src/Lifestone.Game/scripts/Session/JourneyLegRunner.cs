@@ -315,10 +315,14 @@ public sealed partial class JourneyLegRunner : Node
     internal static (IStationFactory Factory, JourneyContext Context, GodotJourneyRunnerHost Runners) BuildParts(JourneyPlan plan, IGameSessionView session, IReadOnlyDictionary<uint, SpellInfo> spells, IReadOnlyList<string> arguments, DatSet dats, string? account, PlayMode mode, GameServices services, Task<RoomGraph>? den, HuntingGround ground, IJourneyObserver? observer, IJourneyWindowFrames? windows)
     {
         var log = GodotLogSink.Instance;
-        var keeper = JourneyStations.CreateKeeper(plan, session, spells, arguments, log);
-        var factory = JourneyStations.Create(plan, arguments, dats, LoginName(account));
+        JourneyScenario.BindPitLog(log); // M6 4 R2: TODO(m6-abode-pits) reaches the run's log file
+        var login = LoginName(account); // hashed by the kit and the floors, never stored, logged or printed
+        var keeper = JourneyStations.CreateKeeper(plan, session, spells, arguments, log, login); // M6 1 w: the keeper's floors read the login name, not the key
+        var factory = JourneyStations.Create(plan, arguments, dats, login, ground); // M6 0 F8: the stations read the run's ground (the rung's), not the command line's default
         var runners = new GodotJourneyRunnerHost(mode, services, dats, den, ground, log);
-        var context = JourneyScenario.NewContext(plan, log, spells, keeper, dats, runners, observer, windowFrames: windows, dungeon: ground);
+        // M6 5 Q2: the quest timers' file, user://quests/<character>.json (QuestTimers.FileName), shared by the Godot journeys and the autopilot (AutopilotHost builds its legs here); IsolateUserData isolates it.
+        var questStore = new UserDataCheckpointStore(ProjectSettings.GlobalizePath("user://" + Lifestone.Client.Session.Quests.QuestTimers.FileName(plan.Character)));
+        var context = JourneyScenario.NewContext(plan, log, spells, keeper, dats, runners, observer, windowFrames: windows, dungeon: ground, questStore: questStore);
         return (factory, context, runners);
     }
 

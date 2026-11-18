@@ -192,7 +192,7 @@ public sealed class HuntingGroundTests
         Assert.Equal(new GroundPortal(0x71B90000, 0x1B90002C, 47, 48, 7242, new Vector3(122.404f, 87.43f, 29.937f), 0x1B90002C, new Vector3(122.40f, 84.43f, 30.01f)), den.Portal);
         Assert.Equal(new GroundHome("Holtburg", 0xA9B40019, new Vector3(84f, 7.7f, 94f)), den.Home);
 
-        Assert.Equal([718u, 2304u, 715u, 719u, 716u, 20214u], den.Vendors.Select(v => v.Wcid)); // M5 7 F13: Ecutha the Tailor, the hooded robe's vendor, last; M5 7 F28: Monyra the Jeweler last; M5 7 P7j: the Scrivener of Item Magic, the learn list's
+        Assert.Equal([718u, 2304u, 715u, 719u, 716u, 714u, 20214u], den.Vendors.Select(v => v.Wcid)); // M5 7 F13: Ecutha the Tailor, the hooded robe's vendor, last; M5 7 F28: Monyra the Jeweler last; M5 7 P7j: the Scrivener of Item Magic, the learn list's; M6 14 grocer: Fispur Ansel the Grocer, the Empty Flask's buyer, after Monyra
         var scrivener = den.VendorOf(20214)!;
         Assert.Equal((0x7A9B301Bu, 0xA9B3003Cu, 0xA9B3003Cu, 0u), (scrivener.Guid, scrivener.Cell, scrivener.StopCell, scrivener.BuysItemTypes)); // outdoors, south of Holtburg; she buys nothing here (no trip sells to her)
         Assert.Equal([(28005u, "Aura of Spirit Drinker Self IV", 5000)], scrivener.Sells.Select(w => (w.Wcid, w.Name, w.Price))); // ACE: ceil(SellPrice 50 x Value 100 - 0.1)
@@ -201,7 +201,7 @@ public sealed class HuntingGroundTests
         Assert.Equal(0xA9B4013Fu, renald.StopCell);
         Assert.Equal(0xA9B40141u, renald.Cell);
         Assert.Equal(0x480467A7u, renald.BuysItemTypes);
-        Assert.Equal([new VendorWare(56, "Leather Gauntlets", 1485)], renald.Sells); // M5 7 F13 (D87): the kit's gloves
+        Assert.Equal([new VendorWare(56, "Leather Gauntlets", 1485), new VendorWare(136, "Pack", 88)], renald.Sells); // M5 7 F13 (D87): the kit's gloves; M6 8 D: the side pack a short layout buys, ceil(1.35 x 65 - 0.1)
         var cindrue = den.VendorOf(2304)!;
         Assert.Equal(0x000CB000u, cindrue.BuysItemTypes);
         Assert.True(cindrue.Buys(0x1000)); // SpellComponents
@@ -240,7 +240,7 @@ public sealed class HuntingGroundTests
         Assert.False(monyra.Buys(0x2)); // not armour
         Assert.Empty(monyra.Sells); // a loot buyer only
         Assert.Equal((0xA9B40117u, 0xA9B40117u), (monyra.Cell, monyra.StopCell)); // the entry hall that is Cindrue's stop cell
-        Assert.Equal(0x480467A7u | 0x000CB000u | 0x00044080u | 0x00040004u | 0x00040808u, den.SellableItemTypes); // the vendors' masks together
+        Assert.Equal(0x480467A7u | 0x000CB000u | 0x00044080u | 0x00040004u | 0x00040808u | 0x00446220u, den.SellableItemTypes); // the vendors' masks together (M6 14 grocer: the Grocer's adds CraftCookingBase 0x400000, the Empty Flask's type)
         Assert.NotEqual(0u, den.SellableItemTypes & 0x8); // jewellery sells
         Assert.NotEqual(0u, den.SellableItemTypes & 0x800); // gems sell
     }
@@ -525,6 +525,19 @@ public sealed class HuntingGroundTests
         Assert.Equal(50_000, temple.Supplies.Purse.Coin);
     }
 
+    /// <summary>M6 8 D (m5-side-packs-use): each dungeon's home vendor that sells the side pack lists it at ACE's sell price, <c>max(1, ceil(rate x Value - 0.1))</c> with the Pack's Value 65 (world SQL v0.9.296, weenie 136) and the vendor's SellPrice (float 38): Renald 1.35, Yoshi Deshi 1.8.</summary>
+    [Theory]
+    [MemberData(nameof(DenRoomGraphTests.Dungeons), MemberType = typeof(DenRoomGraphTests))]
+    public void M6_8_D_a_home_vendor_sells_the_side_pack_at_the_ceiling_of_its_rate(string key)
+    {
+        var ground = GroundCatalog.Get(key);
+        var vendor = ground.VendorSelling(136);
+        Assert.True(vendor is not null, $"{key}: a home vendor sells the Pack");
+        Assert.Equal("Pack", vendor!.Sells.Single(w => w.Wcid == 136).Name);
+        var rate = vendor.Wcid == 2317 ? 1.8 : 1.35;
+        Assert.Equal((int)Math.Max(1, Math.Ceiling((rate * 65) - 0.1)), ground.PriceOf(136));
+    }
+
     [Fact]
     public void The_outdoor_grounds_have_the_empty_supplies_section()
     {
@@ -552,6 +565,12 @@ public sealed class HuntingGroundTests
             foreach (var c in burned)
             {
                 var line = ground.Supplies.StockOf(c.Wcid);
+                if (line is null && ground.TownStockOf(c.Wcid) is { } town)
+                {
+                    Assert.Equal(c.Name, town.Name); // M6 item 14 (m6-goldscarab): a plan component bought in another town (the Gold and the Pyreal Scarab at Uziz) is the town stock's line, not the home walk's
+                    continue;
+                }
+
                 Assert.True(line is not null, $"{key}: spell level {row.SpellLevel}'s component {c.Name} is a stock line");
                 Assert.Equal(c.Name, line!.Name);
             }
@@ -561,11 +580,7 @@ public sealed class HuntingGroundTests
         long firstFill = 0;
         foreach (var kit in ground.Supplies.Kit)
         {
-            if (kit.Slot == KitSlot.Pack)
-            {
-                continue; // M5 7 G3: the side packs are granted by the build; the profile lists no vendor row for them until a trip buys them (TODO(m5-side-packs-use))
-            }
-
+            // M6 8 D (m5-side-packs-use closed): a pack line is sold by a vendor of the profile like any other kit line, so the trip can buy it (Renald's Pack row: the pinned world SQL's CreateList row of weenie 136, 65 x 1.35).
             var vendor = ground.VendorSelling(kit.Wcid);
             Assert.True(vendor is not null, $"{key}: kit line {kit.Name} is sold by a vendor of the profile");
             Assert.Equal(kit.Name, vendor!.Sells.Single(w => w.Wcid == kit.Wcid).Name);
@@ -585,8 +600,17 @@ public sealed class HuntingGroundTests
             }
         }
 
-        Assert.Contains(ground.Supplies.Kit, k => k.Slot == KitSlot.Worn);
-        Assert.Contains(ground.Supplies.Kit, k => k.Slot == KitSlot.Wielded);
+        // M6 3 F1 (3-R1): a profile either lists a robe and a wand or lists no kit and is kit-less by rule (GearKit.HasNoKit: the character fights with what it holds); a half kit is a gap.
+        if (ground.Supplies.Kit.Count == 0)
+        {
+            Assert.True(GearKit.HasNoKit(ground), key);
+        }
+        else
+        {
+            Assert.Contains(ground.Supplies.Kit, k => k.Slot == KitSlot.Worn);
+            Assert.Contains(ground.Supplies.Kit, k => k.Slot == KitSlot.Wielded);
+        }
+
         Assert.True(ground.Supplies.Purse.Coin > 0);
         Assert.True(ground.Supplies.Purse.Total >= firstFill, $"{key}: the purse ({ground.Supplies.Purse.Total}) pays for the first fill of every sold line and the kit ({firstFill})");
         Assert.All(ground.Supplies.Purse.Notes, n => Assert.True(n.Value >= 1000, "a purse note is a large note"));
@@ -634,7 +658,7 @@ public sealed class HuntingGroundTests
         var orphan = FullDenCopy();
         ((JsonArray)orphan["vendors"]![0]!["sells"]!).Add(JsonNode.Parse("""{ "wcid": 12345, "name": "A Gizmo", "price": 9 }"""));
         var e = Assert.Throws<GroundProfileException>(() => GroundCatalog.Parse(DenFile, orphan.ToJsonString()));
-        Assert.Equal("$.vendors[0].sells[1]", e.JsonPath); // Renald sells the gauntlets (M5 7 F13) at sells[0]
+        Assert.Equal("$.vendors[0].sells[2]", e.JsonPath); // Renald sells the gauntlets (M5 7 F13) at sells[0] and the Pack (M6 8 D) at sells[1]
         Assert.Contains("$.supplies.stock, $.supplies.kit, a note of $.supplies.purse or a scroll of $.learn", e.Message, StringComparison.Ordinal);
 
         var twice = FullDenCopy();
@@ -783,7 +807,7 @@ public sealed class HuntingGroundTests
     [InlineData("$.supplies.kit[0].wcid", "0", "$.supplies.kit[0].wcid", "out of range")]
     [InlineData("$.supplies.kit[0].slot", "\"head\"", "$.supplies.kit[0].slot", "out of range")]
     [InlineData("$.supplies.burden_trip_percent", "0", "$.supplies.burden_trip_percent", "out of range")]
-    [InlineData("$.supplies.burden_trip_percent", "101", "$.supplies.burden_trip_percent", "out of range")]
+    [InlineData("$.supplies.burden_trip_percent", "201", "$.supplies.burden_trip_percent", "out of range")]
     [InlineData("$.supplies.purse.coin", "-1", "$.supplies.purse.coin", "out of range")]
     [InlineData("$.supplies.purse.notes[0].wcid", "0", "$.supplies.purse.notes[0].wcid", "out of range")]
     [InlineData("$.supplies.purse.notes[0].value", "0", "$.supplies.purse.notes[0].value", "out of range")]
@@ -956,5 +980,62 @@ public sealed class HuntingGroundAllocationTests
             }
         });
         Assert.True(sink > 0);
+    }
+
+    /// <summary>
+    /// M6 item 3 p1 and p2: the seven spine tusker profiles against item 0's W0 SELECT rows (cache/m6/0/sel-spine.tsv for the slots, sel-portals.tsv for the gates, sel-creatures.tsv for the levels, and the pinned world SQL for the
+    /// health and Magic Defense ACE computes: the creature's init skill plus (Focus + Self) / 7, which is why they are above the W0 sheets' bare 48, 56, 88, 97, 80, 100, 155, 200 and 230): the slots per weenie, the generator's delay, the entry gate,
+    /// each target's level, health and Magic Defense and the kill-first Minion. A profile that drifts from the data fails here (D28).
+    /// </summary>
+    [Fact]
+    public void The_seven_spine_tusker_profiles_hold_the_W0_counts_gates_and_target_stats()
+    {
+        // key, entry min, entry max, generator delay (s), slots per wcid, targets: wcid -> (level, health, magic defence)
+        var burrow = new Dictionary<uint, int> { [236] = 37, [22589] = 5 };
+        var lodge = new Dictionary<uint, int> { [11] = 53, [22597] = 4 };
+        var cave = new Dictionary<uint, int> { [1627] = 77, [22585] = 4 };
+        var temple = new Dictionary<uint, int> { [235] = 49, [22512] = 40, [1627] = 36, [22511] = 19, [22641] = 1 };
+        var abode = new Dictionary<uint, int> { [22600] = 78, [22520] = 39, [22601] = 4 };
+        var quarters = new Dictionary<uint, int> { [1628] = 75, [22605] = 4 };
+        var holding = new Dictionary<uint, int> { [10810] = 136, [16916] = 44, [22599] = 4 };
+        var cases = new (string Key, int? Min, int? Max, double Delay, Dictionary<uint, int> Slots, (uint Wcid, int Level, int Health, int MagicDefence)[] Targets)[]
+        {
+            ("tusker-burrow", null, null, 300, burrow, [(236, 15, 95, 54), (22589, 15, 95, 54)]),
+            ("tusker-lodge", 5, null, 240, lodge, [(11, 20, 100, 63), (22597, 20, 100, 63)]),
+            ("tusker-cave", 12, null, 300, cave, [(1627, 30, 110, 94), (22585, 30, 110, 94)]),
+            ("tusker-temple-20-40", 20, 40, 300, temple, [(235, 30, 130, 103), (1627, 30, 110, 94), (22511, 40, 90, 109), (22512, 40, 90, 146)]),
+            // M6 3 p2: the last three spine profiles (W0: 121 Redeemers L60 17,500 XP, gate 20; 79 Slaves L80 30,000 XP, gate 30; 184 Rampagers L100 80,000 XP, gate 60; each behind one 5-minute generator 7924). Health 250, 400, 435 are W0's;
+            // the Magic Defense 171, 219 and 251 are ACE's current values (the W0 rows' 155, 200 and 230 plus (Focus + Self) / 7 = 16, 19 and 21).
+            ("tusker-abode", 20, null, 300, abode, [(22520, 60, 250, 171), (22600, 60, 250, 171), (22601, 60, 250, 171)]),
+            ("tusker-quarters", 30, null, 300, quarters, [(1628, 80, 400, 219), (22605, 80, 400, 219)]),
+            ("tusker-holding", 60, null, 300, holding, [(10810, 100, 435, 251), (16916, 100, 435, 251), (22599, 100, 435, 251)]),
+        };
+        foreach (var (key, min, max, delay, slots, targets) in cases)
+        {
+            var ground = GroundCatalog.Get(key);
+            Assert.Equal(slots.Values.Sum(), ground.Respawn.Slots.Count);
+            var one = Assert.Single(ground.Respawn.Generators);
+            Assert.Equal(delay, one.DelaySeconds);
+            foreach (var (wcid, count) in slots)
+            {
+                Assert.True(ground.Respawn.Slots.Count(s => s.Wcid == wcid) == count, $"{key}: slots of wcid {wcid}");
+            }
+
+            Assert.NotNull(ground.Entry);
+            Assert.Equal(min, ground.Entry.MinLevel);
+            Assert.Equal(max, ground.Entry.MaxLevel);
+            Assert.Equal(key == "tusker-temple-20-40", ground.Entry.Tieable); // every tusker portal but the Temple 20-40's carries NoRecall (PortalBitmask 0x31), the Temple 20-40's is 0x1
+            Assert.Equal(min is null, ground.AdmitsLevel(1)); // a gate with a MinLevel refuses a level 1
+            Assert.Equal(max is null, ground.AdmitsLevel(100)); // and one with a MaxLevel refuses a level 100
+            Assert.True(ground.AdmitsLevel(max ?? Math.Max(40, min ?? 0)));
+            foreach (var (wcid, level, health, magicDefence) in targets)
+            {
+                var t = Assert.Single(ground.Targets, x => x.Wcid == wcid);
+                Assert.Equal((level, health, magicDefence), (t.Level, t.MaxHealth, t.MagicDefence));
+                Assert.Equal(wcid == 22512, ground.IsKillFirst(wcid));
+            }
+        }
+
+        Assert.Equal(GroundRole.Avoid, GroundCatalog.Get("tusker-temple-20-40").Targets.Single(t => t.Wcid == 22641).Role);
     }
 }

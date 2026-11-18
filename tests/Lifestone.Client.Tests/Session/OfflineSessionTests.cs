@@ -57,6 +57,7 @@ public sealed class OfflineSessionTests
             actions.QueryHealth(guid, ActionSource.Ui),
             actions.Talk("hello", ActionSource.Ui),
             actions.Tell("Someone", "hello", ActionSource.Ui),
+            actions.TalkDirect(guid, "hello", ActionSource.Ui),
             actions.LogOff(ActionSource.Ui),
             actions.Quit(ActionSource.Ui),
         ];

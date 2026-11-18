@@ -45,6 +45,9 @@ public enum OptionScenes
     /// </summary>
     Headless = 8,
 
+    /// <summary>The world walk (<c>dotnet Lifestone.WorldWalk.dll</c>, src/Lifestone.WorldWalk). Not part of <see cref="All"/>, as <see cref="Headless"/> is not.</summary>
+    WorldWalk = 16,
+
     /// <summary>Every Godot scene (also: a run whose scene is not one of the above, where no option is out of place).</summary>
     All = Main | SpellViewer | TerrainPreview,
 }

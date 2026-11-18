@@ -306,6 +306,30 @@ public static class GameEventTypes
 
     /// <summary>IdentifyObjectResponse {guid, flags, success, the flagged appraisal sections} (ACE <c>GameEventIdentifyObjectResponse</c>; M4 3.2 s0).</summary>
     public const uint IdentifyObjectResponse = 0x00C9;
+
+    /// <summary>HouseProfile {guardian, the dwelling's terms, the buy and rent lists} (ACE <c>GameEventHouseProfile</c>; M6 villa).</summary>
+    public const uint HouseProfile = 0x021D;
+
+    /// <summary>HouseData {buy time, rent time, type, free, the buy and rent lists, the position} (ACE <c>GameEventHouseData</c>; M6 villa).</summary>
+    public const uint HouseData = 0x0225;
+
+    /// <summary>HouseStatus {u32 notice} (ACE <c>GameEventHouseStatus</c>; M6 villa).</summary>
+    public const uint HouseStatus = 0x0226;
+
+    /// <summary>UpdateRentTime {u32 rent time} (ACE <c>GameEventHouseUpdateRentTime</c>; M6 villa).</summary>
+    public const uint UpdateRentTime = 0x0227;
+
+    /// <summary>UpdateRentPayment {the rent list} (ACE <c>GameEventHouseUpdateRentPayment</c>; M6 villa).</summary>
+    public const uint UpdateRentPayment = 0x0228;
+
+    /// <summary>HouseUpdateRestrictions {u8 sequence, object, RestrictionDB} (ACE <c>GameEventHouseUpdateRestrictions</c>; M6 villa).</summary>
+    public const uint HouseUpdateRestrictions = 0x0248;
+
+    /// <summary>HouseTransaction {u32 notice} (ACE <c>GameEventHouseTransaction</c>; M6 villa).</summary>
+    public const uint HouseTransaction = 0x0259;
+
+    /// <summary>AvailableHouses {type, locations, total} (ACE <c>GameEventHouseAvailableHouses</c>; M6 villa).</summary>
+    public const uint AvailableHouses = 0x0271;
 }
 
 /// <summary>The GameAction types (inside <see cref="MessageOpcodes.GameAction"/>) M2 sends.</summary>
@@ -325,6 +349,11 @@ public static class GameActionTypes
     /// <c>CM_Communication::Event_TalkDirectByName</c>, 11.4186 0x006A4780, 11.6096 0x006A55A0; ACE
     /// <c>GameActionTell</c>).</summary>
     public const uint Tell = 0x005D;
+
+    /// <summary>TalkDirect {String16L text, u32 target object id}: the message comes first (ACE <c>GameActionTalkDirect</c>,
+    /// <c>GameActionTalkDirect.cs:18-19</c>, @95ef426d; M6 14). Retail's sender is the <c>Event_TalkDirect</c> docs/retail-ui.md names
+    /// (the chat's Selected focus); its body and address were not read.</summary>
+    public const uint TalkDirect = 0x0032;
 
     /// <summary>LoginComplete (no payload), sent when the client leaves portal space.</summary>
     public const uint LoginComplete = 0x00A1;
@@ -447,6 +476,24 @@ public static class GameActionTypes
 
     /// <summary>TeleToMarketPlace (no payload; <c>CM_Character::Event_TeleToMarketplace</c>, 11.6096 0x006A2A40; ACE <c>GameActionTeleToMarketPlace</c>; M5 6 w1).</summary>
     public const uint TeleToMarketPlace = 0x028D;
+
+    /// <summary>BuyHouse {u32 guardian, u32 count, count x u32 item} (ACE <c>GameActionHouseBuyHouse</c>; M6 villa).</summary>
+    public const uint BuyHouse = 0x021C;
+
+    /// <summary>HouseQuery (no payload; ACE <c>GameActionHouseQuery</c>; M6 villa).</summary>
+    public const uint HouseQuery = 0x021E;
+
+    /// <summary>AbandonHouse (no payload; ACE <c>GameActionHouseAbandon</c>; M6 villa).</summary>
+    public const uint AbandonHouse = 0x021F;
+
+    /// <summary>RentHouse {u32 guardian, u32 count, count x u32 item} (ACE <c>GameActionHouseRentHouse</c>; M6 villa).</summary>
+    public const uint RentHouse = 0x0221;
+
+    /// <summary>QueryLord {u32 guardian} (ACE <c>GameActionHouseQueryLord</c>, which reads it and does nothing; M6 villa).</summary>
+    public const uint QueryLord = 0x0258;
+
+    /// <summary>TeleToHouse (no payload; <c>/house recall</c>; ACE <c>GameActionTeleToHouse</c>; M6 villa).</summary>
+    public const uint TeleToHouse = 0x0262;
 
     /// <summary>Jump (56 bytes, retail <c>JumpPack</c>).</summary>
     public const uint Jump = 0xF61B;

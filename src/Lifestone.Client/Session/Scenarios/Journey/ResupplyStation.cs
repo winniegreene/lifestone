@@ -4,6 +4,10 @@ using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
 using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Mage;
+using Lifestone.Client.Session.Quartermaster;
+using Lifestone.Client.Session.Quests;
+using Lifestone.Client.Session.Vitals;
+using Lifestone.Data.Magic;
 using Lifestone.Data.World;
 
 namespace Lifestone.Client.Session.Scenarios.Journey;
@@ -20,7 +24,10 @@ namespace Lifestone.Client.Session.Scenarios.Journey;
 /// </param>
 /// <param name="Memory">M5 7 G1: what the trips remember of the items a vendor refused (see <see cref="SaleMemory"/>), or null (a fresh memory for the one trip: nothing reaches a second refusal).</param>
 /// <param name="Gear">M5 7 D121, D122, D125: the gear phase runs (the packs sorted to their jobs, the footwear, the self-equip, the worn items' mana): <see cref="ResupplyRun.GearPhase"/>. Off for a kit trip.</param>
-public sealed record ResupplyOptions(bool Loot = false, Func<IReadOnlyCollection<uint>>? Kept = null, IReadOnlyList<KitLine>? Kit = null, SaleMemory? Memory = null, bool Gear = false);
+/// <param name="Replace">M6 7 AH (the death handler's replace step): the trip buys only the gear floor's missing pieces (a robe, gauntlets, one caster: <see cref="DeathReplace.Plan"/>), wears them (<see cref="ResupplyRun.EquipPass"/>) and nothing else: no count, no sale, no kit, no mana charge.</param>
+/// <param name="AccountName">The login name the server hashes (the host's, never the secrets key), for a scroll's components on the account's full formula (<see cref="ScrollSupply"/>); null: a school without its focus cannot be named (a loud TODO; the scroll is still bought, D116). Hashed, never logged.</param>
+/// <param name="TownShop">M6 14 T: the buys of a stop in another town, all at one vendor (<see cref="TownStockOrder"/>): the run then walks to that vendor, buys the lines and ends; the rung change runs it between the two hops of the stop. Null: the home walk.</param>
+public sealed record ResupplyOptions(bool Loot = false, Func<IReadOnlyCollection<uint>>? Kept = null, IReadOnlyList<KitLine>? Kit = null, SaleMemory? Memory = null, bool Gear = false, bool Replace = false, string? AccountName = null, IReadOnlyList<TownStockOrder>? TownShop = null);
 
 /// <summary>
 /// M5 7 G1 (edge audit item 2): the items a vendor refused, trip after trip. A sale offers every main-pack item that is not the kit, so an item no vendor will take would be offered for ever; one refused on two trips is dropped at the
@@ -36,6 +43,15 @@ public sealed class SaleMemory
 
     /// <summary>M5 7 F30 (the owner): the items the loot rule kept aside as worth a look (<see cref="KeepAsideRule"/>): never offered to a vendor, whatever an appraisal says.</summary>
     public HashSet<uint> KeptAside { get; } = [];
+
+    /// <summary>M6 7 AU: the foci a vendor refused or that did not arrive in the pack after a buy: the plan does not try them again this session (no loop).</summary>
+    public HashSet<uint> FociRefused { get; } = [];
+
+    /// <summary>M6 7 AX: the wares bought whose stack had not shown when <see cref="ResupplyRun.BoughtArrivalSeconds"/> ran out, with the total expected held (by weenie class id). The next plan holds such a line out once (<c>TODO(m6-bought-unseen)</c>), so a late update is never bought twice.</summary>
+    public Dictionary<uint, int> BoughtUnseen { get; } = [];
+
+    /// <summary>The owner's rule of 2026-11-09 (D116): the components bought scrolls need and a trip could not supply, by weenie class id: the next trip buys them first, ahead of new scrolls, until the pack holds the count (<see cref="ResupplyRun"/>). Session memory; after a restart the buff passes name a missing component again (<see cref="ComponentNeeds"/>).</summary>
+    public Dictionary<uint, ComponentShoppingLine> ComponentShopping { get; } = [];
 
     /// <summary>The memory of the run's journeys: every fight station builds its own factory, so the memory outlives them (item guids are unique within a session).</summary>
     public static SaleMemory Shared { get; } = new();
@@ -54,6 +70,15 @@ public sealed class SaleMemory
 /// <param name="Count">The count to buy.</param>
 public sealed record ResupplyBuy(StockLine Line, GroundVendor Vendor, int Held, int Count)
 {
+    /// <summary>The owner's rule of 2026-11-08, its gate taken out on 2026-11-09 (D116): on a scroll's buy, the components its spell needs (<see cref="ScrollSupply"/>): the buy list buys what the pack lacks from what the scroll leaves of the purse. Null: not a scroll under the rule.</summary>
+    public IReadOnlyList<ScrollComponent>? Components { get; init; }
+
+    /// <summary>The coin of the components the buy list planned for this scroll (0 when the pack holds them or the purse cannot pay them).</summary>
+    public long ComponentCoin { get; init; }
+
+    /// <summary>The components the buy list planned for this scroll, by name and count (<c>Silver Scarab x2</c>), or empty.</summary>
+    public string ComponentNote { get; init; } = string.Empty;
+
     /// <summary>
     /// The buy of one kit line (M5 3 F5): a kit line has no keep or trip count, so its stock line is a stand-in of one (<c>Keep = TripUnder = StopUnder = 1</c>, never read by the buy), held 0, count 1.
     /// </summary>
@@ -64,6 +89,16 @@ public sealed record ResupplyBuy(StockLine Line, GroundVendor Vendor, int Held, 
         ArgumentNullException.ThrowIfNull(kit);
         ArgumentNullException.ThrowIfNull(vendor);
         return new ResupplyBuy(new StockLine(kit.Wcid, kit.Name, 1, 1, 1), vendor, 0, 1);
+    }
+
+    /// <summary>
+    /// M6 2 b: the buy of one gear floor line (<see cref="GearFloor"/>: a caster, a robe, a mana charge), beside the kit and never in it: a stand-in stock line of the line's count (<c>Keep</c> = the count, never read by the buy), held 0.
+    /// </summary>
+    /// <param name="line">The floor line.</param>
+    public static ResupplyBuy ForFloor(GearFloorLine line)
+    {
+        ArgumentNullException.ThrowIfNull(line);
+        return new ResupplyBuy(new StockLine(line.Wcid, line.Name, line.Count, 1, 1), line.Vendor, 0, line.Count);
     }
 }
 
@@ -91,27 +126,298 @@ public static class ResupplyPlanner
     /// </summary>
     /// <param name="ground">The fight's ground.</param>
     /// <param name="counters">The counters after a <see cref="LogisticsCounters.Check"/> that read the pack.</param>
-    public static IReadOnlyList<ResupplyBuy> BuyList(HuntingGround ground, LogisticsCounters counters)
+    public static IReadOnlyList<ResupplyBuy> BuyList(HuntingGround ground, LogisticsCounters counters) => BuyList(ground, counters, -1);
+
+    /// <summary>
+    /// M6 7 X (spells are the armor): the buy list with the trip's scrolls inside the budget (<see cref="BuyList(HuntingGround, LogisticsCounters, long, uint?)"/>). With a scroll to buy the order of need is: every line to its stop line (the run
+    /// cannot fight under it); the scrolls in the plan's order, each while the budget pays it (one it cannot pay goes to <paramref name="waiting"/>, the next is still tried); one of each component with no stop line, from the whole
+    /// purse (a scroll read with no component to cast it is coin thrown away, and these wares cost 7 to 34 pyreals); then every line to its trip line, clear of it (M6 14 T, the cheapest lift first) and to its keep. The list is the stock lines in the profile's order, then the scrolls kept. With
+    /// no scroll, or no budget, it is the list without scrolls.
+    /// </summary>
+    /// <param name="ground">The fight's ground.</param>
+    /// <param name="counters">The counters after a <see cref="LogisticsCounters.Check"/> that read the pack.</param>
+    /// <param name="purse">The pyreals the trip may count, or negative for no budget.</param>
+    /// <param name="scrolls">The trip's scroll buys, in the plan's order (one each).</param>
+    /// <param name="waiting">Takes the scrolls the budget cannot pay this trip.</param>
+    /// <param name="shopping">The standing shopping list's lines (D116: components an earlier trip could not buy), bought ahead of new scrolls, from the whole purse; null or empty when there is none.</param>
+    /// <param name="called">M6 16 Q10: the weenie class id of the stock line the carried trip order names, or null. Its lift clear of its trip line comes before the cheapest-lift pass (after the stop lines), inside the same trip share; null is today's list.</param>
+    public static IReadOnlyList<ResupplyBuy> BuyList(HuntingGround ground, LogisticsCounters counters, long purse, IReadOnlyList<ResupplyBuy> scrolls, List<ResupplyBuy> waiting, IReadOnlyList<ResupplyBuy>? shopping = null, uint? called = null)
+    {
+        ArgumentNullException.ThrowIfNull(scrolls);
+        ArgumentNullException.ThrowIfNull(waiting);
+        shopping ??= [];
+        var supplied = scrolls.Any(s => s.Components is not null); // the owner's rule: a scroll's components are planned beside it, budget or not
+        return shopping.Count == 0 && (scrolls.Count == 0 || (!supplied && (purse < 0 || ground.Supplies.Purse.TripSpendPercent >= 100)))
+            ? [.. BuyList(ground, counters, purse, called), .. scrolls]
+            : Filled(ground, counters, purse < 0 ? int.MaxValue : purse, scrolls, waiting, shopping, called);
+    }
+
+    /// <summary>
+    /// M6 7 V (r1h: one trip at level 10 spent 9,907 of the climber's coin on 198 items and the next found 14): the buy list within a budget. <paramref name="purse"/> is the pyreals the trip may count (the coin and the face of the notes), or a
+    /// negative number for no budget (today's list for every caller that gives none). The budget is the ground's <c>purse.trip_spend_percent</c> of it, spent in the order of need: first every line to its trip line (the lines with a stop
+    /// line, the components, before the others, the potion), then the top-up to the keeps in the same order; a line the budget cannot pay in full is bought in part, at the profile's price. The list stays in the profile's order.
+    /// <para>M6 14 T (the sprint of 2026-11-12: a visit with 14,658 in the purse bought 27 Mana Potions and left the Silver Scarab on its trip line, one use from the next trip): between the two, every line is lifted clear of its trip line
+    /// (<see cref="LogisticsCounters.ClearOf"/>), the cheapest lift first, so a short budget leaves as few lines as it can sitting on their trip lines; only then is any line topped up to its keep.</para>
+    /// </summary>
+    /// <param name="ground">The fight's ground.</param>
+    /// <param name="counters">The counters after a <see cref="LogisticsCounters.Check"/> that read the pack.</param>
+    /// <param name="purse">The pyreals the trip may count, or negative for no budget.</param>
+    /// <param name="called">M6 16 Q10: the weenie class id of the stock line the carried trip order names, or null. Its lift clear of its trip line comes before the cheapest-lift pass (after the stop lines), inside the same trip share; null is today's list.</param>
+    public static IReadOnlyList<ResupplyBuy> BuyList(HuntingGround ground, LogisticsCounters counters, long purse, uint? called = null)
     {
         ArgumentNullException.ThrowIfNull(ground);
         ArgumentNullException.ThrowIfNull(counters);
-        var list = new List<ResupplyBuy>();
+        var rows = RowsOf(ground, counters);
+        var budget = purse < 0 || ground.Supplies.Purse.TripSpendPercent >= 100 ? long.MaxValue : purse * ground.Supplies.Purse.TripSpendPercent / 100; // 100: no budget (BSD Mage, as before)
+        var order = Enumerable.Range(0, rows.Count).OrderBy(r => counters.LineAt(rows[r].Index).StopUnder > 0 ? 0 : 1).ToList(); // stable: the profile's order within a class
+        for (var pass = 0; pass < 3; pass++)
+        {
+            foreach (var r in pass == 1 ? ClearOrder(ground, counters, rows, order, called) : order)
+            {
+                var (index, vendor, bought) = rows[r];
+                var line = counters.LineAt(index);
+                var have = counters.HeldOf(index) + bought;
+                var target = pass switch { 0 => Math.Min(line.Keep, Math.Max(line.TripUnder, line.StopUnder)), 1 => ClearTarget(line), _ => line.Keep };
+                var want = target - have;
+                if (want <= 0)
+                {
+                    continue;
+                }
+
+                if (ground.PriceOf(line.Wcid) is { } price && price > 0 && budget != long.MaxValue)
+                {
+                    want = (int)Math.Min(want, budget / price);
+                    budget -= (long)want * price;
+                }
+
+                rows[r] = (index, vendor, bought + want);
+            }
+        }
+
+        return ListOf(rows, counters);
+    }
+
+    /// <summary>M6 14 T: the count the clear pass lifts a line to: clear of its trip line (<see cref="LogisticsCounters.ClearOf"/>), never over its keep.</summary>
+    private static int ClearTarget(StockLine line) => Math.Min(line.Keep, LogisticsCounters.ClearOf(line));
+
+    /// <summary>M6 14 T: the rows in the clear pass's order: the cheapest lift to the clear count first (the vendor's price times what is still missing), ties in <paramref name="order"/>; a short budget then clears the most lines.</summary>
+    private static List<int> ClearOrder(HuntingGround ground, LogisticsCounters counters, List<(int Index, GroundVendor Vendor, int Count)> rows, List<int> order, uint? called = null)
+    {
+        long Cost(int r)
+        {
+            var line = counters.LineAt(rows[r].Index);
+            return (long)(ground.PriceOf(line.Wcid) ?? 0) * Math.Max(0, ClearTarget(line) - counters.HeldOf(rows[r].Index) - rows[r].Count);
+        }
+
+        return [.. order.OrderBy(r => called is { } wcid && counters.LineAt(rows[r].Index).Wcid == wcid ? 0 : 1).ThenBy(Cost)]; // stable; M6 16 Q10: the line the trip was called for is lifted first, then the cheapest lift
+    }
+
+    /// <summary>The stock lines a home vendor sells, under their keeps, nothing bought yet.</summary>
+    private static List<(int Index, GroundVendor Vendor, int Count)> RowsOf(HuntingGround ground, LogisticsCounters counters)
+    {
+        var rows = new List<(int Index, GroundVendor Vendor, int Count)>();
         for (var i = 0; i < counters.LineCount; i++)
         {
             var line = counters.LineAt(i);
-            if (counters.IsCarried(i) || ground.VendorSelling(line.Wcid) is not { } vendor)
+            if (counters.IsCarried(i) || counters.IsSuspended(i) || ground.VendorSelling(line.Wcid) is not { } vendor)
             {
-                continue;
+                continue; // M6 14 pack rules: an account formula's line is not bought while every focus is held (FociComponents)
             }
 
-            var held = counters.HeldOf(i);
-            if (held < line.Keep)
+            if (counters.HeldOf(i) < line.Keep)
             {
-                list.Add(new ResupplyBuy(line, vendor, held, line.Keep - held));
+                rows.Add((i, vendor, 0));
+            }
+        }
+
+        return rows;
+    }
+
+    private static List<ResupplyBuy> ListOf(List<(int Index, GroundVendor Vendor, int Count)> rows, LogisticsCounters counters)
+    {
+        var list = new List<ResupplyBuy>();
+        foreach (var (index, vendor, count) in rows)
+        {
+            if (count > 0)
+            {
+                list.Add(new ResupplyBuy(counters.LineAt(index), vendor, counters.HeldOf(index), count));
             }
         }
 
         return list;
+    }
+
+    /// <summary>M6 7 AK: the scroll weenies of the ladder's first scrolls.</summary>
+    private static readonly Lazy<HashSet<uint>> FirstScrollWcids = new(() =>
+        [.. LadderLoader.WarMage.FirstScrolls.SelectMany(g => ScrivenerCatalog.Default.LineSpells(g.Line).Where(s => s.Level == g.Level)).Select(s => s.ScrollWcid)]);
+
+    /// <summary>M6 7 AU: the foci's weenies (paid from the whole purse, as the first scrolls).</summary>
+    internal static readonly Lazy<HashSet<uint>> FociWcids = new(() => [.. ScrivenerCatalog.Default.Foci.Select(f => f.Wcid)]);
+
+    /// <summary>The list with scrolls under a budget: the order of <see cref="BuyList(HuntingGround, LogisticsCounters, long, IReadOnlyList{ResupplyBuy}, List{ResupplyBuy}, IReadOnlyList{ResupplyBuy}, uint?)"/>. D116: the stop lines, then the standing shopping list, then each scroll by its own price alone, then the components of the scrolls kept, from what is left of the whole purse and in part if that is all it pays.</summary>
+    private static List<ResupplyBuy> Filled(HuntingGround ground, LogisticsCounters counters, long purse, IReadOnlyList<ResupplyBuy> scrolls, List<ResupplyBuy> waiting, IReadOnlyList<ResupplyBuy> shopping, uint? called = null)
+    {
+        var rows = RowsOf(ground, counters);
+        var budget = purse * ground.Supplies.Purse.TripSpendPercent / 100;
+        var left = purse;
+        var order = Enumerable.Range(0, rows.Count).OrderBy(r => counters.LineAt(rows[r].Index).StopUnder > 0 ? 0 : 1).ToList(); // stable: the profile's order within a class
+        var extras = new List<ResupplyBuy>();
+
+        void Fill(Func<StockLine, int> targetOf, bool wholePurse, bool cheapestFirst = false)
+        {
+            foreach (var r in cheapestFirst ? ClearOrder(ground, counters, rows, order, called) : order)
+            {
+                var (index, vendor, bought) = rows[r];
+                var line = counters.LineAt(index);
+                var want = targetOf(line) - counters.HeldOf(index) - bought;
+                if (want <= 0)
+                {
+                    continue;
+                }
+
+                if (ground.PriceOf(line.Wcid) is { } price && price > 0)
+                {
+                    want = (int)Math.Min(want, (wholePurse ? left : Math.Min(budget, left)) / price);
+                    left -= (long)want * price;
+                    budget = Math.Max(0, budget - ((long)want * price));
+                }
+
+                rows[r] = (index, vendor, bought + want);
+            }
+        }
+
+        // One buy of a component: on its stock line's row (a new row when the line stands at its keep), or a line of the trip's alone.
+        void Place(uint wcid, string name, int want, int held, GroundVendor vendor, int gap)
+        {
+            var stock = StockIndexOf(counters, wcid);
+            var row = stock < 0 ? -1 : rows.FindIndex(r => r.Index == stock);
+            if (row >= 0)
+            {
+                rows[row] = (stock, rows[row].Vendor, rows[row].Count + gap);
+            }
+            else if (stock >= 0)
+            {
+                rows.Add((stock, vendor, gap));
+            }
+            else
+            {
+                var extra = extras.FindIndex(b => b.Line.Wcid == wcid);
+                if (extra >= 0)
+                {
+                    extras[extra] = extras[extra] with { Count = extras[extra].Count + gap };
+                }
+                else
+                {
+                    extras.Add(new ResupplyBuy(new StockLine(wcid, name, want, 1, 1), vendor, held, gap));
+                }
+            }
+        }
+
+        // As many as the purse pays; the coin left and the budget reduced.
+        int Afford(int gap, int price)
+        {
+            var buy = price > 0 ? (int)Math.Min(gap, Math.Max(0, left) / price) : gap;
+            left -= (long)buy * price;
+            budget = Math.Max(0, budget - ((long)buy * price));
+            return buy;
+        }
+
+        Fill(line => line.StopUnder, wholePurse: false);
+        foreach (var line in shopping)
+        {
+            var stock = StockIndexOf(counters, line.Line.Wcid);
+            var row = stock < 0 ? -1 : rows.FindIndex(r => r.Index == stock);
+            var buy = Afford(Math.Max(0, line.Count - (row >= 0 ? rows[row].Count : 0)), ground.PriceOf(line.Line.Wcid) ?? 0);
+            if (buy > 0)
+            {
+                Place(line.Line.Wcid, line.Line.Name, line.Line.Keep, line.Held, line.Vendor, buy);
+            }
+        }
+
+        var kept = new List<ResupplyBuy>();
+        foreach (var scroll in scrolls)
+        {
+            var price = scroll.Vendor.Sells.FirstOrDefault(w => w.Wcid == scroll.Line.Wcid)?.Price ?? 0;
+            var first = FirstScrollWcids.Value.Contains(scroll.Line.Wcid) || FociWcids.Value.Contains(scroll.Line.Wcid); // M6 7 AK: the owner's first scrolls are paid from the whole purse; M6 7 AU: so are the foci
+            if (price > (first ? left : Math.Min(budget, left)))
+            {
+                waiting.Add(scroll); // D116: a scroll waits only for its own price
+                continue;
+            }
+
+            budget = Math.Max(0, budget - price);
+            left -= price;
+            kept.Add(scroll);
+        }
+
+        var wanted = new Dictionary<uint, int>();
+        for (var i = 0; i < kept.Count; i++)
+        {
+            var scroll = kept[i];
+            if (scroll.Components is null)
+            {
+                continue;
+            }
+
+            long coin = 0;
+            var note = new List<string>();
+            foreach (var (c, gap) in ComponentGaps(scroll, rows, extras, wanted, counters))
+            {
+                var buy = Afford(gap, c.Price);
+                if (buy > 0)
+                {
+                    Place(c.Wcid, c.Name, c.Want, c.Held, c.Vendor!, buy);
+                    coin += (long)buy * c.Price;
+                    note.Add(string.Create(CultureInfo.InvariantCulture, $"{c.Name} x{buy}"));
+                }
+            }
+
+            foreach (var c in scroll.Components)
+            {
+                wanted[c.Wcid] = wanted.GetValueOrDefault(c.Wcid) + c.Want;
+            }
+
+            kept[i] = scroll with { ComponentCoin = coin, ComponentNote = string.Join(", ", note) };
+        }
+
+        Fill(line => line.StopUnder == 0 && ComponentWeenies.TryGetByWcid(line.Wcid, out _) ? Math.Min(1, line.Keep) : 0, wholePurse: true);
+        Fill(line => Math.Min(line.Keep, Math.Max(line.TripUnder, line.StopUnder)), wholePurse: false);
+        Fill(ClearTarget, wholePurse: false, cheapestFirst: true); // M6 14 T: every line clear of its trip line, the cheapest lift first, before any is topped up to its keep
+        Fill(line => line.Keep, wholePurse: false);
+        return [.. ListOf(rows, counters), .. extras, .. kept];
+    }
+
+    /// <summary>The index of the stock line of <paramref name="wcid"/>, or -1.</summary>
+    private static int StockIndexOf(LogisticsCounters counters, uint wcid)
+    {
+        for (var i = 0; i < counters.LineCount; i++)
+        {
+            if (counters.LineAt(i).Wcid == wcid)
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>What <paramref name="scroll"/>'s components still lack, with the scrolls kept before it and what the list buys already counted: the pack's count (the stock line's or the plan's) and the rows' purchases against the two passes each spell wants. A component no vendor of the trip sells is not a gap: the walk cannot buy it, and the shopping list names it after the walk (D116).</summary>
+    private static List<(ScrollComponent Component, int Gap)> ComponentGaps(ResupplyBuy scroll, List<(int Index, GroundVendor Vendor, int Count)> rows, List<ResupplyBuy> extras, Dictionary<uint, int> wanted, LogisticsCounters counters)
+    {
+        var gaps = new List<(ScrollComponent, int)>();
+        foreach (var c in scroll.Components ?? [])
+        {
+            var stock = StockIndexOf(counters, c.Wcid);
+            var row = stock < 0 ? -1 : rows.FindIndex(r => r.Index == stock);
+            var have = stock >= 0 ? counters.HeldOf(stock) + (row >= 0 ? rows[row].Count : 0) : c.Held + (extras.FirstOrDefault(b => b.Line.Wcid == c.Wcid)?.Count ?? 0);
+            var gap = wanted.GetValueOrDefault(c.Wcid) + c.Want - have;
+            if (gap > 0 && c.Vendor is not null)
+            {
+                gaps.Add((c, gap));
+            }
+        }
+
+        return gaps;
     }
 
     /// <summary>
@@ -121,7 +427,12 @@ public static class ResupplyPlanner
     /// <param name="ground">The fight's ground.</param>
     /// <param name="lines">The kit lines to buy.</param>
     /// <param name="unsold">Receives the lines no vendor of the profile sells.</param>
-    public static IReadOnlyList<ResupplyBuy> KitBuyList(HuntingGround ground, IReadOnlyList<KitLine> lines, List<KitLine> unsold)
+    /// <param name="held">
+    /// M6 8 D (<c>m5-side-packs-use</c> closed): how many of a weenie the player holds, or null when the caller does not count (a pack line is then left to the build, which grants the side packs). With it, a pack line is bought for what is short of its count, as the container
+    /// slots allow (<paramref name="containerRoom"/>): a purchase with a named reason, riding on the kit trip that happens (it calls no trip of its own).
+    /// </param>
+    /// <param name="containerRoom">The container slots free (<see cref="PackLayout.ContainerRoom"/>); read only with <paramref name="held"/>.</param>
+    public static IReadOnlyList<ResupplyBuy> KitBuyList(HuntingGround ground, IReadOnlyList<KitLine> lines, List<KitLine> unsold, Func<uint, int>? held = null, int containerRoom = int.MaxValue)
     {
         ArgumentNullException.ThrowIfNull(ground);
         ArgumentNullException.ThrowIfNull(lines);
@@ -131,7 +442,28 @@ public static class ResupplyPlanner
         {
             if (line.Slot == KitSlot.Pack)
             {
-                // M5 7 G3: the side packs are granted by the build; a kit trip does not buy them again (a trip that buys packs is item 8's, TODO(m5-side-packs-use)).
+                if (held is null)
+                {
+                    continue; // the caller does not count the packs: the build grants them (M5 7 G3)
+                }
+
+                var have = held(line.Wcid);
+                var need = Math.Min(line.Count - have, containerRoom);
+                if (need <= 0)
+                {
+                    continue; // held already, or no container slot to put one in
+                }
+
+                if (ground.VendorSelling(line.Wcid) is { } packVendor)
+                {
+                    list.Add(new ResupplyBuy(new StockLine(line.Wcid, line.Name, line.Count, 1, 1), packVendor, have, need));
+                    containerRoom -= need;
+                }
+                else
+                {
+                    unsold.Add(line);
+                }
+
                 continue;
             }
 
@@ -146,6 +478,51 @@ public static class ResupplyPlanner
         }
 
         return list;
+    }
+
+    /// <summary>
+    /// M6 8 D (<c>m5-side-packs-use</c> and <c>m5-pack-short</c>): the side packs a trip buys when the layout is short of them (<see cref="PackLayout.PacksWanted"/>), or null with <paramref name="why"/> naming the reason it buys none. The ware is the Pack
+    /// (<see cref="FighterKit.SidePackWcid"/>, ItemType Container, 24 slots) at the home vendor whose <c>sells</c> lists it, at the profile's price; the count is what the layout lacks, what the container slots allow and what the purse pays (the pack
+    /// is the last line of the list, so the purse left is what the other lines leave). No vendor, price or count of a ground lives here.
+    /// </summary>
+    /// <param name="ground">The fight's ground.</param>
+    /// <param name="held">The side packs held (<see cref="PackLayout.SidePacks"/>, the foci not counted).</param>
+    /// <param name="containerRoom">The container slots free once the foci the same list buys are counted.</param>
+    /// <param name="purseLeft">The pyreals the rest of the list leaves.</param>
+    /// <param name="why">The decision, for the log: the reason for the buy, or for none.</param>
+    public static ResupplyBuy? PackBuy(HuntingGround ground, int held, int containerRoom, long purseLeft, out string why)
+    {
+        ArgumentNullException.ThrowIfNull(ground);
+        var lacks = PackLayout.PacksWanted - held;
+        if (lacks <= 0)
+        {
+            why = string.Create(CultureInfo.InvariantCulture, $"packs: {held} side packs held, the layout wants {PackLayout.PacksWanted}: none to buy");
+            return null;
+        }
+
+        if (ground.VendorSelling(FighterKit.SidePackWcid) is not { } vendor || ground.PriceOf(FighterKit.SidePackWcid) is not { } price)
+        {
+            why = string.Create(CultureInfo.InvariantCulture, $"packs: {held} side packs held, the layout wants {PackLayout.PacksWanted}, and no vendor of {ground.Home.Town} sells a pack: the last jobs go to the main pack (TODO(m5-pack-short))");
+            return null;
+        }
+
+        var count = Math.Min(lacks, containerRoom);
+        if (count <= 0)
+        {
+            why = string.Create(CultureInfo.InvariantCulture, $"packs: {held} side packs held, the layout wants {PackLayout.PacksWanted}, and no container slot is free (the foci and packs fill them): none bought (TODO(m5-pack-short))");
+            return null;
+        }
+
+        var pays = price > 0 ? (int)Math.Min(count, Math.Max(0, purseLeft) / price) : count;
+        if (pays <= 0)
+        {
+            why = string.Create(CultureInfo.InvariantCulture, $"packs: {held} side packs held, the layout wants {PackLayout.PacksWanted}: the purse left, {Math.Max(0, purseLeft)} pyreals, does not pay one at {price}: none bought (TODO(m5-pack-short))");
+            return null;
+        }
+
+        var name = vendor.Sells.First(w => w.Wcid == FighterKit.SidePackWcid).Name;
+        why = string.Create(CultureInfo.InvariantCulture, $"packs: {held} side packs held, the layout wants {PackLayout.PacksWanted}: buys {pays} {name} at {vendor.Name} for {pays * (long)price} pyreals (price {price} each, {containerRoom} container slots free, purse left {purseLeft})");
+        return new ResupplyBuy(new StockLine(FighterKit.SidePackWcid, name, PackLayout.PacksWanted, 1, 1), vendor, held, pays);
     }
 
     /// <summary>
@@ -291,6 +668,20 @@ public static class ResupplyPlanner
         return ordered;
     }
 
+    /// <summary>
+    /// M6 1 L3 (live climb, 2026-11-02), the fallback since M6 4 W1: true when a walk from <paramref name="fromCell"/> to <paramref name="toCell"/> joins two rooms in two landblocks (Holtburg's
+    /// healer 0xA9B40111 to the Apprentice Scrivener of Life Magic 0xA9B30102). Such a walk now plans as one composed walk (<c>JourneyLegPlanner.SourceFor</c> gives both landblocks' rooms: out of the
+    /// start's room, outdoors, in to the goal's); when that walk fails, the station walks out to the home lifestone (a room to an outdoor cell), then in again, when the lifestone's landblock is within one of
+    /// the goal's. Fort Tethana's lifestone (0x2780, three landblocks from Zisaha's 0x2481) is too far to be that way out; the walk from it plans since M6 4 W1 (a horizon toward the room's land point
+    /// until the room's tile attaches), so the composed walk's failure is named as it is.
+    /// </summary>
+    /// <param name="fromCell">The player's cell.</param>
+    /// <param name="toCell">The walk's goal cell.</param>
+    /// <param name="lifestoneCell">The home lifestone's cell (the way out).</param>
+    public static bool NeedsWayOut(uint fromCell, uint toCell, uint lifestoneCell) =>
+        LandDefs.IsEnvCell(fromCell) && LandDefs.IsEnvCell(toCell) && fromCell >> 16 != toCell >> 16
+        && Math.Abs((int)((lifestoneCell >> 24) & 0xFF) - (int)((toCell >> 24) & 0xFF)) <= 1 && Math.Abs((int)((lifestoneCell >> 16) & 0xFF) - (int)((toCell >> 16) & 0xFF)) <= 1;
+
     /// <summary>A landblock-local point as world metres on the map (the landblock's x and y bytes times its 192 m, plus the point), for the walk's order and the live-against-profile distance.</summary>
     /// <param name="cell">The full cell id.</param>
     /// <param name="point">The landblock-local point.</param>
@@ -311,7 +702,7 @@ public sealed class ResupplyStation(ResupplyOptions? options = null) : IStation
     public string Name => "resupply";
 
     /// <inheritdoc />
-    /// <remarks>At the home (checked by the run against the ground's lifestone landblock: <see cref="StationWhere"/> has no value for a ground's home, <c>TODO(m5-station-where-home)</c>), in peace.</remarks>
+    /// <remarks>At the home (checked by the run against the ground's lifestone landblock, by design: <see cref="StationWhere"/> names the fixed Holtburg and the den, never a ground's own home, which is a profile fact (D26); closes <c>m5-station-where-home</c>, M6 6 MG), in peace.</remarks>
     public StationNeeds Needs { get; } = new(Peace: true);
 
     /// <summary>The options the station was built with.</summary>
@@ -349,6 +740,7 @@ public sealed partial class ResupplyRun : ShopLeg
     private IReadOnlyList<ResupplyVisit> _visits = [];
     private readonly HashSet<uint> _refusedThisTrip = [];
     private bool _slotLimited;
+    private readonly HashSet<ResupplyBuy> _floorBuys = [];
 
     internal ResupplyRun(JourneyContext context, ResupplyOptions options)
         : base("resupply", context)
@@ -408,14 +800,29 @@ public sealed partial class ResupplyRun : ShopLeg
     /// <remarks>Report-only (a new judge's first gate).</remarks>
     public override string VerdictFields() => string.Create(
         CultureInfo.InvariantCulture,
-        $"bought={Bought} spent={Spent} notes_sold={NotesSold} sold={Sold} earned={Earned} vendors={Vendors} refused={_refusals.Count} refusals={(_refusals.Count == 0 ? "none" : string.Join('+', _refusals))} short={Short} not_found={NotFound} loot={(_options.Loot ? "on" : "off")} problems={Problems.Count} granted={Granted} notes_bought={NotesBought} dropped={DroppedItems} vendors_skipped={VendorsSkipped}")
+        $"bought={Bought} spent={Spent} notes_sold={NotesSold} sold={Sold} earned={Earned} vendors={Vendors} refused={_refusals.Count} refusals={(_refusals.Count == 0 ? "none" : string.Join('+', _refusals))} short={Short} not_found={NotFound} loot={(_options.Loot ? "on" : "off")} problems={Problems.Count} granted={Granted} notes_bought={NotesBought} dropped={DroppedItems} vendors_skipped={VendorsSkipped} junk_dropped={JunkDropped} components_offered={ComponentsOffered}")
         + (Failure is null ? string.Empty : " why=" + Failure.Replace(' ', '_'));
 
     /// <inheritdoc />
     protected override IEnumerable<ActionHandle?> Script()
     {
         var ground = Context.Dungeon;
-        var counters = new LogisticsCounters(ground);
+        if (_options.Replace)
+        {
+            foreach (var h in ReplaceScript(ground)) { yield return h; } // M6 7 AH: the death's replace step, the floor's missing pieces only
+
+            yield break;
+        }
+
+        if (_options.TownShop is { } townOrders)
+        {
+            foreach (var h in TownShopScript(ground, townOrders)) { yield return h; } // M6 14 T: the buys of a stop in another town, on the way out
+
+            yield break;
+        }
+
+        SaleDesk.For(S.State).StateIfNone(Context.Character, Context.Spells, Context.Facts); // M6 16 E5c2: a trip run with no job states who she is and the SpellTable for the rule book's verdict outside its own sale
+        var counters = TripDesk.For(S.State).On(ground); // M6 16 E5d: the session's one set of counters: the town trip states no floor-only line and reads what stands
         if (_options.Kit is null)
         {
             Stage = "count";
@@ -427,18 +834,45 @@ public sealed partial class ResupplyRun : ShopLeg
                 Fail($"stock unread: {verdict.Cause} after {NpcSeconds:0} s, so there is no buy list");
                 yield break;
             }
+
+            if (TripDesk.For(S.State).InHand is { } order)
+            {
+                // M6 16 E5d (check, act, check): the trip carries the verdict the trigger called it on. The count above is the check at home: what the visit acts on. Where it differs from what the trip was called for
+                // (the pack and the purse changed on the way home, the experience was spent) each difference is said here, never recomputed in silence.
+                Log(order.AtHome(counters, verdict, S.State));
+            }
+
+            foreach (var wcid in counters.UnstockedNeeds())
+            {
+                if (ground.TownStockOf(wcid) is { } town)
+                {
+                    // M6 item 14 (m6-goldscarab): no gap: the ware is the town stock's, bought on the way out; the home walk has nothing to buy
+                    Log(Text($"resupply: the buff passes found the pack short of {ComponentNeeds.Shared.NameOf(wcid)} {wcid}: no stock line of the home walk carries it; the town stock buys it at {town.Vendor.Name} in {town.Town} on the way out (to {town.Keep} when under {town.TripUnder})"));
+                    continue;
+                }
+
+                Log(Text($"resupply: TODO(m6-component-unstocked): the buff passes found the pack short of {ComponentNeeds.Shared.NameOf(wcid)} {wcid}, and no stock line of {ground.Key} carries it: this trip cannot buy it"));
+            }
+
+            MeasurePackUse(ground); // M6 14 pack room (m6-pack-room): what she used and the loot since the last visit, read before anything is sold or bought
         }
 
-        if (S.State.Self.Position is not { } here || here.CellId >> 16 != ground.Home.LifestoneCell >> 16)
+        // M6 1 L2 (live, 2026-11-02): the home is the town, not the lifestone's landblock alone: a start in a home vendor's landblock is at home too (Fort Tethana's lifestone, 0x2780,
+        // is two landblocks from its shops in 0x2581 and 0x2481; the scrivener loopback starts by the Grand Master, D40). The walk from the lifestone to their rooms plans since M6 4 W1 (a horizon toward the room's land point until its tile attaches).
+        if (S.State.Self.Position is not { } here || (here.CellId >> 16 != ground.Home.LifestoneCell >> 16 && !ground.Vendors.Any(v => v.Cell >> 16 == here.CellId >> 16)))
         {
-            Fail(string.Create(CultureInfo.InvariantCulture, $"not at the home: the player stands in 0x{S.State.Self.Position?.CellId ?? 0:X8}, the home lifestone of {ground.Home.Town} is in 0x{ground.Home.LifestoneCell:X8}"));
+            Fail(string.Create(CultureInfo.InvariantCulture, $"not at the home: the player stands in 0x{S.State.Self.Position?.CellId ?? 0:X8}, neither the landblock of the home lifestone of {ground.Home.Town} (0x{ground.Home.LifestoneCell:X8}) nor a home vendor's"));
             yield break;
         }
 
         if (_options.Kit is { } kitLines)
         {
             var unsold = new List<KitLine>();
-            _buyList = ResupplyPlanner.KitBuyList(ground, kitLines, unsold);
+            _buyList = ResupplyPlanner.KitBuyList(ground, kitLines, unsold, wcid => GearInventory.CountOf(S.State, [], wcid), PackLayout.ContainerRoom(S.State)); // M6 8 D: a pack line short of its count is bought, named below
+            foreach (var pack in _buyList.Where(b => b.Line.Wcid == FighterKit.SidePackWcid))
+            {
+                Log(Text($"packs: a kit line asks for {pack.Line.Keep} {pack.Line.Name} and {pack.Held} are held: buys {pack.Count} at {pack.Vendor.Name}"));
+            }
             if (unsold.Count > 0)
             {
                 Fail(Text($"no vendor of {ground.Home.Town} sells the kit line {string.Join(", ", unsold.Select(k => $"{k.Name} (weenie {k.Wcid})"))}: the profile lists none, and nothing is granted (D51)"));
@@ -447,32 +881,14 @@ public sealed partial class ResupplyRun : ShopLeg
 
             Log(Text($"resupply: a kit trip (D53): {kitLines.Count} line(s), the stock is not counted and nothing is sold"));
         }
-        else
+        if (_options.Kit is not null)
         {
-            _buyList = ResupplyPlanner.BuyList(ground, counters);
-            if (ground.Learn.Count > 0)
-            {
-                _buyList = [.. _buyList, .. PlanLearns(ground)]; // M5 7 P7j (D143): a scroll the spellbook needs joins the walk at its vendor
-            }
-
-            for (var i = 0; i < counters.LineCount; i++)
-            {
-                var line = counters.LineAt(i);
-                if (counters.IsCarried(i))
-                {
-                    Log(Text($"resupply: {line.Name} is carried (held {counters.HeldOf(i)}, stop under {line.StopUnder}): no home vendor sells it, never bought here; its stop is the counters'"));
-                }
-            }
+            LogBuyList();
         }
 
-        foreach (var b in _buyList)
+        if (_options.Kit is null && _options.Loot && KeepAsideRule.For(ground, Context.Character) is { } keepAside) // M6 14 (m6-lore-cantrips): the profile's block, else the climber's default
         {
-            Log(Text($"resupply: {b.Line.Name} held {b.Held} keep {b.Line.Keep}: buy {b.Count} at {b.Vendor.Name}"));
-        }
-
-        if (_options.Kit is null && _options.Loot && ground.Loot?.KeepAside is { } keepAside)
-        {
-            foreach (var h in AppraiseForKeepAside(new KeepAsideRule(keepAside))) { yield return h; }
+            foreach (var h in AppraiseForKeepAside(keepAside)) { yield return h; }
         }
 
         if (_options.Gear && _options.Kit is null)
@@ -480,7 +896,18 @@ public sealed partial class ResupplyRun : ShopLeg
             foreach (var h in GearPhase(ground)) { yield return h; } // M5 7 D121, D122, D125: before the sale, so the main pack holds the loot to sell alone
         }
 
+        if (_options.Gear && _options.Kit is null && !PlanFloor(ground))
+        {
+            yield break; // M6 2 b: the gear floor rides on the gear phase (a loot trip, slice e turns the climber's loot on); the loud no-caster stop: no caster is held and none can be bought
+        }
+
         var kept = _options.Kit is null ? SaleItems(ground) : [];
+        if (_options.Kit is null)
+        {
+            PlanPackBudget(ground, counters, kept); // M6 14 pack room (m6-pack-room): the burden budget from her live capacity, before the sale walk
+            foreach (var h in SurplusDrinks(kept)) { yield return h; } // the drinks over the cut keeps join the sale (amends m6-sale-keeps-drinks)
+        }
+
         var sellers = kept.Count == 0 ? [] : ResupplyPlanner.LootBuyers(ground, [.. kept.Select(k => k.Object.ItemType)]);
         if (_options.Loot && kept.Count > 0)
         {
@@ -489,7 +916,21 @@ public sealed partial class ResupplyRun : ShopLeg
                 : Text($"sale: {kept.Count} pack items for the loot buyers {string.Join(", ", sellers.Select(b => $"{b.Vendor.Name} ({b.Count}, mask 0x{b.Vendor.BuysItemTypes:X8})"))}"));
         }
 
-        _visits = ResupplyPlanner.Order(_buyList, sellers, ResupplyPlanner.WorldMetres(here.CellId, here.Origin));
+        // D123 (the owner: sell first, then buy): with loot to sell, the stock is planned after the sale, from the coin the sale brought in (long4's trip 3 planned on 729 coin, sold 20,646, bought 321 and walked again 14 s later for the
+        // ten scrolls it had put off). The sale stops are walked first; the buy list then rests on the purse read after the last sale.
+        var sellFirst = _options.Kit is null && sellers.Count > 0;
+        if (_options.Kit is null && !sellFirst)
+        {
+            PlanStock(ground, counters);
+            PlanLeather(ground); // M6 item 14: the leather set, last: only what the purse pays over the stock and the scrolls
+            LogBuyList();
+        }
+        else if (sellFirst)
+        {
+            Log(Text($"resupply: sell first (D123): the stock is planned after the sale, from the purse it leaves (now {FloorPurse()}); the floor's {_buyList.Count} line(s) wait for it too"));
+        }
+
+        _visits = ResupplyPlanner.Order(sellFirst ? [] : _buyList, sellers, ResupplyPlanner.WorldMetres(here.CellId, here.Origin));
         if (_visits.Count > 1)
         {
             _visits = ResupplyPlanner.OutdoorStopsFirst(_visits, here.CellId, out var orderWhy);
@@ -504,6 +945,19 @@ public sealed partial class ResupplyRun : ShopLeg
             }
 
             Log("resupply: nothing to buy or sell: no walk");
+            if (_options.Kit is null)
+            {
+                PackVisited(ground); // M6 14 pack room: a visit, even one with nothing to do: the measure starts again and the loot record is cleared
+            }
+
+            if (_options.Gear && _options.Kit is null)
+            {
+                // M6 2 f (2-R2): a loot trip with nothing to buy or sell still wears what it holds and gives back what it can (the gear phase's pieces the judge held back, a piece unread before)
+                foreach (var h in EquipPass(ground)) { yield return h; }
+                foreach (var h in ReturnPass(ground)) { yield return h; }
+            }
+
+            NoCasterStop("the trip, nothing to buy");
             Stage = "done";
             yield break;
         }
@@ -523,8 +977,8 @@ public sealed partial class ResupplyRun : ShopLeg
             foreach (var h in TravelTo(new TravelRequest(Destination("home-lifestone-point", ground.Home.LifestoneCell, ground.Home.LifestonePoint), TravelPurpose.Bind), "off the lifestone")) { yield return h; }
         }
 
-        // M5 7 G1 (edge audit 1, 12b): a pack nearly full of coin stacks cannot take a payout (ACE refuses the whole sale), so the coin is turned into notes first.
-        if (_options.Kit is null && _options.Loot && kept.Count > 0 && MageLootRules.FreeSlots(S.State) < PreNoteFreeSlots)
+        // M5 7 G1 (edge audit 1, 12b): a pack nearly full of coin stacks cannot take a payout (ACE refuses the whole sale), so the coin is turned into notes first. M6 14 pack rules: before every sale, the coin over the float (CoinFloat)
+        if (_options.Kit is null && _options.Loot && kept.Count > 0 && NotesDue(ground) > 0)
         {
             foreach (var h in ConvertCoin(ground)) { yield return h; }
         }
@@ -532,6 +986,35 @@ public sealed partial class ResupplyRun : ShopLeg
         foreach (var visit in _visits)
         {
             foreach (var h in VisitVendor(ground, visit, kept)) { yield return h; }
+        }
+
+        if (sellFirst)
+        {
+            // D123, check, act, check: the purse read after the last sale (check), the stock planned from it once (act), the plan's lines logged with the coin they rest on (check). The buy stops start where the sale left her;
+            // a buy at the vendor she stands by is the nearest stop, so it costs no walk.
+            Log(Text($"resupply: sold first (D123): sold {Sold} item(s) for {Earned}; the purse now {FloorPurse()}: the stock is planned from it"));
+            PlanStock(ground, counters);
+            PlanLeather(ground); // M6 item 14: the leather set, last: only what the purse pays over the stock and the scrolls
+            LogBuyList();
+            var at = S.State.Self.Position ?? here;
+            var buys = ResupplyPlanner.Order(_buyList, [], ResupplyPlanner.WorldMetres(at.CellId, at.Origin));
+            if (buys.Count > 1)
+            {
+                buys = ResupplyPlanner.OutdoorStopsFirst(buys, at.CellId, out var buyOrderWhy);
+                Log("resupply: the buy walk's order: " + buyOrderWhy);
+            }
+
+            Log(buys.Count == 0 ? "resupply: sold first (D123): nothing to buy after the sale" : "resupply: the buy walk " + string.Join(" -> ", buys.Select(v => v.Vendor.Name)));
+            _visits = [.. _visits, .. buys];
+            foreach (var visit in buys)
+            {
+                foreach (var h in VisitVendor(ground, visit, kept)) { yield return h; }
+            }
+        }
+
+        if (_options.Kit is null)
+        {
+            foreach (var h in BuyScrollKits(ground)) { yield return h; } // D116: the components after the scroll are a required step of this trip, check, act, check
         }
 
         if (_options.Kit is null && _toRead.Count > 0)
@@ -571,30 +1054,97 @@ public sealed partial class ResupplyRun : ShopLeg
             }
         }
 
+        foreach (var h in DropJunk(ground)) { yield return h; } // M6 14 pack rules: the value-0 junk and the tool no Holtburg buyer takes, dropped at the home with check, act, check
+
+        if (_options.Kit is null && (_options.Gear || _floorBuys.Count > 0))
+        {
+            foreach (var h in EquipPass(ground)) { yield return h; } // M6 2 b: the floor's caster and robe and every better piece held, worn with check, act, check (M5 D141)
+            foreach (var h in ReturnPass(ground)) { yield return h; } // M6 2 d: an attuned piece the pass did not wear, outgrown or blocked, given back to its NPC (GearReturn), with check, act, check
+        }
+
         if (_options.Gear && _options.Kit is null)
         {
             foreach (var h in SortPacks(ground, "after the buys")) { yield return h; } // M5 7 D121: the bought components and kit to their packs (ACE creates a bought ware in the main pack, Player_Commerce.cs 59-102)
             Log("resupply: gear: " + GearFields());
         }
 
-        if (ground.Learn.Count > 0 && _options.Kit is null)
+        if (_options.Kit is null)
+        {
+            NoCasterStop("the trip");
+        }
+
+        if (LearnsOn(ground) && _options.Kit is null)
         {
             Log("resupply: learn: " + LearnFields);
+        }
+
+        if (_options.Kit is null)
+        {
+            PackVisited(ground); // M6 14 pack room (m6-pack-room): the next measure's departure; the full-pack line waits for the next item the loot leaves
         }
 
         Log("resupply: done: " + VerdictFields());
     }
 
-    /// <summary>Free slots under which the coin is turned into notes before the sale walk.</summary>
-    private const int PreNoteFreeSlots = 3;
-
     /// <summary>One vendor of the walk: met, opened, the loot sold in batches, the lines bought.</summary>
+    /// <summary>
+    /// The stock's buy list from the purse held now (D123: after the sale when there is one): the scrolls the plan wants, the stock lines within the ground's trip budget, a side pack, the scroll's components; the gear floor's lines,
+    /// planned before, stay first. A scroll the budget cannot pay waits (<see cref="WaitLearn"/>). Called once a trip.
+    /// </summary>
+    private void PlanStock(HuntingGround ground, LogisticsCounters counters)
+    {
+        var floor = _buyList.Where(_floorBuys.Contains).ToList();
+        CutPackKeeps(counters); // M6 14 pack room (m6-pack-room): the stock is bought to the budget's keeps
+        var scrolls = LearnsOn(ground) ? PlanLearns(ground) : []; // M6 1 c: the ground's list or the plan's lines at the home town's scriveners; M5 7 P7j (D143): a scroll the spellbook needs joins the walk at its vendor
+        var waiting = new List<ResupplyBuy>();
+        var stockList = ResupplyPlanner.BuyList(ground, counters, FloorPurse(), scrolls, waiting, ShoppingBuys(ground), TripDesk.For(S.State).InHand?.Verdict.Line?.Wcid); // M6 16 Q10 (engine-trip-order-acts): the line the trip was called for is lifted clear first; // M6 7 V: within the ground's trip budget; M6 7 X: the scrolls inside it, in the plan's order
+        counters.UncutKeeps(); // M6 16 E5d: the cut keeps were this visit's buy list's alone: the session's counters are the fight's too, which keeps the profile's
+        _buyList = [.. floor, .. HoldUnseen([.. stockList, .. PackBuys(ground, stockList)])]; // M6 7 AX: a buy that has not shown is not bought twice; M6 8 D: a side pack rides on this trip when the layout is short
+        foreach (var scroll in waiting)
+        {
+            WaitLearn(ground, scroll, counters);
+        }
+
+        AfterScrollPlan(ground); // the owner's rule: components with every scroll (D115, its gate taken out by D116)
+
+        for (var i = 0; i < counters.LineCount; i++)
+        {
+            var line = counters.LineAt(i);
+            if (counters.IsCarried(i))
+            {
+                Log(Text($"resupply: {line.Name} is carried (held {counters.HeldOf(i)}, stop under {line.StopUnder}): no home vendor sells it, never bought here; its stop is the counters'"));
+            }
+        }
+    }
+
+    private void LogBuyList()
+    {
+        foreach (var b in _buyList)
+        {
+            Log(Text($"resupply: {b.Line.Name} held {b.Held} keep {b.Line.Keep}: buy {b.Count} at {b.Vendor.Name}"));
+        }
+    }
+
     private IEnumerable<ActionHandle?> VisitVendor(HuntingGround ground, ResupplyVisit visit, List<(uint Guid, WorldObject Object)> kept)
     {
         Stage = "vendor:" + visit.Vendor.Name;
         Log(visit.WalkLine);
         uint guid = 0;
         foreach (var h in Meet(visit.Vendor, g => guid = g)) { yield return h; }
+
+        if (guid == 0 && _unreachable is { } first && LeatherWalkAgain(visit, first))
+        {
+            // M6 item 14 (live 2026-11-12 01:02 UTC): a body in the lane to the leather set's vendor: one more walk after a short wait, on this trip; named either way.
+            Log(Text($"vendor: {visit.Vendor.Name} could not be reached ({first}): a body stands in the lane (npc-in-lane), which clears by itself: waiting {LaneWaitSeconds:0} s, then one more walk on this trip (recovery=leather-walk-again)"));
+            foreach (var h in Until(() => false, LaneWaitSeconds)) { yield return h; }
+
+            foreach (var h in Meet(visit.Vendor, g => guid = g)) { yield return h; }
+
+            if (guid == 0 && _unreachable is { } second)
+            {
+                _ = LeatherWalkAgain(visit, second); // the second failure is the one named
+            }
+        }
 
         if (guid == 0 && _unreachable is { } why)
         {
@@ -626,7 +1176,7 @@ public sealed partial class ResupplyRun : ShopLeg
 
         foreach (var buy in visit.Buys)
         {
-            foreach (var h in BuyLine(ground, visit.Vendor, guid, buy)) { yield return h; }
+            foreach (var h in _floorBuys.Contains(buy) ? FloorBuy(ground, visit.Vendor, guid, buy) : BuyLine(ground, visit.Vendor, guid, buy)) { yield return h; }
         }
     }
 
@@ -637,13 +1187,22 @@ public sealed partial class ResupplyRun : ShopLeg
     private int NotesDue(HuntingGround ground)
     {
         // M5 7 D136: the bought notes come as one stack (up to 250) and join the held stack, so one free slot is enough (the buy's own cap is NoteRoom)
-        if (_options.Kit is not null || MageLootRules.FreeSlots(S.State) <= 0)
+        if (_options.Kit is not null || PackView.MainPackFree(S.State) <= 0)
         {
             return 0;
         }
 
-        return PurseNotes.Greedy(Coins() - ground.Supplies.Purse.Coin, NoteOffers(ground)).Picks.Sum(p => p.Count);
+        var coin = Coins();
+        var picks = PurseNotes.Greedy(coin - PurseFloor(ground), NoteOffers(ground)).Picks;
+        return Context.Facts.CoinToNotes || NotesSaveASlot(coin, picks) ? picks.Sum(p => p.Count) : 0; // M6 14 pack rules: a change that frees no slot costs 15% for nothing
     }
+
+    /// <summary>
+    /// The coin the purse keeps as coin: the ground's (<c>purse.coin</c>), or 0 while an order turns the coin into notes (<see cref="JourneyFacts.CoinToNotes"/>, M6 item 14: the den run's trip; what is left is under the smallest
+    /// purse note's price).
+    /// </summary>
+    /// <remarks>M6 14 pack rules: the ground's coin is the float (<see cref="CoinFloat"/>): the trip's own spend rounded up to whole coin stacks, no longer the profile's <c>purse.coin</c> (a restock from nothing, which kept three stacks when a trip spends about one).</remarks>
+    private long PurseFloor(HuntingGround ground) => Context.Facts.CoinToNotes ? 0 : FloatOf(ground, out _);
 
     private static PurseNote? NoteToBuy(HuntingGround ground) =>
         ground.Supplies.Purse.Notes.Where(n => ground.VendorSelling(n.Wcid) is not null).OrderByDescending(n => n.Value).FirstOrDefault();
@@ -660,9 +1219,15 @@ public sealed partial class ResupplyRun : ShopLeg
     private string PurseDecision(HuntingGround ground)
     {
         var coin = Coins();
-        var floor = ground.Supplies.Purse.Coin;
+        var floor = PurseFloor(ground);
+        var floatWhy = "the order turns the coin into notes";
+        if (!Context.Facts.CoinToNotes)
+        {
+            _ = FloatOf(ground, out floatWhy);
+        }
+
         var minNote = ground.Supplies.Purse.MinNote;
-        var head = Text($"purse: coin {coin}, floor {floor}, above {Math.Max(0, coin - floor)}, notes of {minNote} and up (a smaller note saves no pack slot and costs 15%): ");
+        var head = Text($"purse: coin {coin}, floor {floor} ({floatWhy}), above {Math.Max(0, coin - floor)}, notes of {minNote} and up (a smaller note saves no pack slot and costs 15%): ");
         if (NoteToBuy(ground) is null)
         {
             return head + Text($"no notes: no vendor of {ground.Home.Town} sells a note of the purse");
@@ -681,7 +1246,12 @@ public sealed partial class ResupplyRun : ShopLeg
             return head + Text($"no notes: the coin above the floor is under the smallest such note's price ({smallest.Note.Name} at {smallest.Price}); it stays coin");
         }
 
-        if (MageLootRules.FreeSlots(S.State) <= 0)
+        if (!Context.Facts.CoinToNotes && !NotesSaveASlot(coin, picks))
+        {
+            return head + Text($"no notes: {string.Join(", ", picks.Select(p => Text($"{p.Count} x {p.Note.Name}")))} would leave the coin in as many slots or more, a note stack counted ({CoinFloat.Stacks(coin)} coin stacks now): a note costs 15% and frees no slot; it stays coin");
+        }
+
+        if (PackView.MainPackFree(S.State) <= 0)
         {
             return head + "no notes: the main pack has no free slot for a note stack";
         }
@@ -699,7 +1269,7 @@ public sealed partial class ResupplyRun : ShopLeg
         }
 
         Stage = "notes:" + vendor.Name;
-        Log(Text($"walking: purpose=vendor:{vendor.Name} (coin to notes: {Coins()} pyreals, keep {ground.Supplies.Purse.Coin}, {due} notes)"));
+        Log(Text($"walking: purpose=vendor:{vendor.Name} (coin to notes: {Coins()} pyreals, keep {PurseFloor(ground)}, {due} notes)"));
         uint guid = 0;
         foreach (var h in Meet(vendor, g => guid = g)) { yield return h; }
 
@@ -725,7 +1295,7 @@ public sealed partial class ResupplyRun : ShopLeg
         }
 
         // M5 7 D136 follow-up: greedy over the live 0062, largest note first, each denomination bought as one row and merged into its own stack before the next, the coin re-read after each buy
-        var floor = ground.Supplies.Purse.Coin;
+        var floor = PurseFloor(ground);
         var scratch = new List<uint>();
         foreach (var offer in NoteOffers(ground).OrderByDescending(o => o.Note.Value))
         {
@@ -750,7 +1320,7 @@ public sealed partial class ResupplyRun : ShopLeg
                 continue;
             }
 
-            if (MageLootRules.FreeSlots(S.State) <= 0)
+            if (PackView.MainPackFree(S.State) <= 0)
             {
                 Log(Text($"purse: the main pack has no free slot for the {note.Name} stack: {above} above the floor stays coin"));
                 break;
@@ -784,7 +1354,7 @@ public sealed partial class ResupplyRun : ShopLeg
     /// (<c>ItemsToReceive.cs</c> 78-110), and every trade note's MaxStackSize is 250 (ACE-World-Database v0.9.296, wcids 2621-2627 and 20628-20630, PropertyInt 11), so each free main-pack slot holds that many. A row whose 0062 names
     /// no MaxStackSize counts one a slot, as before the notes stacked.
     /// </summary>
-    private int NoteRoom(VendorStockEntry entry) => (int)Math.Min(int.MaxValue, (long)Math.Max(0, MageLootRules.FreeSlots(S.State)) * entry.MaxStackSize);
+    private int NoteRoom(VendorStockEntry entry) => (int)Math.Min(int.MaxValue, (long)Math.Max(0, PackView.MainPackFree(S.State)) * entry.MaxStackSize);
 
     /// <summary>M5 7 D136: one line of the notes held after a buy: each stack in the main pack with its size, so a live run shows the notes in one stack (<c>TODO(m5-note-merge)</c> closed).</summary>
     private void LogNoteStacks(PurseNote note)
@@ -808,76 +1378,264 @@ public sealed partial class ResupplyRun : ShopLeg
         foreach (var h in MergeBought(SellRules.PyrealWcid, 0, "Pyreal", mainPackTarget: true)) { yield return h; }
     }
 
+    /// <summary>The seconds a Give has to take the piece and bring the reward (the Pathwarden station's, <see cref="PathwardenRun.AfterSeconds"/>).</summary>
+    private const double ReturnSeconds = PathwardenRun.AfterSeconds;
+
+    /// <summary>M6 5 Q2 (2-R9): metres beyond <see cref="PathwardenRun.UseRange"/> the giver may stand before the return pass walks to him (no value change).</summary>
+    private const double ReturnWalkSlack = 1;
+
+    /// <summary>M6 5 Q2 (2-R9): metres beyond <see cref="PathwardenRun.UseRange"/> the giver may stand after the walk, and at each Give's check before, for the Give to be tried (no value change).</summary>
+    private const double ReturnGiveSlack = 3;
+
+    /// <summary>M6 5 Q2 (2-R9): the most metres a placed giver may stand from the quest file's point and still be taken for him (<see cref="ReturnNpc"/>; no value change).</summary>
+    private const double ReturnNpcMatchRadius = 40;
+
+    /// <summary>The attuned pieces given back this trip.</summary>
+    public int Returned { get; private set; }
+
+    /// <summary>The attuned pieces kept this trip, each named with its reason (<c>return: kept &lt;name&gt; (&lt;reason&gt;)</c>).</summary>
+    public IReadOnlyList<string> ReturnKept => _returnKept;
+
+    private readonly List<string> _returnKept = [];
+
     /// <summary>
-    /// M5 7 G1 (edge audit items 2 and 3): looting on, every main-pack item that is not the kit: not a stock ware, a kit item, one of the four foci, a trade note, money or a container, of a Value of at least 1, not worn or wielded and not
-    /// one already dropped. The loot rule's kept list no longer decides, so loot kept before a death, a reconnect or a restart is sold too.
+    /// M6 2 d: the return pass after the equip pass (<see cref="GearReturn"/>): each quest file's <c>returns</c> table is planned over the packs' attuned pieces the pass left (outgrown, or blocked by coverage). With pieces to give: check (the NPC's landblock is
+    /// the trip's, he is in the object table within reach, by the station's approach), act (Give), check (the piece gone and the reward arrived, <see cref="GearReturn.Failure"/>); a piece that fails a check is kept and named, with no retry. One summary line:
+    /// <c>return pass: given=&lt;n&gt; kept=&lt;n&gt;</c>.
     /// </summary>
-    private List<(uint Guid, WorldObject Object)> SaleItems(HuntingGround ground)
+    internal IEnumerable<ActionHandle?> ReturnPass(HuntingGround ground)
     {
-        var items = new List<(uint, WorldObject)>();
-        if (!_options.Loot)
+        foreach (var table in GearReturnTable.All)
         {
-            Log("sale: looting off (D38): no walk to the loot buyer, sold=0");
-            return items;
-        }
-
-        var supplies = ground.Supplies;
-        var keepAside = ground.Loot?.KeepAside is { } setting ? new KeepAsideRule(setting) : null;
-        foreach (var (guid, o) in PackItems())
-        {
-            var wcid = o.Weenie.WeenieClassId;
-            if (IsKeptAside(guid, o, keepAside, out var why))
+            var skills = new QualitiesSkills(S.State.Self.Qualities);
+            var context = Judge(ground).Context(skills);
+            var held = new List<GearReturnHeld>();
+            foreach (var candidate in HeldCandidates())
             {
-                Log($"sale: '{o.Name}' 0x{guid:X8} is kept aside ({why}), worth a look: not offered");
-                continue;
+                if (S.State.Self.Inventory.Contains(candidate.Guid) && S.State.Self.Inventory.Find(candidate.Guid).Kind != InventoryPlaceKind.Equipped && S.State.Objects.TryGet(candidate.Guid, out var o))
+                {
+                    held.Add(new GearReturnHeld(candidate, o.Weenie.WeenieClassId));
+                }
             }
 
-            if ((o.ItemType & PackRules.ManaStoneType) != 0 && !(PackMemory.Shared.Shed.Contains(guid) && S.TryGetAppraisal(guid, out var stone) && stone.ItemMana is not > 0))
-            {
-                continue; // M5 7 D139 (d): only an empty stone beyond the keep is sold (ShedStones; Archmage Cindrue's mask buys mana stones); a charged or kept one never
-            }
-
-            if (PackMemory.Shared.Rotation.Contains(guid))
-            {
-                continue; // M5 7 D139 (k): a caster the swap took off is rotation gear wherever it landed (the main pack when the kit pack was full)
-            }
-
-            if (_memory.Dropped.Contains(guid) || supplies.StockOf(wcid) is not null || supplies.KitOf(wcid) is not null || supplies.Purse.Notes.Any(n => n.Wcid == wcid) || GearKit.MageFociWcids.Contains(wcid)
-                || (o.ItemType & (SellRules.ItemTypeMoney | VendorStock.PromissoryNoteType | ContainerType)) != 0 || (o.Weenie.Value ?? 0) < 1 || (o.Weenie.WielderId is { } wielder && wielder != 0))
+            var plan = ReturnUnlitGuard(GearReturn.Plan(table, held, SelfEquipJudge.Worn(S.State), context)); // M6 16 E5e6: a piece a worn piece beats only with its magic off is kept and named, and no Give of this visit takes it
+            if (plan.Returns.Count == 0 && plan.Kept.Count == 0)
             {
                 continue;
             }
 
-            items.Add((guid, o));
+            Stage = "return";
+            foreach (var item in plan.Returns)
+            {
+                Log(Text($"return: {item.Name} 0x{item.Guid:X8} goes back to {table.GiverName} ({table.GiverWcid}): {item.Why}; his Give emote {item.Row.Emote} gives {item.Row.RewardName} ({item.Row.RewardWcid})"));
+            }
+
+            var npc = 0u;
+            if (plan.Returns.Count > 0)
+            {
+                string? unreachable = null;
+                if (table.Place is not { Point: { } at } place)
+                {
+                    unreachable = $"the quest names no place for {table.GiverName}";
+                }
+                else if (S.State.Self.Position is not { } here || (here.CellId >> 16) != (place.Cell >> 16))
+                {
+                    unreachable = $"he stands in landblock 0x{place.Cell >> 16:X4}, not where the trip is";
+                }
+                else
+                {
+                    npc = ReturnNpc(table.GiverWcid, place.Cell, at);
+                    if (npc == 0 || ReturnDistance(npc) > PathwardenRun.UseRange + ReturnWalkSlack)
+                    {
+                        foreach (var h in TravelTo(new TravelRequest(Destination(place.Name, place.Cell, at), TravelPurpose.Cell, npc, PathwardenRun.UseRange), table.GiverName, optional: true)) { yield return h; }
+
+                        if (LastTravelFailure is { } failure)
+                        {
+                            unreachable = "the walk failed: " + failure;
+                        }
+                        else
+                        {
+                            foreach (var h in Until(() => ReturnNpc(table.GiverWcid, place.Cell, at) != 0, NpcSeconds)) { yield return h; }
+
+                            npc = ReturnNpc(table.GiverWcid, place.Cell, at);
+                            unreachable = npc == 0 ? "he is not in the object table after the walk" : ReturnDistance(npc) > PathwardenRun.UseRange + ReturnGiveSlack ? Text($"he is {ReturnDistance(npc):0.0} m away after the walk") : null;
+                        }
+                    }
+                }
+
+                if (unreachable is not null)
+                {
+                    plan = plan.Unreachable(table.GiverName, unreachable);
+                    Log(Text($"return: {table.GiverName} not in reach ({unreachable}): the pieces are kept"));
+                }
+            }
+
+            var given = 0;
+            var kept = plan.Kept.Select(k => k.ToString()).ToList();
+            foreach (var item in plan.Returns)
+            {
+                // Check before: the piece is still held in a pack and the NPC is still in the table in reach.
+                if (!S.State.Self.Inventory.Contains(item.Guid) || S.State.Self.Inventory.Find(item.Guid).Kind == InventoryPlaceKind.Equipped || !S.State.Objects.TryGet(npc, out _) || ReturnDistance(npc) > PathwardenRun.UseRange + ReturnGiveSlack)
+                {
+                    kept.Add(new GearReturnKept(item.Guid, item.Name, "check before failed: the piece is not held in a pack or the NPC is out of reach").ToString());
+                    continue;
+                }
+
+                var scratch = new List<uint>();
+                var before = GearInventory.CountOf(S.State, scratch, item.Row.RewardWcid);
+                var give = S.Actions.Give(npc, item.Guid, 1, ActionSource.Automation);
+                yield return give;
+                foreach (var h in Until(() => !S.State.Self.Inventory.Contains(item.Guid) && GearInventory.CountOf(S.State, scratch, item.Row.RewardWcid) > before, ReturnSeconds)) { yield return h; }
+
+                var after = GearInventory.CountOf(S.State, scratch, item.Row.RewardWcid);
+                var verdict = GearReturn.Failure(item, S.State.Self.Inventory.Contains(item.Guid), before, after);
+                Log(Text($"return: Give {item.Name} 0x{item.Guid:X8} to {table.GiverName}: {Describe(give)}; check after: {(verdict is null ? Text($"gone, and {item.Row.RewardName} arrived (held {before} -> {after})") : verdict)}"));
+                if (verdict is null)
+                {
+                    given++;
+                    Returned++;
+                }
+                else
+                {
+                    kept.Add(new GearReturnKept(item.Guid, item.Name, verdict).ToString());
+                }
+            }
+
+            foreach (var line in kept)
+            {
+                _returnKept.Add(line);
+                Log(line);
+            }
+
+            Log(Text($"return pass: given={given} kept={kept.Count}"));
+        }
+    }
+
+    private uint ReturnNpc(uint wcid, uint cell, Vector3 at)
+    {
+        uint best = 0;
+        var bestDistance = double.MaxValue;
+        foreach (var o in S.State.Objects.All)
+        {
+            if (o.Weenie.WeenieClassId != wcid || o.Position is not { } p || p.CellId >> 16 != cell >> 16 || (o.ContainerId is { } c && c != 0))
+            {
+                continue;
+            }
+
+            var d = Vector3.Distance(p.Origin, at);
+            if (d < bestDistance)
+            {
+                (best, bestDistance) = (o.Guid, d);
+            }
         }
 
-        return items;
+        return bestDistance <= ReturnNpcMatchRadius ? best : 0;
+    }
+
+    private double ReturnDistance(uint guid) =>
+        S.State.Self.Position is { } here && S.State.Objects.TryGet(guid, out var o) && o.Position is { } p && p.CellId >> 16 == here.CellId >> 16 ? Vector3.Distance(p.Origin, here.Origin) : double.MaxValue;
+
+    private bool _saleKeptLogged;
+    private int _drinksKept;
+
+    /// <summary>
+    /// M6 14 (the Cave's run of 2026-11-12, 09:07 UTC): a restarted run begins on the ladder's first ground, whose stock lists neither tincture, and its sale sold the 12 Health Tinctures and 30 Mana Tinctures bought for the
+    /// Cave to the shopkeeper. True for a drink the vitals rules drink (<see cref="HealthDrinks.All"/>, <see cref="ManaDrinks.All"/>, the Stamina Potion): no character sells one, whatever ground the sale is
+    /// planned for.
+    /// </summary>
+    internal static bool DrinkInUse(uint wcid) => HealthDrinks.IndexOf(wcid) >= 0 || ManaDrinks.IndexOf(wcid) >= 0 || wcid == FighterKit.StaminaPotionWcid;
+
+    /// <summary>
+    /// M6 2 d: why the sale must not offer a pack item, or null. A worn piece; a Value of 0 (ACE: "has no value and cannot be sold", <c>Player_Commerce.cs</c>:275-280); an attuned piece (PropertyInt 114 above 0: ACE does buy it, <c>Vendor.cs</c>:626-627 only stops the vendor reselling it; Lifestone keeps it back so GearReturn can give it to its NPC for the reward); a retained one (PropertyBool 91, or the Retained description bit); a caster the gear floor keeps (<see cref="FloorCasters"/>: the floor wants two, the spare is never sold).
+    /// </summary>
+    private string? NotSellable(uint guid, WorldObject o, HashSet<uint> floorCasters)
+    {
+        if (o.Weenie.WielderId is { } wielder && wielder != 0)
+        {
+            return "worn";
+        }
+
+        if ((o.Weenie.Value ?? 0) < 1)
+        {
+            return "value 0";
+        }
+
+        var appraised = S.TryGetAppraisal(guid, out var appraisal) ? appraisal : null;
+        if (GearScore.Attuned(appraised))
+        {
+            return "attuned";
+        }
+
+        if (appraised?.Bool(RetainedBool) == true || (o.DescriptionFlags & VendorStock.RetainedFlag) != 0)
+        {
+            return "retained";
+        }
+
+        return floorCasters.Contains(guid) ? "floor caster" : null;
+    }
+
+    /// <summary>
+    /// M6 2 d: the pack casters the sale keeps for the gear floor. The floor wants <see cref="GearFloor.CastersWanted"/> casters held (wielded, in the main pack, in the side packs); the main pack's casters beyond what the rest of the packs and the
+    /// hands hold are kept best first by <see cref="GearScore"/>, an unread one always (an unappraised caster is not sold on a guess). The rest are loot.
+    /// </summary>
+    private HashSet<uint> FloorCasters(HuntingGround ground, KeepAsideRule? keepAside)
+    {
+        // M6 14 (the owner's ruling, 2026-11-16: drop the loot casters too): the casters her gear rules need (CasterKeep: the wielded, the best for each element she casts, the floor's spare, the charged spare, a useful great cantrip,
+        // the spend's target, an unread one); every verdict logged. The floor's two-casters count is one of the rules, no longer the whole.
+        _ = ground;
+        _ = keepAside;
+        return [.. GearKeepsNow().Verdicts.Where(v => v.KeptFor is not null).Select(v => v.Guid)];
+    }
+
+    private (Func<uint, string?> Casters, Func<uint, bool> Stones, List<CasterKeepVerdict> Verdicts)? _gearKeeps;
+
+    /// <summary>M6 14: the gear rules' keeps over what she carries (<see cref="CantripRoom.GearKeeps"/>), worked out once a sale (or a drain's list), each caster's verdict logged.</summary>
+    private (Func<uint, string?> Casters, Func<uint, bool> Stones, List<CasterKeepVerdict> Verdicts) GearKeepsNow()
+    {
+        if (_gearKeeps is { } made)
+        {
+            return made;
+        }
+
+        var keeps = CantripRoom.GearKeeps(S.State, Context.Dungeon, Context.Spells, Wardrobe.For(S.State).KeepCastChance); // M6 16 E5e1: the job's chance, as the field's (the level up job: the ladder's plan_cast_chance)
+        foreach (var v in keeps.Verdicts)
+        {
+            Log("gear: caster keep: " + v.Line);
+        }
+
+        _gearKeeps = keeps;
+        return keeps;
     }
 
     private const uint ContainerType = 0x200;
 
+    /// <summary>M6 5 q4 (D57), F1 (review 5-R13): the weenie class ids of every quest's hunt-until item and of the items a quest file names as expected or done items (<see cref="QuestCatalog.All"/>, read once), and (M6 villa) the Writ of Refuge and the Crude Lockpick: the sale never offers them. Not every Bonded item: a bonded item that no quest file names is the sale's to judge (ACE refuses to sell it).</summary>
+    internal static IReadOnlySet<uint> QuestItemWcids => QuestItems.Value;
+
+    private static readonly Lazy<IReadOnlySet<uint>> QuestItems = new(() => QuestCatalog.All.SelectMany(QuestItemsOf).Concat([Housing.VillaFacts.WritWcid, Housing.VillaFacts.LockpickWcid]).ToHashSet()); // M6 villa: the villa's price and rent items (the writs and the Crude Lockpick) are kept as a quest's are; the minor stones are the stone files' done items
+
+    /// <summary>The wcids of one quest file the sale keeps: its hunt-until items, the expected items of its steps and its done item.</summary>
+    internal static IEnumerable<uint> QuestItemsOf(Quest quest) =>
+        quest.Steps.Where(st => st.Kind == QuestStepKind.HuntUntil && st.Item?.Wcid is not null).Select(st => st.Item!.Wcid!.Value)
+            .Concat(quest.Steps.Select(st => st.Expect.Item?.Wcid).OfType<uint>())
+            .Concat(quest.Done.Item?.Wcid is { } done ? [done] : []);
+
     /// <summary>
-    /// M5 7 F30 (the owner): true when the sale must not offer the item: the loot step noted its guid (<see cref="SaleMemory.KeptAside"/>), or the keep-aside rule matches the appraisal the session holds of it (so a restart, which empties the ledger,
-    /// still protects what an appraisal of the item says is worth a look). <paramref name="why"/> is the bonus or the cantrips, or says the guid was noted.
+    /// M6 5 q4 (D57): why the sale (and the drop of a refused item) must never touch the item, or null: its weenie is a quest's hunt-until item (<paramref name="questItems"/>; restart-proof, read from the quest files, not the loot step's note),
+    /// (M6 5 F1, review 5-R13: no longer "any Bonded item": the hunt-until items, the expected items and the done items of the quest files are the whole rule).
     /// </summary>
-    internal bool IsKeptAside(uint guid, WorldObject item, KeepAsideRule? rule, out string why)
-    {
-        why = string.Empty;
-        if (rule is not null && S.TryGetAppraisal(guid, out var appraisal) && rule.Match(item.ItemType, appraisal, SpellNameOf) is { } matched)
-        {
-            why = matched;
-            _memory.KeptAside.Add(guid);
-            return true;
-        }
+    /// <param name="item">The held item.</param>
+    /// <param name="appraisal">The session's appraisal of it, or null.</param>
+    /// <param name="questItems">The quests' hunt-until wcids.</param>
+    internal static string? QuestKeepReason(WorldObject item, Appraisal? appraisal, IReadOnlySet<uint> questItems) =>
+        questItems.Contains(item.Weenie.WeenieClassId) ? "quest item: a hunt-until, expected or done item of a quest file" : null;
 
-        if (_memory.KeptAside.Contains(guid))
-        {
-            why = "noted by the loot step";
-            return true;
-        }
+    private Func<WorldObject, string?>? _scrollKeep;
 
-        return false;
-    }
+    /// <summary>M6 6 MG: the keep reason <see cref="ScrollKeepRule.Hook"/> gives <paramref name="item"/> over the live spellbook and skills for the ground's rung, or null (not a scroll, the book unread, or the rule does not keep it).</summary>
+    internal string? ScrollKeepReason(WorldObject item) =>
+        (_scrollKeep ??= ScrollKeepRule.Hook(LadderLoader.WarMage, Context.Dungeon.Key, Context.Spells, () => S.State.Self.Spellbook, () => S.State.Self.Qualities, botCovers: () => BuffBotCover.For(S.State).Covering))(item)
+        ?? EverySpellKeepReason(item); // M6 14 (the every-spell rule): its bought, refused and wanted scrolls are kept too
 
     private string? SpellNameOf(uint id) => Context.Spells.TryGetValue(id, out var info) ? info.Name : null;
 
@@ -949,7 +1707,24 @@ public sealed partial class ResupplyRun : ShopLeg
                 yield break;
             }
 
+            var walkFrom = S.State.Self.Position;
             foreach (var h in TravelTo(request, Text($"vendor:{vendor.Name}"), optional: true)) { yield return h; }
+
+            // M6 1 L3's way out, the fallback since M6 4 W1: a walk between rooms of two landblocks plans as one composed walk (out, outdoors, in); when it fails, out to the lifestone, then in again.
+            if (LastTravelFailure is { } composed && walkFrom is { } from && ResupplyPlanner.NeedsWayOut(from.CellId, request.Destination.Location.Position.CellId, Context.Dungeon.Home.LifestoneCell))
+            {
+                var home = Context.Dungeon.Home;
+                Log(Text($"walking: purpose=vendor:{vendor.Name} (the way out: the walk from the room 0x{from.CellId:X8} to his room 0x{request.Destination.Location.Position.CellId:X8} in another landblock, out of the room, outdoors and in (M6 4 W1), failed: {composed}; out to {home.Town}'s lifestone 0x{home.LifestoneCell:X8} first, then in)"));
+                foreach (var h in TravelTo(new TravelRequest(Destination("way-out:" + vendor.Name, home.LifestoneCell, home.LifestonePoint), TravelPurpose.Vendor, Range: ShopLeg.UnseenVendorReachMetres), Text($"vendor:{vendor.Name} (the way out)"), optional: true)) { yield return h; }
+
+                if (LastTravelFailure is { } outWhy)
+                {
+                    _unreachable = $"the way out: {outWhy} (after the composed walk: {composed})"; // named like any unreached stop
+                    yield break;
+                }
+
+                foreach (var h in TravelTo(request, Text($"vendor:{vendor.Name}"), optional: true)) { yield return h; }
+            }
 
             if (LastTravelFailure is { } why)
             {
@@ -988,7 +1763,7 @@ public sealed partial class ResupplyRun : ShopLeg
     /// <see cref="ShopLeg.UnseenVendorReachMetres"/> as the range, so the walk stops short of the body that stands on that point (M5 item 7, D120: a 0.5 m stop on his own point jammed against him in Thelnoth's cellar).
     /// </summary>
     private static TravelRequest RoomRequest(GroundVendor vendor) =>
-        vendor.StopCell != vendor.Cell
+        vendor.StopCell != vendor.Cell || vendor.StopPoint is not null // M6 1: a stop point in his own cell (20216's street under his balcony) is a point request too
             ? new TravelRequest(Destination(vendor.Name, vendor.StopCell, vendor.StopPoint ?? vendor.Point), TravelPurpose.Vendor)
             : new TravelRequest(Destination(vendor.Name, vendor.StopCell, vendor.Point), TravelPurpose.Vendor, Range: ShopLeg.UnseenVendorReachMetres);
 
@@ -1064,7 +1839,7 @@ public sealed partial class ResupplyRun : ShopLeg
         // M5 7 D99 (soak round 11, 2026-10-29): a full pack sold nothing, trip after trip (no free slot for the payout's coin, and the note's slot held back from the last one). With no free slot the
         // offer's cheapest item is dropped at the home to open one (never a kept-aside item: they are not offered); with one free slot it takes the payout (the note waits). A batch of two or
         // more items then frees more slots than its coin takes, so the next round sells more.
-        var free = MageLootRules.FreeSlots(S.State);
+        var free = PackView.MainPackFree(S.State);
         if (free == 0 && offer.Count > 1)
         {
             var cheapest = offer.MinBy(g => S.State.Objects.TryGet(g, out var t) ? stock.PayoutFor(t) : 0);
@@ -1076,7 +1851,7 @@ public sealed partial class ResupplyRun : ShopLeg
             offer.Remove(cheapest);
             _memory.Dropped.Add(cheapest);
             DroppedItems++;
-            free = MageLootRules.FreeSlots(S.State);
+            free = PackView.MainPackFree(S.State);
             Log(Text($"sale: the pack has no free slot for the payout's coin, so {cheapName} (0x{cheapest:X8}, payout {cheapPay}), the offer's cheapest, was dropped at the home to open one: {Describe(drop)}; free slots now {free}"));
         }
 
@@ -1101,7 +1876,7 @@ public sealed partial class ResupplyRun : ShopLeg
         if (waiting > 0)
         {
             _slotLimited = true;
-            Log(Text($"sale: {waiting} of {offer.Count} items wait: their payout needs more coin stacks than the {MageLootRules.FreeSlots(S.State)} free slots hold (ACE refuses the whole sale then, Player_Commerce.cs 176-191); {batch.Count} go in this batch ({batchPayout} pyreals)"));
+            Log(Text($"sale: {waiting} of {offer.Count} items wait: their payout needs more coin stacks than the {PackView.MainPackFree(S.State)} free slots hold (ACE refuses the whole sale then, Player_Commerce.cs 176-191); {batch.Count} go in this batch ({batchPayout} pyreals)"));
         }
 
         offer = batch;
@@ -1144,6 +1919,16 @@ public sealed partial class ResupplyRun : ShopLeg
     /// </summary>
     private void NoteRefusal(uint guid, string name, List<(uint Guid, string Name)> dropping)
     {
+        if (S.State.Objects.TryGet(guid, out var held) && IsUsableConsumable(held.Weenie.WeenieClassId))
+        {
+            if (_refusedThisTrip.Add(guid))
+            {
+                Log(Text($"sale: {name} (0x{guid:X8}) is a potion she drinks (the emergency rule or the mana rule): kept, never dropped for an unsellable refusal"));
+            }
+
+            return;
+        }
+
         if (!_refusedThisTrip.Add(guid))
         {
             return;
@@ -1156,6 +1941,10 @@ public sealed partial class ResupplyRun : ShopLeg
             dropping.Add((guid, name));
         }
     }
+
+    /// <summary>M6 7 AU (the owner): the potions the mage drinks (Health Draught, Mana Draught, the Potions of Healing, Stamina and Mana): an unsellable one is kept for its use, only an item with no use is dropped after two refusals.</summary>
+    /// <param name="wcid">The weenie class id.</param>
+    internal static bool IsUsableConsumable(uint wcid) => wcid is 378 || Vitals.ManaDrinks.IndexOf(wcid) >= 0 || Vitals.HealthDrinks.IndexOf(wcid) >= 0; // M6 14 T: every health drink (the Health Draught 2457 and the Potion of Healing 377 among them)
 
     private IEnumerable<ActionHandle?> DropRefused(List<(uint Guid, string Name)> dropping)
     {
@@ -1183,90 +1972,73 @@ public sealed partial class ResupplyRun : ShopLeg
     private IEnumerable<ActionHandle?> BuyLine(HuntingGround ground, GroundVendor vendor, uint guid, ResupplyBuy buy)
     {
         var name = buy.Line.Name;
-        if (S.State.Vendor is not { } stock || stock.Vendor != guid)
-        {
-            Refuse("open", Text($"{name}: {vendor.Name}'s stock is no longer open"));
-            yield break;
-        }
+        var isPack = buy.Line.Wcid == FighterKit.SidePackWcid; // M6 8 D: a side pack takes a container slot, not a main pack slot
+        var sideBefore = PackLayout.SidePacks(S.State).Count;
 
-        var entry = stock.Entries.FirstOrDefault(e => e.WeenieClassId == buy.Line.Wcid);
-        if (entry is null)
-        {
-            Refuse("stock", Text($"{name} ({buy.Line.Wcid}) is not in {vendor.Name}'s 0062 ({stock.Entries.Length} rows)"));
-            yield break;
-        }
+        // M6 16 E5b: the buy itself is the vendor counter's, the one buy of every caller (the checks before, a note changed when the coin is short, the send, the wait for the ware, the merge, the check after); the trip's own lines and counters are said through its host (TownTripCounter), and what is the trip's alone stays below
+        var counter = new VendorBuyResult();
+        var request = new VendorBuyRequest(guid, buy.Line.Wcid, buy.Count) { VendorName = vendor.Name, WareName = name, PartialAllowed = true, MergeAfter = true, ContainerSlot = isPack, CoinMustFall = false, ArrivalSeconds = BoughtArrivalSeconds, NotesFirst = ground.Supplies.Purse.Notes };
+        foreach (var h in VendorCounter.Buy(S, request, counter, new TownTripCounter(this, ground, vendor, buy))) { yield return h; }
 
-        if (PriceNote(name, vendor.Name, stock.PriceToBuy(entry, 1), ground.PriceOf(buy.Line.Wcid)) is { } note)
+        switch (counter.Refusal)
         {
-            Log(note);
-        }
-
-        var count = buy.Count;
-        if (!entry.IsUnlimited)
-        {
-            if (entry.Stack <= 0)
-            {
+            case "vendor-closed":
+                Refuse("open", Text($"{name}: {vendor.Name}'s stock is no longer open"));
+                yield break;
+            case "not-sold":
+                Refuse("stock", Text($"{name} ({buy.Line.Wcid}) is not in {vendor.Name}'s 0062 ({S.State.Vendor?.Entries.Length ?? 0} rows)"));
+                yield break;
+            case "stock-short":
                 Refuse("stock", Text($"{name}: {vendor.Name} is out of stock (his 0062 lists 0)"));
                 yield break;
-            }
-
-            if (count > entry.Stack)
-            {
-                Log(Text($"resupply: {name}: {vendor.Name} holds {entry.Stack}, fewer than the {count} to buy: buys {entry.Stack}"));
-                count = entry.Stack;
-            }
-        }
-
-        if (MageLootRules.FreeSlots(S.State) == 0)
-        {
-            Refuse("pack", Text($"{name}: the main pack is full (0 free slots): nothing is bought"));
-            yield break;
-        }
-
-        var cost = (long)stock.PriceToBuy(entry, (uint)count);
-        while (cost > Coins() && stock.BuysType(VendorStock.PromissoryNoteType) && NextNote(ground, cost - Coins()) is { } held)
-        {
-            var changed = false;
-            foreach (var h in SellNote(vendor, guid, held, ok => changed = ok)) { yield return h; }
-
-            if (!changed || S.State.Vendor is not { } refreshed || refreshed.Vendor != guid)
-            {
-                break;
-            }
-
-            stock = refreshed;
-        }
-
-        var coins = Coins();
-        if (cost > coins)
-        {
-            var affordable = Affordable(stock, entry, count, coins);
-            Short++;
-            Log(Text($"purse: short by {cost - coins} pyreals for {name} (the {count} cost {cost}, the coin is {coins} and no note is left): buys {affordable}"));
-            count = affordable;
-            if (count == 0)
-            {
+            case "pack-full":
+                Refuse("pack", isPack ? Text($"{name}: {PackLayout.ContainerRoom(S.State)} container slots free for the {counter.Count} to buy: nothing is bought") : Text($"{name}: the main pack is full (0 free slots): nothing is bought"));
                 yield break;
+            case "purse-short":
+                yield break; // the purse line named it (TownTripCounter.PurseShort): the coin pays for none
+            case VendorCounter.Refused:
+                Refuse(Kind(counter.Detail, "other"), Text($"{name} x{counter.Count} at {vendor.Name}: {counter.Outcome}"));
+                if (ResupplyPlanner.FociWcids.Value.Contains(buy.Line.Wcid) && _memory.FociRefused.Add(buy.Line.Wcid))
+                {
+                    Log(Text($"foci: {name} was refused at {vendor.Name}: not tried again this session (TODO(m6-foci-refused))"));
+                }
+
+                yield break;
+        }
+
+        var entry = counter.Entry!;
+        var count = counter.Count;
+        var paid = counter.Paid;
+        var heldBefore = counter.HeldBefore;
+
+        // M6 7 AX: the check after reads every place a ware can be held (GearInventory.Collect: the main pack, the side packs and what is in them, the worn): a focus comes as ContainerType 2 (WorldObject.cs:453-462 @95ef426d), beside the side packs, so a read of type-0 entries never finds it
+        var heldAfter = counter.HeldAfter;
+        var unseen = counter.Unseen;
+        if (unseen)
+        {
+            _memory.BoughtUnseen[buy.Line.Wcid] = heldBefore + count;
+            Log(Text($"resupply: TODO(m6-bought-unseen): {name}: {count} paid for at {vendor.Name}, held {heldBefore} -> {heldAfter} after {BoughtArrivalSeconds:0} s: the next plan holds the line out once"));
+        }
+
+        if (ResupplyPlanner.FociWcids.Value.Contains(buy.Line.Wcid))
+        {
+            Log(Text($"foci: check after: {name} held {heldBefore} -> {heldAfter}, paid {paid}; the next pass's lines read the foci formula (AccountFormula.HoldsFocus)"));
+            if (unseen && _memory.FociRefused.Add(buy.Line.Wcid))
+            {
+                Refuse("stock", Text($"{name}: bought but not in the pack after {BoughtArrivalSeconds:0} s: not tried again this session (TODO(m6-foci-refused))"));
             }
         }
-
-        var before = Coins();
-        var heldBefore = GearInventory.CountOf(S.State, new List<uint>(), buy.Line.Wcid);
-        var handle = S.Actions.Buy(guid, [(entry.Guid, (uint)count)], ActionSource.Automation);
-        yield return handle;
-        if (handle.Outcome is not { Kind: ActionOutcomeKind.Confirmed })
+        else if (isPack)
         {
-            Refuse(Kind(handle.Outcome?.Detail, "other"), Text($"{name} x{count} at {vendor.Name}: {Describe(handle)}"));
-            yield break;
+            // M6 8 D: the check after reads the side slots: the pack must be one of the player's side packs (ACE puts a container in a side slot, Container.cs 416 @95ef426d), where the layout and the sort find it.
+            var sideAfter = PackLayout.SidePacks(S.State).Count;
+            Log(Text($"packs: check after: side packs {sideBefore} -> {sideAfter} ({count} {name} bought at {vendor.Name} for {paid} pyreals); the sort after the buys puts them to their jobs"));
+            if (!unseen && sideAfter < sideBefore + count)
+            {
+                Log(Text($"packs: TODO(m6-pack-unplaced): {name} is held but not in a side slot ({sideBefore} -> {sideAfter}, {count} bought); the layout counts the side packs again on the next trip, nothing is moved here"));
+            }
         }
-
-        var paid = handle.Result?.Actual ?? Math.Max(0, before - Coins());
-        Bought += count;
-        Spent += paid;
-        Log(Text($"resupply: bought {count} {name} at {vendor.Name} for {paid} pyreals"));
-        foreach (var h in MergeBought(buy.Line.Wcid, heldBefore + count, name)) { yield return h; }
-
-        if (ground.Learn.Any(l => l.ScrollWcid == buy.Line.Wcid))
+        else if (IsLearnScroll(ground, buy.Line.Wcid)) // M6 1 c: the ground's list or the plan's
         {
             ScrollsBought += count;
             Log(Text($"learn: bought the scroll {name} (weenie {buy.Line.Wcid}) at {vendor.Name} for {paid} pyreals; scrolls of it in the pack {InPack(buy.Line.Wcid).Count}: read after the walk"));
@@ -1277,6 +2049,46 @@ public sealed partial class ResupplyRun : ShopLeg
         }
     }
 
+    /// <summary>M6 7 AX: how long a paid ware may take to reach the model before the check after names it unseen (was 3 s). ACE's answer and the ware's F745 and 0022 are separate sends.</summary>
+    internal const double BoughtArrivalSeconds = 10;
+
+    /// <summary>
+    /// M6 8 D: the side packs this trip buys (<see cref="ResupplyPlanner.PackBuy"/>), after the list's other lines: the layout's short is read from the state, the container slots free are counted less the foci the same list buys (a focus takes a slot too), and
+    /// the purse left is the whole purse less the list's cost. Logged on one line whether it buys or not. It rides on this trip and calls none of its own.
+    /// </summary>
+    private List<ResupplyBuy> PackBuys(HuntingGround ground, IReadOnlyList<ResupplyBuy> list)
+    {
+        var pendingFoci = list.Where(b => ResupplyPlanner.FociWcids.Value.Contains(b.Line.Wcid)).Sum(b => b.Count);
+        var listCost = list.Sum(b => (long)b.Count * (b.Vendor.Sells.FirstOrDefault(w => w.Wcid == b.Line.Wcid)?.Price ?? 0));
+        var held = PackLayout.SidePacks(S.State).Count;
+        var buy = ResupplyPlanner.PackBuy(ground, held, Math.Max(0, PackLayout.ContainerRoom(S.State) - pendingFoci), FloorPurse() - listCost, out var why);
+        Log("resupply: " + why);
+        return buy is null ? [] : [buy];
+    }
+
+    /// <summary>M6 7 AX: takes out of the plan a line whose last buy had not shown (<see cref="SaleMemory.BoughtUnseen"/>), once: a ware that has shown since is cleared, one still short is held for this plan by name. The next plan reads the counts alone.</summary>
+    private List<ResupplyBuy> HoldUnseen(List<ResupplyBuy> plan)
+    {
+        foreach (var (wcid, expected) in _memory.BoughtUnseen.ToList())
+        {
+            _memory.BoughtUnseen.Remove(wcid);
+            var held = GearInventory.CountOf(S.State, [], wcid);
+            var name = plan.FirstOrDefault(b => b.Line.Wcid == wcid)?.Line.Name ?? wcid.ToString(CultureInfo.InvariantCulture);
+            if (held >= expected)
+            {
+                Log(Text($"resupply: {name}: the late stack has shown (held {held}, expected {expected})"));
+                continue;
+            }
+
+            if (plan.RemoveAll(b => b.Line.Wcid == wcid) > 0)
+            {
+                Log(Text($"resupply: {name}: held out of this plan: its last buy has not shown (held {held}, expected {expected}), TODO(m6-bought-unseen)"));
+            }
+        }
+
+        return plan;
+    }
+
     /// <summary>The stack merges the server confirmed after a purchase (M5 7).</summary>
     public int StackMerges { get; private set; }
 
@@ -1285,123 +2097,21 @@ public sealed partial class ResupplyRun : ShopLeg
 
     /// <summary>
     /// M5 7: ACE never merges a bought stack into a held one (<c>Player_Commerce.cs</c> 59-102 <c>FinalizeBuyTransaction</c> creates each ware as a new object), so every purchase of a stackable (spell components, potions) would take new
-    /// pack slots. Waits up to 3 s for the bought items to be in the model (<paramref name="expectedTotal"/> held in all), then merges the smallest held stack of the weenie into the fullest other one with room (<see cref="StackMerge"/>,
+    /// pack slots. Waits up to <see cref="BoughtArrivalSeconds"/> for the bought items to be in the model (<paramref name="expectedTotal"/> held in all), then merges the smallest held stack of the weenie into the fullest other one with room (<see cref="StackMerge"/>,
     /// GameAction 0x0054) until none is left to merge; a refused merge is logged, counted and that stack is left. A ware that does not stack does nothing. M5 7 D136: the trade notes and the coin pass <paramref name="mainPackTarget"/>, so
     /// they join only a stack in the main pack (D121).
     /// </summary>
     private IEnumerable<ActionHandle?> MergeBought(uint wcid, int expectedTotal, string name, bool mainPackTarget = false)
     {
-        var scratch = new List<uint>();
-        foreach (var h in Until(() => GearInventory.CountOf(S.State, scratch, wcid) >= expectedTotal, 3)) { yield return h; }
-
-        var skip = new HashSet<uint>();
-        for (var round = 0; round < 12 && StackMerge.TryPlanFor(S.State, wcid, scratch, skip, out var from, out var to, out var amount, mainPackTarget); round++)
-        {
-            Log(Text($"resupply: merging a {(expectedTotal > 0 ? "bought" : "held")} {name} stack 0x{from:X8} into 0x{to:X8}: x{amount}"));
-            var merge = S.Actions.MergeStack(from, to, amount, ActionSource.Automation);
-            yield return merge;
-            if (merge.Outcome is { Kind: ActionOutcomeKind.Confirmed })
-            {
-                StackMerges++;
-                continue;
-            }
-
-            MergesRefused++;
-            skip.Add(from);
-            Log(Text($"resupply: the merge of {name} 0x{from:X8} into 0x{to:X8} ended {Describe(merge)}; counted, the stack stays, going on"));
-        }
+        foreach (var h in VendorCounter.Merge(S, new TownTripCounter(this, null, null, null), wcid, expectedTotal, name, BoughtArrivalSeconds, mainPackTarget)) { yield return h; } // M6 16 E5b: the one merge after a buy, the vendor counter's; the trip's lines and counters through its host
     }
 
-    /// <summary>The held trade note to change for <paramref name="shortfall"/> pyreals: the smallest whose face covers it, else the largest; null when the pack holds none of the purse's notes.</summary>
-    private (uint Guid, PurseNote Note)? NextNote(HuntingGround ground, long shortfall)
-    {
-        var held = new List<(uint Guid, PurseNote Note)>();
-        foreach (var note in ground.Supplies.Purse.Notes)
-        {
-            held.AddRange(InPack(note.Wcid).Select(g => (g, note)));
-        }
+    /// <summary>The trade note stacks a buy can change: the main pack's (<see cref="StationLeg.InPack"/>), every one of ACE's ten faces.</summary>
+    private List<(uint Guid, PurseNote Note)> HeldNotes(HuntingGround ground) =>
+        [.. PurseNotes.Read(S.State, ground.Supplies.Purse.Notes).Notes.Select(h => (h.Guid, h.Note))]; // M6 16 E5b: the one read of the purse's notes, the vendor counter's too (M6 7 AU: every one of ACE's ten faces, not only the profile's)
 
-        if (held.Count == 0)
-        {
-            return null;
-        }
-
-        var covering = held.Where(h => h.Note.Value >= shortfall).OrderBy(h => h.Note.Value).ToList();
-        return covering.Count > 0 ? covering[0] : held.MaxBy(h => h.Note.Value);
-    }
-
-    /// <summary>
-    /// Changes one trade note to coin at the open vendor (D49: a vendor pays a promissory note at 1.0). ACE's <c>Vendor.GetBuyCost</c> (<c>Vendor.cs</c> 591-599 @95ef426d) pays <c>max(1, floor(rate x Value + 0.1))</c> with the rate the
-    /// vendor's BuyPrice (1 when absent) and exactly 1.0 for a promissory note (593-595), so a note's face value is its payout whatever the vendor's own rate.
-    /// <para>M5 7 D136: ACE sells the whole object it is handed, whatever the amount (<c>Player_Commerce.cs</c> 232-298 <c>VerifySellItems</c> only checks the amount against the stack; 199-205 removes the item; <c>Vendor.cs</c> 586-609
-    /// pays the stack's whole Value), so a note from a stack of several is first split off into the main pack with GameAction 0x0055 (<see cref="IActionApi.SplitToContainer"/>; ACE
-    /// <c>Player_Inventory.cs</c> 2243 <c>HandleActionStackableSplitToContainer</c>) and that one note is sold; the rest of the stack stays.</para>
-    /// </summary>
-    private IEnumerable<ActionHandle?> SellNote(GroundVendor vendor, uint guid, (uint Guid, PurseNote Note) held, Action<bool> done)
-    {
-        var one = held.Guid;
-        var size = S.State.Objects.TryGet(held.Guid, out var stack) ? GearInventory.StackOf(S.State, stack) : 1;
-        if (size > 1)
-        {
-            if (MageLootRules.FreeSlots(S.State) <= 0)
-            {
-                Refuse("pack", Text($"the trade note {held.Note.Name}: one note of the stack 0x{held.Guid:X8} (x{size}) cannot be split off: the main pack has no free slot"));
-                done(false);
-                yield break;
-            }
-
-            var others = InPack(held.Note.Wcid);
-            var split = S.Actions.SplitToContainer(held.Guid, 0, 0, 1, ActionSource.Automation);
-            yield return split;
-            foreach (var h in Until(() => InPack(held.Note.Wcid).Except(others).Any(), 2)) { yield return h; } // ACE's 0022 confirms the split; the new stack's F745 follows it (the tracker's note)
-
-            one = InPack(held.Note.Wcid).Except(others).FirstOrDefault();
-            if (split.Outcome is not { Kind: ActionOutcomeKind.Confirmed } || one == 0)
-            {
-                Refuse(Kind(split.Outcome?.Detail, "other"), Text($"the trade note {held.Note.Name}: the split of one from 0x{held.Guid:X8} (x{size}) {Describe(split)}"));
-                done(false);
-                yield break;
-            }
-
-            Log(Text($"purse: split one {held.Note.Name} 0x{one:X8} from its stack 0x{held.Guid:X8} (x{size}) to change it"));
-        }
-
-        var before = Coins();
-        var sell = S.Actions.Sell(guid, [one], ActionSource.Automation);
-        yield return sell;
-        foreach (var h in Until(() => Coins() > before, 2)) { yield return h; }
-
-        if (sell.Outcome is not { Kind: ActionOutcomeKind.Confirmed } || S.State.Self.Inventory.Contains(one))
-        {
-            Refuse(Kind(sell.Outcome?.Detail, "other"), Text($"the trade note {held.Note.Name} at {vendor.Name}: {Describe(sell)}"));
-            done(false);
-            yield break;
-        }
-
-        NotesSold++;
-        Log(Text($"purse: changed {held.Note.Name} to coin at {vendor.Name}: paid {sell.Result?.Actual ?? (Coins() - before)} pyreals (the coin {before} -> {Coins()})"));
-        done(true);
-    }
-
-    /// <summary>The most of the row the coin pays for (the price is chunked by stack, so it is searched, not divided).</summary>
-    private static int Affordable(VendorStock stock, VendorStockEntry entry, int count, long coins)
-    {
-        int lo = 0, hi = count;
-        while (lo < hi)
-        {
-            var mid = (lo + hi + 1) / 2;
-            if (stock.PriceToBuy(entry, (uint)mid) <= coins)
-            {
-                lo = mid;
-            }
-            else
-            {
-                hi = mid - 1;
-            }
-        }
-
-        return lo;
-    }
+    /// <summary>M6 16 E5b: the main pack's free slots, for the vendor counter's host (<see cref="TownTripCounter"/>).</summary>
+    private int MainRoom() => PackView.MainPackFree(S.State);
 
     /// <summary>
     /// The kind of an ACE refusal from its detail: <c>coin</c> (the tracker's "too few pyreals": ACE sends no text, Vendor.cs 546-552 @95ef426d), <c>unsellable</c> (ACE's 02EB "The X is unsellable.", Player_Commerce.cs:268-271 @95ef426d), <c>pack</c>

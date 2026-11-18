@@ -40,7 +40,7 @@ public readonly record struct SkillRule(SkillTableFormula Formula, uint MinLevel
 /// <c>× 19.6)</c>; <c>CanJump</c> holds below a load of 2; the stamina cost is <see cref="MovementSystem.JumpStaminaCost"/>
 /// and is payable while the current stamina (vital 3's current value) covers it.</item>
 /// <item>A <b>skill's level</b> is what <c>CACQualities::InqSkill</c> (11.4186 0x00591DF0, 11.6096 0x00592AF0) adds up: the
-/// skill's formula over the current attributes (start plus ranks), plus the skill's start level (<c>_init_level</c>, the
+/// skill's formula over the current attributes (start plus ranks, enchanted: see Buffs below), plus the skill's start level (<c>_init_level</c>, the
 /// PlayerDescription's <c>init</c> field) and the levels from its ranks (<c>_level_from_pp</c>). It adds <b>no class
 /// bonus</b>: the 5 (trained) or 10 (specialised) that <c>CharGenState::GetSkillScore</c> (11.4186 0x005C4B50, 11.6096
 /// 0x005C5B30) shows on the character-creation screen is the creation-time value the server already sends in the skill's
@@ -50,11 +50,14 @@ public readonly record struct SkillRule(SkillTableFormula Formula, uint MinLevel
 /// <item>Before the PlayerDescription arrives (<see cref="PlayerQualities.IsKnown"/> is false) the run rate and jump speed
 /// are unknown, so the interpreter runs at <see cref="MotionInterpreter.MyRunRate"/> and the stock jump speed.</item>
 /// </list>
-/// <para><b>Not read yet</b> (each a named TODO, logged once when the first answer is given): enchantments, which the
-/// reducer does not keep (TODO(state-enchantments): a buffed Run or Jump skill, or a spell on an attribute, is missed);
-/// the 11.6096 Enlightenment bonus on Run and Jump (TODO(state-enlightenment): <see cref="MovementSystem"/> notes that it
-/// is added to the skill fed in); and the player-killer status that <see cref="IsPK"/> and <see cref="IsPKLite"/> need
-/// (TODO(state-pk-status): both are false, so the player passes through other players as a non-player-killer does).</para>
+/// <para><b>Buffs</b> (M6 14 pits: <c>TODO(state-enchantments)</c> and <c>TODO(state-enlightenment)</c> are closed for the weenie). Retail's <c>InqRunRate</c> and <c>InqJumpVelocity</c> ask
+/// <c>CACQualities::InqSkill</c> with <c>raw</c> false, so the enchantment registry counts: Sprint Self and Quickness Self raise the run rate, Jumping Mastery Self, Strength Self and
+/// Coordination Self the jump (the skill is <see cref="SkillRules.TryCurrent"/>, the one rule the skills page and the cast planner read: the attributes enchanted, the skill's multiplicative and
+/// additive enchantments, the vitae, the augmentation and Enlightenment bonuses). The load's Strength is enchanted too (<see cref="EnchantmentRules.EnchantAttribute"/>; ACE's
+/// <c>HandleActionJump</c> reads <c>Strength.Current</c>, Player.cs:870 @95ef426d). Before this the climber ran and jumped on her bare skills: Qwinnie at level 47 (Quickness 15, Run and
+/// Jump 8 ranks each) ran at Run 23, 5.1 m/s, and jumped at Jump 98, where the buff bot's level VII set makes them Run 103, 7.7 m/s, and Jump 178.</para>
+/// <para><b>Not read yet</b> (each a named TODO, logged once when the first answer is given): the carrying-capacity augmentations (TODO(state-carry-augmentation)); and the player-killer status that
+/// <see cref="IsPK"/> and <see cref="IsPKLite"/> need (TODO(state-pk-status): both are false, so the player passes through other players as a non-player-killer does).</para>
 /// <para>Game thread only, like the qualities.</para>
 /// </remarks>
 public sealed class QualitiesWeenie : IPhysicsWeenie
@@ -125,11 +128,17 @@ public sealed class QualitiesWeenie : IPhysicsWeenie
     /// <inheritdoc/>
     public bool IsImpenetrable => false;
 
-    /// <summary>The Run skill's level now (0 before the description), as the run rate uses it.</summary>
+    /// <summary>The Run skill's level now, buffs counted (0 before the description), as the run rate uses it.</summary>
     public int RunSkill => SkillLevel(_run, RunSkillId);
 
-    /// <summary>The Jump skill's level now (0 before the description), as the jump speed uses it.</summary>
+    /// <summary>The Jump skill's level now, buffs counted (0 before the description), as the jump speed uses it.</summary>
     public int JumpSkill => SkillLevel(_jump, JumpSkillId);
+
+    /// <summary>The Run skill's base level (no buffs: <c>InqSkill</c> with <c>raw</c> true): the formula over the bare attributes, the start level and the ranks.</summary>
+    public int RunSkillBase => BaseLevel(_run, RunSkillId);
+
+    /// <summary>The Jump skill's base level (no buffs).</summary>
+    public int JumpSkillBase => BaseLevel(_jump, JumpSkillId);
 
     /// <summary>The load (burden over capacity) now: 0 before the description.</summary>
     public float Load
@@ -142,7 +151,8 @@ public sealed class QualitiesWeenie : IPhysicsWeenie
             }
 
             _ = _qualities.TryGetInt(EncumbranceValueProperty, out var burden);
-            return (float)EncumbranceSystem.Load(EncumbranceSystem.EncumbranceCapacity(Attribute(StrengthAttributeId), augmentations: 0), burden);
+            var strength = (int)EnchantmentRules.EnchantAttribute(_qualities.Enchantments, StrengthAttributeId, (uint)Attribute(StrengthAttributeId));
+            return (float)EncumbranceSystem.Load(EncumbranceSystem.EncumbranceCapacity(strength, augmentations: 0), burden);
         }
     }
 
@@ -207,7 +217,6 @@ public sealed class QualitiesWeenie : IPhysicsWeenie
             _todosLogged = true;
             _log.Warn(
                 LogCategory,
-                "TODO(state-enchantments): the player's buffs are not applied to Run, Jump or the attributes; TODO(state-enlightenment): the 11.6096 Enlightenment bonus on Run and Jump is not added; " +
                 "TODO(state-carry-augmentation): the carrying-capacity augmentations are not counted; TODO(state-pk-status): IsPK and IsPKLite are false");
         }
 
@@ -216,8 +225,22 @@ public sealed class QualitiesWeenie : IPhysicsWeenie
 
     private int Attribute(uint id) => _qualities.TryGetAttribute(id, out var a) ? checked((int)(a.Start + a.Ranks)) : 0;
 
-    /// <summary><c>CACQualities::InqSkill</c>: formula + start level (<c>init</c>) + ranks; the class is only the usability gate.</summary>
+    /// <summary>
+    /// <c>CACQualities::InqSkill</c> with <c>raw</c> false: <see cref="SkillRules.TryCurrent"/> (the formula over the enchanted attributes, the start level and the ranks, the skill's enchantments, the
+    /// vitae and the bonuses); the class is only the usability gate. A description that lacks an attribute of the formula falls back to the bare sum with that attribute 0.
+    /// </summary>
     private int SkillLevel(SkillRule rule, uint id)
+    {
+        if (!_qualities.IsKnown || !_qualities.TryGetSkill(id, out var skill) || skill.AdvancementClass < rule.MinLevel)
+        {
+            return 0;
+        }
+
+        return SkillRules.TryCurrent(_qualities, id, rule.Formula, rule.MinLevel, out var current) ? (int)Math.Min(current, int.MaxValue) : BaseLevel(rule, id);
+    }
+
+    /// <summary><c>CACQualities::InqSkill</c> with <c>raw</c> true: the formula over the bare attributes (start plus ranks) plus the start level and the ranks; the class is only the usability gate.</summary>
+    private int BaseLevel(SkillRule rule, uint id)
     {
         if (!_qualities.IsKnown || !_qualities.TryGetSkill(id, out var skill) || skill.AdvancementClass < rule.MinLevel)
         {

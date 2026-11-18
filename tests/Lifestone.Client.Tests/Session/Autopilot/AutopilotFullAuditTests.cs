@@ -142,10 +142,10 @@ public sealed class AutopilotFullAuditTests(ITestOutputHelper output)
         w.Run(autopilot, a => a.State == AutopilotState.Fight);
 
         Assert.Contains(", 6 m from ", AuditLine(w, "place"), StringComparison.Ordinal);
-        Assert.Contains("fix=none: the fight resumes from where he stands and names each walk it makes (D47", AuditLine(w, "place"), StringComparison.Ordinal);
+        Assert.Contains("fix=none: the fight resumes from where it stands and names each walk it makes (D47", AuditLine(w, "place"), StringComparison.Ordinal);
         Assert.Equal(["den-fight"], Kinds(w));
         Assert.Same(AutopilotScenario.FightResumeSpec, w.Factory.Made[0]); // no walk back to the arrival, no recall: the fight's own walks are named
-        Assert.Contains(notices, n => n.EndsWith("; back to the fight from where he stands.", StringComparison.Ordinal));
+        Assert.Contains(notices, n => n.EndsWith("; back to the fight from where it stands.", StringComparison.Ordinal));
 
         // a place with no route: neither home nor the ground
         var e = new ApWorld(key, output, atHome: false) { Prime = c => Proven(c, key) };
@@ -156,9 +156,9 @@ public sealed class AutopilotFullAuditTests(ITestOutputHelper output)
         e.Run(lost, a => a.Audits >= 1);
 
         Assert.Equal("recall-home", Kinds(e)[0]);
-        Assert.Contains(said, n => n.StartsWith("Autopilot: he is neither in ", StringComparison.Ordinal) && n.Contains("no route from here, so he recalls home, then takes the way back.", StringComparison.Ordinal));
-        Assert.Contains(e.Lines, l => l.StartsWith("autopilot audit place: elsewhere (cell 0xC6A90001)", StringComparison.Ordinal) && l.Contains("no route walks back from an unknown place, so he never guesses one", StringComparison.Ordinal));
-        Assert.Contains("he was away from home and the den: recalled home", said[^1], StringComparison.Ordinal);
+        Assert.Contains(said, n => n.StartsWith("Autopilot: it is neither in ", StringComparison.Ordinal) && n.Contains("no route from here, so it recalls home, then takes the way back.", StringComparison.Ordinal));
+        Assert.Contains(e.Lines, l => l.StartsWith("autopilot audit place: elsewhere (cell 0xC6A90001)", StringComparison.Ordinal) && l.Contains("no route walks back from an unknown place, so it never guesses one", StringComparison.Ordinal));
+        Assert.Contains("it was away from home and the den: recalled home", said[^1], StringComparison.Ordinal);
     }
 
     [Theory]
@@ -245,13 +245,31 @@ public sealed class AutopilotFullAuditTests(ITestOutputHelper output)
         Assert.Equal(["den-fight"], Kinds(w)); // not the trip, not the buff pass
         Assert.StartsWith("autopilot audit hostiles: in-reach: Tusker Guard 0x80000F45 at 6 m", AuditLine(w, "hostiles"), StringComparison.Ordinal);
         Assert.Contains("fix=self-defence first (D88)", AuditLine(w, "hostiles"), StringComparison.Ordinal);
-        Assert.Contains("fix=deferred: a hostile is on him: the fight fights back first (D88) and its counters call the trip", AuditLine(w, "kit"), StringComparison.Ordinal);
+        Assert.Contains("fix=deferred: a hostile is on it: the fight fights back first (D88) and its counters call the trip", AuditLine(w, "kit"), StringComparison.Ordinal);
         Assert.Contains("fix=deferred", AuditLine(w, "packs"), StringComparison.Ordinal);
         Assert.Contains("fix=deferred", AuditLine(w, "worn"), StringComparison.Ordinal);
-        Assert.Contains("fix=deferred: a hostile is on him", AuditLine(w, "buffs"), StringComparison.Ordinal);
+        Assert.Contains("fix=deferred: a hostile is on it", AuditLine(w, "buffs"), StringComparison.Ordinal);
         Assert.Matches("kit=trip-deferred .* buffs=fight-first .* hostiles=in-reach ", autopilot.LastAudit);
-        Assert.Contains(notices, n => n.Contains("a hostile on him: fighting back first", StringComparison.Ordinal) && n.EndsWith("; fighting back from where he stands.", StringComparison.Ordinal));
-        Assert.Contains("audit: a hostile is on him (Tusker Guard 0x80000F45 at 6 m", w.Lines.First(l => l.StartsWith("autopilot state known-state -> fight", StringComparison.Ordinal)), StringComparison.Ordinal);
+        Assert.Contains(notices, n => n.Contains("a hostile on it: fighting back first", StringComparison.Ordinal) && n.EndsWith("; fighting back from where it stands.", StringComparison.Ordinal));
+        Assert.Contains("audit: a hostile is on it (Tusker Guard 0x80000F45 at 6 m", w.Lines.First(l => l.StartsWith("autopilot state known-state -> fight", StringComparison.Ordinal)), StringComparison.Ordinal);
+    }
+
+    /// <summary>M6 7 BB: a hostile on her and the fight's own needs (health, mana) unmet: the fight starts at once, named; no keeper's pass and no precondition stands before it (live 2026-11-07: 47 hits taken in the keeper's dance, no bolt cast).</summary>
+    [Fact]
+    public void With_a_hostile_on_her_and_the_mana_short_the_fight_starts_at_once_with_no_need_before_it()
+    {
+        var w = new ApWorld(Den, output, held: l => l.Name == "Prismatic Taper" ? l.TripUnder / 2 : l.Keep, atHome: false) { Prime = c => Proven(c, Den) };
+        w.Factory.FightNeeds = new StationNeeds(StationWhere.Den, MinHealthPercent: 100, MinManaPercent: 100);
+        Hostile(w, Guard, 6);
+        var autopilot = w.Autopilot(new AutopilotOptions());
+        w.Run(autopilot, a => a.State == AutopilotState.Fight);
+        w.Run(autopilot, _ => w.Lines.Any(l => l.Contains("autopilot fight: station den-fight starts", StringComparison.Ordinal)), frames: 400);
+
+        var fightBack = Assert.Single(w.Lines, l => l.StartsWith("autopilot fight-back: a hostile is on her or in reach (Tusker Guard", StringComparison.Ordinal));
+        Assert.Contains("no keeper's vitals pass and no health, mana or buff need first", fightBack, StringComparison.Ordinal);
+        Assert.Contains(w.Lines, l => l.Contains("autopilot fight: station den-fight starts", StringComparison.Ordinal));
+        Assert.DoesNotContain(w.Lines, l => l.Contains("precondition", StringComparison.Ordinal) && l.Contains("den-fight", StringComparison.Ordinal));
+        Assert.Equal(AutopilotState.Fight, autopilot.State);
     }
 
     [Theory]
@@ -289,14 +307,14 @@ public sealed class AutopilotFullAuditTests(ITestOutputHelper output)
         Assert.Equal(ScenarioStatus.Succeeded, w.Run(autopilot));
 
         var summary = Assert.Single(notices, n => n.StartsWith("Autopilot started: ", StringComparison.Ordinal));
-        Assert.Equal($"Autopilot started: no caster in his hands or packs; buffing, then the way to {w.Ground.Name}.", summary);
+        Assert.Equal($"Autopilot started: no caster in its hands or packs; buffing, then the way to {w.Ground.Name}.", summary);
         Assert.DoesNotContain(notices, static n => n.StartsWith("Autopilot stopped", StringComparison.Ordinal)); // the stop is logged; the host's unlock line is the chat's one stop line (D145)
         Assert.Contains(w.Lines, l => l == AutopilotScenario.ChatLinePrefix + "(log only) Autopilot stopped (test): the fight stopped for the stop rule. The controls are yours.");
         Assert.Equal(["request:test"], stopped);
         Assert.Contains(w.Lines, l => l == AutopilotScenario.ChatLinePrefix + summary); // every chat line is logged too
 
         // a stop the run makes by itself says so
-        var g = new ApWorld(key, output) { Prime = c => { c.Facts.LifestoneTied = true; c.Facts.SetPortalTie(key, PortalTie.Untied); } };
+        var g = new ApWorld(Den, output) { Prime = c => { c.Facts.LifestoneTied = true; c.Facts.SetPortalTie(Den, PortalTie.Untied); } }; // M6 4 t3b: the den's gap (a routed ground goes by the rung change)
         var gap = g.Autopilot(new AutopilotOptions());
         var said = new List<string>();
         var why = new List<string>();
@@ -324,12 +342,12 @@ public sealed class AutopilotFullAuditTests(ITestOutputHelper output)
     public void The_summary_names_the_start_and_what_was_fixed_in_plain_words()
     {
         var audit = new StartupAudit(StartupAudit.ResumeWhy, 0);
-        Assert.Equal("Autopilot resumed: every check passed; back to the fight from where he stands.", audit.ChatSummary("back to the fight from where he stands"));
+        Assert.Equal("Autopilot resumed: every check passed; back to the fight from where it stands.", audit.ChatSummary("back to the fight from where it stands"));
         audit.Note("caster re-wielded ('Fire Sceptre')");
         audit.Note("magic stance set");
         audit.Note("2 buff line(s) due: renewed first");
         audit.Note("magic stance set"); // once each
-        Assert.Equal("Autopilot resumed: caster re-wielded ('Fire Sceptre'), magic stance set, 2 buff line(s) due: renewed first; buffing, then back to the fight from where he stands.", audit.ChatSummary("buffing, then back to the fight from where he stands"));
+        Assert.Equal("Autopilot resumed: caster re-wielded ('Fire Sceptre'), magic stance set, 2 buff line(s) due: renewed first; buffing, then back to the fight from where it stands.", audit.ChatSummary("buffing, then back to the fight from where it stands"));
         Assert.StartsWith("Autopilot back after a reconnect: ", new StartupAudit("reconnect", 0).ChatSummary("x"), StringComparison.Ordinal);
         Assert.StartsWith("Autopilot started: ", new StartupAudit("start", 0).ChatSummary("x"), StringComparison.Ordinal);
     }
@@ -426,7 +444,7 @@ public sealed class AutopilotFullAuditTests(ITestOutputHelper output)
         Assert.DoesNotContain(d.World.Factory.Made.Skip(made), s => s.Kind is StationKinds.RecallHome or StationKinds.DenTravel); // no recall, no travel: he stands in the den
         Assert.Contains(d.World.Factory.Made.Skip(made), s => ReferenceEquals(s, AutopilotScenario.FightResumeSpec));
         Assert.Contains(d.World.Lines, l => l.StartsWith("autopilot audit actions: no automation action queued or in flight", StringComparison.Ordinal));
-        Assert.Contains(d.Notices, n => n.StartsWith("Autopilot resumed: ", StringComparison.Ordinal) && n.Contains("back to the fight from where he stands", StringComparison.Ordinal));
+        Assert.Contains(d.Notices, n => n.StartsWith("Autopilot resumed: ", StringComparison.Ordinal) && n.Contains("back to the fight from where it stands", StringComparison.Ordinal));
         Assert.Equal(1, d.Host.Halts);
     }
 

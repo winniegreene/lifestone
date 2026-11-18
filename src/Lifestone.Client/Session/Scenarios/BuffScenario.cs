@@ -40,7 +40,7 @@ namespace Lifestone.Client.Session.Scenarios;
 /// of the worn pieces found after a login. <see cref="CycleArmourCast"/> counts the armour lines the ordered pass cast: none on a known ledger. Given an <see cref="IArmourLedgerStore"/> the scenario keeps the ledger's remaining seconds
 /// at the end of the run (ACE's clock for an item enchantment stops while its owner is offline, <see cref="ArmourBuffLedger"/>); the buff leg passes the file store.</para>
 /// </remarks>
-public sealed class BuffScenario : IScenario
+public sealed class BuffScenario : IScenario, Journey.IStationWait
 {
     /// <summary>The scenario's token (<c>--scenario=buff</c>).</summary>
     public const string ScenarioName = "buff";
@@ -99,8 +99,9 @@ public sealed class BuffScenario : IScenario
     /// <param name="store">Where the ledger's remaining seconds are kept across a log-off, or null (the conservative rule).</param>
     /// <param name="noGrant">True (M5 3 F2, closes 3-R3, DoD 6: play grants nothing): the gear stage verifies the kit and never asks the mod for an item (<see cref="GearScenario.NoGrant"/>); false (the default, the standalone buff leg's and the tests'): the gear stage tops the kit up.</param>
     /// <param name="ground">The ground whose kit the gear stage verifies (the journey's <c>--fight-ground</c>, as the gear station does), or null for the default ground.</param>
-    public BuffScenario(IReadOnlyDictionary<uint, SpellInfo> spells, string account, BuffOptions options, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, BuffCycle? cycle = null, MageSpellBars? bars = null, ArmourBuffLedger? ledger = null, IArmourLedgerStore? store = null, bool noGrant = false, HuntingGround? ground = null)
-        : this(GearKit.Build(spells ?? throw new ArgumentNullException(nameof(spells)), account, ground: ground), spells, options, log, arrivalSeconds, endSession, cycle, bars, ledger, store, noGrant)
+    /// <param name="profile">M6 7 H: the buff profile the cycle runs (<see cref="Journey.JourneyPlan.BuffProfile"/>), or null: the cycle's own choice by the character's name.</param>
+    public BuffScenario(IReadOnlyDictionary<uint, SpellInfo> spells, string account, BuffOptions options, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, BuffCycle? cycle = null, MageSpellBars? bars = null, ArmourBuffLedger? ledger = null, IArmourLedgerStore? store = null, bool noGrant = false, HuntingGround? ground = null, IBuffProfile? profile = null)
+        : this(GearKit.BuildFor(spells ?? throw new ArgumentNullException(nameof(spells)), account, ground), spells, (options ?? throw new ArgumentNullException(nameof(options))) with { AccountName = account }, log, arrivalSeconds, endSession, cycle, bars, ledger, store, noGrant, profile) // M6 1 w: the cycle, the gear's first cast and the precondition's keeper read the account's formula
     {
     }
 
@@ -116,7 +117,8 @@ public sealed class BuffScenario : IScenario
     /// <param name="ledger">The armour lines' memory handed to the cycle (M4 4.1 lane b), or null for the session's (<see cref="ArmourBuffLedger.For"/>).</param>
     /// <param name="store">Where the ledger's remaining seconds are kept across a log-off, or null (the conservative rule).</param>
     /// <param name="noGrant">True (M5 3 F2, closes 3-R3): the gear stage verifies the kit and sends no grant (<see cref="GearScenario.NoGrant"/>).</param>
-    public BuffScenario(GearKit kit, IReadOnlyDictionary<uint, SpellInfo> spells, BuffOptions options, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, BuffCycle? cycle = null, MageSpellBars? bars = null, ArmourBuffLedger? ledger = null, IArmourLedgerStore? store = null, bool noGrant = false)
+    /// <param name="profile">M6 7 H: the buff profile the cycle runs, or null: the cycle's own choice by the character's name.</param>
+    public BuffScenario(GearKit kit, IReadOnlyDictionary<uint, SpellInfo> spells, BuffOptions options, ILogSink log, double arrivalSeconds = LoginScenario.DefaultArrivalSeconds, bool endSession = true, BuffCycle? cycle = null, MageSpellBars? bars = null, ArmourBuffLedger? ledger = null, IArmourLedgerStore? store = null, bool noGrant = false, IBuffProfile? profile = null)
     {
         ArgumentNullException.ThrowIfNull(kit);
         ArgumentNullException.ThrowIfNull(spells);
@@ -130,8 +132,9 @@ public sealed class BuffScenario : IScenario
         _bars = bars;
         _ledger = ledger;
         _store = store;
-        _gear = new GearScenario(kit, log, arrivalSeconds, endSession: false, cast: false, spells) { NoGrant = noGrant };
-        foreach (var line in ArenaProfile.Lines)
+        _profile = profile;
+        _gear = new GearScenario(kit, log, arrivalSeconds, endSession: false, cast: false, spells) { NoGrant = noGrant, Account = options.AccountName }; // M6 1 w
+        foreach (var line in profile?.Lines ?? ArenaProfile.Lines)
         {
             if (line.IsBuff && !line.ByPlay)
             {
@@ -202,6 +205,12 @@ public sealed class BuffScenario : IScenario
 
     /// <inheritdoc/>
     public string Stage { get; private set; } = "start";
+
+    /// <inheritdoc />
+    /// <remarks>M6 7 BD: the pass's mana wait and its precondition's keeper pass: the two places the pass stands with nothing to show for it.</remarks>
+    public string? Waiting => Stage == "vitals" ? "the buff pass's precondition (the vitals keeper)"
+        : _cycle is { Status: BuffStatus.Running, Stage: BuffCycle.StageManaWait } ? "the buff pass's mana wait"
+        : null;
 
     /// <inheritdoc/>
     public string? Failure { get; private set; }
@@ -642,7 +651,7 @@ public sealed class BuffScenario : IScenario
             return BeginSwapIn(session, clock);
         }
 
-        _keeper = new VitalsKeeper(session, _spells, _fighter is null ? _vitalsOptions : _vitalsOptions.ForFighter(), _log); // M4 P5a C7: a fighter's mana order is a Mana Potion, then a rest
+        _keeper = new VitalsKeeper(session, _spells, _fighter is null ? _vitalsOptions : _vitalsOptions.ForFighter(), _log) { AccountName = _options.AccountName }; // M4 P5a C7: a fighter's mana order is a Mana Potion, then a rest
         if (_keeper.NeedsFor(needs))
         {
             _log.Info(LogCategory, "precondition met at once: stamina and mana are where the pass starts");
@@ -711,6 +720,13 @@ public sealed class BuffScenario : IScenario
     private string? Judge()
     {
         var best = _driverResult ?? _final!;
+        if (BuffLegVerdict.EndsWithWhatStands(best, _unattendedEnd))
+        {
+            // M6 7 AO: the autopilot's own station on a climber's pass: the cycle ended Done; a missed line is named, not a failed station (M6 7 AN)
+            _log.Info(LogCategory, $"buffs: her pass ends with what stands: {best.Active} of {best.Wanted} lines ({best.Levels}); missed: {(best.Misses.Count == 0 ? "none" : string.Join(';', best.Misses))}");
+            return null;
+        }
+
         var missed = new List<string>();
         if (_first is not null)
         {

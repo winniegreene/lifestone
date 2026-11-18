@@ -60,6 +60,14 @@ public sealed class PhysicsWorld : IGroundProbe, IPhysicsCellSource
     /// <summary>The moving object the camera sweep reports (retail passes the player; cells only need one to exist).</summary>
     private static readonly object ViewerObject = new();
 
+    private static readonly object BoltObject = new();
+
+    /// <summary>M6 8 L: a target id no object has: <see cref="SweepBolt"/>'s missile passes every creature (the target ends the path before its body would be met).</summary>
+    private const uint NoBoltTarget = 0xFFFFFFFF;
+
+    /// <summary>M6 8 L: how near the end a bolt's sweep must come to have reached it, squared (a centimetre: the steps land on it unless something stopped them).</summary>
+    private const float BoltReachedSquared = 1e-4f;
+
     /// <summary>The moving object the ground probe reports (cells refuse a transition without one).</summary>
     private static readonly object GroundProbeObject = new();
 
@@ -391,6 +399,56 @@ public sealed class PhysicsWorld : IGroundProbe, IPhysicsCellSource
             var reached = transition.SpherePath.CurPos;
             var blocked = reached.GetOffset(to).LengthSquared() > PhysicsGlobals.EpsilonSquared;
             return new ViewerSweepResult(reached, blocked);
+        }
+        finally
+        {
+            Transitions.Return(transition);
+        }
+    }
+
+    /// <summary>
+    /// M6 8 L: whether a bolt can fly from <paramref name="start"/> to <paramref name="end"/>: ACE's launch test, <c>WorldObject.IsProjectileVisible</c> (@95ef426d WorldObjects/WorldObject.cs:402, called at WorldObject_Magic.cs:1835), which runs the projectile's own
+    /// transition and ends the bolt at birth when the path does not reach the target. The same transition here: one sphere, the Missile object state with PathClipped (<c>PhysicsObj.get_object_info</c>, Physics/PhysicsObj.cs:2617), so the first contact ends it, no gravity,
+    /// and every creature passed (<c>ObjectInfo.MissileIgnore</c>, Physics/ObjectInfo.cs:75-84: a missile with a target clips through creatures that are not the target; the target itself ends the path). Walls, floors, terrain, statics and doors stop it.
+    /// </summary>
+    /// <param name="start">Where the bolt starts; its cell is the caster's or one it sees (<see cref="AdjustPosition"/> finds which).</param>
+    /// <param name="end">Where the path must reach.</param>
+    /// <param name="sphere">The bolt's first collision sphere, already scaled.</param>
+    /// <returns>Clear, blocked with where it stopped, or not attached (no answer: a landblock of the path is not streamed in).</returns>
+    public BoltSweepResult SweepBolt(in CellFrame start, in CellFrame end, in PhysSphere sphere)
+    {
+        var begin = start;
+        var beginCell = GetCell(start.CellId);
+        if (beginCell is null || GetCell(end.CellId) is null)
+        {
+            return new BoltSweepResult(BoltLine.NotAttached, start);
+        }
+
+        if (AdjustPosition(ref begin, sphere.Center, searchCells: true) is { } found)
+        {
+            beginCell = found;
+        }
+        else
+        {
+            begin = start;
+        }
+
+        var transition = Transitions.Rent();
+        try
+        {
+            transition.InitObject(BoltObject, ObjectInfoState.PathClipped | ObjectInfoState.FreeRotate, PhysicsState.Missile, 1.0f, 0f, 0f);
+            transition.ObjectInfo.TargetId = NoBoltTarget;
+            Span<PhysSphere> spheres = [sphere];
+            transition.InitSphere(spheres, 1.0f);
+            transition.InitPath(beginCell, begin, end);
+            if (!transition.FindValidPosition())
+            {
+                return new BoltSweepResult(BoltLine.Blocked, begin);
+            }
+
+            var reached = transition.SpherePath.CurPos;
+            var clear = !transition.CollisionInfo.CollidedWithEnvironment && reached.GetOffset(end).LengthSquared() <= BoltReachedSquared;
+            return new BoltSweepResult(clear ? BoltLine.Clear : BoltLine.Blocked, reached);
         }
         finally
         {

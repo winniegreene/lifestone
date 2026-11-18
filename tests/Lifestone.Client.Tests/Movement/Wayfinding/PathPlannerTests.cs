@@ -144,6 +144,29 @@ public sealed class PathPlannerTests(ITestOutputHelper output)
         Assert.All(SampleNodes(map, wet.Route), n => Assert.Equal(NavFlags.None, n.Flags & flags)); // the pull keeps off it too
     }
 
+    [Theory]
+    [InlineData(255, true)]
+    [InlineData(254, false)]
+    public void A_strip_at_the_top_of_the_slope_ramp_is_worth_a_short_detour(int slopeCost, bool detours)
+    {
+        // One node wide, open to the north past y = 119: crossing at the top of the ramp costs SteepEdgeWeight more than the
+        // detour's roughly 8 m; a node one step lower on the ramp is crossed straight.
+        var map = Map(Flat().Mark(90, 0, 90, 119, NavFlags.Slope, (byte)slopeCost));
+        var plan = new PathPlanner(map).Plan(P(40.5f, 100.5f), NavGoal.ToPoint(P(140.5f, 100.5f)));
+        Assert.Equal(NavStatus.Found, plan.Status);
+        Assert.Equal(detours, plan.Route!.Vertices.Max(v => v.Local.Y) >= 119f);
+    }
+
+    [Fact]
+    public void A_steep_edge_strip_turns_the_route_and_the_pull_keeps_off_it()
+    {
+        var map = Map(Flat().Mark(90, 0, 90, 119, NavFlags.SteepEdge));
+        var plan = new PathPlanner(map).Plan(P(40.5f, 100.5f), NavGoal.ToPoint(P(140.5f, 100.5f)));
+        Assert.Equal(NavStatus.Found, plan.Status);
+        Assert.True(plan.Route!.Vertices.Max(v => v.Local.Y) >= 119f);
+        Assert.All(SampleNodes(map, plan.Route), n => Assert.Equal(NavFlags.None, n.Flags & NavFlags.SteepEdge));
+    }
+
     [Fact]
     public void Scars_force_a_detour_and_expire()
     {
@@ -186,6 +209,83 @@ public sealed class PathPlannerTests(ITestOutputHelper output)
         var into = planner.Plan(P(120.5f, 50.5f), NavGoal.ToPoint(start), scars);
         Assert.Equal(NavStatus.GoalBlocked, into.Status);
         Assert.Equal("goal-scarred", into.Reason);
+    }
+
+    /// <summary>
+    /// M6 14 (m6-14-yinar; live ladder61, 2026-11-17 14:14:16 UTC, the Yinar Portal's front): a point goal is judged against the scars by its own point, not by its node's centre. The front 3.00 m south of the portal stands outside the own portal's
+    /// disc (2.84 m), in the node whose centre the disc covers (2.63 m from the portal): the plan reaches the goal and no sample of its line enters the disc. A goal inside the disc is still <c>goal-scarred</c>.
+    /// </summary>
+    /// <summary>
+    /// M6 14 (m6-14-plaza2; live ladder63, 2026-11-17 18:06:38 UTC: a plan's leg passed within the Maythen Geroyu Villas Portal's clearance, and the runner's exact check refused it, <c>portal-keep-off</c>): the planner and the runner agree.
+    /// Over a field of portal discs (centres off the node grid, the clearance and a shared lane's radius), every leg of every plan keeps each disc's exact radius, as <see cref="PortalKeepOff.FirstMeeting(IReadOnlyList{NavWaypoint})"/> judges it.
+    /// </summary>
+    [Fact]
+    public void Every_leg_of_a_plan_keeps_each_kept_discs_exact_radius()
+    {
+        var rng = new Random(61);
+        var discs = new List<(Vector2 Centre, float Radius)>();
+        for (int i = 0; i < 40; i++)
+        {
+            var c = P(20f + (float)(rng.NextDouble() * 150.0), 20f + (float)(rng.NextDouble() * 150.0)).Global;
+            discs.Add((c, i % 3 == 0 ? PortalKeepOff.LaneFloorMetres : PortalKeepOff.ClearanceMetres));
+        }
+
+        var scars = new NavScars(new ManualTimeProvider());
+        scars.SetKeepOff(discs);
+        var planner = new PathPlanner(Map(Flat()));
+        var checkedPlans = 0;
+        for (int i = 0; i < 120; i++)
+        {
+            var a = P(5f + (float)(rng.NextDouble() * 180.0), 5f + (float)(rng.NextDouble() * 180.0));
+            var b = P(5f + (float)(rng.NextDouble() * 180.0), 5f + (float)(rng.NextDouble() * 180.0));
+            if (discs.Any(d => Vector2.Distance(d.Centre, a.Global) <= d.Radius + 0.5f || Vector2.Distance(d.Centre, b.Global) <= d.Radius + 0.5f))
+            {
+                continue;
+            }
+
+            var result = planner.Plan(a, NavGoal.ToPoint(b), scars);
+            if (result.Status != NavStatus.Found)
+            {
+                continue;
+            }
+
+            checkedPlans++;
+            var v = result.Route!.Vertices;
+            for (int k = 1; k < v.Count; k++)
+            {
+                foreach (var (centre, radius) in discs)
+                {
+                    var ab = v[k].Global - v[k - 1].Global;
+                    var t = ab.LengthSquared() <= 1e-8f ? 0f : Math.Clamp(Vector2.Dot(centre - v[k - 1].Global, ab) / ab.LengthSquared(), 0f, 1f);
+                    var metres = Vector2.Distance(centre, v[k - 1].Global + (ab * t));
+                    Assert.True(metres >= radius, $"plan {i}: leg {k} passes {metres:0.000} m from a disc of {radius:0.000} m");
+                }
+            }
+        }
+
+        Assert.True(checkedPlans >= 60, $"only {checkedPlans} plans were checked");
+    }
+
+    [Fact]
+    public void A_point_goal_beside_a_disc_is_judged_by_its_own_point_not_by_its_nodes_centre()
+    {
+        var portal = P(20.6096f, 53.1273f);
+        var reach = 2.841f;
+        var scars = new NavScars(new ManualTimeProvider());
+        scars.SetKeepOff([(portal.Global, reach)]);
+        var front = P(20.6377f, 50.1274f);
+        Assert.True(front.HorizontalDistance(portal) > reach);
+        Assert.True(P(20.5f, 50.5f).HorizontalDistance(portal) < reach); // the goal's node's centre is inside the disc
+
+        var planner = new PathPlanner(Map(Flat()));
+        var result = planner.Plan(P(30.5f, 10.5f), NavGoal.ToPoint(front), scars);
+        Assert.Equal(NavStatus.Found, result.Status);
+        Assert.Equal(front.Global, result.Route!.End.Global);
+        Assert.All(Samples(result.Route, 0.05f), p => Assert.True(p.HorizontalDistance(portal) > reach - 1e-3f, $"{p} in the disc"));
+
+        var inside = planner.Plan(P(30.5f, 10.5f), NavGoal.ToPoint(P(20.6f, 50.6f)), scars);
+        Assert.Equal(NavStatus.GoalBlocked, inside.Status);
+        Assert.Equal("goal-scarred", inside.Reason);
     }
 
     [Fact]
@@ -325,6 +425,7 @@ public sealed class PathPlannerTests(ITestOutputHelper output)
     }
 
     [Fact]
+    [Trait("Tier", "Timing")] // m5-pathplanner-km-timing-flake: a warm-plan byte bound; the one-kilometre timing theory below was already Timing since M4
     public void A_pooled_replan_allocates_only_its_result()
     {
         var tile = Flat();

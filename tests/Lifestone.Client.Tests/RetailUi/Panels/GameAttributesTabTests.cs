@@ -148,6 +148,7 @@ public sealed class GameAttributesTabTests(DatSetFixture fixture) : IClassFixtur
     }
 
     [RequiresLocalDatsFact]
+    [Trait("Tier", "Timing")] // m4-timing-tier-candidates: the attribute page's construction-time bound
     public void The_controller_is_built_in_one_staged_unit_well_under_the_budget()
     {
         var (rig, screen, tab, _) = Enter();

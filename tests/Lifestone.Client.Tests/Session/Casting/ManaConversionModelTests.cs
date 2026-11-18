@@ -393,6 +393,62 @@ public sealed class ManaConversionModelAllocationTests
         });
         Assert.True(sink > 0);
     }
+
+    /// <summary>
+    /// M6 16 Eperf: the mean of the rolled cost is kept once worked out (each decision of the fight asks it for every candidate; one call is O(base mana squared)). The number is the sum's own, bit for bit, the first time
+    /// and every time after, for every spell and skill, past the kept means' bound too; it allocates nothing, asked again or worked out for the first time.
+    /// </summary>
+    [Fact]
+    public void The_expected_cost_is_the_sums_own_number_every_time_it_is_asked_and_allocates_nothing_kept_or_worked_out()
+    {
+        static double Sum(uint baseMana, uint power, uint skill)
+        {
+            var mean = 0.0;
+            for (uint held = 0; held < baseMana; held++)
+            {
+                mean += 1.0 - ManaConversionModel.LandingChance(baseMana, power, skill, held);
+            }
+
+            return mean;
+        }
+
+        (uint Base, uint Power)[] spells = [(2, 1), (10, 25), (20, 50), (35, 300), (70, 300), (100, 400), (150, 250)];
+        foreach (var (baseMana, power) in spells)
+        {
+            for (uint skill = 1; skill <= 421; skill += 60)
+            {
+                var sum = Sum(baseMana, power, skill);
+                Assert.Equal(BitConverter.DoubleToInt64Bits(sum), BitConverter.DoubleToInt64Bits(ManaConversionModel.ExpectedCost(baseMana, power, skill))); // worked out, or kept by an earlier test
+                Assert.Equal(BitConverter.DoubleToInt64Bits(sum), BitConverter.DoubleToInt64Bits(ManaConversionModel.ExpectedCost(baseMana, power, skill))); // kept
+            }
+        }
+
+        // past the bound a mean takes another's place, and the one replaced is worked out again: the same numbers
+        for (uint skill = 1; skill <= (2 * ManaConversionModel.ExpectedCostsKept) + 8; skill++)
+        {
+            ManaConversionModel.ExpectedCost(3, 25, skill);
+        }
+
+        Assert.Equal(BitConverter.DoubleToInt64Bits(Sum(70, 300, 311)), BitConverter.DoubleToInt64Bits(ManaConversionModel.ExpectedCost(70, 300, 311)));
+        Assert.Equal(BitConverter.DoubleToInt64Bits(Sum(3, 25, 7)), BitConverter.DoubleToInt64Bits(ManaConversionModel.ExpectedCost(3, 25, 7)));
+
+        // numbers too large for a key are worked out each time, and what does not roll is the base
+        Assert.Equal(BitConverter.DoubleToInt64Bits(Sum(4, 1u << 22, 300)), BitConverter.DoubleToInt64Bits(ManaConversionModel.ExpectedCost(4, 1u << 22, 300)));
+        Assert.Equal(70.0, ManaConversionModel.ExpectedCost(70, 300, 0));
+        Assert.Equal(70.0, ManaConversionModel.ExpectedCost(70, 300, 311, ignoresManaConversion: true));
+
+        var sink = ManaConversionModel.ExpectedCost(100, 400, 258);
+        var fresh = 5000u;
+        AllocationAssert.Nothing(() =>
+        {
+            for (var i = 0; i < 100; i++)
+            {
+                sink += ManaConversionModel.ExpectedCost(100, 400, 258); // kept
+                sink += ManaConversionModel.ExpectedCost(4, 25, fresh++); // never asked before: worked out and kept, with no allocation
+            }
+        });
+        Assert.True(sink > 0);
+    }
 }
 
 /// <summary>

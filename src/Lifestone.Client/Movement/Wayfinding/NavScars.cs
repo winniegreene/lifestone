@@ -7,6 +7,11 @@ namespace Lifestone.Client.Movement.Wayfinding;
 /// the planner treats as blocked until it expires (<see cref="DefaultLife"/>). Per run, never written into the shared
 /// <see cref="NavTile"/>. The planner lets a route leave a scar the start stands in (each step moving outward) but never
 /// enter one. The clock is injectable (<see cref="TimeProvider"/>). Not thread-safe: one per run. Not retail: Lifestone's own.
+/// <para><b>Bodies</b> (M6 4 W2, <c>m6-npc-in-door-lane</c>): the runner also sets the discs of the NPCs' bodies near the route here at each plan
+/// (<see cref="SetBodies"/>, <see cref="NpcBodies"/>). They never expire and are replaced whole at the next plan; the planner reads them as scars
+/// (<see cref="CopyLive"/>, <see cref="IsScarred(NavPoint)"/>), but <see cref="All"/>, <see cref="LiveCount"/> and <see cref="Expire()"/> are the timed
+/// scars alone.</para>
+/// <para><b>Portals</b> (M6 7 AI): the discs of the portals in outdoor cells a walk keeps clear of (<see cref="SetKeepOff"/>, <see cref="PortalKeepOff"/>): as the bodies', but the run's whole, and not replaced by the bodies' plans.</para>
 /// </summary>
 public sealed class NavScars
 {
@@ -16,6 +21,8 @@ public sealed class NavScars
     private readonly TimeProvider _clock;
     private readonly long _origin;
     private readonly List<NavScar> _scars = [];
+    private readonly List<NavScar> _bodies = [];
+    private readonly List<NavScar> _keepOff = [];
 
     /// <summary>A scar set on <paramref name="clock"/> (the system clock by default).</summary>
     public NavScars(TimeProvider? clock = null)
@@ -29,6 +36,41 @@ public sealed class NavScars
 
     /// <summary>The scars added and not yet removed by <see cref="Expire()"/> (some may have outlived their life).</summary>
     public IReadOnlyList<NavScar> All => _scars;
+
+    /// <summary>The bodies' discs the last plan was given (<see cref="SetBodies"/>); never expired, replaced whole.</summary>
+    public IReadOnlyList<NavScar> Bodies => _bodies;
+
+    /// <summary>
+    /// Replaces the bodies' discs (M6 4 W2): each a disc of <c>Radius</c> round <c>Centre</c> (global metres) that the planner never enters (a start inside one
+    /// may leave it, as a scar's). An empty list clears them. Allocates nothing once the list has grown.
+    /// </summary>
+    /// <param name="discs">The discs: centre and radius.</param>
+    public void SetBodies(IReadOnlyList<(Vector2 Centre, float Radius)> discs)
+    {
+        ArgumentNullException.ThrowIfNull(discs);
+        _bodies.Clear();
+        for (var i = 0; i < discs.Count; i++)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(discs[i].Radius);
+            _bodies.Add(new NavScar(discs[i].Centre, discs[i].Radius, TimeSpan.MaxValue));
+        }
+    }
+
+    /// <summary>Removes the bodies' discs (a plan without them).</summary>
+    public void ClearBodies() => _bodies.Clear();
+
+    /// <summary>Replaces the portals' discs (M6 7 AI, <see cref="PortalKeepOff.OutdoorDiscs"/>): read as the bodies' are; <see cref="ClearBodies"/> leaves them. An empty list clears them.</summary>
+    /// <param name="discs">The discs: centre and radius.</param>
+    public void SetKeepOff(IReadOnlyList<(Vector2 Centre, float Radius)> discs)
+    {
+        ArgumentNullException.ThrowIfNull(discs);
+        _keepOff.Clear();
+        for (var i = 0; i < discs.Count; i++)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(discs[i].Radius);
+            _keepOff.Add(new NavScar(discs[i].Centre, discs[i].Radius, TimeSpan.MaxValue));
+        }
+    }
 
     /// <summary>The number of live scars (not past their life now).</summary>
     public int LiveCount
@@ -69,8 +111,13 @@ public sealed class NavScars
     /// <summary>Removes the scars past their life at <paramref name="now"/> (this set's clock); returns how many went.</summary>
     public int Expire(TimeSpan now) => _scars.RemoveAll(s => s.Until <= now);
 
-    /// <summary>Removes every scar (a new run).</summary>
-    public void Clear() => _scars.Clear();
+    /// <summary>Removes every scar, every body's disc and every portal's disc (a new run).</summary>
+    public void Clear()
+    {
+        _scars.Clear();
+        _bodies.Clear();
+        _keepOff.Clear();
+    }
 
     internal bool IsScarred(Vector2 global, TimeSpan now)
     {
@@ -82,10 +129,26 @@ public sealed class NavScars
             }
         }
 
+        foreach (var s in _bodies)
+        {
+            if (Vector2.DistanceSquared(global, s.Centre) <= s.Radius * s.Radius)
+            {
+                return true;
+            }
+        }
+
+        foreach (var s in _keepOff)
+        {
+            if (Vector2.DistanceSquared(global, s.Centre) <= s.Radius * s.Radius)
+            {
+                return true;
+            }
+        }
+
         return false;
     }
 
-    /// <summary>Copies the live scars into <paramref name="buffer"/> (grown if needed, so a warm planner allocates nothing); returns the count.</summary>
+    /// <summary>Copies the live scars and the bodies' discs into <paramref name="buffer"/> (grown if needed, so a warm planner allocates nothing); returns the count.</summary>
     internal int CopyLive(ref NavScar[] buffer)
     {
         var now = Now;
@@ -97,6 +160,26 @@ public sealed class NavScars
                 continue;
             }
 
+            if (n == buffer.Length)
+            {
+                Array.Resize(ref buffer, Math.Max(8, buffer.Length * 2));
+            }
+
+            buffer[n++] = s;
+        }
+
+        foreach (var s in _bodies)
+        {
+            if (n == buffer.Length)
+            {
+                Array.Resize(ref buffer, Math.Max(8, buffer.Length * 2));
+            }
+
+            buffer[n++] = s;
+        }
+
+        foreach (var s in _keepOff)
+        {
             if (n == buffer.Length)
             {
                 Array.Resize(ref buffer, Math.Max(8, buffer.Length * 2));

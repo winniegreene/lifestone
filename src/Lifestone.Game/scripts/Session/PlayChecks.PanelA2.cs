@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Lifestone.Client.RetailUi.Input;
 using Lifestone.Client.RetailUi.Panels;
 using Lifestone.Client.RetailUi.Screens;
 using Lifestone.Client.RetailUi.Widgets;
@@ -64,6 +65,65 @@ public sealed partial class PlayChecks
         }
 
         Check(name, ok, detail);
+        if (ok)
+        {
+            await SkillsRowMouseAsync(shell, tab);
+        }
+
         await ClosePanelAsync(shell, SkillPage);
+    }
+
+    /// <summary>
+    /// The owner's report (M6 7 S): a click on a skill row selects nothing. The real mouse route: the pointer goes to the War Magic row (the list's own hit test), a left click, and the tab must hold that skill as selected,
+    /// its footer must change off the default, and a second click on the same row must clear it. The hit chain is logged so a covering element shows.
+    /// </summary>
+    private async Task SkillsRowMouseAsync(GamePlayScreen shell, GameSkillsTab tab)
+    {
+        const string name = "skills-tab-row-click-selects-the-skill";
+        var manager = tab.List?.Manager;
+        if (manager is null || tab.List is not { } list || tab.RowOf(WarMagicSkill) is not { } row)
+        {
+            Check(name, false, "no ui manager, list or War Magic row");
+            return;
+        }
+
+        var index = list.Items.ToList().IndexOf(row);
+        list.ScrollToShow(index);
+        await Frames(2);
+        var box = list.ScreenBox;
+        var x = (box.X1 - box.X0) / 2;
+        int? first = null, last = null;
+        for (var y = 0; y < box.Y1 - box.Y0; y++)
+        {
+            if (list.TryGetItemIndexAt(x, y, out var at) && at == index)
+            {
+                first ??= y;
+                last = y;
+            }
+        }
+
+        if (first is not { } top || last is not { } bottom)
+        {
+            Check(name, false, $"row {index} not under the list ({box.X0},{box.Y0})-({box.X1},{box.Y1})");
+            return;
+        }
+
+        var (sx, sy) = (box.X0 + x, box.Y0 + ((top + bottom) / 2));
+        var chain = new List<string>();
+        for (var e = manager.HitTest(sx, sy); e is not null && chain.Count < 8; e = e.Parent)
+        {
+            chain.Add(e.ElementId.ToString("X8", System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        manager.Input.MouseMove(sx, sy);
+        await Frames(2);
+        manager.Input.MouseMove(sx, sy);
+        manager.Input.MouseButton(UiMouseButton.Left, true);
+        manager.Input.MouseButton(UiMouseButton.Left, false);
+        await Frames(2);
+        var selected = tab.SelectedSkill;
+        var footer = tab.FooterState;
+        Check(name, selected == WarMagicSkill && footer != GameSkillsTab.DefaultState,
+            $"at=({sx},{sy}) hit=[{string.Join("<", chain)}] click_select={list.ClickSelect} list_selected={list.SelectedIndex}/{index} selected_skill={selected} footer_state=0x{footer:X} rows_state_selected={row.State}");
     }
 }

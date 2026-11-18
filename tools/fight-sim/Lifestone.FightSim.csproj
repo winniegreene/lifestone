@@ -1,0 +1,66 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The fight simulator (docs/fight-sim.md): runs ACE's own combat code offline, in memory, on real server objects (a
+    creature built from its world-database weenie, the character restored from her saved shard row), so that every
+    chance, hit size, kill time and experience rate an agent states is the server's own number and never a guess. It
+    reads the local world and shard databases (read-only) and the retail dats, and writes only under cache/fight-sim/.
+    A tool, not a check: it lives outside Lifestone.slnx (no default build or test run touches it) and outside src/ and
+    tests/, so Directory.Build.props does not apply and every setting is made here. Program.cs says how to run it and
+    what it never does.
+
+    It references ACE's assemblies at compile time only (Private=false), from the same ACE build the server mod uses
+    (-p:AceDir=<folder> when given, otherwise the server/runtime/ace folder of the outermost enclosing Lifestone checkout
+    that has one, so a worktree builds against the main checkout's ACE). At run time Program.cs loads ACE and its
+    dependencies from that folder. No NuGet package is used.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Lifestone.FightSim</RootNamespace>
+    <AssemblyName>Lifestone.FightSim</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <Deterministic>true</Deterministic>
+    <AnalysisLevel>10.0</AnalysisLevel>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <NuGetAudit>false</NuGetAudit>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <IsPackable>false</IsPackable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <Authors>Lifestone contributors</Authors>
+    <Product>Lifestone</Product>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <_LsCheckout0>$([MSBuild]::GetDirectoryNameOfFileAbove('$(MSBuildProjectDirectory)', 'Lifestone.slnx'))</_LsCheckout0>
+    <_LsCheckout1 Condition="'$(_LsCheckout0)' != ''">$([MSBuild]::GetDirectoryNameOfFileAbove('$([System.IO.Path]::GetDirectoryName('$(_LsCheckout0)'))', 'Lifestone.slnx'))</_LsCheckout1>
+    <_LsCheckout2 Condition="'$(_LsCheckout1)' != ''">$([MSBuild]::GetDirectoryNameOfFileAbove('$([System.IO.Path]::GetDirectoryName('$(_LsCheckout1)'))', 'Lifestone.slnx'))</_LsCheckout2>
+    <_LsAceDir>$(AceDir)</_LsAceDir>
+    <_LsAceDir Condition="'$(_LsAceDir)' == '' and '$(_LsCheckout2)' != '' and Exists('$(_LsCheckout2)\server\runtime\ace\ACE.Server.dll')">$(_LsCheckout2)\server\runtime\ace\</_LsAceDir>
+    <_LsAceDir Condition="'$(_LsAceDir)' == '' and '$(_LsCheckout1)' != '' and Exists('$(_LsCheckout1)\server\runtime\ace\ACE.Server.dll')">$(_LsCheckout1)\server\runtime\ace\</_LsAceDir>
+    <_LsAceDir Condition="'$(_LsAceDir)' == '' and '$(_LsCheckout0)' != ''">$(_LsCheckout0)\server\runtime\ace\</_LsAceDir>
+    <_LsAceDir Condition="'$(_LsAceDir)' != '' and !HasTrailingSlash('$(_LsAceDir)')">$(_LsAceDir)\</_LsAceDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="ACE.Server" HintPath="$(_LsAceDir)ACE.Server.dll" Private="false" />
+    <Reference Include="ACE.Entity" HintPath="$(_LsAceDir)ACE.Entity.dll" Private="false" />
+    <Reference Include="ACE.Database" HintPath="$(_LsAceDir)ACE.Database.dll" Private="false" />
+    <Reference Include="ACE.Common" HintPath="$(_LsAceDir)ACE.Common.dll" Private="false" />
+    <Reference Include="ACE.DatLoader" HintPath="$(_LsAceDir)ACE.DatLoader.dll" Private="false" />
+    <Reference Include="log4net" HintPath="$(_LsAceDir)log4net.dll" Private="false" />
+    <Reference Include="Microsoft.EntityFrameworkCore" HintPath="$(_LsAceDir)Microsoft.EntityFrameworkCore.dll" Private="false" />
+  </ItemGroup>
+
+  <Target Name="LifestoneFightSimCheckAce" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="!Exists('$(_LsAceDir)ACE.Server.dll')"
+           Text="Lifestone fight sim: no ACE.Server.dll in '$(_LsAceDir)'. Set the backend up once from the main checkout (server\README.md), or pass -p:AceDir=&lt;the folder of a built ACE&gt;\." />
+    <ItemGroup>
+      <AssemblyMetadata Include="LifestoneAceDir" Value="$(_LsAceDir)" />
+    </ItemGroup>
+  </Target>
+
+</Project>

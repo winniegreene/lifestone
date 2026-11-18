@@ -37,6 +37,9 @@ internal sealed class FreshPurge(string name, ILogSink log, string category)
     /// <summary>How many old copies of the name were purged (each Confirmed reply that removed a character record or a player biota).</summary>
     public int Purged { get; private set; }
 
+    /// <summary>True when the last answer was <c>own-character</c>: the installed mod does not list the name as one that is re-created, so it treats the ask as a character purging itself. The loop still reports it as failed; a run that deleted nothing may read it as nothing to purge.</summary>
+    public bool RefusedAsOwnCharacter { get; private set; }
+
     /// <summary>The name this loop purges (the template's character, never another).</summary>
     public string Name => name;
 
@@ -77,6 +80,7 @@ internal sealed class FreshPurge(string name, ILogSink log, string category)
             return FreshPurgeProgress.Failed;
         }
 
+        RefusedAsOwnCharacter = outcome.Kind == ActionOutcomeKind.ServerError && outcome.Detail?.StartsWith(ToolErrors.OwnCharacter, StringComparison.Ordinal) == true;
         if (outcome.Kind != ActionOutcomeKind.Confirmed || handle.Result is not { } result || (result.Characters <= 0 && result.PlayerBiotas <= 0))
         {
             failure = "purge: " + Describe(outcome) + (handle.Result is { } r ? string.Create(CultureInfo.InvariantCulture, $" (removed {r.Characters} character records, {r.PlayerBiotas} player biotas)") : string.Empty);

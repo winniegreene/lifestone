@@ -41,6 +41,13 @@ public interface IGameSessionView
     /// <summary>What <see cref="Attack"/> reads for a view that keeps none (a test fake, a session without a reducer): an Idle sequence nothing ever changes.</summary>
     private static readonly AttackSequence NoAttack = new();
 
+    /// <summary>
+    /// M6 item 14 (<c>m6-live-position</c>): where another object stands now, the one answer for every automation that judges a creature by its place (<see cref="LivePositions"/>): the body the screen draws when the
+    /// session draws bodies and the body can be trusted, else the server's last report (<see cref="WorldObject.Position"/>). A view that draws no bodies (a headless host, a test fake, the default here) answers from the
+    /// server's report alone (<see cref="LivePositions.ReportsOnly"/>). Read it each time: play mode replaces it when it makes a new avatar set.
+    /// </summary>
+    LivePositions Live => LivePositions.ReportsOnly;
+
     /// <summary>The ammunition the player wields (wcid, guid, stack), or null when none is (M4 1.2 s1). Read from the inventory, so it follows 0x0197 and the wield and unwield messages.</summary>
     HeldAmmo? Ammo => HeldAmmo.Of(State);
 
@@ -95,4 +102,18 @@ public interface IGameSessionView
     void CloseVendorWindow()
     {
     }
+
+    /// <summary>
+    /// The player closed the guardian window (M6 villa): the model's open guardian closes with it, as the vendor's does (ACE has no close message).
+    /// Publishes <see cref="GuardianClosed"/>; does nothing when none is open. A view without a model ignores it.
+    /// </summary>
+    void CloseGuardianWindow()
+    {
+    }
+
+    /// <summary>
+    /// The guardian window as the retail UI reads it (M6 villa, <see cref="GuardianWindowView"/>): the open guardian and the guardian window's model shared by the drawn <c>gmSlumlordUI</c> and the
+    /// autopilot. A view without a model reads the profile alone (read-only; the session's own forwards to its model).
+    /// </summary>
+    GuardianWindowView GuardianView => new(State, null);
 }

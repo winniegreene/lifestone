@@ -23,6 +23,7 @@ internal sealed partial class GameStateReducer
     {
         ArgumentNullException.ThrowIfNull(message);
         var appraisal = _state.Appraisals.Add(message, _clock.Now);
+        NoteDoorLock(appraisal);
         Changed();
         if (_log.IsEnabled(LogSeverity.Debug))
         {
@@ -36,5 +37,21 @@ internal sealed partial class GameStateReducer
         }
 
         Publish(new AppraisalReceived(appraisal.Guid, appraisal.Success, appraisal.Flags, appraisal.Sequence));
+    }
+
+    /// <summary>
+    /// M6 8 C (D117): a door's appraisal carries its lock. ACE marks <c>PropertyBool.Locked</c> an assessment property (<c>PropertyBool.cs:15-16</c>) and appraises a door with its bool table (<c>AppraiseInfo.cs:354</c>): a locked
+    /// door sends Locked true, an unlocked default-locked one sends false (<c>:158-164</c>), another unlocked door sends none, which a successful answer makes "not locked" (ACE's <c>IsLocked</c> is false without it). The answer
+    /// is kept on the door as <see cref="WorldObject.Locked"/> (read from <c>appraised</c>); a later 0x02D2 overwrites it, so ACE's re-lock about 30 s after a use (<c>Door.cs:210-228</c>) reaches the model.
+    /// </summary>
+    private void NoteDoorLock(Appraisal appraisal)
+    {
+        if (!appraisal.Success || !_state.Objects.TryGet(appraisal.Guid, out var door) || (door.DescriptionFlags & Movement.Wayfinding.DoorCrossings.DoorFlag) == 0)
+        {
+            return; // not a door, or the server withheld the tables
+        }
+
+        door.Locked = appraisal.Bool(LockedProperty) ?? false;
+        door.LockedFrom = "appraised";
     }
 }

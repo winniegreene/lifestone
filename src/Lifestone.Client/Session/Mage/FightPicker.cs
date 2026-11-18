@@ -1,6 +1,10 @@
 using System.Globalization;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session.Casting;
+using Lifestone.Client.Session.Contracts;
+using Lifestone.Client.Session.Grounds;
+using Lifestone.Client.Session.Vitals;
+using Lifestone.Data.World;
 
 namespace Lifestone.Client.Session.Mage;
 
@@ -49,8 +53,15 @@ public sealed class FightRates
     /// <summary>The landed drains and heals measured.</summary>
     public int HealthSamples { get; private set; }
 
-    /// <summary>The damage the mage takes a second (every attacker in the fight; <c>TODO(f10-incoming-per-attacker)</c>: ACE's notices name the attacker, the tally sums them).</summary>
+    /// <summary>The damage the mage takes a second over the fight's long run (every attacker in the fight; <c>TODO(f10-incoming-per-attacker)</c>: ACE's notices name the attacker, the tally sums them): the picker's cost of the time a move takes. A danger read is <see cref="Read"/>.</summary>
     public double IncomingPerSecond { get; private set; }
+
+    /// <summary>M6 7 Y: the fight's recent hits (fed by the fight's hit notices).</summary>
+    public RecentHits Hits { get; } = new();
+
+    /// <summary>M6 7 Y: what the recent hits say at <paramref name="clock"/>: the number the emergency reads, and the retreat rule on <c>HostileWatch</c>'s ring of the same hits.</summary>
+    /// <param name="clock">The session clock.</param>
+    public IncomingRead Read(double clock) => Hits.Read(clock);
 
     /// <summary>A landed dance: <paramref name="seconds"/> spent for <paramref name="netMana"/> gained. Ignored when either is not positive.</summary>
     /// <param name="seconds">The seconds of the presses and the refills since the last sample.</param>
@@ -122,11 +133,17 @@ public struct FightSnapshot
     /// <summary>The live skills (buffs up), as the cast policy reads them.</summary>
     public double WarSkill, LifeSkill, CreatureSkill, ManaConversion, MeleeDefense;
 
-    /// <summary>The highest debuff and drain level the plan cap, the book and the pack allow (6 or 7; 0: none).</summary>
+    /// <summary>The level the debuffs are scored at: the fight's plan cap for the bolt now, at most 7 (M6 1 f: 1 to 7; 0: none). The drains as an attack stay at VI and VII.</summary>
     public int DebuffLevel;
 
     /// <summary>The debuff kinds the target's profile entry allows (its <c>opener</c>), a bit per <see cref="DebuffKind"/>.</summary>
     public uint AllowedDebuffs;
+
+    /// <summary>M6 1 f: true when <see cref="KnownDebuffs"/> was read from the spellbook (false: every kind counts as known, the unit tests' default).</summary>
+    public bool BookRead;
+
+    /// <summary>M6 1 f: a bit per <see cref="DebuffKind"/> whose spell at <see cref="DebuffLevel"/> the spellbook holds and whose school is trained; a kind without it is skipped, named once.</summary>
+    public uint KnownDebuffs;
 
     /// <summary>True when Drain Health Other VI (or VII) is offered: known, paid for by the pack, the mana over its floor, the target in its range.</summary>
     public bool DrainVI, DrainVII;
@@ -154,6 +171,12 @@ public struct FightSnapshot
 
     /// <summary>The target's maximum health and Magic Defense (the ground profile's; 0: unknown).</summary>
     public double TargetMaxHealth, TargetMagicDefense;
+
+    /// <summary>
+    /// M6 14 drain resistance: the target kind's health-drain resistance (<c>Vitals.DrainResist.Of</c>, its <c>ResistHealthDrain</c>), which scales a drain's take and a Harm Other's roll (<see cref="DebuffTarget.HealthDrainResistance"/>);
+    /// null reads as 1.
+    /// </summary>
+    public double? TargetHealthDrainResistance;
 
     /// <summary>The target's stamina (0: unknown).</summary>
     public double TargetStamina;
@@ -204,6 +227,16 @@ public struct FightSnapshot
 /// <param name="Why">A short reason (a constant).</param>
 public readonly record struct FightPick(FightMoveKind Kind, DebuffKind Debuff, int Level, string Spell, double AllIn, double BoltAllIn, double Hit, double Mana, string Why);
 
+/// <summary>The emergency's finishing bolt, read by <see cref="FightPicker.Finishing"/>.</summary>
+/// <param name="Wins">True when the bolt beats the heal.</param>
+/// <param name="Why">A short reason (a constant).</param>
+/// <param name="Remaining">The target's health the bolt must take: its live health less the projectiles in flight.</param>
+/// <param name="Expected">The bolt's expected damage: its mean hit, our vulnerability and the chance it lands.</param>
+/// <param name="Landing">The chance it lands (the picker's war landing).</param>
+/// <param name="Survives">True when the mage is expected to live through the cast.</param>
+/// <param name="HealSaves">True when the best heal outruns the incoming and the mage lives through its cast.</param>
+public readonly record struct FinishRead(bool Wins, string Why, double Remaining, double Expected, double Landing, bool Survives, bool HealSaves);
+
 /// <summary>
 /// The fight's one live picker (M5 7 F10, D90, the owner's option C): each decision it scores every move the mage may make now in expected all-in seconds to finish the target in reach, and the least wins; a tie keeps the bolt. Engine-free and
 /// allocation-free per decision (reused arrays; the strings are built only when the pick changes and once per debuff for its note).
@@ -231,7 +264,13 @@ public sealed class FightPicker
     private const string WhyVulnerability = "the vulnerability multiplies every bolt that follows";
     private const string WhyDebuff = "it saves more than it costs over the fight";
     private const string WhyDrain = "it takes nearly a bolt of health and heals the mage";
-    private const string WhyNoData = "TODO(f10-picker-data): the bolt's numbers or the target's health are missing; the bolt";
+    private const string WhyFinishNoData = "not read: the bolt's numbers or the target's health are not known; the heal stands";
+    private const string WhyFinishInFlight = "the projectiles in flight are expected to finish it; the heal stands";
+    private const string WhyFinishShort = "one bolt is not expected to finish it; the heal stands";
+    private const string WhyFinishSurvives = "the bolt kills the only attacker and the mage lives through the cast";
+    private const string WhyFinishNoHeal = "no heal can save the mage: a dead attacker stops the incoming";
+    private const string WhyFinishHeal = "the mage does not live through the bolt's cast and a heal does: the heal stands";
+    private const string WhyNoData = "the bolt: its numbers or the target's maximum health are not known (named once for this kind of target, f10-picker-data)";
 
     private static readonly int Kinds = Enum.GetValues<DebuffKind>().Length;
     private static readonly string[] Numerals = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII"];
@@ -250,7 +289,7 @@ public sealed class FightPicker
     private int _ledgerNext;
     private string _lastSpell = string.Empty;
     private uint _lastGuid;
-    private bool _noDataNoted;
+    private readonly HashSet<string> _noDataKinds = new(StringComparer.Ordinal); // M6 1 f: the target kinds whose missing data was named
     private const int CandidateCap = 48;
     private readonly string[] _candName = new string[CandidateCap];
     private readonly double[] _candSeconds = new double[CandidateCap];
@@ -278,8 +317,41 @@ public sealed class FightPicker
     /// <summary>The two live rates and the incoming damage.</summary>
     public FightRates Rates { get; } = new();
 
+    /// <summary>M6 1 f: the debuff rows the picker scores (<see cref="DebuffRows.Standard"/>: VI and VII; the fight sets the SpellTable's I to VII, <see cref="DebuffRows.FromSpellTable"/>).</summary>
+    public DebuffRows Rows { get; set; } = DebuffRows.Standard;
+
     /// <summary>The last pick.</summary>
     public FightPick Last { get; private set; }
+
+    /// <summary>
+    /// M6 1 f (<c>f10-picker-data</c>): the bolt's numbers from the bolt the fight will cast when no war option was built: its name, base mana and power are the SpellTable's, its cast seconds the bolt gesture and overhead
+    /// (<see cref="WarSpellData.EffectSeconds"/>, the item 0 measure) plus the flight, its level and mean damage the projectile row's (<see cref="WarSpellPicker.MeanHit"/>). True when the mean damage was filled; false leaves it 0 (the
+    /// spell has no projectile row: the picker names the gap once for the target kind).
+    /// </summary>
+    /// <param name="s">The snapshot.</param>
+    /// <param name="picker">F9's picker (its estimates).</param>
+    /// <param name="id">The bolt's spell id.</param>
+    /// <param name="name">Its name.</param>
+    /// <param name="baseMana">Its dat base mana.</param>
+    /// <param name="power">Its dat power.</param>
+    /// <param name="warSkill">The current War Magic skill.</param>
+    /// <param name="distance">The target's distance in metres.</param>
+    public static bool FillBolt(ref FightSnapshot s, WarSpellPicker picker, uint id, string name, uint baseMana, uint power, uint warSkill, double distance)
+    {
+        ArgumentNullException.ThrowIfNull(picker);
+        (s.BoltName, s.BoltBaseMana, s.BoltPower) = (name, baseMana, power);
+        s.BoltCastSeconds = WarSpellData.EffectSeconds(WarKind.Bolt) + picker.Settings.CastOverheadSeconds;
+        if (!WarSpellData.TryGet(id, out var row))
+        {
+            return false;
+        }
+
+        var option = new WarOption(name, name, row, power, baseMana, false, 0, WarSpellData.EffectSeconds(row.Kind));
+        s.BoltMeanDamage = picker.MeanHit(option, warSkill);
+        s.BoltCastSeconds = option.EffectSeconds + picker.Settings.CastOverheadSeconds + (row.SpeedMetresPerSecond > 0 ? distance / row.SpeedMetresPerSecond : 0);
+        s.BoltLevel = row.Level;
+        return true;
+    }
 
     /// <summary>The bit of <paramref name="kind"/> in <see cref="FightSnapshot.AllowedDebuffs"/>.</summary>
     /// <param name="kind">The kind.</param>
@@ -365,6 +437,7 @@ public sealed class FightPicker
         SwingSeconds = s.TargetSwingSeconds,
         PowerupSeconds = s.TargetPowerupSeconds,
         FireVulnerabilityMultiplier = vulnerability,
+        HealthDrainResistance = s.TargetHealthDrainResistance ?? 1.0, // M6 14 drain resistance
     };
 
     private double HealthRate => double.IsNaN(Rates.SecondsPerHealth) ? 0 : Rates.SecondsPerHealth;
@@ -378,10 +451,11 @@ public sealed class FightPicker
     {
         if (s.BoltMeanDamage <= 0 || s.BoltCastSeconds <= 0 || s.TargetMaxHealth <= 0)
         {
-            if (!_noDataNoted)
+            var kindName = s.TargetName ?? "creature";
+            if (!_noDataKinds.Contains(kindName) && _noDataKinds.Add(kindName))
             {
-                _noDataNoted = true;
-                _log.Warn(_category, WhyNoData);
+                // M6 1 f: once per kind of target, naming what is missing (item 0's climb wrote it on every decision: 130 lines).
+                _log.Warn(_category, string.Create(CultureInfo.InvariantCulture, $"TODO(f10-picker-data): {kindName}: {(s.BoltMeanDamage <= 0 ? "the bolt's mean damage " : string.Empty)}{(s.BoltCastSeconds <= 0 ? "the bolt's cast seconds " : string.Empty)}{(s.TargetMaxHealth <= 0 ? "the target's maximum health (no ground row, no appraisal answer) " : string.Empty)}missing; the bolt, unscored, for this kind of target"));
             }
 
             return Settle(new FightPick(FightMoveKind.Bolt, default, s.BoltLevel, s.BoltName ?? "bolt", double.NaN, double.NaN, double.NaN, 0, WhyNoData), in s);
@@ -408,8 +482,8 @@ public sealed class FightPicker
             }
         }
 
-        // The debuffs and the drains through F11's value model.
-        if (s.DebuffLevel >= 6)
+        // The debuffs and the drains through F11's value model, at the fight's cap (M6 1 f: every level I to VII the rows hold, the spellbook's).
+        if (s.DebuffLevel >= 1)
         {
             var level = Math.Min(s.DebuffLevel, 7);
             for (var k = 0; k < Kinds; k++)
@@ -423,8 +497,22 @@ public sealed class FightPicker
                 if (kind == DebuffKind.DrainHealthOther)
                 {
                     var drainOn = s.DrainOffWhy is null && !s.TargetHealthUnknown; // M5 7 F20: a drain is never scored as castable on a stale yield or an unknown health
-                    Consider(ref best, in s, in caster, in target, bolt, kind, 6, s.DrainVI && drainOn);
-                    Consider(ref best, in s, in caster, in target, bolt, kind, 7, s.DrainVII && level >= 7 && drainOn);
+                    if (level >= 6)
+                    {
+                        Consider(ref best, in s, in caster, in target, bolt, kind, 6, s.DrainVI && drainOn); // the drain as an attack is offered at VI and VII only (FillDrainOffer)
+                        Consider(ref best, in s, in caster, in target, bolt, kind, 7, s.DrainVII && level >= 7 && drainOn);
+                    }
+
+                    continue;
+                }
+
+                if (s.BookRead && (s.KnownDebuffs & Bit(kind)) == 0)
+                {
+                    if (!_noted[k])
+                    {
+                        Note(kind, string.Create(CultureInfo.InvariantCulture, $"pick: {Rows.Find(kind, level)?.Name ?? kind + " level " + Numeral(level)} is skipped: the spellbook does not hold it or its school is not trained (M6 1 f)"));
+                    }
+
                     continue;
                 }
 
@@ -432,7 +520,17 @@ public sealed class FightPicker
                 {
                     if (!_noted[k])
                     {
-                        Note(kind, "pick: TODO(f10-target-attributes): " + kind + " reads the target's attributes, which no source gives; skipped");
+                        Note(kind, "pick: TODO(f10-target-attributes): " + kind + " reads the target's attributes, which the ground's profile gives for no such creature (its attributes section); skipped");
+                    }
+
+                    continue;
+                }
+
+                if (NeedsAttackSkill(kind) && s.TargetAttackSkill <= 0)
+                {
+                    if (!_noted[k])
+                    {
+                        Note(kind, "pick: TODO(m6-target-attack-skill): " + kind + " reads the target's attack skill, which the profile does not carry (its attributes are not the skill); skipped");
                     }
 
                     continue;
@@ -443,6 +541,48 @@ public sealed class FightPicker
         }
 
         return Settle(best, in s);
+    }
+
+    /// <summary>
+    /// M6 7 Y: the emergency's question, on the picker's own numbers (the target's live health as <see cref="TargetOf"/> reads it, the bolt's mean, our vulnerability, the war landing <see cref="Decide"/> scores with): is the target's health at or under
+    /// the bolt's expected damage at the chance it lands? If so the bolt wins when the mage is expected to live through the cast, and also when no heal can save her anyway (<paramref name="healPerSecond"/>, the emergency's best score, does not outrun
+    /// the incoming, or she does not live through the heal's own cast): a dead attacker stops the incoming. A health that is not known never finishes (an unknown is never taken as low). Engine-free; the caller says the target is the only attacker.
+    /// </summary>
+    /// <param name="s">The snapshot of the target.</param>
+    /// <param name="read">The recent hits.</param>
+    /// <param name="healPerSecond">The best heal's health a second (<see cref="HealPick"/>'s; 0: nothing payable).</param>
+    /// <param name="healSeconds">That heal's cast seconds.</param>
+    /// <param name="inFlight">The damage the mage's projectiles in flight are expected to deal the target.</param>
+    /// <param name="clock">The session clock (the ledger's).</param>
+    public FinishRead Finishing(in FightSnapshot s, in IncomingRead read, double healPerSecond, double healSeconds, double inFlight, double clock)
+    {
+        if (s.BoltMeanDamage <= 0 || s.BoltCastSeconds <= 0 || s.TargetMaxHealth <= 0 || s.TargetHealthUnknown)
+        {
+            return new FinishRead(false, WhyFinishNoData, 0, 0, 0, false, false);
+        }
+
+        var vulnerability = VulnerabilityOn(s.TargetGuid, clock);
+        var target = TargetOf(in s, vulnerability);
+        var remaining = Math.Max(0, target.RemainingHealth - Math.Max(0, inFlight));
+        var landing = FightDebuffs.Chance(s.WarSkill, s.TargetMagicDefense);
+        var expected = s.BoltMeanDamage * vulnerability * landing;
+        var survives = read.Survives(s.Health, s.BoltCastSeconds);
+        var healSaves = healPerSecond > read.PerSecond && read.Survives(s.Health, healSeconds);
+        if (remaining <= 0)
+        {
+            return new FinishRead(false, WhyFinishInFlight, remaining, expected, landing, survives, healSaves);
+        }
+
+        if (remaining > expected)
+        {
+            return new FinishRead(false, WhyFinishShort, remaining, expected, landing, survives, healSaves);
+        }
+
+        return survives
+            ? new FinishRead(true, WhyFinishSurvives, remaining, expected, landing, survives, healSaves)
+            : !healSaves
+                ? new FinishRead(true, WhyFinishNoHeal, remaining, expected, landing, survives, healSaves)
+                : new FinishRead(false, WhyFinishHeal, remaining, expected, landing, survives, healSaves);
     }
 
     /// <summary>
@@ -522,12 +662,36 @@ public sealed class FightPicker
         return "picks=" + string.Join(',', parts);
     }
 
+    /// <summary>The kinds whose value reads the target's attack skill (the hit chance before and after): the Light Weapons formula's (Strength + Coordination) / 3 is only the part a debuff moves.</summary>
+    private static bool NeedsAttackSkill(DebuffKind kind) => kind is DebuffKind.Weakness or DebuffKind.Clumsiness or DebuffKind.LightWeaponsIneptitude;
+
+    /// <summary>
+    /// M6 3 a2 (closes the source half of <c>TODO(f10-target-attributes)</c>): fills the snapshot's target attributes and swing from the ground profile's row for the creature, or zeroes them when the profile has none (the
+    /// debuffs that read them are then skipped, named once). Each attribute feeds one ACE rule: Strength the melee damage mod (<c>SkillFormula.GetAttributeMod</c>, SkillFormula.cs:18-22 @95ef426d); Endurance the maximum health
+    /// (AttributeFormula.cs:55-71, CreatureVital.cs:104-131); Quickness the attack animation speed (<c>GetAnimSpeed</c>, Creature_Combat.cs:510-523); Coordination, with Strength, the Light Weapons skill and, with Quickness, the Melee Defense
+    /// (CreatureSkill.cs:154-163); Focus and Self, divided by 7, the Magic Defense our spells roll against (CreatureSkill.cs:154-163). The swing seconds are the profile's <c>swing_s</c> (Monster_Melee.cs:151-156), 0 when it has none
+    /// (<c>TODO(f11-swing-seconds)</c>: Slowness is then reported unscored). The attack skill and the PowerupTime are not profile fields and stay as they were.
+    /// </summary>
+    /// <param name="s">The snapshot.</param>
+    /// <param name="target">The ground's row for the creature, or null.</param>
+    public static void FillTargetStats(ref FightSnapshot s, GroundTarget? target)
+    {
+        var a = target?.Attributes;
+        (s.TargetStrength, s.TargetEndurance, s.TargetQuickness, s.TargetCoordination, s.TargetFocus, s.TargetSelf) = a is null ? (0, 0, 0, 0, 0, 0) : (a.Strength, a.Endurance, a.Quickness, a.Coordination, a.Focus, a.Self);
+        s.TargetSwingSeconds = target?.SwingSeconds is { } swing && swing > 0 ? swing : 0;
+    }
+
     private static bool NeedsAttributes(DebuffKind kind) => kind is DebuffKind.Weakness or DebuffKind.Clumsiness or DebuffKind.LightWeaponsIneptitude or DebuffKind.Slowness or DebuffKind.Bafflement or DebuffKind.Feeblemind or DebuffKind.Frailty;
 
     private void Consider(ref FightPick best, in FightSnapshot s, in DebuffCaster caster, in DebuffTarget target, double bolt, DebuffKind kind, int level, bool castable)
     {
-        if (FightDebuffs.Find(kind, level) is not { } spell)
+        if (Rows.Find(kind, level) is not { } spell)
         {
+            if (!_noted[(int)kind])
+            {
+                Note(kind, string.Create(CultureInfo.InvariantCulture, $"pick: {kind} level {Numeral(level)} has no row (the SpellTable lacks it: DebuffRows.FromSpellTable named it); not scored"));
+            }
+
             return;
         }
 
@@ -623,4 +787,55 @@ public sealed class FightPicker
 
     private static string Numeral(int level) => level is >= 1 and <= 8 ? Numerals[level - 1] : "-";
 
+}
+
+/// <summary>
+/// M6 3 a2 (the reader of <c>GroundTarget.KillFirst</c>): the fight's pick among the creatures in reach. A kill-first creature of the ground (<see cref="HuntingGround.IsKillFirst"/>) in reach is picked before the
+/// others, the nearest of them; with none in reach the pick is today's nearest. The filtered list is rebuilt only when the list it filters is another object, so a pick allocates nothing.
+/// </summary>
+public sealed class KillFirstPick
+{
+    private readonly HuntingGround _ground;
+    private IReadOnlyList<uint>? _source;
+    private uint[] _first = [];
+
+    /// <summary>A pick for <paramref name="ground"/>.</summary>
+    /// <param name="ground">The ground whose kill-first targets come first.</param>
+    public KillFirstPick(HuntingGround ground) => _ground = ground ?? throw new ArgumentNullException(nameof(ground));
+
+    /// <summary>The nearest creature of <paramref name="wcids"/> within <paramref name="maxMetres"/>, a kill-first one first (then <see cref="WorldObjectTable.NearestCreature(IReadOnlyList{uint}, in CellFrame, float, Func{uint, bool}, IReadOnlyList{uint}, out uint, LivePositions)"/> over all).</summary>
+    /// <param name="objects">The table.</param>
+    /// <param name="wcids">The classes the pick may take (a dungeon's targets, an outdoor ground's band).</param>
+    /// <param name="centre">Where to measure from.</param>
+    /// <param name="maxMetres">The largest distance accepted.</param>
+    /// <param name="cellFilter">Takes an object's full cell id; null accepts every cell.</param>
+    /// <param name="excluded">Ids never returned, or null.</param>
+    /// <param name="guid">The pick, or 0.</param>
+    /// <param name="live">Where a creature stands now (M6 14, <c>m6-live-position</c>: the session's <see cref="IGameSessionView.Live"/>), or null for the server's last report.</param>
+    public bool Nearest(WorldObjectTable objects, IReadOnlyList<uint> wcids, in CellFrame centre, float maxMetres, Func<uint, bool>? cellFilter, IReadOnlyList<uint>? excluded, out uint guid, LivePositions? live = null)
+    {
+        ArgumentNullException.ThrowIfNull(objects);
+        if (!ReferenceEquals(_source, wcids))
+        {
+            var n = 0;
+            for (var i = 0; i < wcids.Count; i++)
+            {
+                n += _ground.IsKillFirst(wcids[i]) ? 1 : 0;
+            }
+
+            var first = new uint[n];
+            n = 0;
+            for (var i = 0; i < wcids.Count; i++)
+            {
+                if (_ground.IsKillFirst(wcids[i]))
+                {
+                    first[n++] = wcids[i];
+                }
+            }
+
+            (_first, _source) = (first, wcids);
+        }
+
+        return (_first.Length > 0 && objects.NearestCreature(_first, in centre, maxMetres, cellFilter, excluded, out guid, live)) || objects.NearestCreature(wcids, in centre, maxMetres, cellFilter, excluded, out guid, live);
+    }
 }

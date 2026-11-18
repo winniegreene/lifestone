@@ -1,0 +1,6855 @@
+{
+  "sources": {
+    "scriveners": "cache/m6/1/sel-scriveners.tsv (every vendor whose Name contains 'Scrivener') and the pinned world SQL v0.9.296's landblock_instance rows (guid, obj_Cell_Id, origin), parsed read-only offline: the scriveners who sell a row of this catalog, with their instances in the towns named here; sell_rate is each one's SellPrice, float property 38 (50 for all of them), the price being ACE's GetSellCost ceil(50 x Value - 0.1) (Vendor.cs 577-585 @95ef426d). Left out: the Viamont scriveners at 0x31D6 (30016, 30020, 30026, 30030) and the ACE-added 49596-49599 at 0xA25F, whose town the corpus does not name, and the Void scriveners (no line here). M6 7 AK adds the Scrivener of Item Magic 20214 (Holtburg 0x7A9B301B, Sanamar 0x732D905C, landblock_instance rows), who sells every Item Magic level IV. M6 14 (m6-banes) adds the Master Scriveners of Item Magic 20211 (Plateau Village 0x749B6037, Qalaba'r 0x7972204A, Dryreach 0x7DA75036) and 30027 (Westwatch 0x723DA017), who sell every Item Magic level V, and the Grand Master Scriveners of Item Magic 20212 (Ayan Baqur 0x71134037, Fort Tethana 0x72581036, Candeth Keep 0x72B12021, Wai Jhou 0x73F31017, Stonehold 0x764D503D, Kara 0x7BA1702C) and 30028 (Eastwatch 0x749F0017), who sell every level VI: the read-only world copy, read 2026-11-12: SELECT weenie_Class_Id, guid, obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE weenie_Class_Id IN (20211, 20212, 30027, 30028), eleven rows, each beside the catalog's Master or Grand Master of Life Magic of the same town; float property 38 of each is 50. Fort Tethana's stands behind the lever gate with the three Grand Masters already there (Journey/lever-doors.json). The walks from the Network drops to the Master at Dryreach (the plan's first town for a level V) and to the Grand Master at Stonehold (level VI) are whole and confirmed on the dats at their own points, so neither has a stop (TownNetworkTripDatTests), and the walk to Fort Tethana's crosses the gate as the list says. TODO(m6-item-master-stops): the walks to the eight other new places (Plateau Village, Qalaba'r, Westwatch, Ayan Baqur, Candeth Keep, Wai Jhou, Kara, Eastwatch) are not confirmed; a walk that fails is named by the learn trip and not tried again that session",
+    "towns": "by landblock: Holtburg 0xA9B3 (the landblock south of the lifestone's 0xA9B4), Sanamar 0x32D9 (its portal lands in 0x33D9), Plateau Village 0x49B6, Qalaba'r 0x9722, Dryreach 0xDA75, Westwatch 0x23DA, Fort Tethana 0x2581, Candeth Keep 0x2B12, Wai Jhou 0x3F31, Stonehold 0x64D5, Kara 0xBA17, Eastwatch 0x49F0 (cache/m6/1/map.md section 2.C, sel-town-portals.tsv, and src/Lifestone.Data/World/Data/ace-world-points-of-interest.json); Ayan Baqur 0x1134: the points of interest name Ayan Baqur at 0x1133001F and the Town Network portal 42852 stands at 0x11340026",
+    "cells": "an instance row whose cell has the low word 0 (20216 at 0xA9B30000 above 20215 at 0xA9B30101, and five more) is resolved at load to the outdoor cell under its point (LandDefs.get_outside_lcoord); the station reads the scrivener live by guid before the last metres (a check, not a guess)",
+    "spells": "cache/m6/1/sel-scroll-rows.tsv: each scroll's spell (int property 28 SpellDID), Value (int 19) and the create-list row (destination 4, Shop) of each catalog scrivener selling it; power and school are the SpellTable's (ScrivenerCatalogTests pins them against the dats). The M6 7 X rows (Armor Self, Bludgeoning Protection Self, Mana Renewal Self): the read-only world copy, SELECT object_Id FROM weenie_properties_d_i_d WHERE type=28 AND value=<spell> for the scroll (ItemType 8192), weenie_properties_int type 19 for its Value, weenie_properties_create_list WHERE weenie_Class_Id=<scroll> AND destination_Type=4 for the sellers. The M6 14 rows (Heal Self and Drain Health Other III to VI; live 2026-11-12: with Life Magic 252 standing she healed with Heal Self I, 8 to 25 a cast, and lay down for 37 of her 46 rests, because the catalog held those two lines at I and II only): the same SELECTs on the read-only world copy, each row kept for the catalog's scriveners (the Viamont 30016 and the ACE-added 49597 left out, as above). The M6 14 rows of Harm Other I to VI (m6-life-through, the owner's rule of 2026-11-12: an attacker her bolt cannot reach is fought with Life Magic, and she knew no Harm Other): the same SELECTs on the read-only world copy, read 2026-11-12: spells 7, 1172, 1173, 1174, 1175, 1176; scrolls 1554, 2687, 2688, 2689, 2690, 2691 (ItemType 8192; the Magic trap weenies 4087 to 4089 that carry the same SpellDID are no scrolls), Values 1, 5, 20, 100, 200, 1000; create-list rows 33575 and 79107 (the Apprentice Scriveners of Life Magic 20217 and 30011), 33636 and 79168 (20218 and 30012), 33816 and 79339 (the Journeyman 20221 and 30015), 33876 (the Scrivener of Life Magic 20222; the Viamont 30016, row 79396, and the ACE-added 49597, row 87818, left out, as above), 33696 and 79225 (the Master 20219 and 30013), 33756 and 79282 (the Grand Master 20220 and 30014). The M6 7 AK rows (the lines of sources.lines): the same SELECTs, spell ids from Mage/ArenaProfile.cs, each row kept for the catalog's scriveners. The M6 14 rows of the six other armour banes, I to VI (m6-banes, the owner's order of 2026-11-12: every armour protection on her armour, not only the tuskers' two), and of Impenetrability and Bludgeon Bane V and VI: the same SELECTs on the read-only world copy, read 2026-11-12: the spell ids are spell.id by name (Piercing Bane 1569 to 1574, Blade Bane 37 and 1558 to 1562, Lightning Bane 1535 to 1540, Flame Bane 1547 to 1552, Frost Bane 1523 to 1528, Acid Bane 1493 to 1498; Impenetrability 1485 and 1486, Bludgeon Bane 1515 and 1516); each has one scroll (ItemType 8192: Piercing 1892 and 2867 to 2871, Blade 1552 and 2772 to 2776, Lightning 1889 and 2852 to 2856, Flame 1881 and 2812 to 2816, Frost 1883 and 2822 to 2826, Acid 1875 and 2762 to 2766; Impenetrability V and VI 2845 and 2846, Bludgeon Bane V and VI 2795 and 2796), Values 1, 5, 20, 100, 200, 1000; the sellers are the Apprentice Scriveners of Item and War Magic 20215 and 30009 (I), 20216 and 30010 (II), the Journeyman Scriveners of Item Magic 20213 and 30029 (III), the Scrivener of Item Magic 20214 (IV; the Viamont 30030 and the ACE-added 49599 left out, as above), the Master Scriveners of Item Magic 20211 and 30027 (V) and the Grand Masters 20212 and 30028 (VI), each row's create-list id beside its seller (ArmourBanesTests pins every one). The M6 14 rows of the caster auras, I to VI (m6-caster; the owner, 2026-11-13: the caster she wields is buffed with her own item magic): the same SELECTs on the read-only world copy, read 2026-11-13: Aura of Spirit Drinker Self 3253 to 3258 (scrolls 28002 to 28007), Aura of Hermetic Link Self 1475 to 1480 (scrolls 1896, 2887, 2888, 2889, 2891, 2892), Aura of Defender Self 1599, 1601 to 1605 (scrolls 1880, 2807 to 2811); Values 1, 5, 20, 100, 200, 1000 (50 to 50,000 pyreals); the sellers the banes' (20215 and 30009 I, 20216 and 30010 II, 20213 and 30029 III, 20214 IV with the Viamont 30030 and the ACE-added 49599 left out, 20211 and 30027 V, 20212 and 30028 VI), each create-list id beside its seller (CasterPickTests pins the prices and towns). The M6 14 rows of Revitalize Self I to VI (kind revitalize; the owner, 2026-11-14: at her level the potions go, and the stamina dance, Revitalize Self then Stamina to Mana Self, restores her mana): the same SELECTs on the read-only world copy, read 2026-11-15: SELECT d.object_Id, d.value, t.value, v.value FROM weenie_properties_d_i_d d LEFT JOIN weenie_properties_int t ON t.object_Id=d.object_Id AND t.type=1 LEFT JOIN weenie_properties_int v ON v.object_Id=d.object_Id AND v.type=19 WHERE d.type=28 AND d.value IN (1177, 1178, 1179, 1180, 1181, 1182, 2083, 4321), then SELECT id, object_Id, weenie_Class_Id FROM weenie_properties_create_list WHERE destination_Type=4 AND weenie_Class_Id IN (1785, 2727, 2728, 2729, 2730, 2731, 20251, 37930): spells 1177 to 1182; scrolls 1785, 2727, 2728, 2729, 2730, 2731 (ItemType 8192), Values 1, 5, 20, 100, 200, 1000 (50 to 50,000 pyreals); create-list rows 33581 and 79113 (the Apprentice Scriveners of Life Magic 20217 and 30011), 33642 and 79174 (20218 and 30012), 33822 and 79345 (the Journeyman 20221 and 30015), 33882 (the Scrivener of Life Magic 20222; the Viamont 30016, row 79402, and the ACE-added 49597, row 87824, left out, as above), 33702 and 79231 (the Master 20219 and 30013), 33762 and 79288 (the Grand Master 20220 and 30014). Level VII (2083 Robustification, scroll 20251, Value 2000) and the Incantation (4321, scroll 37930, Value 60000) are on no vendor's create list: the loot's, as every VII (D4)",
+    "lines": "the war bolt lines of the seven elements (SpellPlan.BoltLineNames), the vulnerability debuffs the fight casts (FightDebuffs: the seven elemental Vulnerability Other lines and Imperil Other of Life Magic; Vulnerability Other and Magic Yield Other of Creature Enchantment), I to VI, and the travel spells of the Journeyman Scriveners of Item Magic. M6 7 X (spells are the armor): the protective lines the climber's plan learns, I to VI: Armor Self (kind armor), Bludgeoning Protection Self (kind protection, the element naming the damage it cuts: the only damage type a played rung's targets carry, 0x0004; another type is a loud TODO(m6-protection-line-other-types), since the climber's buff profile casts no other protection line) and Mana Renewal Self (kind recovery: 180 mana an hour at II, base ManaRate 1 of weenie 1 (weenie_properties_float type 5) each 5 s heartbeat (type 1) x the spell's 1.25, for two casts an hour of 30 mana). M6 7 AD (the dance needs no Mana Conversion, Creature_Magic.cs:41-44 @95ef426d): Stamina to Mana Self, I to VI, kind dance: the same SELECTs (scrolls 1874, 9655-9659). Revitalize Self was left out, and Stamina to Mana stopped at I at her size, on the numbers (M6 7 AN, level 10, no Mana Conversion): net mana a press from stamina 57 is I +15.6, II +8.5, III +1.3, IV -5.8, and a press plus Revitalize I is about -1 per two casts, so the 'always push the next level' rule stopped there. M6 14 (the owner, 2026-11-14: at her level the potions go; with Mana Conversion trained, Revitalize Self then Stamina to Mana Self restores her mana): Revitalize Self, I to VI, kind revitalize, stands right after the dance line, and the plan reads those numbers live (ScrivenerLearnPlan.RevitalizeTarget): a level joins the plan only when one round nets mana on her state (its mean boost, cut to her standing stamina maximum, through the best press at the plan's chance, over its own expected cost on her Mana Conversion), the level that nets the most; otherwise the line is named with its numbers and nothing is bought, as at level 10. M6 7 AN (the owner, 2026-11-06): the regeneration lines are bought and kept up: Regeneration Self, Rejuvenation Self and Mana Renewal Self (kind recovery, spell rows stat_Mod_Val x1.1, x1.25, x1.4, x1.55 at I to IV, stat_Mod_Key 3, 4, 5, base mana 20, 30, 40, 50, 30 minutes) to the highest level at plan_buff_chance on the live skill, right after the two Life IVs and the bootstrap, before more Item scrolls: lying down (ACE GetStanceMod x3) stamina comes at 1.8 a second, 2.5 at x1.4, 2.8 at x1.55, and the rest's press pays for it, so the recharge is what they buy, not the fight's own regeneration. The drains and the heal (kind sustain, the levels the catalog holds are the levels she buys, by the same SELECTs): Drain Health Other I and II (25% of the target's current health, her gain x2 and x1.6, cap 60 and 80), Drain Stamina Other I (10% of the target's stamina, her gain x2, cap 60: 58 from a tusker's 290, 16 from an outskirts creature's 80) and Heal Self I and II. WorldObject_Magic.cs HandleCastSpell_Transfer @95ef426d. M6 7 AK (the owner's decisions of 2026-11-06, buff everything and bootstrap): the creature self lines (kind self_buff; needs_skill names a skill that must be trained first) and Impenetrability and Bludgeon Bane (kind item_armor), I to IV, the levels Holtburg and Sanamar sell on foot. Levels V and VI of the creature self lines are left out: nothing she can cast reaches them, TODO(m6-self-buff-lines-v-vi). M6 14 (m6-banes, the owner's order of 2026-11-12): the item armor lines are eight and run I to VI: Impenetrability, Bludgeon Bane and the six other banes, in the order her pass casts them (Piercing, Blade, Lightning, Flame, Frost, Acid). What a bane adds to each worn piece's protection against its damage type is the world's spell row (stat_Mod_Type 36872, an additive float; stat_Mod_Key 13 slash, 14 pierce, 15 bludgeon, 16 cold, 17 fire, 18 acid, 19 electric; stat_Mod_Val 0.111, 0.25, 0.5, 0.75, 1, 1.5 at I to VI, the same for every bane), summed and clamped to 2 by ACE (Creature.GetArmorMod, Creature_BodyPart.cs:65-100 @95ef426d). With the buff bot's mastery her Item Enchantment stands near 230, over the buff bar of level V (power 200, 216) and under VI's (266). The six carry from_level 32: the plan learns them from the first level of the rung whose band ended at the level the owner's order names (ladder/war-mage.json temple-20-40, levels 32 to 40; the order: a run through the Direlands at level 40). M6 14 (the owner, 2026-11-13: the Temple 20-40 leaves the ladder, the Cave to 39, the Abode from 40): 32 stands, now inside the Cave's band 22-39, eight levels before the Abode and the order's 40; whether it moves to the Cave's first level 22 or stays is the lead's or the owner's (the level is data). under it each is named and nothing is bought, because every target of the rungs before it deals bludgeon alone (the profiles' damage_types 0x0004), six more scrolls a level compete with the gates' lines, the debuffs and the leather set for a purse of a few thousand pyreals, and six more casts lengthen every pass at home on a pool of 150 to 200 mana. The level is data: the lead's or the owner's to move. One level is bought first at home, Harm Other's rule: the plan's level when Holtburg sells it, else Holtburg's IV (5,000 pyreals a scroll), and the higher level is the Town Network's once IV is in the book (V 10,000, VI 50,000). The plan's level is one she can cast (ScrivenerLearnPlan.ArmorLevelInReach): a level whose scarab no vendor of the ground's trips sells is not planned. Holtburg's Archmage Cindrue 2304 sells the Lead, Iron, Copper and Silver Scarabs (the profiles' sells); the Gold Scarab 687 is on the create lists of 34 vendors, none in Holtburg and no scrivener (SELECT object_Id FROM weenie_properties_create_list WHERE weenie_Class_Id=687 AND destination_Type=4, read 2026-11-12: archmages of other towns, Zisaha 2314 of Fort Tethana and Philomon 5646 of Neydisa among them), so on every Holtburg ground her level is IV today whatever her skill, and the V and VI rows wait for a ground whose trips sell the scarab: TODO(m6-armor-scarab-reach). Cast by foci (the Foci of Artifice): a level's scarab and its Prismatic Tapers (I Lead and 1, II Iron and 2, III Copper and 3, IV Silver and 3, V Gold and 4, VI Pyreal and 4: the SpellTable's formulas through SpellFormula.GetFociFormula, Entity/SpellFormula.cs:339-381), bought with each scroll for two passes (the resupply's scroll kit). One cast pays the base mana and the mana mod for each worn piece (I 10 and 2, II 20 and 4, III 30 and 6, IV 40 and 8, V 50 and 10, VI 60 and 12: the SpellTable's; Creature_Magic.cs:22-31) before Mana Conversion. M6 14 (m6-life-through): Harm Other, I to VI, kind attack: the Life Magic line the fight casts at an attacker no bolt reaches (ACE asks no line of sight of a spell with no projectile, Player_Magic.cs:481-506 @95ef426d). One level is bought: the highest at plan_cast_chance on her standing Life Magic that a scrivener of the ground's home town sells; a higher level sold only off home is the Town Network's once the home's is in the book. What a landed cast takes is the world's spell row (boost and boost_Variance: I -4 and -2, II -7 and -5, III -10 and -9, IV -16 and -17, V -24 and -23, VI -33 and -30, damage_Type 128: a whole number from boost to boost + boost_Variance, times the target's health-drain resistance; WorldObject_Magic.cs:474-601; Session/Vitals/LifeThrough.cs holds the rows and the arithmetic). M6 14 (m6-caster): the caster auras, I to VI, kind caster_aura, Item Enchantment, read at the buff bar on her standing skill and bought by the banes' rule (Holtburg's IV first while the plan's level is sold only off home): Spirit Drinker, Hermetic Link, Defender, in that order by what each adds to her hour at the ladder's caster_score weights (Spirit Drinker V +5% bolt damage on a caster of the bolt's element, 2.5% of the hour; Hermetic Link V x1.5 on the Wand's 0.06 Mana Conversion bonus, about 0.6%; Defender V +0.13 on the melee defence modifier, about 0.3%). What each level adds is the world's spell row: Hermetic Link stat_Mod_Key 171 WeaponAuraManaConv x1.1 to x1.6, multiplying the caster's own ManaConversionMod (WorldObject_Weapon.cs:247-259 @95ef426d); Defender key 169 WeaponAuraDefense +0.03, 0.05, 0.075, 0.10, 0.13, 0.15, added to the caster's melee defence modifier (:123-126); Spirit Drinker key 170 WeaponAuraElemental +0.01 a level, added to the caster's ElementalDamageMod only on the caster's own element (:384-395). They are 'Aura of ... Self': they land on her (WorldObject_Magic.cs:2180-2184), so a line is planned only while it adds to a caster she holds and can wield (Mage/CasterTerms.cs CasterGain), and a caster swap checks them on her after it (Mage/CasterAuraCheck.cs).",
+    "scarab_sellers": "cache/m6/1/sel-scarabs.tsv (every vendor whose shop, create_list destination 4, lists the Pyreal Scarab 690 or the Platinum Scarab 8897: the create_list ids per scarab, checked row by row against weenie_properties_create_list) and sel-zisaha.tsv (Zisaha's list: rows 70986 and 70987, the Values 1,000 and 10,000), with the pinned world SQL v0.9.296's landblock_instance rows (guid, obj_Cell_Id, origin) and float property 38 (SellPrice: Zisaha 1.8, as profiles/tusker-temple-fort-tethana.json reads it) of each seller, parsed read-only offline; the price is ACE's GetSellCost ceil(rate x Value - 0.1) (Vendor.cs 577-585 @95ef426d). The towns: Zisaha is Fort Tethana's mage (the Fort Tethana profile's vendors, D40); the others by the landblock of the point of interest that names it (src/Lifestone.Data/World/Data/ace-world-points-of-interest.json): Uziz 0xA260, Sawato 0xC95B, Neydisa 0x95D6, Linvak Tukal 0xA21E, Timaru 0x1DB6, Fiun 0x38F7, Xarabydun 0x934B (Janier al-Evv sells the Pyreal Scarab only). Zisaha is first: the buy-trip takes the first seller whose town some ground calls home (D12, D40). Left out: the 25 sellers whose town no point of interest names (the dungeon and Viamont archmages, 2246, 2247, 2248 (no instance), 2249, 2540, 4539, 4694, 8492, 20923, 24594, 25994, 32056, 33000, 34840, 35488, 38687-38691, 40942-40977, 41612, 80423, 80424) and Jeeves 6826 in the Advocate dungeon, the only seller of the Diamond Scarab 7299 (D12: no shop, the ring is put away at its floor)",
+    "foci": "M6 7 AU (the owner: acquire the foci of the other schools): Foci of Enchantment 15268 (Creature Enchantment) and Foci of Artifice 15269 (Item Enchantment), Value 500 and burden 400 (the pinned world SQL v0.9.296, weenie_properties_int 19 and 5), sold by the Apprentice Scrivener of Creature Magic 20205 (weenie_properties_create_list row 76977) and the Apprentice Scrivener of Item and War Magic 20215 (row 77964), destination 4, both SellPrice 50 (float 38): price max(1, ceil(50 x 500 - 0.1)) = 25,000 each (Vendor.GetSellCost, Vendor.cs 577-585 @95ef426d). ACE casts a school on the foci formula once its focus is in the pack (Player.HasFoci, Player_Spells.cs:451-488 @95ef426d): the scarabs stay, the rest become Prismatic Tapers by spell power (SpellFormula.cs:340-378) M6 14 pack rules (the owner, 2026-11-13: a lost focus is bought back, not carried as a backup of the account formula's components): Foci of Verdancy 15270 (Life Magic), sold by the Apprentice Scrivener of Life Magic 20217 (weenie_properties_create_list row 33572), and Foci of Strife 15271 (War Magic), sold by the Apprentice Scrivener of Item and War Magic 20215 (row 77965), destination 4, both in Holtburg's landblock 0xA9B3, both SellPrice 50 and Value 500, so 25,000 each, as the other two (SELECT cl.weenie_Class_Id, cl.object_Id, cl.id, f.value FROM weenie_properties_create_list cl JOIN weenie_properties_float f ON f.object_Id = cl.object_Id AND f.type = 38 JOIN landblock_instance li ON li.weenie_Class_Id = cl.object_Id WHERE cl.weenie_Class_Id IN (15270, 15271) AND cl.destination_Type = 4 AND li.obj_Cell_Id >> 16 = 0xA9B3, a read of the world copy, 2026-11-13)"
+  },
+  "lines": [
+    {
+      "name": "Acid Stream",
+      "kind": "bolt",
+      "element": "acid",
+      "school": "WarMagic"
+    },
+    {
+      "name": "Flame Bolt",
+      "kind": "bolt",
+      "element": "fire",
+      "school": "WarMagic"
+    },
+    {
+      "name": "Force Bolt",
+      "kind": "bolt",
+      "element": "pierce",
+      "school": "WarMagic"
+    },
+    {
+      "name": "Frost Bolt",
+      "kind": "bolt",
+      "element": "cold",
+      "school": "WarMagic"
+    },
+    {
+      "name": "Lightning Bolt",
+      "kind": "bolt",
+      "element": "electric",
+      "school": "WarMagic"
+    },
+    {
+      "name": "Shock Wave",
+      "kind": "bolt",
+      "element": "bludgeon",
+      "school": "WarMagic"
+    },
+    {
+      "name": "Whirling Blade",
+      "kind": "bolt",
+      "element": "slash",
+      "school": "WarMagic"
+    },
+    {
+      "name": "Acid Vulnerability Other",
+      "kind": "debuff",
+      "element": "acid",
+      "school": "LifeMagic"
+    },
+    {
+      "name": "Blade Vulnerability Other",
+      "kind": "debuff",
+      "element": "slash",
+      "school": "LifeMagic"
+    },
+    {
+      "name": "Bludgeoning Vulnerability Other",
+      "kind": "debuff",
+      "element": "bludgeon",
+      "school": "LifeMagic"
+    },
+    {
+      "name": "Cold Vulnerability Other",
+      "kind": "debuff",
+      "element": "cold",
+      "school": "LifeMagic"
+    },
+    {
+      "name": "Fire Vulnerability Other",
+      "kind": "debuff",
+      "element": "fire",
+      "school": "LifeMagic"
+    },
+    {
+      "name": "Imperil Other",
+      "kind": "debuff",
+      "element": null,
+      "school": "LifeMagic"
+    },
+    {
+      "name": "Lightning Vulnerability Other",
+      "kind": "debuff",
+      "element": "electric",
+      "school": "LifeMagic"
+    },
+    {
+      "name": "Magic Yield Other",
+      "kind": "debuff",
+      "element": null,
+      "school": "CreatureEnchantment"
+    },
+    {
+      "name": "Piercing Vulnerability Other",
+      "kind": "debuff",
+      "element": "pierce",
+      "school": "LifeMagic"
+    },
+    {
+      "name": "Vulnerability Other",
+      "kind": "debuff",
+      "element": null,
+      "school": "CreatureEnchantment"
+    },
+    {
+      "name": "Lifestone Recall",
+      "kind": "travel",
+      "element": null,
+      "school": "ItemEnchantment"
+    },
+    {
+      "name": "Lifestone Tie",
+      "kind": "travel",
+      "element": null,
+      "school": "ItemEnchantment"
+    },
+    {
+      "name": "Portal Recall",
+      "kind": "travel",
+      "element": null,
+      "school": "ItemEnchantment"
+    },
+    {
+      "name": "Primary Portal Recall",
+      "kind": "travel",
+      "element": null,
+      "school": "ItemEnchantment"
+    },
+    {
+      "name": "Primary Portal Tie",
+      "kind": "travel",
+      "element": null,
+      "school": "ItemEnchantment"
+    },
+    {
+      "name": "Secondary Portal Recall",
+      "kind": "travel",
+      "element": null,
+      "school": "ItemEnchantment"
+    },
+    {
+      "name": "Secondary Portal Tie",
+      "kind": "travel",
+      "element": null,
+      "school": "ItemEnchantment"
+    },
+    {
+      "name": "Armor Self",
+      "kind": "armor",
+      "element": null,
+      "school": "LifeMagic"
+    },
+    {
+      "name": "Bludgeoning Protection Self",
+      "kind": "protection",
+      "element": "bludgeon",
+      "school": "LifeMagic"
+    },
+    {
+      "name": "Stamina to Mana Self",
+      "kind": "dance",
+      "element": null,
+      "school": "LifeMagic"
+    },
+    {
+      "name": "Revitalize Self",
+      "kind": "revitalize",
+      "element": null,
+      "school": "LifeMagic"
+    },
+    {
+      "name": "Drain Health Other",
+      "kind": "sustain",
+      "element": null,
+      "school": "LifeMagic"
+    },
+    {
+      "name": "Drain Stamina Other",
+      "kind": "sustain",
+      "element": null,
+      "school": "LifeMagic"
+    },
+    {
+      "name": "Heal Self",
+      "kind": "sustain",
+      "element": null,
+      "school": "LifeMagic"
+    },
+    {
+      "name": "Harm Other",
+      "kind": "attack",
+      "element": null,
+      "school": "LifeMagic"
+    },
+    {
+      "name": "Mana Renewal Self",
+      "kind": "recovery",
+      "element": null,
+      "school": "LifeMagic"
+    },
+    {
+      "name": "Regeneration Self",
+      "kind": "recovery",
+      "element": null,
+      "school": "LifeMagic"
+    },
+    {
+      "name": "Rejuvenation Self",
+      "kind": "recovery",
+      "element": null,
+      "school": "LifeMagic"
+    },
+    {
+      "name": "Focus Self",
+      "kind": "self_buff",
+      "element": null,
+      "school": "CreatureEnchantment"
+    },
+    {
+      "name": "Willpower Self",
+      "kind": "self_buff",
+      "element": null,
+      "school": "CreatureEnchantment"
+    },
+    {
+      "name": "Creature Enchantment Mastery Self",
+      "kind": "self_buff",
+      "element": null,
+      "school": "CreatureEnchantment"
+    },
+    {
+      "name": "Life Magic Mastery Self",
+      "kind": "self_buff",
+      "element": null,
+      "school": "CreatureEnchantment"
+    },
+    {
+      "name": "War Magic Mastery Self",
+      "kind": "self_buff",
+      "element": null,
+      "school": "CreatureEnchantment"
+    },
+    {
+      "name": "Item Enchantment Mastery Self",
+      "kind": "self_buff",
+      "element": null,
+      "school": "CreatureEnchantment",
+      "needs_skill": 32
+    },
+    {
+      "name": "Mana Conversion Mastery Self",
+      "kind": "self_buff",
+      "element": null,
+      "school": "CreatureEnchantment",
+      "needs_skill": 16
+    },
+    {
+      "name": "Endurance Self",
+      "kind": "self_buff",
+      "element": null,
+      "school": "CreatureEnchantment"
+    },
+    {
+      "name": "Strength Self",
+      "kind": "self_buff",
+      "element": null,
+      "school": "CreatureEnchantment"
+    },
+    {
+      "name": "Quickness Self",
+      "kind": "self_buff",
+      "element": null,
+      "school": "CreatureEnchantment"
+    },
+    {
+      "name": "Coordination Self",
+      "kind": "self_buff",
+      "element": null,
+      "school": "CreatureEnchantment"
+    },
+    {
+      "name": "Invulnerability Self",
+      "kind": "self_buff",
+      "element": null,
+      "school": "CreatureEnchantment"
+    },
+    {
+      "name": "Impenetrability",
+      "kind": "item_armor",
+      "element": null,
+      "school": "ItemEnchantment"
+    },
+    {
+      "name": "Bludgeon Bane",
+      "kind": "item_armor",
+      "element": null,
+      "school": "ItemEnchantment"
+    },
+    {
+      "name": "Piercing Bane",
+      "kind": "item_armor",
+      "element": null,
+      "school": "ItemEnchantment",
+      "from_level": 32
+    },
+    {
+      "name": "Blade Bane",
+      "kind": "item_armor",
+      "element": null,
+      "school": "ItemEnchantment",
+      "from_level": 32
+    },
+    {
+      "name": "Lightning Bane",
+      "kind": "item_armor",
+      "element": null,
+      "school": "ItemEnchantment",
+      "from_level": 32
+    },
+    {
+      "name": "Flame Bane",
+      "kind": "item_armor",
+      "element": null,
+      "school": "ItemEnchantment",
+      "from_level": 32
+    },
+    {
+      "name": "Frost Bane",
+      "kind": "item_armor",
+      "element": null,
+      "school": "ItemEnchantment",
+      "from_level": 32
+    },
+    {
+      "name": "Acid Bane",
+      "kind": "item_armor",
+      "element": null,
+      "school": "ItemEnchantment",
+      "from_level": 32
+    },
+    {
+      "name": "Spirit Drinker",
+      "kind": "caster_aura",
+      "element": null,
+      "school": "ItemEnchantment"
+    },
+    {
+      "name": "Hermetic Link",
+      "kind": "caster_aura",
+      "element": null,
+      "school": "ItemEnchantment"
+    },
+    {
+      "name": "Defender",
+      "kind": "caster_aura",
+      "element": null,
+      "school": "ItemEnchantment"
+    }
+  ],
+  "scriveners": [
+    {
+      "wcid": 20205,
+      "name": "Apprentice Scrivener of Creature Magic",
+      "class": "scrivenercreature1starter",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Holtburg",
+          "guid": "0x7A9B300A",
+          "cell": "0xA9B30103",
+          "point": {
+            "x": 178.117,
+            "y": 85.978,
+            "z": 116.005
+          },
+          "stop": {
+            "cell": "0xA9B30100",
+            "point": {
+              "x": 177.6,
+              "y": 83.7,
+              "z": 116.005
+            },
+            "why": "a clear floor before his counter, 2.3 m from him, planned through the front room 0xA9B30100 (the walker ends on 0xA9B30103's floor, 2.5 m from him): the walk into his cell is refused by the walker's physics pre-check at the doorway's approach (182.56, 83.96), no floor for the foot (M6 1, HoltburgScrivenerWalkDatTests); the NPC bodies are on the plan since M6 4 W2 (HoltburgScrivenerWalkDatTests), so climb 3's stall 5.5 m before the front door 0x7A9B3005, the Scrivener of Item Magic 0x7A9B301B's body in the door's lane, is planned round (live: the lead's round)"
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 20206,
+      "name": "Apprentice Scrivener of Creature Magic",
+      "class": "scrivenercreature2starter",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Holtburg",
+          "guid": "0x7A9B300B",
+          "cell": "0xA9B30108",
+          "point": {
+            "x": 184.705,
+            "y": 85.161,
+            "z": 119.005
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 20207,
+      "name": "Master Scrivener of Creature Magic",
+      "class": "scrivenercreaturedistant",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Plateau Village",
+          "guid": "0x749B6036",
+          "cell": "0x49B60131",
+          "point": {
+            "x": 16.257,
+            "y": 133.561,
+            "z": 240.005
+          }
+        },
+        {
+          "town": "Qalaba'r",
+          "guid": "0x7972204B",
+          "cell": "0x97220175",
+          "point": {
+            "x": 34.056,
+            "y": 172.324,
+            "z": 105.205
+          }
+        },
+        {
+          "town": "Dryreach",
+          "guid": "0x7DA75030",
+          "cell": "0xDA75016D",
+          "point": {
+            "x": 157.94,
+            "y": 81.166,
+            "z": 18.005
+          },
+          "stop": {
+            "cell": "0xDA75016D",
+            "point": {
+              "x": 159.94,
+              "y": 81.17,
+              "z": 18.005
+            },
+            "why": "a clear floor before his counter, 2.0 m from him: the walk from the Network drop to his own point is refused at his counter by the walker's physics; this point confirms from the drop (M6 4 T4a, TownNetworkTripDatTests; the stop-ring check)"
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 20208,
+      "name": "Grand Master Scrivener of Creature Magic",
+      "class": "scrivenercreatureextreme",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Ayan Baqur",
+          "guid": "0x71134036",
+          "cell": "0x11340000",
+          "point": {
+            "x": 41.456,
+            "y": 104.499,
+            "z": 45.605
+          }
+        },
+        {
+          "town": "Fort Tethana",
+          "guid": "0x72581033",
+          "cell": "0x25810170",
+          "point": {
+            "x": 107.076,
+            "y": 87.928,
+            "z": 220.005
+          },
+          "stop": {
+            "cell": "0x25810170",
+            "point": {
+              "x": 107.3,
+              "y": 84.9,
+              "z": 220.0
+            },
+            "why": "the floor of his room before his counter, 3.04 m from him, behind Fort Tethana's lever gate: confirmed from the lifestone through the open gate (M6 4 W6a, GoalTileDatTests; the stop-ring check)"
+          }
+        },
+        {
+          "town": "Candeth Keep",
+          "guid": "0x72B12020",
+          "cell": "0x2B120131",
+          "point": {
+            "x": 138.351,
+            "y": 60.756,
+            "z": 48.005
+          }
+        },
+        {
+          "town": "Wai Jhou",
+          "guid": "0x73F31015",
+          "cell": "0x3F310106",
+          "point": {
+            "x": 87.734,
+            "y": 87.424,
+            "z": 4.405
+          }
+        },
+        {
+          "town": "Stonehold",
+          "guid": "0x764D503E",
+          "cell": "0x64D50136",
+          "point": {
+            "x": 108.594,
+            "y": 57.103,
+            "z": 78.005
+          },
+          "stop": {
+            "cell": "0x64D50133",
+            "point": {
+              "x": 109.25,
+              "y": 59.0,
+              "z": 78.005
+            },
+            "why": "the floor of the room 0x64D50133 before his own room 0x64D50136, 2.0 m from him: the old candidate (105.0, 57.0) confirmed but its ring's east point (105.5, 57.0) found a floor at 78.82; of the 2,909 grid points (0.25 m, x 95-112, y 50-66) whose whole 0.5 m ring stands within the stop's height, the nearest ones that confirm from the drop are this one and its neighbours, and this is the nearest (M6 7 E, TownNetworkTripDatTests; the stop-ring check; the way out confirms to the drop)"
+          }
+        },
+        {
+          "town": "Kara",
+          "guid": "0x7BA1702A",
+          "cell": "0xBA17010F",
+          "point": {
+            "x": 31.498,
+            "y": 79.734,
+            "z": 137.005
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 20209,
+      "name": "Journeyman Scrivener of Creature Magic",
+      "class": "scrivenercreatureinner",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Holtburg",
+          "guid": "0x7A9B3016",
+          "cell": "0xA9B30108",
+          "point": {
+            "x": 184.464,
+            "y": 86.882,
+            "z": 119.005
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 20210,
+      "name": "Scrivener of Creature Magic",
+      "class": "scrivenercreatureouter",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Sanamar",
+          "guid": "0x732D9059",
+          "cell": "0x32D90120",
+          "point": {
+            "x": 123.625,
+            "y": 136.855,
+            "z": 56.005
+          }
+        },
+        {
+          "town": "Holtburg",
+          "guid": "0x7A9B3017",
+          "cell": "0xA9B30108",
+          "point": {
+            "x": 182.096,
+            "y": 88.145,
+            "z": 119.005
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 20213,
+      "name": "Journeyman Scrivener of Item Magic",
+      "class": "scriveneriteminner",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Holtburg",
+          "guid": "0x7A9B301A",
+          "cell": "0xA9B3003C",
+          "point": {
+            "x": 183.232,
+            "y": 76.679,
+            "z": 116.005
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 20215,
+      "name": "Apprentice Scrivener of Item and War Magic",
+      "class": "scriveneritemwar1starter",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Holtburg",
+          "guid": "0x7A9B3008",
+          "cell": "0xA9B30101",
+          "point": {
+            "x": 183.749,
+            "y": 79.945,
+            "z": 116.005
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 20216,
+      "name": "Apprentice Scrivener of Item and War Magic",
+      "class": "scriveneritemwar2starter",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Holtburg",
+          "guid": "0x7A9B300D",
+          "cell": "0xA9B30000",
+          "point": {
+            "x": 184.004,
+            "y": 79.787,
+            "z": 119.005
+          },
+          "stop": {
+            "cell": "0xA9B3003C",
+            "point": {
+              "x": 185.75,
+              "y": 81.54,
+              "z": 116.005
+            },
+            "why": "the street under his balcony (he stands at 119.0 in the outdoor cell 0xA9B3003C), 3.9 m from him, within his reach: a walk to his own point is refused at the building's wall (184.62, 81.53); the walk that bought Flame Bolt II in climb 2, an object goal, ended within 3 m of him on this street (M6 1, HoltburgScrivenerWalkDatTests)"
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 20217,
+      "name": "Apprentice Scrivener of Life Magic",
+      "class": "scrivenerlife1starter",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Holtburg",
+          "guid": "0x7A9B3009",
+          "cell": "0xA9B30102",
+          "point": {
+            "x": 184.705,
+            "y": 85.662,
+            "z": 116.005
+          },
+          "stop": {
+            "cell": "0xA9B30100",
+            "point": {
+              "x": 182.7,
+              "y": 85.4,
+              "z": 116.005
+            },
+            "why": "the floor of the front room 0xA9B30100 in front of his counter, 2.0 m from him: the push into his cell 0xA9B30102 stands on his counter (117.08 over the floor's 116.0, no room to stand; climb 2, 2026-11-02; M6 1, HoltburgScrivenerWalkDatTests); the NPC bodies are on the plan since M6 4 W2 (HoltburgScrivenerWalkDatTests), so climb 3's stall 5.5 m before the front door 0x7A9B3005, the Scrivener of Item Magic 0x7A9B301B's body in the door's lane, is planned round (live: the lead's round)"
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 20218,
+      "name": "Apprentice Scrivener of Life Magic",
+      "class": "scrivenerlife2starter",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Holtburg",
+          "guid": "0x7A9B300C",
+          "cell": "0xA9B30107",
+          "point": {
+            "x": 176.794,
+            "y": 82.194,
+            "z": 119.005
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 20219,
+      "name": "Master Scrivener of Life Magic",
+      "class": "scrivenerlifedistant",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Plateau Village",
+          "guid": "0x749B6035",
+          "cell": "0x49B60132",
+          "point": {
+            "x": 11.314,
+            "y": 129.651,
+            "z": 240.005
+          }
+        },
+        {
+          "town": "Qalaba'r",
+          "guid": "0x79722049",
+          "cell": "0x9722017C",
+          "point": {
+            "x": 31.488,
+            "y": 176.68,
+            "z": 102.005
+          }
+        },
+        {
+          "town": "Dryreach",
+          "guid": "0x7DA7502F",
+          "cell": "0xDA75016D",
+          "point": {
+            "x": 161.63,
+            "y": 79.324,
+            "z": 18.005
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 20220,
+      "name": "Grand Master Scrivener of Life Magic",
+      "class": "scrivenerlifeextreme",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Ayan Baqur",
+          "guid": "0x71134038",
+          "cell": "0x11340151",
+          "point": {
+            "x": 29.051,
+            "y": 114.19,
+            "z": 42.005
+          }
+        },
+        {
+          "town": "Fort Tethana",
+          "guid": "0x72581032",
+          "cell": "0x25810170",
+          "point": {
+            "x": 112.864,
+            "y": 88.869,
+            "z": 220.005
+          }
+        },
+        {
+          "town": "Candeth Keep",
+          "guid": "0x72B12022",
+          "cell": "0x2B120000",
+          "point": {
+            "x": 126.745,
+            "y": 59.8,
+            "z": 51.605
+          }
+        },
+        {
+          "town": "Wai Jhou",
+          "guid": "0x73F31014",
+          "cell": "0x3F31010C",
+          "point": {
+            "x": 78.936,
+            "y": 82.532,
+            "z": 0.005
+          }
+        },
+        {
+          "town": "Stonehold",
+          "guid": "0x764D503B",
+          "cell": "0x64D50136",
+          "point": {
+            "x": 111.474,
+            "y": 60.956,
+            "z": 78.005
+          },
+          "stop": {
+            "cell": "0x64D50133",
+            "point": {
+              "x": 107.5,
+              "y": 61.0,
+              "z": 78.005
+            },
+            "why": "the floor of the room 0x64D50133 before his own room 0x64D50136, 4.0 m from him: the step from 0x64D50133 into 0x64D50136 is refused by the walker's physics; this point confirms from the drop (M6 4 T4a, TownNetworkTripDatTests; the stop-ring check)"
+          }
+        },
+        {
+          "town": "Kara",
+          "guid": "0x7BA1702B",
+          "cell": "0xBA17010F",
+          "point": {
+            "x": 40.787,
+            "y": 79.501,
+            "z": 137.005
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 20221,
+      "name": "Journeyman Scrivener of Life Magic",
+      "class": "scrivenerlifeinner",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Holtburg",
+          "guid": "0x7A9B3014",
+          "cell": "0xA9B30107",
+          "point": {
+            "x": 177.083,
+            "y": 80.469,
+            "z": 119.005
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 20222,
+      "name": "Scrivener of Life Magic",
+      "class": "scrivenerlifeouter",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Sanamar",
+          "guid": "0x732D905B",
+          "cell": "0x32D9002E",
+          "point": {
+            "x": 135.503,
+            "y": 135.641,
+            "z": 56.005
+          }
+        },
+        {
+          "town": "Holtburg",
+          "guid": "0x7A9B3015",
+          "cell": "0xA9B30107",
+          "point": {
+            "x": 178.599,
+            "y": 79.03,
+            "z": 119.005
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 20223,
+      "name": "Master Scrivener of War Magic",
+      "class": "scrivenerwardistant",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Plateau Village",
+          "guid": "0x749B6038",
+          "cell": "0x49B60000",
+          "point": {
+            "x": 16.391,
+            "y": 127.819,
+            "z": 243.005
+          }
+        },
+        {
+          "town": "Qalaba'r",
+          "guid": "0x7972204C",
+          "cell": "0x97220181",
+          "point": {
+            "x": 26.784,
+            "y": 179.602,
+            "z": 105.205
+          }
+        },
+        {
+          "town": "Dryreach",
+          "guid": "0x7DA75035",
+          "cell": "0xDA75016D",
+          "point": {
+            "x": 163.004,
+            "y": 87.067,
+            "z": 18.005
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 20224,
+      "name": "Grand Master Scrivener of War Magic",
+      "class": "scrivenerwarextreme",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Ayan Baqur",
+          "guid": "0x71134035",
+          "cell": "0x1134014C",
+          "point": {
+            "x": 39.128,
+            "y": 101.175,
+            "z": 42.005
+          }
+        },
+        {
+          "town": "Fort Tethana",
+          "guid": "0x72581035",
+          "cell": "0x25810175",
+          "point": {
+            "x": 115.679,
+            "y": 86.015,
+            "z": 223.005
+          }
+        },
+        {
+          "town": "Candeth Keep",
+          "guid": "0x72B1201F",
+          "cell": "0x2B12012E",
+          "point": {
+            "x": 128.341,
+            "y": 66.183,
+            "z": 48.005
+          }
+        },
+        {
+          "town": "Wai Jhou",
+          "guid": "0x73F31016",
+          "cell": "0x3F310106",
+          "point": {
+            "x": 87.38,
+            "y": 83.11,
+            "z": 4.405
+          }
+        },
+        {
+          "town": "Stonehold",
+          "guid": "0x764D503C",
+          "cell": "0x64D50134",
+          "point": {
+            "x": 107.218,
+            "y": 65.588,
+            "z": 78.005
+          }
+        },
+        {
+          "town": "Kara",
+          "guid": "0x7BA17029",
+          "cell": "0xBA17010C",
+          "point": {
+            "x": 31.813,
+            "y": 83.246,
+            "z": 134.005
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 20225,
+      "name": "Journeyman Scrivener of War Magic",
+      "class": "scrivenerwarinner",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Holtburg",
+          "guid": "0x7A9B3019",
+          "cell": "0xA9B30103",
+          "point": {
+            "x": 175.884,
+            "y": 81.608,
+            "z": 116.005
+          },
+          "stop": {
+            "cell": "0xA9B30100",
+            "point": {
+              "x": 177.4,
+              "y": 82.9,
+              "z": 116.005
+            },
+            "why": "a clear floor before his counter, 2.0 m from him, planned through the front room 0xA9B30100: the push into his cell 0xA9B30103 stands on his counter (117.19, no room to stand; M6 1, HoltburgScrivenerWalkDatTests)"
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 20226,
+      "name": "Scrivener of War Magic",
+      "class": "scrivenerwarouter",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Sanamar",
+          "guid": "0x732D905A",
+          "cell": "0x32D90120",
+          "point": {
+            "x": 127.632,
+            "y": 129.203,
+            "z": 56.005
+          }
+        },
+        {
+          "town": "Holtburg",
+          "guid": "0x7A9B3018",
+          "cell": "0xA9B30100",
+          "point": {
+            "x": 182.336,
+            "y": 87.006,
+            "z": 116.005
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 30009,
+      "name": "Apprentice Scrivener of Item and War Magic",
+      "class": "viascriveneritemwar1starter",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Sanamar",
+          "guid": "0x732D9014",
+          "cell": "0x32D9010A",
+          "point": {
+            "x": 164.19,
+            "y": 140.292,
+            "z": 56.005
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 30010,
+      "name": "Apprentice Scrivener of Item and War Magic",
+      "class": "viascriveneritemwar2starter",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Sanamar",
+          "guid": "0x732D9040",
+          "cell": "0x32D9010A",
+          "point": {
+            "x": 157.338,
+            "y": 138.145,
+            "z": 56.0
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 30011,
+      "name": "Apprentice Scrivener of Life Magic",
+      "class": "viascrivenerlife1starter",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Sanamar",
+          "guid": "0x732D9018",
+          "cell": "0x32D9010D",
+          "point": {
+            "x": 154.598,
+            "y": 136.964,
+            "z": 52.005
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 30012,
+      "name": "Apprentice Scrivener of Life Magic",
+      "class": "viascrivenerlife2starter",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Sanamar",
+          "guid": "0x732D9019",
+          "cell": "0x32D9010B",
+          "point": {
+            "x": 162.609,
+            "y": 138.232,
+            "z": 52.0
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 30013,
+      "name": "Master Scrivener of Life Magic",
+      "class": "viascrivenerlifedistant",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Westwatch",
+          "guid": "0x723DA015",
+          "cell": "0x23DA0115",
+          "point": {
+            "x": 91.123,
+            "y": 113.853,
+            "z": 2.085
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 30014,
+      "name": "Grand Master Scrivener of Life Magic",
+      "class": "viascrivenerlifeextreme",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Eastwatch",
+          "guid": "0x749F0015",
+          "cell": "0x49F00032",
+          "point": {
+            "x": 152.692,
+            "y": 38.403,
+            "z": 185.205
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 30015,
+      "name": "Journeyman Scrivener of Life Magic",
+      "class": "viascrivenerlifeinner",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Sanamar",
+          "guid": "0x732D9013",
+          "cell": "0x32D9012F",
+          "point": {
+            "x": 136.766,
+            "y": 138.7,
+            "z": 52.005
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 30017,
+      "name": "Master Scrivener of War Magic",
+      "class": "viascrivenerwardistant",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Westwatch",
+          "guid": "0x723DA016",
+          "cell": "0x23DA0115",
+          "point": {
+            "x": 89.414,
+            "y": 108.992,
+            "z": 2.085
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 30018,
+      "name": "Grand Master Scrivener of War Magic",
+      "class": "viascrivenerwarextreme",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Eastwatch",
+          "guid": "0x749F0016",
+          "cell": "0x49F0010E",
+          "point": {
+            "x": 57.167,
+            "y": 57.708,
+            "z": 170.105
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 30019,
+      "name": "Journeyman Scrivener of War Magic",
+      "class": "viascrivenerwarinner",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Sanamar",
+          "guid": "0x732D9012",
+          "cell": "0x32D90120",
+          "point": {
+            "x": 128.105,
+            "y": 133.886,
+            "z": 56.005
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 30021,
+      "name": "Apprentice Scrivener of Creature Magic",
+      "class": "viascrivenercreature1starter",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Sanamar",
+          "guid": "0x732D9016",
+          "cell": "0x32D90119",
+          "point": {
+            "x": 164.38,
+            "y": 127.473,
+            "z": 52.005
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 30022,
+      "name": "Apprentice Scrivener of Creature Magic",
+      "class": "viascrivenercreature2starter",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Sanamar",
+          "guid": "0x732D9017",
+          "cell": "0x32D90036",
+          "point": {
+            "x": 159.416,
+            "y": 128.755,
+            "z": 56.005
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 30023,
+      "name": "Master Scrivener of Creature Magic",
+      "class": "viascrivenercreaturedistant",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Westwatch",
+          "guid": "0x723DA014",
+          "cell": "0x23DA0115",
+          "point": {
+            "x": 86.449,
+            "y": 115.054,
+            "z": 2.085
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 30024,
+      "name": "Grand Master Scrivener of Creature Magic",
+      "class": "viascrivenercreatureextreme",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Eastwatch",
+          "guid": "0x749F0014",
+          "cell": "0x49F0010D",
+          "point": {
+            "x": 153.433,
+            "y": 33.867,
+            "z": 170.105
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 30025,
+      "name": "Journeyman Scrivener of Creature Magic",
+      "class": "viascrivenercreatureinner",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Sanamar",
+          "guid": "0x732D9010",
+          "cell": "0x32D90121",
+          "point": {
+            "x": 123.97,
+            "y": 140.312,
+            "z": 52.0
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 30029,
+      "name": "Journeyman Scrivener of Item Magic",
+      "class": "viascriveneriteminner",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Sanamar",
+          "guid": "0x732D9011",
+          "cell": "0x32D90123",
+          "point": {
+            "x": 124.192,
+            "y": 127.708,
+            "z": 52.005
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 20214,
+      "name": "Scrivener of Item Magic",
+      "class": "scriveneritemouter",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Holtburg",
+          "guid": "0x7A9B301B",
+          "cell": "0xA9B3003C",
+          "point": {
+            "x": 187.288,
+            "y": 86.7918,
+            "z": 116.005
+          }
+        },
+        {
+          "town": "Sanamar",
+          "guid": "0x732D905C",
+          "cell": "0x32D9002E",
+          "point": {
+            "x": 140.622,
+            "y": 135.596,
+            "z": 56.005
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 20211,
+      "name": "Master Scrivener of Item Magic",
+      "class": "scriveneritemdistant",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Plateau Village",
+          "guid": "0x749B6037",
+          "cell": "0x49B60137",
+          "point": {
+            "x": 14.834,
+            "y": 136.301,
+            "z": 243.005
+          }
+        },
+        {
+          "town": "Qalaba'r",
+          "guid": "0x7972204A",
+          "cell": "0x9722017C",
+          "point": {
+            "x": 31.725,
+            "y": 181.977,
+            "z": 102.005
+          }
+        },
+        {
+          "town": "Dryreach",
+          "guid": "0x7DA75036",
+          "cell": "0xDA75016D",
+          "point": {
+            "x": 159.011,
+            "y": 87.671,
+            "z": 18.005
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 20212,
+      "name": "Grand Master Scrivener of Item Magic",
+      "class": "scriveneritemextreme",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Ayan Baqur",
+          "guid": "0x71134037",
+          "cell": "0x11340000",
+          "point": {
+            "x": 33.345,
+            "y": 102.261,
+            "z": 50.805
+          }
+        },
+        {
+          "town": "Fort Tethana",
+          "guid": "0x72581036",
+          "cell": "0x2581016E",
+          "point": {
+            "x": 110.157,
+            "y": 82.434,
+            "z": 220.005
+          }
+        },
+        {
+          "town": "Candeth Keep",
+          "guid": "0x72B12021",
+          "cell": "0x2B120131",
+          "point": {
+            "x": 138.311,
+            "y": 66.33,
+            "z": 48.005
+          }
+        },
+        {
+          "town": "Wai Jhou",
+          "guid": "0x73F31017",
+          "cell": "0x3F310107",
+          "point": {
+            "x": 88.099,
+            "y": 82.978,
+            "z": 0.005
+          }
+        },
+        {
+          "town": "Stonehold",
+          "guid": "0x764D503D",
+          "cell": "0x64D50135",
+          "point": {
+            "x": 103.795,
+            "y": 60.703,
+            "z": 78.005
+          }
+        },
+        {
+          "town": "Kara",
+          "guid": "0x7BA1702C",
+          "cell": "0xBA17010F",
+          "point": {
+            "x": 40.48,
+            "y": 88.624,
+            "z": 137.005
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 30027,
+      "name": "Master Scrivener of Item Magic",
+      "class": "viascriveneritemdistant",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Westwatch",
+          "guid": "0x723DA017",
+          "cell": "0x23DA0115",
+          "point": {
+            "x": 91.179,
+            "y": 110.188,
+            "z": 2.085
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 30028,
+      "name": "Grand Master Scrivener of Item Magic",
+      "class": "viascriveneritemextreme",
+      "sell_rate": 50,
+      "instances": [
+        {
+          "town": "Eastwatch",
+          "guid": "0x749F0017",
+          "cell": "0x49F00013",
+          "point": {
+            "x": 56.968,
+            "y": 57.009,
+            "z": 185.205
+          }
+        }
+      ]
+    }
+  ],
+  "spells": [
+    {
+      "spell": 58,
+      "name": "Acid Stream I",
+      "line": "Acid Stream",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1638,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20215,
+          "create_list": 78002
+        },
+        {
+          "wcid": 30009,
+          "create_list": 79023
+        }
+      ]
+    },
+    {
+      "spell": 59,
+      "name": "Acid Stream II",
+      "line": "Acid Stream",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 2907,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20216,
+          "create_list": 78065
+        },
+        {
+          "wcid": 30010,
+          "create_list": 79082
+        }
+      ]
+    },
+    {
+      "spell": 60,
+      "name": "Acid Stream III",
+      "line": "Acid Stream",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 2908,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20225,
+          "create_list": 34015
+        },
+        {
+          "wcid": 30019,
+          "create_list": 79526
+        }
+      ]
+    },
+    {
+      "spell": 61,
+      "name": "Acid Stream IV",
+      "line": "Acid Stream",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 2909,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20226,
+          "create_list": 34055
+        }
+      ]
+    },
+    {
+      "spell": 62,
+      "name": "Acid Stream V",
+      "line": "Acid Stream",
+      "level": 5,
+      "power": 200,
+      "scroll_wcid": 2910,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20223,
+          "create_list": 33935
+        },
+        {
+          "wcid": 30017,
+          "create_list": 79452
+        }
+      ]
+    },
+    {
+      "spell": 63,
+      "name": "Acid Stream VI",
+      "line": "Acid Stream",
+      "level": 6,
+      "power": 250,
+      "scroll_wcid": 2911,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20224,
+          "create_list": 33975
+        },
+        {
+          "wcid": 30018,
+          "create_list": 79488
+        }
+      ]
+    },
+    {
+      "spell": 27,
+      "name": "Flame Bolt I",
+      "line": "Flame Bolt",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1569,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20215,
+          "create_list": 78005
+        },
+        {
+          "wcid": 30009,
+          "create_list": 79026
+        }
+      ]
+    },
+    {
+      "spell": 81,
+      "name": "Flame Bolt II",
+      "line": "Flame Bolt",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 5998,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20216,
+          "create_list": 78068
+        },
+        {
+          "wcid": 30010,
+          "create_list": 79085
+        }
+      ]
+    },
+    {
+      "spell": 82,
+      "name": "Flame Bolt III",
+      "line": "Flame Bolt",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 5999,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20225,
+          "create_list": 34023
+        },
+        {
+          "wcid": 30019,
+          "create_list": 79534
+        }
+      ]
+    },
+    {
+      "spell": 83,
+      "name": "Flame Bolt IV",
+      "line": "Flame Bolt",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 6000,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20226,
+          "create_list": 34063
+        }
+      ]
+    },
+    {
+      "spell": 84,
+      "name": "Flame Bolt V",
+      "line": "Flame Bolt",
+      "level": 5,
+      "power": 200,
+      "scroll_wcid": 6001,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20223,
+          "create_list": 33943
+        },
+        {
+          "wcid": 30017,
+          "create_list": 79460
+        }
+      ]
+    },
+    {
+      "spell": 85,
+      "name": "Flame Bolt VI",
+      "line": "Flame Bolt",
+      "level": 6,
+      "power": 250,
+      "scroll_wcid": 6002,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20224,
+          "create_list": 33983
+        },
+        {
+          "wcid": 30018,
+          "create_list": 79496
+        }
+      ]
+    },
+    {
+      "spell": 86,
+      "name": "Force Bolt I",
+      "line": "Force Bolt",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1639,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20215,
+          "create_list": 78008
+        },
+        {
+          "wcid": 30009,
+          "create_list": 79029
+        }
+      ]
+    },
+    {
+      "spell": 87,
+      "name": "Force Bolt II",
+      "line": "Force Bolt",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 4395,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20216,
+          "create_list": 78071
+        },
+        {
+          "wcid": 30010,
+          "create_list": 79088
+        }
+      ]
+    },
+    {
+      "spell": 88,
+      "name": "Force Bolt III",
+      "line": "Force Bolt",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 2931,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20225,
+          "create_list": 34028
+        },
+        {
+          "wcid": 30019,
+          "create_list": 79539
+        }
+      ]
+    },
+    {
+      "spell": 89,
+      "name": "Force Bolt IV",
+      "line": "Force Bolt",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 2932,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20226,
+          "create_list": 34068
+        }
+      ]
+    },
+    {
+      "spell": 90,
+      "name": "Force Bolt V",
+      "line": "Force Bolt",
+      "level": 5,
+      "power": 200,
+      "scroll_wcid": 2933,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20223,
+          "create_list": 33948
+        },
+        {
+          "wcid": 30017,
+          "create_list": 79465
+        }
+      ]
+    },
+    {
+      "spell": 91,
+      "name": "Force Bolt VI",
+      "line": "Force Bolt",
+      "level": 6,
+      "power": 250,
+      "scroll_wcid": 2934,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20224,
+          "create_list": 33988
+        },
+        {
+          "wcid": 30018,
+          "create_list": 79501
+        }
+      ]
+    },
+    {
+      "spell": 28,
+      "name": "Frost Bolt I",
+      "line": "Frost Bolt",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1573,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20215,
+          "create_list": 78011
+        },
+        {
+          "wcid": 30009,
+          "create_list": 79032
+        }
+      ]
+    },
+    {
+      "spell": 70,
+      "name": "Frost Bolt II",
+      "line": "Frost Bolt",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 2941,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20216,
+          "create_list": 78074
+        },
+        {
+          "wcid": 30010,
+          "create_list": 79091
+        }
+      ]
+    },
+    {
+      "spell": 71,
+      "name": "Frost Bolt III",
+      "line": "Frost Bolt",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 2942,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20225,
+          "create_list": 34033
+        },
+        {
+          "wcid": 30019,
+          "create_list": 79544
+        }
+      ]
+    },
+    {
+      "spell": 72,
+      "name": "Frost Bolt IV",
+      "line": "Frost Bolt",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 2943,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20226,
+          "create_list": 34073
+        }
+      ]
+    },
+    {
+      "spell": 73,
+      "name": "Frost Bolt V",
+      "line": "Frost Bolt",
+      "level": 5,
+      "power": 200,
+      "scroll_wcid": 2944,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20223,
+          "create_list": 33953
+        },
+        {
+          "wcid": 30017,
+          "create_list": 79470
+        }
+      ]
+    },
+    {
+      "spell": 74,
+      "name": "Frost Bolt VI",
+      "line": "Frost Bolt",
+      "level": 6,
+      "power": 250,
+      "scroll_wcid": 2945,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20224,
+          "create_list": 33993
+        },
+        {
+          "wcid": 30018,
+          "create_list": 79506
+        }
+      ]
+    },
+    {
+      "spell": 75,
+      "name": "Lightning Bolt I",
+      "line": "Lightning Bolt",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1640,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20215,
+          "create_list": 78014
+        },
+        {
+          "wcid": 30009,
+          "create_list": 79035
+        }
+      ]
+    },
+    {
+      "spell": 76,
+      "name": "Lightning Bolt II",
+      "line": "Lightning Bolt",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 2955,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20216,
+          "create_list": 78077
+        },
+        {
+          "wcid": 30010,
+          "create_list": 79094
+        }
+      ]
+    },
+    {
+      "spell": 77,
+      "name": "Lightning Bolt III",
+      "line": "Lightning Bolt",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 2956,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20225,
+          "create_list": 34038
+        },
+        {
+          "wcid": 30019,
+          "create_list": 79549
+        }
+      ]
+    },
+    {
+      "spell": 78,
+      "name": "Lightning Bolt IV",
+      "line": "Lightning Bolt",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 2957,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20226,
+          "create_list": 34078
+        }
+      ]
+    },
+    {
+      "spell": 79,
+      "name": "Lightning Bolt V",
+      "line": "Lightning Bolt",
+      "level": 5,
+      "power": 200,
+      "scroll_wcid": 2958,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20223,
+          "create_list": 33958
+        },
+        {
+          "wcid": 30017,
+          "create_list": 79475
+        }
+      ]
+    },
+    {
+      "spell": 80,
+      "name": "Lightning Bolt VI",
+      "line": "Lightning Bolt",
+      "level": 6,
+      "power": 250,
+      "scroll_wcid": 2959,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20224,
+          "create_list": 33998
+        },
+        {
+          "wcid": 30018,
+          "create_list": 79511
+        }
+      ]
+    },
+    {
+      "spell": 64,
+      "name": "Shock Wave I",
+      "line": "Shock Wave",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1641,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20215,
+          "create_list": 78017
+        },
+        {
+          "wcid": 30009,
+          "create_list": 79038
+        }
+      ]
+    },
+    {
+      "spell": 65,
+      "name": "Shock Wave II",
+      "line": "Shock Wave",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 2963,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20216,
+          "create_list": 78080
+        },
+        {
+          "wcid": 30010,
+          "create_list": 79097
+        }
+      ]
+    },
+    {
+      "spell": 66,
+      "name": "Shock Wave III",
+      "line": "Shock Wave",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 2964,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20225,
+          "create_list": 34043
+        },
+        {
+          "wcid": 30019,
+          "create_list": 79554
+        }
+      ]
+    },
+    {
+      "spell": 67,
+      "name": "Shock Wave IV",
+      "line": "Shock Wave",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 2965,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20226,
+          "create_list": 34083
+        }
+      ]
+    },
+    {
+      "spell": 68,
+      "name": "Shock Wave V",
+      "line": "Shock Wave",
+      "level": 5,
+      "power": 200,
+      "scroll_wcid": 2966,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20223,
+          "create_list": 33963
+        },
+        {
+          "wcid": 30017,
+          "create_list": 79480
+        }
+      ]
+    },
+    {
+      "spell": 69,
+      "name": "Shock Wave VI",
+      "line": "Shock Wave",
+      "level": 6,
+      "power": 250,
+      "scroll_wcid": 2967,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20224,
+          "create_list": 34003
+        },
+        {
+          "wcid": 30018,
+          "create_list": 79516
+        }
+      ]
+    },
+    {
+      "spell": 92,
+      "name": "Whirling Blade I",
+      "line": "Whirling Blade",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1642,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20215,
+          "create_list": 78020
+        },
+        {
+          "wcid": 30009,
+          "create_list": 79041
+        }
+      ]
+    },
+    {
+      "spell": 93,
+      "name": "Whirling Blade II",
+      "line": "Whirling Blade",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 2968,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20216,
+          "create_list": 78083
+        },
+        {
+          "wcid": 30010,
+          "create_list": 79100
+        }
+      ]
+    },
+    {
+      "spell": 94,
+      "name": "Whirling Blade III",
+      "line": "Whirling Blade",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 2969,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20225,
+          "create_list": 34046
+        },
+        {
+          "wcid": 30019,
+          "create_list": 79557
+        }
+      ]
+    },
+    {
+      "spell": 95,
+      "name": "Whirling Blade IV",
+      "line": "Whirling Blade",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 2970,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20226,
+          "create_list": 34086
+        }
+      ]
+    },
+    {
+      "spell": 96,
+      "name": "Whirling Blade V",
+      "line": "Whirling Blade",
+      "level": 5,
+      "power": 200,
+      "scroll_wcid": 2971,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20223,
+          "create_list": 33966
+        },
+        {
+          "wcid": 30017,
+          "create_list": 79483
+        }
+      ]
+    },
+    {
+      "spell": 97,
+      "name": "Whirling Blade VI",
+      "line": "Whirling Blade",
+      "level": 6,
+      "power": 250,
+      "scroll_wcid": 2972,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20224,
+          "create_list": 34006
+        },
+        {
+          "wcid": 30018,
+          "create_list": 79519
+        }
+      ]
+    },
+    {
+      "spell": 521,
+      "name": "Acid Vulnerability Other I",
+      "line": "Acid Vulnerability Other",
+      "level": 1,
+      "power": 25,
+      "scroll_wcid": 1840,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20217,
+          "create_list": 33585
+        },
+        {
+          "wcid": 30011,
+          "create_list": 79117
+        }
+      ]
+    },
+    {
+      "spell": 522,
+      "name": "Acid Vulnerability Other II",
+      "line": "Acid Vulnerability Other",
+      "level": 2,
+      "power": 75,
+      "scroll_wcid": 2983,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20218,
+          "create_list": 33645
+        },
+        {
+          "wcid": 30012,
+          "create_list": 79177
+        }
+      ]
+    },
+    {
+      "spell": 523,
+      "name": "Acid Vulnerability Other III",
+      "line": "Acid Vulnerability Other",
+      "level": 3,
+      "power": 125,
+      "scroll_wcid": 2984,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20221,
+          "create_list": 33825
+        },
+        {
+          "wcid": 30015,
+          "create_list": 79348
+        }
+      ]
+    },
+    {
+      "spell": 524,
+      "name": "Acid Vulnerability Other IV",
+      "line": "Acid Vulnerability Other",
+      "level": 4,
+      "power": 175,
+      "scroll_wcid": 2985,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20222,
+          "create_list": 33885
+        }
+      ]
+    },
+    {
+      "spell": 525,
+      "name": "Acid Vulnerability Other V",
+      "line": "Acid Vulnerability Other",
+      "level": 5,
+      "power": 225,
+      "scroll_wcid": 2986,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20219,
+          "create_list": 33705
+        },
+        {
+          "wcid": 30013,
+          "create_list": 79234
+        }
+      ]
+    },
+    {
+      "spell": 526,
+      "name": "Acid Vulnerability Other VI",
+      "line": "Acid Vulnerability Other",
+      "level": 6,
+      "power": 275,
+      "scroll_wcid": 2987,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20220,
+          "create_list": 33765
+        },
+        {
+          "wcid": 30014,
+          "create_list": 79291
+        }
+      ]
+    },
+    {
+      "spell": 1127,
+      "name": "Blade Vulnerability Other I",
+      "line": "Blade Vulnerability Other",
+      "level": 1,
+      "power": 25,
+      "scroll_wcid": 1843,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20217,
+          "create_list": 33588
+        },
+        {
+          "wcid": 30011,
+          "create_list": 79120
+        }
+      ]
+    },
+    {
+      "spell": 1128,
+      "name": "Blade Vulnerability Other II",
+      "line": "Blade Vulnerability Other",
+      "level": 2,
+      "power": 75,
+      "scroll_wcid": 2998,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20218,
+          "create_list": 33648
+        },
+        {
+          "wcid": 30012,
+          "create_list": 79180
+        }
+      ]
+    },
+    {
+      "spell": 1129,
+      "name": "Blade Vulnerability Other III",
+      "line": "Blade Vulnerability Other",
+      "level": 3,
+      "power": 125,
+      "scroll_wcid": 2999,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20221,
+          "create_list": 33828
+        },
+        {
+          "wcid": 30015,
+          "create_list": 79351
+        }
+      ]
+    },
+    {
+      "spell": 1130,
+      "name": "Blade Vulnerability Other IV",
+      "line": "Blade Vulnerability Other",
+      "level": 4,
+      "power": 175,
+      "scroll_wcid": 3000,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20222,
+          "create_list": 33888
+        }
+      ]
+    },
+    {
+      "spell": 1131,
+      "name": "Blade Vulnerability Other V",
+      "line": "Blade Vulnerability Other",
+      "level": 5,
+      "power": 225,
+      "scroll_wcid": 3001,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20219,
+          "create_list": 33708
+        },
+        {
+          "wcid": 30013,
+          "create_list": 79237
+        }
+      ]
+    },
+    {
+      "spell": 1132,
+      "name": "Blade Vulnerability Other VI",
+      "line": "Blade Vulnerability Other",
+      "level": 6,
+      "power": 275,
+      "scroll_wcid": 3002,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20220,
+          "create_list": 33768
+        },
+        {
+          "wcid": 30014,
+          "create_list": 79294
+        }
+      ]
+    },
+    {
+      "spell": 1048,
+      "name": "Bludgeoning Vulnerability Other I",
+      "line": "Bludgeoning Vulnerability Other",
+      "level": 1,
+      "power": 25,
+      "scroll_wcid": 1846,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20217,
+          "create_list": 33591
+        },
+        {
+          "wcid": 30011,
+          "create_list": 79123
+        }
+      ]
+    },
+    {
+      "spell": 1049,
+      "name": "Bludgeoning Vulnerability Other II",
+      "line": "Bludgeoning Vulnerability Other",
+      "level": 2,
+      "power": 75,
+      "scroll_wcid": 3013,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20218,
+          "create_list": 33651
+        },
+        {
+          "wcid": 30012,
+          "create_list": 79183
+        }
+      ]
+    },
+    {
+      "spell": 1050,
+      "name": "Bludgeoning Vulnerability Other III",
+      "line": "Bludgeoning Vulnerability Other",
+      "level": 3,
+      "power": 125,
+      "scroll_wcid": 3014,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20221,
+          "create_list": 33831
+        },
+        {
+          "wcid": 30015,
+          "create_list": 79354
+        }
+      ]
+    },
+    {
+      "spell": 1051,
+      "name": "Bludgeoning Vulnerability Other IV",
+      "line": "Bludgeoning Vulnerability Other",
+      "level": 4,
+      "power": 175,
+      "scroll_wcid": 3015,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20222,
+          "create_list": 33891
+        }
+      ]
+    },
+    {
+      "spell": 1052,
+      "name": "Bludgeoning Vulnerability Other V",
+      "line": "Bludgeoning Vulnerability Other",
+      "level": 5,
+      "power": 225,
+      "scroll_wcid": 3016,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20219,
+          "create_list": 33711
+        },
+        {
+          "wcid": 30013,
+          "create_list": 79240
+        }
+      ]
+    },
+    {
+      "spell": 1053,
+      "name": "Bludgeoning Vulnerability Other VI",
+      "line": "Bludgeoning Vulnerability Other",
+      "level": 6,
+      "power": 275,
+      "scroll_wcid": 3017,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20220,
+          "create_list": 33771
+        },
+        {
+          "wcid": 30014,
+          "create_list": 79297
+        }
+      ]
+    },
+    {
+      "spell": 1060,
+      "name": "Cold Vulnerability Other I",
+      "line": "Cold Vulnerability Other",
+      "level": 1,
+      "power": 25,
+      "scroll_wcid": 1849,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20217,
+          "create_list": 33594
+        },
+        {
+          "wcid": 30011,
+          "create_list": 79126
+        }
+      ]
+    },
+    {
+      "spell": 1061,
+      "name": "Cold Vulnerability Other II",
+      "line": "Cold Vulnerability Other",
+      "level": 2,
+      "power": 75,
+      "scroll_wcid": 3028,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20218,
+          "create_list": 33654
+        },
+        {
+          "wcid": 30012,
+          "create_list": 79186
+        }
+      ]
+    },
+    {
+      "spell": 1062,
+      "name": "Cold Vulnerability Other III",
+      "line": "Cold Vulnerability Other",
+      "level": 3,
+      "power": 125,
+      "scroll_wcid": 3029,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20221,
+          "create_list": 33834
+        },
+        {
+          "wcid": 30015,
+          "create_list": 79357
+        }
+      ]
+    },
+    {
+      "spell": 1063,
+      "name": "Cold Vulnerability Other IV",
+      "line": "Cold Vulnerability Other",
+      "level": 4,
+      "power": 175,
+      "scroll_wcid": 3030,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20222,
+          "create_list": 33894
+        }
+      ]
+    },
+    {
+      "spell": 1064,
+      "name": "Cold Vulnerability Other V",
+      "line": "Cold Vulnerability Other",
+      "level": 5,
+      "power": 225,
+      "scroll_wcid": 3031,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20219,
+          "create_list": 33714
+        },
+        {
+          "wcid": 30013,
+          "create_list": 79243
+        }
+      ]
+    },
+    {
+      "spell": 1065,
+      "name": "Cold Vulnerability Other VI",
+      "line": "Cold Vulnerability Other",
+      "level": 6,
+      "power": 275,
+      "scroll_wcid": 3032,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20220,
+          "create_list": 33774
+        },
+        {
+          "wcid": 30014,
+          "create_list": 79300
+        }
+      ]
+    },
+    {
+      "spell": 21,
+      "name": "Fire Vulnerability Other I",
+      "line": "Fire Vulnerability Other",
+      "level": 1,
+      "power": 25,
+      "scroll_wcid": 1578,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20217,
+          "create_list": 33597
+        },
+        {
+          "wcid": 30011,
+          "create_list": 79129
+        }
+      ]
+    },
+    {
+      "spell": 1104,
+      "name": "Fire Vulnerability Other II",
+      "line": "Fire Vulnerability Other",
+      "level": 2,
+      "power": 75,
+      "scroll_wcid": 3043,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20218,
+          "create_list": 33657
+        },
+        {
+          "wcid": 30012,
+          "create_list": 79189
+        }
+      ]
+    },
+    {
+      "spell": 1105,
+      "name": "Fire Vulnerability Other III",
+      "line": "Fire Vulnerability Other",
+      "level": 3,
+      "power": 125,
+      "scroll_wcid": 3044,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20221,
+          "create_list": 33837
+        },
+        {
+          "wcid": 30015,
+          "create_list": 79360
+        }
+      ]
+    },
+    {
+      "spell": 1106,
+      "name": "Fire Vulnerability Other IV",
+      "line": "Fire Vulnerability Other",
+      "level": 4,
+      "power": 175,
+      "scroll_wcid": 3045,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20222,
+          "create_list": 33897
+        }
+      ]
+    },
+    {
+      "spell": 1107,
+      "name": "Fire Vulnerability Other V",
+      "line": "Fire Vulnerability Other",
+      "level": 5,
+      "power": 225,
+      "scroll_wcid": 3046,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20219,
+          "create_list": 33717
+        },
+        {
+          "wcid": 30013,
+          "create_list": 79246
+        }
+      ]
+    },
+    {
+      "spell": 1108,
+      "name": "Fire Vulnerability Other VI",
+      "line": "Fire Vulnerability Other",
+      "level": 6,
+      "power": 275,
+      "scroll_wcid": 3047,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20220,
+          "create_list": 33777
+        },
+        {
+          "wcid": 30014,
+          "create_list": 79303
+        }
+      ]
+    },
+    {
+      "spell": 25,
+      "name": "Imperil Other I",
+      "line": "Imperil Other",
+      "level": 1,
+      "power": 25,
+      "scroll_wcid": 1778,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20217,
+          "create_list": 33578
+        },
+        {
+          "wcid": 30011,
+          "create_list": 79110
+        }
+      ]
+    },
+    {
+      "spell": 1323,
+      "name": "Imperil Other II",
+      "line": "Imperil Other",
+      "level": 2,
+      "power": 75,
+      "scroll_wcid": 2702,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20218,
+          "create_list": 33639
+        },
+        {
+          "wcid": 30012,
+          "create_list": 79171
+        }
+      ]
+    },
+    {
+      "spell": 1324,
+      "name": "Imperil Other III",
+      "line": "Imperil Other",
+      "level": 3,
+      "power": 125,
+      "scroll_wcid": 2703,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20221,
+          "create_list": 33819
+        },
+        {
+          "wcid": 30015,
+          "create_list": 79342
+        }
+      ]
+    },
+    {
+      "spell": 1325,
+      "name": "Imperil Other IV",
+      "line": "Imperil Other",
+      "level": 4,
+      "power": 175,
+      "scroll_wcid": 2704,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20222,
+          "create_list": 33879
+        }
+      ]
+    },
+    {
+      "spell": 1326,
+      "name": "Imperil Other V",
+      "line": "Imperil Other",
+      "level": 5,
+      "power": 225,
+      "scroll_wcid": 2705,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20219,
+          "create_list": 33699
+        },
+        {
+          "wcid": 30013,
+          "create_list": 79228
+        }
+      ]
+    },
+    {
+      "spell": 1327,
+      "name": "Imperil Other VI",
+      "line": "Imperil Other",
+      "level": 6,
+      "power": 275,
+      "scroll_wcid": 2706,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20220,
+          "create_list": 33759
+        },
+        {
+          "wcid": 30014,
+          "create_list": 79285
+        }
+      ]
+    },
+    {
+      "spell": 1084,
+      "name": "Lightning Vulnerability Other I",
+      "line": "Lightning Vulnerability Other",
+      "level": 1,
+      "power": 25,
+      "scroll_wcid": 1852,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20217,
+          "create_list": 33600
+        },
+        {
+          "wcid": 30011,
+          "create_list": 79132
+        }
+      ]
+    },
+    {
+      "spell": 1085,
+      "name": "Lightning Vulnerability Other II",
+      "line": "Lightning Vulnerability Other",
+      "level": 2,
+      "power": 75,
+      "scroll_wcid": 3058,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20218,
+          "create_list": 33660
+        },
+        {
+          "wcid": 30012,
+          "create_list": 79192
+        }
+      ]
+    },
+    {
+      "spell": 1086,
+      "name": "Lightning Vulnerability Other III",
+      "line": "Lightning Vulnerability Other",
+      "level": 3,
+      "power": 125,
+      "scroll_wcid": 3059,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20221,
+          "create_list": 33840
+        },
+        {
+          "wcid": 30015,
+          "create_list": 79363
+        }
+      ]
+    },
+    {
+      "spell": 1087,
+      "name": "Lightning Vulnerability Other IV",
+      "line": "Lightning Vulnerability Other",
+      "level": 4,
+      "power": 175,
+      "scroll_wcid": 3060,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20222,
+          "create_list": 33900
+        }
+      ]
+    },
+    {
+      "spell": 1088,
+      "name": "Lightning Vulnerability Other V",
+      "line": "Lightning Vulnerability Other",
+      "level": 5,
+      "power": 225,
+      "scroll_wcid": 3061,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20219,
+          "create_list": 33720
+        },
+        {
+          "wcid": 30013,
+          "create_list": 79249
+        }
+      ]
+    },
+    {
+      "spell": 1089,
+      "name": "Lightning Vulnerability Other VI",
+      "line": "Lightning Vulnerability Other",
+      "level": 6,
+      "power": 275,
+      "scroll_wcid": 3062,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20220,
+          "create_list": 33780
+        },
+        {
+          "wcid": 30014,
+          "create_list": 79306
+        }
+      ]
+    },
+    {
+      "spell": 280,
+      "name": "Magic Yield Other I",
+      "line": "Magic Yield Other",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 3725,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20205,
+          "create_list": 77067
+        },
+        {
+          "wcid": 30021,
+          "create_list": 79682
+        }
+      ]
+    },
+    {
+      "spell": 281,
+      "name": "Magic Yield Other II",
+      "line": "Magic Yield Other",
+      "level": 2,
+      "power": 75,
+      "scroll_wcid": 3423,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20206,
+          "create_list": 77203
+        },
+        {
+          "wcid": 30022,
+          "create_list": 79812
+        }
+      ]
+    },
+    {
+      "spell": 282,
+      "name": "Magic Yield Other III",
+      "line": "Magic Yield Other",
+      "level": 3,
+      "power": 125,
+      "scroll_wcid": 3424,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20209,
+          "create_list": 77611
+        },
+        {
+          "wcid": 30025,
+          "create_list": 80207
+        }
+      ]
+    },
+    {
+      "spell": 283,
+      "name": "Magic Yield Other IV",
+      "line": "Magic Yield Other",
+      "level": 4,
+      "power": 175,
+      "scroll_wcid": 3425,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20210,
+          "create_list": 77747
+        }
+      ]
+    },
+    {
+      "spell": 284,
+      "name": "Magic Yield Other V",
+      "line": "Magic Yield Other",
+      "level": 5,
+      "power": 225,
+      "scroll_wcid": 3426,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20207,
+          "create_list": 77339
+        },
+        {
+          "wcid": 30023,
+          "create_list": 79943
+        }
+      ]
+    },
+    {
+      "spell": 285,
+      "name": "Magic Yield Other VI",
+      "line": "Magic Yield Other",
+      "level": 6,
+      "power": 275,
+      "scroll_wcid": 3427,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20208,
+          "create_list": 77475
+        },
+        {
+          "wcid": 30024,
+          "create_list": 80076
+        }
+      ]
+    },
+    {
+      "spell": 1151,
+      "name": "Piercing Vulnerability Other I",
+      "line": "Piercing Vulnerability Other",
+      "level": 1,
+      "power": 25,
+      "scroll_wcid": 1855,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20217,
+          "create_list": 33603
+        },
+        {
+          "wcid": 30011,
+          "create_list": 79135
+        }
+      ]
+    },
+    {
+      "spell": 1152,
+      "name": "Piercing Vulnerability Other II",
+      "line": "Piercing Vulnerability Other",
+      "level": 2,
+      "power": 75,
+      "scroll_wcid": 3073,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20218,
+          "create_list": 33663
+        },
+        {
+          "wcid": 30012,
+          "create_list": 79195
+        }
+      ]
+    },
+    {
+      "spell": 1153,
+      "name": "Piercing Vulnerability Other III",
+      "line": "Piercing Vulnerability Other",
+      "level": 3,
+      "power": 125,
+      "scroll_wcid": 3074,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20221,
+          "create_list": 33843
+        },
+        {
+          "wcid": 30015,
+          "create_list": 79366
+        }
+      ]
+    },
+    {
+      "spell": 1154,
+      "name": "Piercing Vulnerability Other IV",
+      "line": "Piercing Vulnerability Other",
+      "level": 4,
+      "power": 175,
+      "scroll_wcid": 3075,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20222,
+          "create_list": 33903
+        }
+      ]
+    },
+    {
+      "spell": 1155,
+      "name": "Piercing Vulnerability Other V",
+      "line": "Piercing Vulnerability Other",
+      "level": 5,
+      "power": 225,
+      "scroll_wcid": 3076,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20219,
+          "create_list": 33723
+        },
+        {
+          "wcid": 30013,
+          "create_list": 79252
+        }
+      ]
+    },
+    {
+      "spell": 1156,
+      "name": "Piercing Vulnerability Other VI",
+      "line": "Piercing Vulnerability Other",
+      "level": 6,
+      "power": 275,
+      "scroll_wcid": 3077,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20220,
+          "create_list": 33783
+        },
+        {
+          "wcid": 30014,
+          "create_list": 79309
+        }
+      ]
+    },
+    {
+      "spell": 15,
+      "name": "Vulnerability Other I",
+      "line": "Vulnerability Other",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1583,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20205,
+          "create_list": 77096
+        },
+        {
+          "wcid": 30021,
+          "create_list": 79708
+        }
+      ]
+    },
+    {
+      "spell": 230,
+      "name": "Vulnerability Other II",
+      "line": "Vulnerability Other",
+      "level": 2,
+      "power": 75,
+      "scroll_wcid": 3558,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20206,
+          "create_list": 77232
+        },
+        {
+          "wcid": 30022,
+          "create_list": 79838
+        }
+      ]
+    },
+    {
+      "spell": 231,
+      "name": "Vulnerability Other III",
+      "line": "Vulnerability Other",
+      "level": 3,
+      "power": 125,
+      "scroll_wcid": 3559,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20209,
+          "create_list": 77640
+        },
+        {
+          "wcid": 30025,
+          "create_list": 80233
+        }
+      ]
+    },
+    {
+      "spell": 232,
+      "name": "Vulnerability Other IV",
+      "line": "Vulnerability Other",
+      "level": 4,
+      "power": 175,
+      "scroll_wcid": 3560,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20210,
+          "create_list": 77776
+        }
+      ]
+    },
+    {
+      "spell": 233,
+      "name": "Vulnerability Other V",
+      "line": "Vulnerability Other",
+      "level": 5,
+      "power": 225,
+      "scroll_wcid": 3561,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20207,
+          "create_list": 77368
+        },
+        {
+          "wcid": 30023,
+          "create_list": 79972
+        }
+      ]
+    },
+    {
+      "spell": 234,
+      "name": "Vulnerability Other VI",
+      "line": "Vulnerability Other",
+      "level": 6,
+      "power": 275,
+      "scroll_wcid": 3562,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20208,
+          "create_list": 77504
+        },
+        {
+          "wcid": 30024,
+          "create_list": 80105
+        }
+      ]
+    },
+    {
+      "spell": 1635,
+      "name": "Lifestone Recall",
+      "line": "Lifestone Recall",
+      "level": 0,
+      "power": 100,
+      "scroll_wcid": 2903,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20213,
+          "create_list": 77911
+        },
+        {
+          "wcid": 30029,
+          "create_list": 80501
+        }
+      ]
+    },
+    {
+      "spell": 2644,
+      "name": "Lifestone Tie",
+      "line": "Lifestone Tie",
+      "level": 0,
+      "power": 100,
+      "scroll_wcid": 20618,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20213,
+          "create_list": 77910
+        },
+        {
+          "wcid": 30029,
+          "create_list": 80500
+        }
+      ]
+    },
+    {
+      "spell": 2645,
+      "name": "Portal Recall",
+      "line": "Portal Recall",
+      "level": 0,
+      "power": 100,
+      "scroll_wcid": 1564,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20213,
+          "create_list": 77912
+        },
+        {
+          "wcid": 30029,
+          "create_list": 80502
+        }
+      ]
+    },
+    {
+      "spell": 48,
+      "name": "Primary Portal Recall",
+      "line": "Primary Portal Recall",
+      "level": 0,
+      "power": 100,
+      "scroll_wcid": 20620,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20213,
+          "create_list": 77915
+        },
+        {
+          "wcid": 30029,
+          "create_list": 80505
+        }
+      ]
+    },
+    {
+      "spell": 47,
+      "name": "Primary Portal Tie",
+      "line": "Primary Portal Tie",
+      "level": 0,
+      "power": 150,
+      "scroll_wcid": 1565,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20213,
+          "create_list": 77913
+        },
+        {
+          "wcid": 30029,
+          "create_list": 80503
+        }
+      ]
+    },
+    {
+      "spell": 2647,
+      "name": "Secondary Portal Recall",
+      "line": "Secondary Portal Recall",
+      "level": 0,
+      "power": 100,
+      "scroll_wcid": 20621,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20213,
+          "create_list": 77916
+        },
+        {
+          "wcid": 30029,
+          "create_list": 80506
+        }
+      ]
+    },
+    {
+      "spell": 2646,
+      "name": "Secondary Portal Tie",
+      "line": "Secondary Portal Tie",
+      "level": 0,
+      "power": 150,
+      "scroll_wcid": 20619,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20213,
+          "create_list": 77914
+        },
+        {
+          "wcid": 30029,
+          "create_list": 80504
+        }
+      ]
+    },
+    {
+      "spell": 24,
+      "name": "Armor Self I",
+      "line": "Armor Self",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1550,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20217,
+          "create_list": 33574
+        },
+        {
+          "wcid": 30011,
+          "create_list": 79106
+        }
+      ]
+    },
+    {
+      "spell": 1308,
+      "name": "Armor Self II",
+      "line": "Armor Self",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 4390,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20218,
+          "create_list": 33634
+        },
+        {
+          "wcid": 30012,
+          "create_list": 79166
+        }
+      ]
+    },
+    {
+      "spell": 1309,
+      "name": "Armor Self III",
+      "line": "Armor Self",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 4391,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20221,
+          "create_list": 33814
+        },
+        {
+          "wcid": 30015,
+          "create_list": 79337
+        }
+      ]
+    },
+    {
+      "spell": 1310,
+      "name": "Armor Self IV",
+      "line": "Armor Self",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 4392,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20222,
+          "create_list": 33874
+        }
+      ]
+    },
+    {
+      "spell": 1311,
+      "name": "Armor Self V",
+      "line": "Armor Self",
+      "level": 5,
+      "power": 200,
+      "scroll_wcid": 4393,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20219,
+          "create_list": 33694
+        },
+        {
+          "wcid": 30013,
+          "create_list": 79223
+        }
+      ]
+    },
+    {
+      "spell": 1312,
+      "name": "Armor Self VI",
+      "line": "Armor Self",
+      "level": 6,
+      "power": 250,
+      "scroll_wcid": 4394,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20220,
+          "create_list": 33754
+        },
+        {
+          "wcid": 30014,
+          "create_list": 79280
+        }
+      ]
+    },
+    {
+      "spell": 1018,
+      "name": "Bludgeoning Protection Self I",
+      "line": "Bludgeoning Protection Self",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1845,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20217,
+          "create_list": 33590
+        },
+        {
+          "wcid": 30011,
+          "create_list": 79122
+        }
+      ]
+    },
+    {
+      "spell": 1019,
+      "name": "Bludgeoning Protection Self II",
+      "line": "Bludgeoning Protection Self",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 3008,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20218,
+          "create_list": 33650
+        },
+        {
+          "wcid": 30012,
+          "create_list": 79182
+        }
+      ]
+    },
+    {
+      "spell": 1020,
+      "name": "Bludgeoning Protection Self III",
+      "line": "Bludgeoning Protection Self",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 3009,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20221,
+          "create_list": 33830
+        },
+        {
+          "wcid": 30015,
+          "create_list": 79353
+        }
+      ]
+    },
+    {
+      "spell": 1021,
+      "name": "Bludgeoning Protection Self IV",
+      "line": "Bludgeoning Protection Self",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 3010,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20222,
+          "create_list": 33890
+        }
+      ]
+    },
+    {
+      "spell": 1022,
+      "name": "Bludgeoning Protection Self V",
+      "line": "Bludgeoning Protection Self",
+      "level": 5,
+      "power": 200,
+      "scroll_wcid": 3011,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20219,
+          "create_list": 33710
+        },
+        {
+          "wcid": 30013,
+          "create_list": 79239
+        }
+      ]
+    },
+    {
+      "spell": 1023,
+      "name": "Bludgeoning Protection Self VI",
+      "line": "Bludgeoning Protection Self",
+      "level": 6,
+      "power": 250,
+      "scroll_wcid": 3012,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20220,
+          "create_list": 33770
+        },
+        {
+          "wcid": 30014,
+          "create_list": 79296
+        }
+      ]
+    },
+    {
+      "spell": 1676,
+      "name": "Stamina to Mana Self I",
+      "line": "Stamina to Mana Self",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1874,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20217,
+          "create_list": 33624
+        },
+        {
+          "wcid": 30011,
+          "create_list": 79156
+        }
+      ]
+    },
+    {
+      "spell": 1677,
+      "name": "Stamina to Mana Self II",
+      "line": "Stamina to Mana Self",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 9655,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20218,
+          "create_list": 33684
+        },
+        {
+          "wcid": 30012,
+          "create_list": 79216
+        }
+      ]
+    },
+    {
+      "spell": 1678,
+      "name": "Stamina to Mana Self III",
+      "line": "Stamina to Mana Self",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 9656,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20221,
+          "create_list": 33864
+        },
+        {
+          "wcid": 30015,
+          "create_list": 79387
+        }
+      ]
+    },
+    {
+      "spell": 1679,
+      "name": "Stamina to Mana Self IV",
+      "line": "Stamina to Mana Self",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 9657,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20222,
+          "create_list": 33924
+        }
+      ]
+    },
+    {
+      "spell": 1680,
+      "name": "Stamina to Mana Self V",
+      "line": "Stamina to Mana Self",
+      "level": 5,
+      "power": 200,
+      "scroll_wcid": 9658,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20219,
+          "create_list": 33744
+        },
+        {
+          "wcid": 30013,
+          "create_list": 79273
+        }
+      ]
+    },
+    {
+      "spell": 1681,
+      "name": "Stamina to Mana Self VI",
+      "line": "Stamina to Mana Self",
+      "level": 6,
+      "power": 250,
+      "scroll_wcid": 9659,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20220,
+          "create_list": 33804
+        },
+        {
+          "wcid": 30014,
+          "create_list": 79330
+        }
+      ]
+    },
+    {
+      "spell": 1177,
+      "name": "Revitalize Self I",
+      "line": "Revitalize Self",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1785,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20217,
+          "create_list": 33581
+        },
+        {
+          "wcid": 30011,
+          "create_list": 79113
+        }
+      ]
+    },
+    {
+      "spell": 1178,
+      "name": "Revitalize Self II",
+      "line": "Revitalize Self",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 2727,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20218,
+          "create_list": 33642
+        },
+        {
+          "wcid": 30012,
+          "create_list": 79174
+        }
+      ]
+    },
+    {
+      "spell": 1179,
+      "name": "Revitalize Self III",
+      "line": "Revitalize Self",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 2728,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20221,
+          "create_list": 33822
+        },
+        {
+          "wcid": 30015,
+          "create_list": 79345
+        }
+      ]
+    },
+    {
+      "spell": 1180,
+      "name": "Revitalize Self IV",
+      "line": "Revitalize Self",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 2729,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20222,
+          "create_list": 33882
+        }
+      ]
+    },
+    {
+      "spell": 1181,
+      "name": "Revitalize Self V",
+      "line": "Revitalize Self",
+      "level": 5,
+      "power": 200,
+      "scroll_wcid": 2730,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20219,
+          "create_list": 33702
+        },
+        {
+          "wcid": 30013,
+          "create_list": 79231
+        }
+      ]
+    },
+    {
+      "spell": 1182,
+      "name": "Revitalize Self VI",
+      "line": "Revitalize Self",
+      "level": 6,
+      "power": 250,
+      "scroll_wcid": 2731,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20220,
+          "create_list": 33762
+        },
+        {
+          "wcid": 30014,
+          "create_list": 79288
+        }
+      ]
+    },
+    {
+      "spell": 212,
+      "name": "Mana Renewal Self I",
+      "line": "Mana Renewal Self",
+      "level": 1,
+      "power": 25,
+      "scroll_wcid": 1659,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20217,
+          "create_list": 33608
+        },
+        {
+          "wcid": 30011,
+          "create_list": 79140
+        }
+      ]
+    },
+    {
+      "spell": 213,
+      "name": "Mana Renewal Self II",
+      "line": "Mana Renewal Self",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 3103,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20218,
+          "create_list": 33668
+        },
+        {
+          "wcid": 30012,
+          "create_list": 79200
+        }
+      ]
+    },
+    {
+      "spell": 214,
+      "name": "Mana Renewal Self III",
+      "line": "Mana Renewal Self",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 3104,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20221,
+          "create_list": 33848
+        },
+        {
+          "wcid": 30015,
+          "create_list": 79371
+        }
+      ]
+    },
+    {
+      "spell": 215,
+      "name": "Mana Renewal Self IV",
+      "line": "Mana Renewal Self",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 3105,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20222,
+          "create_list": 33908
+        }
+      ]
+    },
+    {
+      "spell": 216,
+      "name": "Mana Renewal Self V",
+      "line": "Mana Renewal Self",
+      "level": 5,
+      "power": 200,
+      "scroll_wcid": 3106,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20219,
+          "create_list": 33728
+        },
+        {
+          "wcid": 30013,
+          "create_list": 79257
+        }
+      ]
+    },
+    {
+      "spell": 217,
+      "name": "Mana Renewal Self VI",
+      "line": "Mana Renewal Self",
+      "level": 6,
+      "power": 250,
+      "scroll_wcid": 3107,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20220,
+          "create_list": 33788
+        },
+        {
+          "wcid": 30014,
+          "create_list": 79314
+        }
+      ]
+    },
+    {
+      "spell": 1421,
+      "name": "Focus Self I",
+      "line": "Focus Self",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1776,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20205,
+          "create_list": 76988
+        },
+        {
+          "wcid": 30021,
+          "create_list": 79606
+        }
+      ]
+    },
+    {
+      "spell": 1422,
+      "name": "Focus Self II",
+      "line": "Focus Self",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 1782,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20206,
+          "create_list": 77124
+        },
+        {
+          "wcid": 30022,
+          "create_list": 79733
+        }
+      ]
+    },
+    {
+      "spell": 1423,
+      "name": "Focus Self III",
+      "line": "Focus Self",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 1783,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20209,
+          "create_list": 77532
+        },
+        {
+          "wcid": 30025,
+          "create_list": 80128
+        }
+      ]
+    },
+    {
+      "spell": 1424,
+      "name": "Focus Self IV",
+      "line": "Focus Self",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 2679,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20210,
+          "create_list": 77668
+        }
+      ]
+    },
+    {
+      "spell": 1445,
+      "name": "Willpower Self I",
+      "line": "Willpower Self",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1837,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20205,
+          "create_list": 76997
+        },
+        {
+          "wcid": 30021,
+          "create_list": 79615
+        }
+      ]
+    },
+    {
+      "spell": 1446,
+      "name": "Willpower Self II",
+      "line": "Willpower Self",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 2757,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20206,
+          "create_list": 77133
+        },
+        {
+          "wcid": 30022,
+          "create_list": 79742
+        }
+      ]
+    },
+    {
+      "spell": 1447,
+      "name": "Willpower Self III",
+      "line": "Willpower Self",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 2758,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20209,
+          "create_list": 77541
+        },
+        {
+          "wcid": 30025,
+          "create_list": 80137
+        }
+      ]
+    },
+    {
+      "spell": 1448,
+      "name": "Willpower Self IV",
+      "line": "Willpower Self",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 2759,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20210,
+          "create_list": 77677
+        }
+      ]
+    },
+    {
+      "spell": 557,
+      "name": "Creature Enchantment Mastery Self I",
+      "line": "Creature Enchantment Mastery Self",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1690,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20205,
+          "create_list": 77015
+        },
+        {
+          "wcid": 30021,
+          "create_list": 79630
+        }
+      ]
+    },
+    {
+      "spell": 558,
+      "name": "Creature Enchantment Mastery Self II",
+      "line": "Creature Enchantment Mastery Self",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 3198,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20206,
+          "create_list": 77151
+        },
+        {
+          "wcid": 30022,
+          "create_list": 79760
+        }
+      ]
+    },
+    {
+      "spell": 559,
+      "name": "Creature Enchantment Mastery Self III",
+      "line": "Creature Enchantment Mastery Self",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 3199,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20209,
+          "create_list": 77559
+        },
+        {
+          "wcid": 30025,
+          "create_list": 80155
+        }
+      ]
+    },
+    {
+      "spell": 560,
+      "name": "Creature Enchantment Mastery Self IV",
+      "line": "Creature Enchantment Mastery Self",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 3200,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20210,
+          "create_list": 77695
+        }
+      ]
+    },
+    {
+      "spell": 605,
+      "name": "Life Magic Mastery Self I",
+      "line": "Life Magic Mastery Self",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1718,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20205,
+          "create_list": 77060
+        },
+        {
+          "wcid": 30021,
+          "create_list": 79675
+        }
+      ]
+    },
+    {
+      "spell": 606,
+      "name": "Life Magic Mastery Self II",
+      "line": "Life Magic Mastery Self",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 3373,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20206,
+          "create_list": 77196
+        },
+        {
+          "wcid": 30022,
+          "create_list": 79805
+        }
+      ]
+    },
+    {
+      "spell": 607,
+      "name": "Life Magic Mastery Self III",
+      "line": "Life Magic Mastery Self",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 3374,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20209,
+          "create_list": 77604
+        },
+        {
+          "wcid": 30025,
+          "create_list": 80200
+        }
+      ]
+    },
+    {
+      "spell": 608,
+      "name": "Life Magic Mastery Self IV",
+      "line": "Life Magic Mastery Self",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 3375,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20210,
+          "create_list": 77740
+        }
+      ]
+    },
+    {
+      "spell": 629,
+      "name": "War Magic Mastery Self I",
+      "line": "War Magic Mastery Self",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1752,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20205,
+          "create_list": 77099
+        },
+        {
+          "wcid": 30021,
+          "create_list": 79711
+        }
+      ]
+    },
+    {
+      "spell": 630,
+      "name": "War Magic Mastery Self II",
+      "line": "War Magic Mastery Self",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 3573,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20206,
+          "create_list": 77235
+        },
+        {
+          "wcid": 30022,
+          "create_list": 79841
+        }
+      ]
+    },
+    {
+      "spell": 631,
+      "name": "War Magic Mastery Self III",
+      "line": "War Magic Mastery Self",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 3574,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20209,
+          "create_list": 77643
+        },
+        {
+          "wcid": 30025,
+          "create_list": 80236
+        }
+      ]
+    },
+    {
+      "spell": 632,
+      "name": "War Magic Mastery Self IV",
+      "line": "War Magic Mastery Self",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 3575,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20210,
+          "create_list": 77779
+        }
+      ]
+    },
+    {
+      "spell": 581,
+      "name": "Item Enchantment Mastery Self I",
+      "line": "Item Enchantment Mastery Self",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1705,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20205,
+          "create_list": 77047
+        },
+        {
+          "wcid": 30021,
+          "create_list": 79662
+        }
+      ]
+    },
+    {
+      "spell": 582,
+      "name": "Item Enchantment Mastery Self II",
+      "line": "Item Enchantment Mastery Self",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 3313,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20206,
+          "create_list": 77183
+        },
+        {
+          "wcid": 30022,
+          "create_list": 79792
+        }
+      ]
+    },
+    {
+      "spell": 583,
+      "name": "Item Enchantment Mastery Self III",
+      "line": "Item Enchantment Mastery Self",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 3314,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20209,
+          "create_list": 77591
+        },
+        {
+          "wcid": 30025,
+          "create_list": 80187
+        }
+      ]
+    },
+    {
+      "spell": 584,
+      "name": "Item Enchantment Mastery Self IV",
+      "line": "Item Enchantment Mastery Self",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 3315,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20210,
+          "create_list": 77727
+        }
+      ]
+    },
+    {
+      "spell": 653,
+      "name": "Mana Conversion Mastery Self I",
+      "line": "Mana Conversion Mastery Self",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1726,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20205,
+          "create_list": 77069
+        },
+        {
+          "wcid": 30021,
+          "create_list": 79684
+        }
+      ]
+    },
+    {
+      "spell": 654,
+      "name": "Mana Conversion Mastery Self II",
+      "line": "Mana Conversion Mastery Self",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 3433,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20206,
+          "create_list": 77205
+        },
+        {
+          "wcid": 30022,
+          "create_list": 79814
+        }
+      ]
+    },
+    {
+      "spell": 655,
+      "name": "Mana Conversion Mastery Self III",
+      "line": "Mana Conversion Mastery Self",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 3434,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20209,
+          "create_list": 77613
+        },
+        {
+          "wcid": 30025,
+          "create_list": 80209
+        }
+      ]
+    },
+    {
+      "spell": 656,
+      "name": "Mana Conversion Mastery Self IV",
+      "line": "Mana Conversion Mastery Self",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 3435,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20210,
+          "create_list": 77749
+        }
+      ]
+    },
+    {
+      "spell": 1349,
+      "name": "Endurance Self I",
+      "line": "Endurance Self",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1772,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20205,
+          "create_list": 76985
+        },
+        {
+          "wcid": 30021,
+          "create_list": 79603
+        }
+      ]
+    },
+    {
+      "spell": 1350,
+      "name": "Endurance Self II",
+      "line": "Endurance Self",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 2659,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20206,
+          "create_list": 77121
+        },
+        {
+          "wcid": 30022,
+          "create_list": 79730
+        }
+      ]
+    },
+    {
+      "spell": 1351,
+      "name": "Endurance Self III",
+      "line": "Endurance Self",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 2660,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20209,
+          "create_list": 77529
+        },
+        {
+          "wcid": 30025,
+          "create_list": 80125
+        }
+      ]
+    },
+    {
+      "spell": 1352,
+      "name": "Endurance Self IV",
+      "line": "Endurance Self",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 2661,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20210,
+          "create_list": 77665
+        }
+      ]
+    },
+    {
+      "spell": 2,
+      "name": "Strength Self I",
+      "line": "Strength Self",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1558,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20205,
+          "create_list": 76994
+        },
+        {
+          "wcid": 30021,
+          "create_list": 79612
+        }
+      ]
+    },
+    {
+      "spell": 1328,
+      "name": "Strength Self II",
+      "line": "Strength Self",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 2742,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20206,
+          "create_list": 77130
+        },
+        {
+          "wcid": 30022,
+          "create_list": 79739
+        }
+      ]
+    },
+    {
+      "spell": 1329,
+      "name": "Strength Self III",
+      "line": "Strength Self",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 2743,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20209,
+          "create_list": 77538
+        },
+        {
+          "wcid": 30025,
+          "create_list": 80134
+        }
+      ]
+    },
+    {
+      "spell": 1330,
+      "name": "Strength Self IV",
+      "line": "Strength Self",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 2744,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20210,
+          "create_list": 77674
+        }
+      ]
+    },
+    {
+      "spell": 1397,
+      "name": "Quickness Self I",
+      "line": "Quickness Self",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1781,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20205,
+          "create_list": 76991
+        },
+        {
+          "wcid": 30021,
+          "create_list": 79609
+        }
+      ]
+    },
+    {
+      "spell": 1398,
+      "name": "Quickness Self II",
+      "line": "Quickness Self",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 2717,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20206,
+          "create_list": 77127
+        },
+        {
+          "wcid": 30022,
+          "create_list": 79736
+        }
+      ]
+    },
+    {
+      "spell": 1399,
+      "name": "Quickness Self III",
+      "line": "Quickness Self",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 2718,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20209,
+          "create_list": 77535
+        },
+        {
+          "wcid": 30025,
+          "create_list": 80131
+        }
+      ]
+    },
+    {
+      "spell": 1400,
+      "name": "Quickness Self IV",
+      "line": "Quickness Self",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 2719,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20210,
+          "create_list": 77671
+        }
+      ]
+    },
+    {
+      "spell": 1373,
+      "name": "Coordination Self I",
+      "line": "Coordination Self",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1770,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20205,
+          "create_list": 76983
+        },
+        {
+          "wcid": 30021,
+          "create_list": 79601
+        }
+      ]
+    },
+    {
+      "spell": 1374,
+      "name": "Coordination Self II",
+      "line": "Coordination Self",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 2649,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20206,
+          "create_list": 77119
+        },
+        {
+          "wcid": 30022,
+          "create_list": 79728
+        }
+      ]
+    },
+    {
+      "spell": 1375,
+      "name": "Coordination Self III",
+      "line": "Coordination Self",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 2650,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20209,
+          "create_list": 77527
+        },
+        {
+          "wcid": 30025,
+          "create_list": 80123
+        }
+      ]
+    },
+    {
+      "spell": 1376,
+      "name": "Coordination Self IV",
+      "line": "Coordination Self",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 2651,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20210,
+          "create_list": 77663
+        }
+      ]
+    },
+    {
+      "spell": 18,
+      "name": "Invulnerability Self I",
+      "line": "Invulnerability Self",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1585,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20205,
+          "create_list": 77044
+        },
+        {
+          "wcid": 30021,
+          "create_list": 79659
+        }
+      ]
+    },
+    {
+      "spell": 245,
+      "name": "Invulnerability Self II",
+      "line": "Invulnerability Self",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 3298,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20206,
+          "create_list": 77180
+        },
+        {
+          "wcid": 30022,
+          "create_list": 79789
+        }
+      ]
+    },
+    {
+      "spell": 246,
+      "name": "Invulnerability Self III",
+      "line": "Invulnerability Self",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 3299,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20209,
+          "create_list": 77588
+        },
+        {
+          "wcid": 30025,
+          "create_list": 80184
+        }
+      ]
+    },
+    {
+      "spell": 247,
+      "name": "Invulnerability Self IV",
+      "line": "Invulnerability Self",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 3300,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20210,
+          "create_list": 77724
+        }
+      ]
+    },
+    {
+      "spell": 51,
+      "name": "Impenetrability I",
+      "line": "Impenetrability",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1887,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20215,
+          "create_list": 77988
+        },
+        {
+          "wcid": 30009,
+          "create_list": 79009
+        }
+      ]
+    },
+    {
+      "spell": 1482,
+      "name": "Impenetrability II",
+      "line": "Impenetrability",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 2842,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20216,
+          "create_list": 78051
+        },
+        {
+          "wcid": 30010,
+          "create_list": 79068
+        }
+      ]
+    },
+    {
+      "spell": 1483,
+      "name": "Impenetrability III",
+      "line": "Impenetrability",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 2843,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20213,
+          "create_list": 77896
+        },
+        {
+          "wcid": 30029,
+          "create_list": 80486
+        }
+      ]
+    },
+    {
+      "spell": 1484,
+      "name": "Impenetrability IV",
+      "line": "Impenetrability",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 2844,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20214,
+          "create_list": 77944
+        }
+      ]
+    },
+    {
+      "spell": 1485,
+      "name": "Impenetrability V",
+      "line": "Impenetrability",
+      "level": 5,
+      "power": 200,
+      "scroll_wcid": 2845,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20211,
+          "create_list": 77813
+        },
+        {
+          "wcid": 30027,
+          "create_list": 80403
+        }
+      ]
+    },
+    {
+      "spell": 1486,
+      "name": "Impenetrability VI",
+      "line": "Impenetrability",
+      "level": 6,
+      "power": 250,
+      "scroll_wcid": 2846,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20212,
+          "create_list": 77853
+        },
+        {
+          "wcid": 30028,
+          "create_list": 80443
+        }
+      ]
+    },
+    {
+      "spell": 1511,
+      "name": "Bludgeon Bane I",
+      "line": "Bludgeon Bane",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1877,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20215,
+          "create_list": 77973
+        },
+        {
+          "wcid": 30009,
+          "create_list": 78994
+        }
+      ]
+    },
+    {
+      "spell": 1512,
+      "name": "Bludgeon Bane II",
+      "line": "Bludgeon Bane",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 2792,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20216,
+          "create_list": 78036
+        },
+        {
+          "wcid": 30010,
+          "create_list": 79053
+        }
+      ]
+    },
+    {
+      "spell": 1513,
+      "name": "Bludgeon Bane III",
+      "line": "Bludgeon Bane",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 2793,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20213,
+          "create_list": 77881
+        },
+        {
+          "wcid": 30029,
+          "create_list": 80471
+        }
+      ]
+    },
+    {
+      "spell": 1514,
+      "name": "Bludgeon Bane IV",
+      "line": "Bludgeon Bane",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 2794,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20214,
+          "create_list": 77929
+        }
+      ]
+    },
+    {
+      "spell": 1515,
+      "name": "Bludgeon Bane V",
+      "line": "Bludgeon Bane",
+      "level": 5,
+      "power": 200,
+      "scroll_wcid": 2795,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20211,
+          "create_list": 77798
+        },
+        {
+          "wcid": 30027,
+          "create_list": 80388
+        }
+      ]
+    },
+    {
+      "spell": 1516,
+      "name": "Bludgeon Bane VI",
+      "line": "Bludgeon Bane",
+      "level": 6,
+      "power": 250,
+      "scroll_wcid": 2796,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20212,
+          "create_list": 77838
+        },
+        {
+          "wcid": 30028,
+          "create_list": 80428
+        }
+      ]
+    },
+    {
+      "spell": 1569,
+      "name": "Piercing Bane I",
+      "line": "Piercing Bane",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1892,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20215,
+          "create_list": 77992
+        },
+        {
+          "wcid": 30009,
+          "create_list": 79013
+        }
+      ]
+    },
+    {
+      "spell": 1570,
+      "name": "Piercing Bane II",
+      "line": "Piercing Bane",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 2867,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20216,
+          "create_list": 78055
+        },
+        {
+          "wcid": 30010,
+          "create_list": 79072
+        }
+      ]
+    },
+    {
+      "spell": 1571,
+      "name": "Piercing Bane III",
+      "line": "Piercing Bane",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 2868,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20213,
+          "create_list": 77900
+        },
+        {
+          "wcid": 30029,
+          "create_list": 80490
+        }
+      ]
+    },
+    {
+      "spell": 1572,
+      "name": "Piercing Bane IV",
+      "line": "Piercing Bane",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 2869,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20214,
+          "create_list": 77948
+        }
+      ]
+    },
+    {
+      "spell": 1573,
+      "name": "Piercing Bane V",
+      "line": "Piercing Bane",
+      "level": 5,
+      "power": 200,
+      "scroll_wcid": 2870,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20211,
+          "create_list": 77817
+        },
+        {
+          "wcid": 30027,
+          "create_list": 80407
+        }
+      ]
+    },
+    {
+      "spell": 1574,
+      "name": "Piercing Bane VI",
+      "line": "Piercing Bane",
+      "level": 6,
+      "power": 250,
+      "scroll_wcid": 2871,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20212,
+          "create_list": 77857
+        },
+        {
+          "wcid": 30028,
+          "create_list": 80447
+        }
+      ]
+    },
+    {
+      "spell": 37,
+      "name": "Blade Bane I",
+      "line": "Blade Bane",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1552,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20215,
+          "create_list": 77968
+        },
+        {
+          "wcid": 30009,
+          "create_list": 78989
+        }
+      ]
+    },
+    {
+      "spell": 1558,
+      "name": "Blade Bane II",
+      "line": "Blade Bane",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 2772,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20216,
+          "create_list": 78031
+        },
+        {
+          "wcid": 30010,
+          "create_list": 79048
+        }
+      ]
+    },
+    {
+      "spell": 1559,
+      "name": "Blade Bane III",
+      "line": "Blade Bane",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 2773,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20213,
+          "create_list": 77876
+        },
+        {
+          "wcid": 30029,
+          "create_list": 80466
+        }
+      ]
+    },
+    {
+      "spell": 1560,
+      "name": "Blade Bane IV",
+      "line": "Blade Bane",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 2774,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20214,
+          "create_list": 77924
+        }
+      ]
+    },
+    {
+      "spell": 1561,
+      "name": "Blade Bane V",
+      "line": "Blade Bane",
+      "level": 5,
+      "power": 200,
+      "scroll_wcid": 2775,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20211,
+          "create_list": 77793
+        },
+        {
+          "wcid": 30027,
+          "create_list": 80383
+        }
+      ]
+    },
+    {
+      "spell": 1562,
+      "name": "Blade Bane VI",
+      "line": "Blade Bane",
+      "level": 6,
+      "power": 250,
+      "scroll_wcid": 2776,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20212,
+          "create_list": 77833
+        },
+        {
+          "wcid": 30028,
+          "create_list": 80423
+        }
+      ]
+    },
+    {
+      "spell": 1535,
+      "name": "Lightning Bane I",
+      "line": "Lightning Bane",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1889,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20215,
+          "create_list": 77990
+        },
+        {
+          "wcid": 30009,
+          "create_list": 79011
+        }
+      ]
+    },
+    {
+      "spell": 1536,
+      "name": "Lightning Bane II",
+      "line": "Lightning Bane",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 2852,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20216,
+          "create_list": 78053
+        },
+        {
+          "wcid": 30010,
+          "create_list": 79070
+        }
+      ]
+    },
+    {
+      "spell": 1537,
+      "name": "Lightning Bane III",
+      "line": "Lightning Bane",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 2853,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20213,
+          "create_list": 77898
+        },
+        {
+          "wcid": 30029,
+          "create_list": 80488
+        }
+      ]
+    },
+    {
+      "spell": 1538,
+      "name": "Lightning Bane IV",
+      "line": "Lightning Bane",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 2854,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20214,
+          "create_list": 77946
+        }
+      ]
+    },
+    {
+      "spell": 1539,
+      "name": "Lightning Bane V",
+      "line": "Lightning Bane",
+      "level": 5,
+      "power": 200,
+      "scroll_wcid": 2855,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20211,
+          "create_list": 77815
+        },
+        {
+          "wcid": 30027,
+          "create_list": 80405
+        }
+      ]
+    },
+    {
+      "spell": 1540,
+      "name": "Lightning Bane VI",
+      "line": "Lightning Bane",
+      "level": 6,
+      "power": 250,
+      "scroll_wcid": 2856,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20212,
+          "create_list": 77855
+        },
+        {
+          "wcid": 30028,
+          "create_list": 80445
+        }
+      ]
+    },
+    {
+      "spell": 1547,
+      "name": "Flame Bane I",
+      "line": "Flame Bane",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1881,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20215,
+          "create_list": 77978
+        },
+        {
+          "wcid": 30009,
+          "create_list": 78999
+        }
+      ]
+    },
+    {
+      "spell": 1548,
+      "name": "Flame Bane II",
+      "line": "Flame Bane",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 2812,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20216,
+          "create_list": 78041
+        },
+        {
+          "wcid": 30010,
+          "create_list": 79058
+        }
+      ]
+    },
+    {
+      "spell": 1549,
+      "name": "Flame Bane III",
+      "line": "Flame Bane",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 2813,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20213,
+          "create_list": 77886
+        },
+        {
+          "wcid": 30029,
+          "create_list": 80476
+        }
+      ]
+    },
+    {
+      "spell": 1550,
+      "name": "Flame Bane IV",
+      "line": "Flame Bane",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 2814,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20214,
+          "create_list": 77934
+        }
+      ]
+    },
+    {
+      "spell": 1551,
+      "name": "Flame Bane V",
+      "line": "Flame Bane",
+      "level": 5,
+      "power": 200,
+      "scroll_wcid": 2815,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20211,
+          "create_list": 77803
+        },
+        {
+          "wcid": 30027,
+          "create_list": 80393
+        }
+      ]
+    },
+    {
+      "spell": 1552,
+      "name": "Flame Bane VI",
+      "line": "Flame Bane",
+      "level": 6,
+      "power": 250,
+      "scroll_wcid": 2816,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20212,
+          "create_list": 77843
+        },
+        {
+          "wcid": 30028,
+          "create_list": 80433
+        }
+      ]
+    },
+    {
+      "spell": 1523,
+      "name": "Frost Bane I",
+      "line": "Frost Bane",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1883,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20215,
+          "create_list": 77980
+        },
+        {
+          "wcid": 30009,
+          "create_list": 79001
+        }
+      ]
+    },
+    {
+      "spell": 1524,
+      "name": "Frost Bane II",
+      "line": "Frost Bane",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 2822,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20216,
+          "create_list": 78043
+        },
+        {
+          "wcid": 30010,
+          "create_list": 79060
+        }
+      ]
+    },
+    {
+      "spell": 1525,
+      "name": "Frost Bane III",
+      "line": "Frost Bane",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 2823,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20213,
+          "create_list": 77888
+        },
+        {
+          "wcid": 30029,
+          "create_list": 80478
+        }
+      ]
+    },
+    {
+      "spell": 1526,
+      "name": "Frost Bane IV",
+      "line": "Frost Bane",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 2824,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20214,
+          "create_list": 77936
+        }
+      ]
+    },
+    {
+      "spell": 1527,
+      "name": "Frost Bane V",
+      "line": "Frost Bane",
+      "level": 5,
+      "power": 200,
+      "scroll_wcid": 2825,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20211,
+          "create_list": 77805
+        },
+        {
+          "wcid": 30027,
+          "create_list": 80395
+        }
+      ]
+    },
+    {
+      "spell": 1528,
+      "name": "Frost Bane VI",
+      "line": "Frost Bane",
+      "level": 6,
+      "power": 250,
+      "scroll_wcid": 2826,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20212,
+          "create_list": 77845
+        },
+        {
+          "wcid": 30028,
+          "create_list": 80435
+        }
+      ]
+    },
+    {
+      "spell": 1493,
+      "name": "Acid Bane I",
+      "line": "Acid Bane",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1875,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20215,
+          "create_list": 77966
+        },
+        {
+          "wcid": 30009,
+          "create_list": 78987
+        }
+      ]
+    },
+    {
+      "spell": 1494,
+      "name": "Acid Bane II",
+      "line": "Acid Bane",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 2762,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20216,
+          "create_list": 78029
+        },
+        {
+          "wcid": 30010,
+          "create_list": 79046
+        }
+      ]
+    },
+    {
+      "spell": 1495,
+      "name": "Acid Bane III",
+      "line": "Acid Bane",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 2763,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20213,
+          "create_list": 77874
+        },
+        {
+          "wcid": 30029,
+          "create_list": 80464
+        }
+      ]
+    },
+    {
+      "spell": 1496,
+      "name": "Acid Bane IV",
+      "line": "Acid Bane",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 2764,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20214,
+          "create_list": 77922
+        }
+      ]
+    },
+    {
+      "spell": 1497,
+      "name": "Acid Bane V",
+      "line": "Acid Bane",
+      "level": 5,
+      "power": 200,
+      "scroll_wcid": 2765,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20211,
+          "create_list": 77791
+        },
+        {
+          "wcid": 30027,
+          "create_list": 80381
+        }
+      ]
+    },
+    {
+      "spell": 1498,
+      "name": "Acid Bane VI",
+      "line": "Acid Bane",
+      "level": 6,
+      "power": 250,
+      "scroll_wcid": 2766,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20212,
+          "create_list": 77831
+        },
+        {
+          "wcid": 30028,
+          "create_list": 80421
+        }
+      ]
+    },
+    {
+      "spell": 1237,
+      "name": "Drain Health Other I",
+      "line": "Drain Health Other",
+      "level": 1,
+      "power": 38,
+      "scroll_wcid": 1859,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20217,
+          "create_list": 33613
+        },
+        {
+          "wcid": 30011,
+          "create_list": 79145
+        }
+      ]
+    },
+    {
+      "spell": 1238,
+      "name": "Drain Health Other II",
+      "line": "Drain Health Other",
+      "level": 2,
+      "power": 88,
+      "scroll_wcid": 2890,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20218,
+          "create_list": 33673
+        },
+        {
+          "wcid": 30012,
+          "create_list": 79205
+        }
+      ]
+    },
+    {
+      "spell": 1239,
+      "name": "Drain Health Other III",
+      "line": "Drain Health Other",
+      "level": 3,
+      "power": 138,
+      "scroll_wcid": 3934,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20221,
+          "create_list": 33853
+        },
+        {
+          "wcid": 30015,
+          "create_list": 79376
+        }
+      ]
+    },
+    {
+      "spell": 1240,
+      "name": "Drain Health Other IV",
+      "line": "Drain Health Other",
+      "level": 4,
+      "power": 188,
+      "scroll_wcid": 4220,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20222,
+          "create_list": 33913
+        }
+      ]
+    },
+    {
+      "spell": 1241,
+      "name": "Drain Health Other V",
+      "line": "Drain Health Other",
+      "level": 5,
+      "power": 238,
+      "scroll_wcid": 3935,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20219,
+          "create_list": 33733
+        },
+        {
+          "wcid": 30013,
+          "create_list": 79262
+        }
+      ]
+    },
+    {
+      "spell": 1242,
+      "name": "Drain Health Other VI",
+      "line": "Drain Health Other",
+      "level": 6,
+      "power": 288,
+      "scroll_wcid": 4221,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20220,
+          "create_list": 33793
+        },
+        {
+          "wcid": 30014,
+          "create_list": 79319
+        }
+      ]
+    },
+    {
+      "spell": 1249,
+      "name": "Drain Stamina Other I",
+      "line": "Drain Stamina Other",
+      "level": 1,
+      "power": 38,
+      "scroll_wcid": 1860,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20217,
+          "create_list": 33615
+        },
+        {
+          "wcid": 30011,
+          "create_list": 79147
+        }
+      ]
+    },
+    {
+      "spell": 6,
+      "name": "Heal Self I",
+      "line": "Heal Self",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1556,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20217,
+          "create_list": 33577
+        },
+        {
+          "wcid": 30011,
+          "create_list": 79109
+        }
+      ]
+    },
+    {
+      "spell": 1157,
+      "name": "Heal Self II",
+      "line": "Heal Self",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 2697,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20218,
+          "create_list": 33638
+        },
+        {
+          "wcid": 30012,
+          "create_list": 79170
+        }
+      ]
+    },
+    {
+      "spell": 1158,
+      "name": "Heal Self III",
+      "line": "Heal Self",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 2698,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20221,
+          "create_list": 33818
+        },
+        {
+          "wcid": 30015,
+          "create_list": 79341
+        }
+      ]
+    },
+    {
+      "spell": 1159,
+      "name": "Heal Self IV",
+      "line": "Heal Self",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 2699,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20222,
+          "create_list": 33878
+        }
+      ]
+    },
+    {
+      "spell": 1160,
+      "name": "Heal Self V",
+      "line": "Heal Self",
+      "level": 5,
+      "power": 200,
+      "scroll_wcid": 2700,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20219,
+          "create_list": 33698
+        },
+        {
+          "wcid": 30013,
+          "create_list": 79227
+        }
+      ]
+    },
+    {
+      "spell": 1161,
+      "name": "Heal Self VI",
+      "line": "Heal Self",
+      "level": 6,
+      "power": 250,
+      "scroll_wcid": 2701,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20220,
+          "create_list": 33758
+        },
+        {
+          "wcid": 30014,
+          "create_list": 79284
+        }
+      ]
+    },
+    {
+      "spell": 7,
+      "name": "Harm Other I",
+      "line": "Harm Other",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1554,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20217,
+          "create_list": 33575
+        },
+        {
+          "wcid": 30011,
+          "create_list": 79107
+        }
+      ]
+    },
+    {
+      "spell": 1172,
+      "name": "Harm Other II",
+      "line": "Harm Other",
+      "level": 2,
+      "power": 75,
+      "scroll_wcid": 2687,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20218,
+          "create_list": 33636
+        },
+        {
+          "wcid": 30012,
+          "create_list": 79168
+        }
+      ]
+    },
+    {
+      "spell": 1173,
+      "name": "Harm Other III",
+      "line": "Harm Other",
+      "level": 3,
+      "power": 125,
+      "scroll_wcid": 2688,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20221,
+          "create_list": 33816
+        },
+        {
+          "wcid": 30015,
+          "create_list": 79339
+        }
+      ]
+    },
+    {
+      "spell": 1174,
+      "name": "Harm Other IV",
+      "line": "Harm Other",
+      "level": 4,
+      "power": 175,
+      "scroll_wcid": 2689,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20222,
+          "create_list": 33876
+        }
+      ]
+    },
+    {
+      "spell": 1175,
+      "name": "Harm Other V",
+      "line": "Harm Other",
+      "level": 5,
+      "power": 225,
+      "scroll_wcid": 2690,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20219,
+          "create_list": 33696
+        },
+        {
+          "wcid": 30013,
+          "create_list": 79225
+        }
+      ]
+    },
+    {
+      "spell": 1176,
+      "name": "Harm Other VI",
+      "line": "Harm Other",
+      "level": 6,
+      "power": 275,
+      "scroll_wcid": 2691,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20220,
+          "create_list": 33756
+        },
+        {
+          "wcid": 30014,
+          "create_list": 79282
+        }
+      ]
+    },
+    {
+      "spell": 165,
+      "name": "Regeneration Self I",
+      "line": "Regeneration Self",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1658,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20217,
+          "create_list": 33610
+        },
+        {
+          "wcid": 30011,
+          "create_list": 79142
+        }
+      ]
+    },
+    {
+      "spell": 166,
+      "name": "Regeneration Self II",
+      "line": "Regeneration Self",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 3113,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20218,
+          "create_list": 33670
+        },
+        {
+          "wcid": 30012,
+          "create_list": 79202
+        }
+      ]
+    },
+    {
+      "spell": 167,
+      "name": "Regeneration Self III",
+      "line": "Regeneration Self",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 3114,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20221,
+          "create_list": 33850
+        },
+        {
+          "wcid": 30015,
+          "create_list": 79373
+        }
+      ]
+    },
+    {
+      "spell": 168,
+      "name": "Regeneration Self IV",
+      "line": "Regeneration Self",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 3115,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20222,
+          "create_list": 33910
+        }
+      ]
+    },
+    {
+      "spell": 54,
+      "name": "Rejuvenation Self I",
+      "line": "Rejuvenation Self",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1656,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20217,
+          "create_list": 33612
+        },
+        {
+          "wcid": 30011,
+          "create_list": 79144
+        }
+      ]
+    },
+    {
+      "spell": 189,
+      "name": "Rejuvenation Self II",
+      "line": "Rejuvenation Self",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 3123,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20218,
+          "create_list": 33672
+        },
+        {
+          "wcid": 30012,
+          "create_list": 79204
+        }
+      ]
+    },
+    {
+      "spell": 190,
+      "name": "Rejuvenation Self III",
+      "line": "Rejuvenation Self",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 3124,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20221,
+          "create_list": 33852
+        },
+        {
+          "wcid": 30015,
+          "create_list": 79375
+        }
+      ]
+    },
+    {
+      "spell": 191,
+      "name": "Rejuvenation Self IV",
+      "line": "Rejuvenation Self",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 3125,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20222,
+          "create_list": 33912
+        }
+      ]
+    },
+    {
+      "spell": 3253,
+      "name": "Aura of Spirit Drinker Self I",
+      "line": "Spirit Drinker",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 28002,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20215,
+          "create_list": 77994
+        },
+        {
+          "wcid": 30009,
+          "create_list": 79015
+        }
+      ]
+    },
+    {
+      "spell": 3254,
+      "name": "Aura of Spirit Drinker Self II",
+      "line": "Spirit Drinker",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 28003,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20216,
+          "create_list": 78057
+        },
+        {
+          "wcid": 30010,
+          "create_list": 79074
+        }
+      ]
+    },
+    {
+      "spell": 3255,
+      "name": "Aura of Spirit Drinker Self III",
+      "line": "Spirit Drinker",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 28004,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20213,
+          "create_list": 77902
+        },
+        {
+          "wcid": 30029,
+          "create_list": 80492
+        }
+      ]
+    },
+    {
+      "spell": 3256,
+      "name": "Aura of Spirit Drinker Self IV",
+      "line": "Spirit Drinker",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 28005,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20214,
+          "create_list": 77950
+        }
+      ]
+    },
+    {
+      "spell": 3257,
+      "name": "Aura of Spirit Drinker Self V",
+      "line": "Spirit Drinker",
+      "level": 5,
+      "power": 200,
+      "scroll_wcid": 28006,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20211,
+          "create_list": 77819
+        },
+        {
+          "wcid": 30027,
+          "create_list": 80409
+        }
+      ]
+    },
+    {
+      "spell": 3258,
+      "name": "Aura of Spirit Drinker Self VI",
+      "line": "Spirit Drinker",
+      "level": 6,
+      "power": 250,
+      "scroll_wcid": 28007,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20212,
+          "create_list": 77859
+        },
+        {
+          "wcid": 30028,
+          "create_list": 80449
+        }
+      ]
+    },
+    {
+      "spell": 1475,
+      "name": "Aura of Hermetic Link Self I",
+      "line": "Hermetic Link",
+      "level": 1,
+      "power": 25,
+      "scroll_wcid": 1896,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20215,
+          "create_list": 77985
+        },
+        {
+          "wcid": 30009,
+          "create_list": 79006
+        }
+      ]
+    },
+    {
+      "spell": 1476,
+      "name": "Aura of Hermetic Link Self II",
+      "line": "Hermetic Link",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 2887,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20216,
+          "create_list": 78048
+        },
+        {
+          "wcid": 30010,
+          "create_list": 79065
+        }
+      ]
+    },
+    {
+      "spell": 1477,
+      "name": "Aura of Hermetic Link Self III",
+      "line": "Hermetic Link",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 2888,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20213,
+          "create_list": 77893
+        },
+        {
+          "wcid": 30029,
+          "create_list": 80483
+        }
+      ]
+    },
+    {
+      "spell": 1478,
+      "name": "Aura of Hermetic Link Self IV",
+      "line": "Hermetic Link",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 2889,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20214,
+          "create_list": 77941
+        }
+      ]
+    },
+    {
+      "spell": 1479,
+      "name": "Aura of Hermetic Link Self V",
+      "line": "Hermetic Link",
+      "level": 5,
+      "power": 200,
+      "scroll_wcid": 2891,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20211,
+          "create_list": 77810
+        },
+        {
+          "wcid": 30027,
+          "create_list": 80400
+        }
+      ]
+    },
+    {
+      "spell": 1480,
+      "name": "Aura of Hermetic Link Self VI",
+      "line": "Hermetic Link",
+      "level": 6,
+      "power": 250,
+      "scroll_wcid": 2892,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20212,
+          "create_list": 77850
+        },
+        {
+          "wcid": 30028,
+          "create_list": 80440
+        }
+      ]
+    },
+    {
+      "spell": 1599,
+      "name": "Aura of Defender Self I",
+      "line": "Defender",
+      "level": 1,
+      "power": 1,
+      "scroll_wcid": 1880,
+      "scroll_value": 1,
+      "sellers": [
+        {
+          "wcid": 20215,
+          "create_list": 77975
+        },
+        {
+          "wcid": 30009,
+          "create_list": 78996
+        }
+      ]
+    },
+    {
+      "spell": 1601,
+      "name": "Aura of Defender Self II",
+      "line": "Defender",
+      "level": 2,
+      "power": 50,
+      "scroll_wcid": 2807,
+      "scroll_value": 5,
+      "sellers": [
+        {
+          "wcid": 20216,
+          "create_list": 78038
+        },
+        {
+          "wcid": 30010,
+          "create_list": 79055
+        }
+      ]
+    },
+    {
+      "spell": 1602,
+      "name": "Aura of Defender Self III",
+      "line": "Defender",
+      "level": 3,
+      "power": 100,
+      "scroll_wcid": 2808,
+      "scroll_value": 20,
+      "sellers": [
+        {
+          "wcid": 20213,
+          "create_list": 77883
+        },
+        {
+          "wcid": 30029,
+          "create_list": 80473
+        }
+      ]
+    },
+    {
+      "spell": 1603,
+      "name": "Aura of Defender Self IV",
+      "line": "Defender",
+      "level": 4,
+      "power": 150,
+      "scroll_wcid": 2809,
+      "scroll_value": 100,
+      "sellers": [
+        {
+          "wcid": 20214,
+          "create_list": 77931
+        }
+      ]
+    },
+    {
+      "spell": 1604,
+      "name": "Aura of Defender Self V",
+      "line": "Defender",
+      "level": 5,
+      "power": 200,
+      "scroll_wcid": 2810,
+      "scroll_value": 200,
+      "sellers": [
+        {
+          "wcid": 20211,
+          "create_list": 77800
+        },
+        {
+          "wcid": 30027,
+          "create_list": 80390
+        }
+      ]
+    },
+    {
+      "spell": 1605,
+      "name": "Aura of Defender Self VI",
+      "line": "Defender",
+      "level": 6,
+      "power": 250,
+      "scroll_wcid": 2811,
+      "scroll_value": 1000,
+      "sellers": [
+        {
+          "wcid": 20212,
+          "create_list": 77840
+        },
+        {
+          "wcid": 30028,
+          "create_list": 80430
+        }
+      ]
+    }
+  ],
+  "scarab_sellers": [
+    {
+      "wcid": 2314,
+      "name": "Zisaha bint Jaidka the Mage",
+      "sell_rate": 1.8,
+      "sells": [
+        {
+          "wcid": 690,
+          "name": "Pyreal Scarab",
+          "value": 1000,
+          "create_list": 70986
+        },
+        {
+          "wcid": 8897,
+          "name": "Platinum Scarab",
+          "value": 10000,
+          "create_list": 70987
+        }
+      ],
+      "instances": [
+        {
+          "town": "Fort Tethana",
+          "guid": "0x72481001",
+          "cell": "0x24810102",
+          "point": {
+            "x": 85.0908,
+            "y": 132.949,
+            "z": 219.245
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 1824,
+      "name": "Archmage Sammam al-Ashiz",
+      "sell_rate": 1.55,
+      "sells": [
+        {
+          "wcid": 690,
+          "name": "Pyreal Scarab",
+          "value": 1000,
+          "create_list": 68791
+        },
+        {
+          "wcid": 8897,
+          "name": "Platinum Scarab",
+          "value": 10000,
+          "create_list": 68792
+        }
+      ],
+      "instances": [
+        {
+          "town": "Uziz",
+          "guid": "0x7A260006",
+          "cell": "0xA2600112",
+          "point": {
+            "x": 182.987,
+            "y": 40.1413,
+            "z": 17.205
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 2290,
+      "name": "Archmage Tawa Matema",
+      "sell_rate": 1.55,
+      "sells": [
+        {
+          "wcid": 690,
+          "name": "Pyreal Scarab",
+          "value": 1000,
+          "create_list": 70346
+        },
+        {
+          "wcid": 8897,
+          "name": "Platinum Scarab",
+          "value": 10000,
+          "create_list": 70347
+        }
+      ],
+      "instances": [
+        {
+          "town": "Sawato",
+          "guid": "0x7C95B01C",
+          "cell": "0xC95B0142",
+          "point": {
+            "x": 172.677,
+            "y": 179.644,
+            "z": 13.605
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 5646,
+      "name": "Archmage Philomon",
+      "sell_rate": 1.7,
+      "sells": [
+        {
+          "wcid": 690,
+          "name": "Pyreal Scarab",
+          "value": 1000,
+          "create_list": 26515
+        },
+        {
+          "wcid": 8897,
+          "name": "Platinum Scarab",
+          "value": 10000,
+          "create_list": 26516
+        }
+      ],
+      "instances": [
+        {
+          "town": "Neydisa",
+          "guid": "0x795D6007",
+          "cell": "0x95D6012B",
+          "point": {
+            "x": 106.807,
+            "y": 65.6681,
+            "z": 100.005
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 9414,
+      "name": "Kifandal the Imbuer",
+      "sell_rate": 1.7,
+      "sells": [
+        {
+          "wcid": 690,
+          "name": "Pyreal Scarab",
+          "value": 1000,
+          "create_list": 75059
+        },
+        {
+          "wcid": 8897,
+          "name": "Platinum Scarab",
+          "value": 10000,
+          "create_list": 75060
+        }
+      ],
+      "instances": [
+        {
+          "town": "Linvak Tukal",
+          "guid": "0x7A21E005",
+          "cell": "0xA21E015F",
+          "point": {
+            "x": 56.0835,
+            "y": 104.781,
+            "z": 639.555
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 11400,
+      "name": "Aun Dreganaua the Elder Shaman",
+      "sell_rate": 1.7,
+      "sells": [
+        {
+          "wcid": 690,
+          "name": "Pyreal Scarab",
+          "value": 1000,
+          "create_list": 76481
+        },
+        {
+          "wcid": 8897,
+          "name": "Platinum Scarab",
+          "value": 10000,
+          "create_list": 76482
+        }
+      ],
+      "instances": [
+        {
+          "town": "Timaru",
+          "guid": "0x71DB601A",
+          "cell": "0x1DB60000",
+          "point": {
+            "x": 150.216,
+            "y": 131.888,
+            "z": 120.007
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 30049,
+      "name": "Fiun Archmage",
+      "sell_rate": 1.8,
+      "sells": [
+        {
+          "wcid": 690,
+          "name": "Pyreal Scarab",
+          "value": 1000,
+          "create_list": 81151
+        },
+        {
+          "wcid": 8897,
+          "name": "Platinum Scarab",
+          "value": 10000,
+          "create_list": 81152
+        }
+      ],
+      "instances": [
+        {
+          "town": "Fiun",
+          "guid": "0x738F7002",
+          "cell": "0x38F70100",
+          "point": {
+            "x": 103.523,
+            "y": 9.38596,
+            "z": 2.21048
+          }
+        }
+      ]
+    },
+    {
+      "wcid": 35730,
+      "name": "Janier al-Evv",
+      "sell_rate": 1.25,
+      "sells": [
+        {
+          "wcid": 690,
+          "name": "Pyreal Scarab",
+          "value": 1000,
+          "create_list": 83444
+        }
+      ],
+      "instances": [
+        {
+          "town": "Xarabydun",
+          "guid": "0x7934B068",
+          "cell": "0x934B0121",
+          "point": {
+            "x": 41.9543,
+            "y": 34.1705,
+            "z": 14.005
+          }
+        }
+      ]
+    }
+  ],
+  "foci": [
+    { "wcid": 15268, "name": "Foci of Enchantment", "school": "CreatureEnchantment", "value": 500, "burden": 400, "sellers": [ { "vendor": 20205, "create_list": 76977 } ] },
+    { "wcid": 15269, "name": "Foci of Artifice", "school": "ItemEnchantment", "value": 500, "burden": 400, "sellers": [ { "vendor": 20215, "create_list": 77964 } ] },
+    { "wcid": 15270, "name": "Foci of Verdancy", "school": "LifeMagic", "value": 500, "burden": 400, "sellers": [ { "vendor": 20217, "create_list": 33572 } ] },
+    { "wcid": 15271, "name": "Foci of Strife", "school": "WarMagic", "value": 500, "burden": 400, "sellers": [ { "vendor": 20215, "create_list": 77965 } ] }
+  ]
+}

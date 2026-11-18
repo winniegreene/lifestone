@@ -90,6 +90,38 @@ public sealed class GearKitTests(DatSetFixture fixture, ITestOutputHelper output
     }
 
     [RequiresDatsFact]
+    public void The_kit_list_reads_the_account_formula_for_a_school_without_its_focus_and_the_foci_formula_when_it_is_held_M6_3_a2()
+    {
+        // m6-kit-account-formula closed: with a focus test, a school whose focus is not held burns AccountFormula's components; every focus held is the foci formula unchanged (the den's mage).
+        var spells = SpellTableData.Load(fixture.Dats).Spells;
+        var den = Lifestone.Client.Session.Grounds.GroundCatalog.Get(FightOptions.DefaultGround);
+        var today = GearKit.CastBurns(den, spells, heroRing: false);
+        Assert.Equal(today, GearKit.CastBurns(den, spells, heroRing: false, Account, _ => true));
+        Assert.Equal(today, GearKit.CastBurns(den, spells, heroRing: false, null, _ => false)); // no account name: the foci formula, as before
+
+        // A focus-less character: the first school's cast is read on the account formula (AccountFormula.Counts); the den's stock holds no such component, so the kit fails by name (a profile gap, never a silent guess).
+        var gap = Assert.Throws<InvalidOperationException>(() => GearKit.CastBurns(den, spells, heroRing: false, Account, _ => false));
+        Assert.Contains("ground-plan-gap", gap.Message, StringComparison.Ordinal);
+        Assert.Contains("the account's full formula (no focus of the school held)", gap.Message, StringComparison.Ordinal); // M6 6 MG (m6-kit-account-gap-text): the message names the formula that was read
+        Assert.DoesNotContain("TODO(m6-kit-account-gap-text)", gap.Message, StringComparison.Ordinal);
+    }
+
+    [RequiresDatsFact]
+    public void M6_6_MG_the_kit_build_passes_the_focus_test_through_and_the_gap_names_the_foci_formula_when_that_is_the_one_read()
+    {
+        var spells = SpellTableData.Load(fixture.Dats).Spells;
+        var den = Lifestone.Client.Session.Grounds.GroundCatalog.Get(FightOptions.DefaultGround);
+        var held = GearKit.Build(spells, Account, ground: den, holdsFocus: _ => true); // every focus held: the foci formula, the kit as it is today
+        Assert.Equal(KitFor(Account).Burden, held.Burden);
+        var gap = Assert.Throws<InvalidOperationException>(() => GearKit.Build(spells, Account, ground: den, holdsFocus: _ => false));
+        Assert.Contains("the account's full formula", gap.Message, StringComparison.Ordinal);
+
+        var noFocus = den with { Supplies = den.Supplies with { Stock = [.. den.Supplies.Stock.Where(l => l.Wcid is 686)] } }; // a ground whose stock lacks the foci formula's lines: the foci formula's gap
+        var fociGap = Assert.Throws<InvalidOperationException>(() => GearKit.CastBurns(noFocus, spells, heroRing: false));
+        Assert.Contains("on the foci formula", fociGap.Message, StringComparison.Ordinal);
+    }
+
+    [RequiresDatsFact]
     public void The_kit_stays_well_under_the_burden_capacity_and_the_pack_slots_and_the_numbers_are_printed()
     {
         var kit = KitFor(Account);
@@ -190,6 +222,128 @@ public sealed class GearKitTests(DatSetFixture fixture, ITestOutputHelper output
     {
         var e = Assert.Throws<KeyNotFoundException>(() => GearKit.Build(new Dictionary<uint, SpellInfo>(), Account));
         Assert.Contains("is not in the SpellTable", e.Message, StringComparison.Ordinal);
+    }
+
+    [RequiresDatsTheory]
+    [InlineData("tusker-burrow")]
+    [InlineData("cave-of-alabree")]
+    public void A_ground_with_no_vendor_kit_fails_by_name_and_a_stock_only_plan_is_the_foci_and_the_stock_M6_5(string key)
+    {
+        // M6 5 round 1 (TODO(m6-loopback-burrow-kit) closed): the Throwaway loopbacks grant a kit-less ground's foci and stock; every play caller still fails by name.
+        var spells = SpellTableData.Load(fixture.Dats).Spells;
+        var ground = Lifestone.Client.Session.Grounds.GroundCatalog.Get(key);
+        var gap = Assert.Throws<InvalidOperationException>(() => GearKit.KitPlan.For(ground, spells, Account));
+        Assert.Contains("ground-plan-gap", gap.Message, StringComparison.Ordinal);
+        var plan = GearKit.KitPlan.For(ground, spells, Account, stockOnly: true);
+        output.WriteLine(plan.Kit.Describe() + " " + plan.LoadLine);
+        Assert.Equal("Wand", Assert.Single(plan.Kit.Items, i => i.Kind == GearKind.Wand).Name); // round 2: ACE's magic mode needs a wielded caster
+        Assert.DoesNotContain(plan.Kit.Items, i => i.Kind == GearKind.Armour);
+        Assert.Equal(4, plan.Kit.Items.Count(i => i.Kind == GearKind.Focus));
+        Assert.Equal(ground.Supplies.Stock.Count, plan.Kit.Items.Count(i => i.Kind == GearKind.Component));
+        Assert.Equal("skipped", MageBuildScenario.TieIntent(plan, endSession: true)); // round 2: no build-time tie on a low rung (a level-10 mage fizzles Primary Portal Tie)
+    }
+
+    /// <summary>M6 7 K (round 1c): the level-32 Throwaway's kit on the Cave of Alabree carries the bolt its fight picks off the ground's plan: one line beyond the stock, the stock's lines unchanged, and only a stock-only plan may ask.</summary>
+    [RequiresDatsFact]
+    public void A_stock_only_plan_carries_the_off_plan_bolts_scarab_beside_the_stock_M6_7_K()
+    {
+        var spells = SpellTableData.Load(fixture.Dats).Spells;
+        var ground = Lifestone.Client.Session.Grounds.GroundCatalog.Get("cave-of-alabree");
+        var boltIV = ArenaProfile.LineNamed(ArenaProfile.WarLineName)!.Spells[3].Id;
+        var plain = GearKit.KitPlan.For(ground, spells, Account, stockOnly: true);
+        var plan = GearKit.KitPlan.For(ground, spells, Account, stockOnly: true, offPlan: new GearKit.OffPlanBolts([boltIV], 60));
+        output.WriteLine(plan.Kit.Describe() + " " + plan.LoadLine);
+        var added = Assert.Single(plan.Kit.Items.Where(i => i.Kind == GearKind.Component).ExceptBy(plain.Kit.Items.Select(i => i.Wcid), i => i.Wcid));
+        Assert.Equal(ground.Supplies.Stock.Count + 1, plan.Kit.Items.Count(i => i.Kind == GearKind.Component));
+        Assert.Equal(60, added.Stack);
+        foreach (var (component, _) in GearKit.FociFormulaCounts(spells[boltIV].Formula))
+        {
+            Assert.True(ComponentWeenies.TryGetByComponent(component, out var weenie));
+            Assert.Contains(plan.Kit.Items, i => i.Wcid == weenie.Wcid); // the pack the fight judges pays for the bolt
+        }
+
+        var den = Lifestone.Client.Session.Grounds.GroundCatalog.Get(FightOptions.DefaultGround);
+        var refused = Assert.Throws<InvalidOperationException>(() => GearKit.KitPlan.For(den, spells, Account, offPlan: new GearKit.OffPlanBolts([boltIV], 60)));
+        Assert.Contains("play grants nothing", refused.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// M6 7 AV (live, 2026-11-06: Lifestone Recall refused 0x0400): what Lifestone Recall (1635) casts in an account's formula (the tapers' colours depend on the account; the rest does not): Copper Scarab, Comfrey, Powdered Malachite, Turpeth, Rowan Talisman and three tapers. Comfrey and Powdered Malachite
+    /// are on no ground's stock line (the Holtburg outskirts' is read here), so a trip's restock cannot buy them: <c>TODO(m6-recall-components-stock)</c>, pinned so the day a line is added this test says so.
+    /// </summary>
+    [RequiresDatsFact]
+    public void Lifestone_Recalls_components_and_the_two_the_outskirts_stock_lacks_M6_7_AV()
+    {
+        var spells = SpellTableData.Load(fixture.Dats).Spells;
+        var recall = spells[1635];
+        var formula = SpellFormulaRules.CustomizeForAccount(recall.Formula, recall.FormulaVersion, Account);
+        var ground = Lifestone.Client.Session.Grounds.GroundCatalog.Get("holtburg-outskirts");
+        var lacking = new List<string>();
+        var all = new List<string>();
+        foreach (var id in formula.Where(c => c != 0).Distinct())
+        {
+            Assert.True(ComponentWeenies.TryGetByComponent(id, out var weenie), "component " + id);
+            all.Add(weenie.Name);
+            if (ground.Supplies.StockOf(weenie.Wcid) is null)
+            {
+                lacking.Add(weenie.Name);
+            }
+        }
+
+        output.WriteLine("Lifestone Recall casts: " + string.Join(", ", all) + "; not stock lines: " + string.Join(", ", lacking));
+        Assert.Contains("Comfrey", all);
+        Assert.Equal(["Comfrey", "Powdered Malachite"], lacking.Order().ToArray());
+    }
+
+    /// <summary>M6 7 K: a component a stock line already holds adds no line; the slots of a cast multiply the casts; the stack caps the count; a spell the table lacks fails by name. No dats.</summary>
+    [Fact]
+    public void The_off_plan_lines_are_only_what_the_stock_lacks_M6_7_K()
+    {
+        var ground = Lifestone.Client.Session.Grounds.GroundCatalog.Get("cave-of-alabree");
+        SpellInfo Bolt(uint id, params uint[] formula) => WorldActionRig.Spell(id, DatReaderWriter.Enums.SpellType.Projectile) with { Name = "Bolt " + id, Formula = formula };
+        var spells = new Dictionary<uint, SpellInfo> { [1] = Bolt(1, 2, 0, 0, 0, 0, 0, 0, 0), [2] = Bolt(2, 4, 0, 0, 0, 0, 0, 0, 0), [3] = Bolt(3, 4, 4, 0, 0, 0, 0, 0, 0) };
+
+        var ok = new GearKit.OffPlanBolts([1, 2, 3], 10).Lines(spells, ground);
+        var line = Assert.Single(ok, l => ground.Supplies.StockOf(l.Wcid) is null);
+        Assert.Equal(ok.Count, ok.Count(l => ground.Supplies.StockOf(l.Wcid) is null));
+        Assert.True(ComponentWeenies.TryGetByComponent(line.Component, out var weenie));
+        Assert.Equal(weenie.Wcid, line.Wcid);
+        Assert.Equal(Math.Min(20, weenie.MaxStack), line.Count); // bolt 3 has two slots of it
+
+        Assert.Throws<KeyNotFoundException>(() => new GearKit.OffPlanBolts([9], 10).Lines(spells, ground));
+    }
+
+    [RequiresDatsFact]
+    public void A_withheld_spell_burns_nothing_so_the_outskirts_stock_only_plan_builds_without_the_recall_scarab_M6_6()
+    {
+        // M6 6 live round 2: the low-rung death loopback withholds Lifestone Recall (1635). M6 7 AR: the Copper Scarab is an outskirts stock line now (the III lines), so the plan builds with or without the withheld spells.
+        var spells = SpellTableData.Load(fixture.Dats).Spells;
+        var ground = Lifestone.Client.Session.Grounds.GroundCatalog.Get("holtburg-outskirts");
+        Assert.Equal(1, ground.Supplies.StockOf(686)!.StopUnder);
+        var plan = GearKit.KitPlan.For(ground, spells, Account, stockOnly: true, withheld: [Lifestone.Client.Session.Fighter.RecallHome.LifestoneRecallSpell, Lifestone.Client.Session.Scenarios.Journey.BindStation.LifestoneTieSpell]); // the tie is skipped without the recall (tied=skipped)
+        output.WriteLine(plan.Kit.Describe() + " " + plan.LoadLine);
+        Assert.Equal(4, plan.Kit.Items.Count(i => i.Kind == GearKind.Focus));
+    }
+
+    [RequiresDatsFact]
+    public void Lifestone_Recall_on_the_foci_formula_burns_only_stocked_outskirts_lines_M6_7_BC()
+    {
+        // M6 7 BC (gate A climb 19): the climber holds the four foci, so ACE casts Lifestone Recall on the foci formula (Player.HasFoci, Player_Spells.cs:458-488 @95ef426d): the Copper Scarab and Prismatic Tapers, never the full
+        // formula's Comfrey, Powdered Malachite, Turpeth and Rowan Talisman. Each is a stock line of the outskirts that holds a cast's worth. TODO(m6-recall-components-stock): the full formula's Comfrey 767 and Powdered Malachite 788
+        // (Cindrue sells both, world SQL) have no stock line, which only a climber that lost a focus would need.
+        var spells = SpellTableData.Load(fixture.Dats).Spells;
+        var ground = Lifestone.Client.Session.Grounds.GroundCatalog.Get("holtburg-outskirts");
+        var recall = spells[Lifestone.Client.Session.Fighter.RecallHome.LifestoneRecallSpell];
+        var counts = GearKit.FociFormulaCounts(recall.Formula);
+        Assert.NotEmpty(counts);
+        foreach (var (component, n) in counts)
+        {
+            Assert.True(ComponentWeenies.TryGetByComponent(component, out var weenie), $"component {component}");
+            var stock = ground.Supplies.StockOf(weenie.Wcid);
+            Assert.True(stock is not null && stock.StopUnder >= n, $"{weenie.Name} x{n} on the foci formula needs an outskirts stock line that holds it");
+        }
+
+        Assert.Contains(counts.Keys, c => ComponentWeenies.TryGetByComponent(c, out var w) && w.Wcid == 686);
     }
 
     // ---------------------------------------------------------------- PlayerTools.SpawnGear against the offline stand-in
@@ -619,6 +773,71 @@ public sealed class GearKitTests(DatSetFixture fixture, ITestOutputHelper output
     {
         // Player_Spells.cs 451-457: Enchantment, Artifice, Verdancy, Strife, Shadow.
         Assert.Equal([15268u, 15269u, 15270u, 15271u, 43173u], GearKit.FociWcids);
+    }
+
+    /// <summary>M6 2 b (the map's finding 4): the gear floor's lines (a Wand, a robe, a charge) are the resupply's, never <c>supplies.kit</c>: the outskirts stay kit-less, so the kit-less death keeps <c>rearm=corpse</c> or <c>none</c>.</summary>
+    [Fact]
+    public void M6_2_b_HasNoKit_stays_true_for_the_outskirts_with_floor_lines_planned_and_the_kit_is_Bare()
+    {
+        var ground = Lifestone.Client.Session.Grounds.GroundCatalog.Get("holtburg-outskirts");
+        var plan = GearFloor.Plan(ground, new GearFloorState(10, 0, false, null, 10_000), GearFloor.FloorLevel(Lifestone.Client.Session.Grounds.LadderLoader.WarMage));
+
+        Assert.Equal(3, plan.Lines.Count); // two Wands and the hooded robe
+        Assert.Empty(ground.Supplies.Kit);
+        Assert.True(GearKit.HasNoKit(ground));
+        Assert.Same(GearKit.Bare, GearKit.BuildFor(new Dictionary<uint, SpellInfo>(), "kit-test-account", ground));
+        Assert.All(plan.Lines, l => Assert.Null(ground.Supplies.KitOf(l.Wcid)));
+    }
+
+    /// <summary>M6 3 F1 (review 3-R1): every ground a non-pending rung or live alternate of the war mage's ladder names builds a kit through <see cref="GearKit.BuildFor"/> (the bare kit for a profile with no kit, dungeon or outdoor); before the fix nine dungeons threw <c>ground-plan-gap</c>.</summary>
+    [RequiresDatsFact]
+    public void M6_3_F1_BuildFor_builds_a_kit_for_the_ground_of_every_live_rung_and_alternate()
+    {
+        var keys = new List<string>();
+        foreach (var rung in Lifestone.Client.Session.Grounds.LadderLoader.WarMage.Rungs.Where(r => !r.Pending && r.GroundKey is not null))
+        {
+            keys.Add(rung.GroundKey!);
+            keys.AddRange(rung.Alternates.Where(a => !a.Pending).Select(a => a.GroundKey));
+        }
+
+        Assert.Contains("tusker-lodge", keys); // M6 7 AC: the Burrow rung is dropped; its kit-less dungeon is still built below (the dungeon test) and by the catalog case
+        Assert.Contains("tusker-holding", keys);
+        foreach (var key in keys.Distinct())
+        {
+            var ground = Lifestone.Client.Session.Grounds.GroundCatalog.Get(key);
+            var kit = GearKit.BuildFor(SpellTableData.Load(fixture.Dats).Spells, "kit-test-account", ground);
+            if (ground.Supplies.Kit.Count == 0)
+            {
+                Assert.Same(GearKit.Bare, kit);
+                Assert.True(GearKit.HasNoKit(ground), key);
+            }
+            else
+            {
+                Assert.False(GearKit.HasNoKit(ground), key);
+            }
+        }
+    }
+
+    /// <summary>M6 3 F1 (3-R1): a dungeon whose profile lists no kit is kit-less like an outdoor ground, and the Build rules stand for a ground that has one.</summary>
+    [Fact]
+    public void M6_3_F1_HasNoKit_reads_the_profile_not_the_ground_kind()
+    {
+        var dungeon = Lifestone.Client.Session.Grounds.GroundCatalog.Get("tusker-burrow");
+        Assert.Empty(dungeon.Supplies.Kit);
+        Assert.False(Lifestone.Client.Session.Grounds.FightTargets.IsOutdoorFight(dungeon));
+        Assert.True(GearKit.HasNoKit(dungeon));
+        Assert.Throws<InvalidOperationException>(() => GearKit.Build(new Dictionary<uint, SpellInfo>(), "kit-test-account", ground: dungeon));
+        Assert.False(GearKit.HasNoKit(Lifestone.Client.Session.Grounds.GroundCatalog.Get(FightOptions.DefaultGround)));
+    }
+
+    /// <summary>M6 2 b: the floor's weenie lookup never throws: a supply weenie (the Wand, the robes) or null (a component, a charge, a note).</summary>
+    [Fact]
+    public void M6_2_b_FloorWeenieOf_reads_the_supply_weenies_and_is_null_for_anything_else()
+    {
+        Assert.Equal((GearKit.ItemTypeCaster, 200), (GearKit.FloorWeenieOf(2472)!.ItemType, GearKit.FloorWeenieOf(2472)!.Value));
+        Assert.Equal((EquipMask)0x7F01, GearKit.FloorWeenieOf(5851)!.ValidLocations);
+        Assert.Null(GearKit.FloorWeenieOf(20631));
+        Assert.Null(GearKit.FloorWeenieOf(4615));
     }
 }
 

@@ -65,6 +65,12 @@ public enum CastEnd : byte
     /// walk and never out of range: the caller picks another at once.
     /// </summary>
     TargetDied,
+
+    /// <summary>
+    /// M6 14 airborne: the body stayed in the air past <see cref="CastAttempt.MaxAirSeconds"/> (the attempt's wait for the landing: no try is sent while the body is in the air, and ACE's 0x04EB YouCantDoThatWhileInTheAir is a wait,
+    /// never a try, <c>Player_Magic.cs</c>:105-109 @95ef426d). It names the moment, not the spell: never a refusal or a miss, and no rule demotes, drops or sets a spell aside for it; the caller decides again.
+    /// </summary>
+    InTheAir,
 }
 
 /// <summary>Helpers over <see cref="CastEnd"/>.</summary>
@@ -99,6 +105,7 @@ public static class CastEndExtensions
         CastEnd.Timeout => "timeout",
         CastEnd.TimeCap => "time-cap",
         CastEnd.ServerError => "server-error",
+        CastEnd.InTheAir => "in-the-air",
         _ => "not-implemented",
     };
 }
@@ -157,6 +164,12 @@ public readonly record struct CastReport
     /// <summary>The Sent casts the proof proved.</summary>
     public int Proved { get; init; }
 
+    /// <summary>M6 14 airborne: the casts ACE answered 0x04EB (the body was in the air when the cast reached it); not tries (<see cref="Tries"/> leaves them out), each sent again once the body stood.</summary>
+    public int AirRefusals { get; init; }
+
+    /// <summary>M6 14 airborne: the seconds the attempt held its next try for the air (the body in the air, or the spacing after a 0x04EB); left out of the rules' <see cref="CastRules.MaxSeconds"/>.</summary>
+    public double AirSeconds { get; init; }
+
     /// <summary>The seconds from the start to the end (to now while it runs).</summary>
     public double Seconds { get; init; }
 
@@ -206,6 +219,9 @@ public sealed class CastTally
     /// <summary>The proofs.</summary>
     public int Proved { get; private set; }
 
+    /// <summary>M6 14 airborne: the 0x04EB answers (the body was in the air), none of them a try; report-only, not in <see cref="Fields"/>.</summary>
+    public int AirRefusals { get; private set; }
+
     /// <summary>The attempts' seconds in all.</summary>
     public double Seconds { get; private set; }
 
@@ -240,13 +256,14 @@ public sealed class CastTally
         Busy += report.Busy;
         Resists += report.Resists;
         Proved += report.Proved;
+        AirRefusals += report.AirRefusals;
         Seconds += report.Seconds;
     }
 
     /// <summary>Clears every count.</summary>
     public void Clear()
     {
-        Attempts = Landed = Unproven = Failed = Tries = Fizzles = ManaTries = ManaRefusals = ManaLanded = Busy = Resists = Proved = 0;
+        Attempts = Landed = Unproven = Failed = Tries = Fizzles = ManaTries = ManaRefusals = ManaLanded = Busy = Resists = Proved = AirRefusals = 0;
         Seconds = 0;
     }
 

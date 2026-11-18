@@ -24,7 +24,7 @@ public sealed partial class OptionCatalogTests
     /// The source files that may parse options: every script of Lifestone.Game, Lifestone.Client's parser files
     /// (*Options.cs, *Arguments.cs) outside src/Lifestone.Client/Options/ - which holds every option literal of the
     /// registry, so scanning it would make <see cref="Every_registered_option_is_read_by_some_parser"/> pass by itself - and
-    /// every file of Lifestone.Headless. Build output (bin/, obj/) is skipped.
+    /// every file of Lifestone.Headless and Lifestone.WorldWalk. Build output (bin/, obj/) is skipped.
     /// </summary>
     private static IEnumerable<(string File, string Text)> ParserSources()
     {
@@ -33,7 +33,8 @@ public sealed partial class OptionCatalogTests
             .Where(f => !f.StartsWith("src/Lifestone.Client/Options/", StringComparison.Ordinal))
             .Where(IsParserFile);
         var headless = SourceFiles("src", "Lifestone.Headless");
-        return game.Concat(client).Concat(headless).Select(f => (f, File.ReadAllText(RepositoryFiles.PathOf(f))));
+        var worldWalk = SourceFiles("src", "Lifestone.WorldWalk");
+        return game.Concat(client).Concat(headless).Concat(worldWalk).Select(f => (f, File.ReadAllText(RepositoryFiles.PathOf(f))));
     }
 
     /// <summary>The .cs files under a source folder, as repository-relative paths with forward slashes, without bin/ and obj/.</summary>
@@ -266,7 +267,7 @@ public sealed partial class OptionCatalogTests
         // OptionScenes.All keeps its meaning: the three Godot scenes, not the headless host.
         Assert.Equal(OptionScenes.None, OptionScenes.All & OptionScenes.Headless);
         Assert.Equal(OptionScenes.All, registry.ScenesOf("--screenshot"));
-        Assert.Equal(OptionScenes.All | OptionScenes.Headless, registry.ScenesOf("--dat-dir"));
+        Assert.Equal(OptionScenes.All | OptionScenes.Headless | OptionScenes.WorldWalk, registry.ScenesOf("--dat-dir"));
     }
 
     [Fact]

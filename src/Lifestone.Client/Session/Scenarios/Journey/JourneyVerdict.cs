@@ -34,8 +34,18 @@ public sealed class JourneyVerdict
     /// <param name="planned">The plan's station count (the <c>m</c> of <c>stations=n/m</c>).</param>
     public JourneyVerdict(int planned) => Planned = planned;
 
-    /// <summary>The plan's station count.</summary>
-    public int Planned { get; }
+    /// <summary>The station count the journey expects: the plan's, plus each station it inserted (a death station after a station that died). Counting the inserted ones keeps <c>stations=n/m</c> truthful: <c>m</c> is every station that had to end, so <see cref="Ok"/> can hold.</summary>
+    public int Planned { get; private set; }
+
+    /// <summary>The stations the journey inserted beyond its plan (6-D10): <c>inserted=</c> on the done line when above zero.</summary>
+    public int Inserted { get; private set; }
+
+    /// <summary>A station was inserted into the run: it counts in <see cref="Planned"/> and in <see cref="Inserted"/>.</summary>
+    public void NoteInserted()
+    {
+        Planned++;
+        Inserted++;
+    }
 
     /// <summary>The results so far, in order.</summary>
     public IReadOnlyList<JourneyStationResult> Stations => _stations;
@@ -122,7 +132,7 @@ public sealed class JourneyVerdict
         var failed = _stations.Where(r => r.Skipped is null && !r.Ok).Select(r => r.Name).ToList();
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"journey done ok={Bool(Ok(facts))} name={name} stations={_stations.Count(r => r.Ok)}/{Planned} failed={(failed.Count == 0 ? "none" : string.Join(',', failed))} teleports={facts.Teleports} recalls={facts.Recalls} budget={facts.TeleportBudget} route_m={routeMetres:0.0} run_s={runSeconds:0.0} rungs={rungs} blocked={blocked} sightless={sightless} vitals_passes={VitalsPasses} recovery_places={RecoveryPlaces} granted={facts.Verbs.Granted} places={facts.Verbs.Place} recovery_place={RecoveryPlace} recovery={Recovery}");
+            $"journey done ok={Bool(Ok(facts))} name={name} stations={_stations.Count(r => r.Ok)}/{Planned}{(Inserted > 0 ? string.Create(CultureInfo.InvariantCulture, $" inserted={Inserted}") : string.Empty)} failed={(failed.Count == 0 ? "none" : string.Join(',', failed))} teleports={facts.Teleports} recalls={facts.Recalls} budget={facts.TeleportBudget} route_m={routeMetres:0.0} run_s={runSeconds:0.0} rungs={rungs} blocked={blocked} sightless={sightless} vitals_passes={VitalsPasses} recovery_places={RecoveryPlaces} granted={facts.Verbs.Granted} places={facts.Verbs.Place} recovery_place={RecoveryPlace} recovery={Recovery}");
     }
 
     /// <summary>A sentence as one line token: whitespace to underscores, at most <see cref="MaxWhyLength"/> characters.</summary>

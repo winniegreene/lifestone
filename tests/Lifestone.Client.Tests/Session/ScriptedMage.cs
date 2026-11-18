@@ -69,6 +69,7 @@ internal sealed class ScriptedMage
     internal static readonly IReadOnlyDictionary<uint, int> AceTrainedCost = new Dictionary<uint, int>
     {
         [6] = 10, [15] = 12, [16] = 6, [21] = 6, [22] = 4, [24] = 4, [31] = 8, [32] = 8, [33] = 12, [34] = 16,
+        [38] = 6, // M6 14: Alchemy, the climber's last credit line (the dats' 6: SkillCreditTests)
     };
 
     public string Name { get; }
@@ -264,7 +265,7 @@ internal sealed class ScriptedMage
         {
             Ints = [.. baseline.Ints.Where(p => p.Key is not (CreditsKey or LevelKey)), (CreditsKey, Credits), (LevelKey, Level)],
             Int64s = [(TotalExperienceKey, Total), (AvailableExperienceKey, Available)],
-            Attributes = [.. Enumerable.Range(0, 6).Select(i => (_attributeRanks[i], MageTemplate.CreationValue((uint)i + 1), _attributeExperience[i]))],
+            Attributes = [.. Enumerable.Range(0, 6).Select(i => (_attributeRanks[i], MageTemplate.ClimberCreationValue(Name, (uint)i + 1), _attributeExperience[i]))],
             Vitals = [.. Enumerable.Range(0, 3).Select(i => (_vitalRanks[i], 0u, _vitalExperience[i], CurrentOf(i)))],
             Skills = [.. _skills.Select(s => new AceSkill(s.Key, s.Value.Ranks, s.Value.Class, s.Value.Experience, 0))],
             Spells = [.. Known.Select(id => (int)id)],
@@ -292,7 +293,7 @@ internal sealed class ScriptedMage
     /// </summary>
     private uint VitalMax(int vital)
     {
-        uint Attribute(uint id) => MageTemplate.CreationValue(id) + _attributeRanks[id - 1];
+        uint Attribute(uint id) => MageTemplate.ClimberCreationValue(Name, id) + _attributeRanks[id - 1];
         var bonus = vital switch
         {
             0 => (Attribute(PlayerQualities.EnduranceAttributeId) + 1) / 2,
@@ -346,7 +347,7 @@ internal sealed class ScriptedMage
                 _attributeRanks[a] = (uint)RankFor(_table.AttributeXpList, _attributeExperience[a]);
                 Available -= amount;
                 Send(AceWireWriters.PrivateUpdatePropertyInt64(++_sequence, AvailableExperienceKey, Available));
-                Send(AceWireWriters.PrivateUpdateAttribute(++_sequence, id, _attributeRanks[a], MageTemplate.CreationValue(id), _attributeExperience[a]));
+                Send(AceWireWriters.PrivateUpdateAttribute(++_sequence, id, _attributeRanks[a], MageTemplate.ClimberCreationValue(Name, id), _attributeExperience[a]));
                 break;
             case GameActionTypes.RaiseVital when id is MageTemplate.MaxHealth or MageTemplate.MaxStamina or MageTemplate.MaxMana:
                 if (Dropped.Contains((MageStatKind.Vital, id)) || amount == 0 || amount > Available)

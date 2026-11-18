@@ -75,6 +75,22 @@ public sealed record SessionOptions
     /// </summary>
     public bool RetailNet { get; init; }
 
+    /// <summary>True for <c>--allow-climber-grant</c> (M6 0 F5, 0-R4; D34): the session may grant or place the climber Winnie, which the player tools otherwise refuse by name (TODO m6-climber-no-grant). Default off.</summary>
+    public bool AllowClimberGrant { get; init; }
+
+    /// <summary>
+    /// False for <c>--autopilot-player-rules=off</c> (M6 item 15; default on): the session's automation casts only spells that are on a spell bar and drinks only from the shortcut bar, as a person does
+    /// (<see cref="GameSession.PlayerRules"/>). The option is listed with the autopilot's (OptionCatalog.Autopilot) and read here because the rule is the session's: every automated path passes it, not the autopilot's loop alone.
+    /// </summary>
+    public bool PlayerRules { get; init; } = true;
+
+    /// <summary>
+    /// <c>--walk-awareness=pinned|own</c> (M6 16 E1f; default own since M6 16 Q3): which awareness range the session's walks keep off a hostile creature (<see cref="Movement.Wayfinding.WalkAwareness"/>): the pinned range of its kind, else ACE's
+    /// default, as before; or the kind's own range by the world database. The option is listed with the autopilot's (OptionCatalog.Autopilot) and read here because the setting is the session's: every walk of every host reads it from
+    /// the session's object table.
+    /// </summary>
+    public Movement.Wayfinding.WalkAwarenessMode WalkAwareness { get; init; } = Movement.Wayfinding.WalkAwarenessMode.Own;
+
     /// <summary>The problems <see cref="Parse(IEnumerable{string})"/> found, one line each; the option keeps its default.</summary>
     public IReadOnlyList<string> Errors { get; init; } = [];
 
@@ -135,6 +151,15 @@ public sealed record SessionOptions
                     break;
                 case "--retail-net":
                     o = o with { RetailNet = OptionValues.Switch(argument, errors, o.RetailNet) };
+                    break;
+                case "--allow-climber-grant":
+                    o = o with { AllowClimberGrant = OptionValues.Switch(argument, errors, o.AllowClimberGrant) };
+                    break;
+                case "--autopilot-player-rules":
+                    o = o with { PlayerRules = OptionValues.Switch(argument, errors, o.PlayerRules) };
+                    break;
+                case "--walk-awareness":
+                    o = o with { WalkAwareness = OptionValues.Choice(argument, errors, o.WalkAwareness, ("pinned", Movement.Wayfinding.WalkAwarenessMode.Pinned), ("own", Movement.Wayfinding.WalkAwarenessMode.Own)) };
                     break;
             }
         }

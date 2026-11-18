@@ -21,6 +21,8 @@ namespace Lifestone.Game.Diagnostics;
 /// <para>A child of the world beside <see cref="World.Objects.ObjectsSystem"/> (<c>ObjectsLayer.Install</c>). The frame path does one
 /// <see cref="SoakFrameWindow.Add"/> and one clock read: no allocation. Everything else (the process, the collector, Godot's monitors, the
 /// counts, the string) happens once per interval, into one reused <see cref="StringBuilder"/> and <see cref="SoakSnapshot"/>.</para>
+/// <para>M6 16 Eperf2: the frame path also steps the <see cref="LongFrameWatch"/> with the frame's length (its reads of a few running totals, no allocation); a frame over 50 ms writes the
+/// <c>[play] long frame</c> line, at most one every few seconds.</para>
 /// <para>Play mode binds the session, the avatar set and the light table with <see cref="Bind"/>; until then (and in a scene without a session) their fields read
 /// <c>n/a</c>. An exception while sampling or logging is logged once as an error and never reaches the frame.</para>
 /// <para><c>kills</c>, <c>deaths</c> and <c>cycles</c> are the autopilot's (<see cref="BindAutopilot"/>, <see cref="SoakTallies"/>; M5 4 h1, <c>m5-soak-tallies</c>) and read <c>n/a</c> when none runs (logged once at the start).</para>
@@ -32,6 +34,8 @@ public partial class SoakLine : Node
 
     private readonly SoakSnapshot _snapshot = new();
     private readonly SoakFrameWindow _frames = new();
+    private readonly FrameWallClock _frameClock = new();
+    private readonly LongFrameWatch _longFrames = new(); // M6 16 Eperf2: a frame over 50 ms names what it was made of
     private readonly StringBuilder _builder = new(768);
     private double _intervalSeconds;
     private ulong _intervalMilliseconds;
@@ -65,6 +69,10 @@ public partial class SoakLine : Node
         _silenceSeen = false;
         _frames.Reset();
         SetProcess(_intervalSeconds > 0.0);
+        if (_intervalSeconds > 0.0 && IsInsideTree())
+        {
+            FramePhases.HookDraw(GetTree());
+        }
     }
 
     /// <summary>Gives the line its play-mode sources: the live session, the avatar set (a function: a log off builds a new one), and the object light table. Any may be null.</summary>
@@ -97,6 +105,7 @@ public partial class SoakLine : Node
         SetProcess(_intervalSeconds > 0.0);
         if (_intervalSeconds > 0.0)
         {
+            FramePhases.HookDraw(GetTree()); // M6 16 Eperf2: the draw's share of a frame and the engine's after it, for the long-frame line
             Log.Info(
                 SoakLineFormat.Category,
                 "soak line on",
@@ -106,12 +115,16 @@ public partial class SoakLine : Node
         }
     }
 
+    public override void _ExitTree() => FramePhases.UnhookDraw();
+
     public override void _Process(double delta)
     {
         try
         {
-            _frames.Add(delta * 1000.0);
+            var frameMs = _frameClock.Next((long)Engine.GetProcessFrames(), delta * 1000.0); // M6 14 hub plan: the wall time between frames; the engine's delta does not show a long hold
+            _frames.Add(frameMs);
             var now = Time.GetTicksMsec();
+            _longFrames.Step(frameMs, now, _autopilot); // M6 16 Eperf2: the long-frame line, at most one every few seconds
             if (now >= _nextSilenceSampleAt)
             {
                 _nextSilenceSampleAt = now + SilenceSampleMilliseconds;
@@ -218,6 +231,8 @@ public partial class SoakLine : Node
         s.FrameP99Ms = _frames.P99();
         s.Over50 = _frames.Over50;
         s.Over75 = _frames.Over75;
+        s.Frames = _frames.Frames; // M6 16 Eperf: the interval's frame count and mean frame, the line's last two fields
+        s.FrameMeanMs = _frames.Mean;
         SoakTallies.Read(s, _autopilot); // M5 4 h1: n/a unless an autopilot is bound
         s.TexCacheCount = _textures?.Count; // M5 7 P7d (D139 rows e, f): the render caches, the arrival trims and the orphans
         s.TexCacheMb = _textures is { } textures ? textures.TotalBytes / Mb : null;

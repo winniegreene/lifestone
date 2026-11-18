@@ -318,6 +318,174 @@ public sealed class NavRunnerTests(ITestOutputHelper output)
         Assert.Contains("no path: no-path", rig.Runner.FailureReason, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// M6 7 N (the live round 1c, <c>no path: no-path</c> 168 ms after the hop into the island): the streamer's kept corridor landblock left the goal's tile attached alone beside the ring round the body. The planner then does not plan a horizon (the goal has a tile) and
+    /// cannot reach it: <c>no-path</c>, though the ground is open. With no goal tile the same map plans a horizon; with the tile between it, the whole way.
+    /// </summary>
+    [Fact]
+    public void A_goal_tile_attached_alone_is_no_path_until_the_tile_between_comes()
+    {
+        var (here, between, ground) = Blocks();
+        var from = NavPoint.At(here, 50.5f, 50.5f);
+        var goal = NavGoal.ToPoint(NavPoint.At(ground, 50.5f, 50.5f));
+
+        Assert.Equal(NavStatus.Horizon, new PathPlanner(S2TileKit.Map(S2TileKit.Flat(here))).Plan(from, goal).Status);
+        var lone = S2TileKit.Map(S2TileKit.Flat(here), S2TileKit.Flat(ground));
+        var failed = new PathPlanner(lone).Plan(from, goal);
+        Assert.Equal((NavStatus.NoPath, "no-path"), (failed.Status, failed.Reason));
+        Assert.Equal([between], NavRunner.MissingTiles(lone, from.Global, goal.Point.Global));
+        lone.Attach(S2TileKit.Flat(between));
+        Assert.Equal(NavStatus.Found, new PathPlanner(lone).Plan(from, goal).Status);
+        Assert.Empty(NavRunner.MissingTiles(lone, from.Global, goal.Point.Global));
+    }
+
+    /// <summary>M6 7 N: a plan that fails <c>no-path</c> with a tile missing on the way waits, keys released, one wait and no plan a frame; the map's change plans again and the run goes on.</summary>
+    [Fact]
+    public void A_no_path_with_a_tile_missing_waits_for_the_tile_and_plans_again()
+    {
+        var (rig, map, between) = LoneGoal();
+
+        Assert.Equal(NavRunState.Running, rig.RunFor(1.0));
+        Assert.Equal((1, 1, 0), (rig.Paths.PlanCalls, rig.Runner.TileWaits, rig.Body.TotalDepth));
+        Assert.Null(rig.Runner.Path);
+
+        map.Attach(S2TileKit.Flat(between));
+        rig.Paths.FailWith = null;
+        Assert.Equal(NavRunState.Running, rig.Frame());
+        Assert.Equal((2, 1), (rig.Paths.PlanCalls, rig.Runner.Replans));
+        Assert.NotNull(rig.Runner.Path);
+
+        Assert.Equal(NavRunState.Running, rig.RunFor(1.0));
+        Assert.True(rig.Body.TotalDepth > 0, "the body runs on");
+        Assert.Equal(1, rig.Runner.TileWaits);
+    }
+
+    /// <summary>M6 7 N: a genuine no-path stays a failure: the tiles never come: Blocked at the bound, the reason the planner's, the tiles named.</summary>
+    [Fact]
+    public void A_no_path_whose_tiles_never_come_is_Blocked_at_the_bound_naming_them()
+    {
+        var (rig, _, between) = LoneGoal();
+
+        var state = rig.RunFor(NavRunner.HorizonWaitSeconds + 10);
+
+        output.WriteLine(rig.Runner.FailureReason);
+        Assert.Equal(NavRunState.Blocked, state);
+        Assert.Contains("no path: no-path; the tiles 0x" + (between >> 16).ToString("X4", System.Globalization.CultureInfo.InvariantCulture) + " between the body and the goal were not attached within 30 s", rig.Runner.FailureReason, StringComparison.Ordinal);
+        Assert.InRange(rig.Body.Now, NavRunner.HorizonWaitSeconds, NavRunner.HorizonWaitSeconds + 1);
+        Assert.Equal(2, rig.Paths.PlanCalls); // the first plan and the one at the bound: nothing changed between
+        Assert.Equal(0, rig.Body.TotalDepth);
+    }
+
+    /// <summary>M6 7 N: the tiles came and the plan still fails: a genuine no-path, at once, with no wait for the bound.</summary>
+    [Fact]
+    public void A_no_path_with_every_tile_attached_ends_the_wait_at_once()
+    {
+        var (rig, map, between) = LoneGoal();
+        rig.RunFor(1.0);
+
+        map.Attach(S2TileKit.Flat(between));
+
+        Assert.Equal(NavRunState.Blocked, rig.Frame());
+        Assert.Contains("no path: no-path", rig.Runner.FailureReason, StringComparison.Ordinal);
+        Assert.DoesNotContain("not attached within", rig.Runner.FailureReason, StringComparison.Ordinal);
+        Assert.InRange(rig.Body.Now, 1.0, 2.0);
+    }
+
+    /// <summary>M6 7 N: with every tile on the way attached a no-path never waits (today's reading).</summary>
+    [Fact]
+    public void A_no_path_with_no_tile_missing_is_Blocked_on_the_first_frame()
+    {
+        var rig = new S5Rig(50f, 50f);
+        rig.Paths.Map = S2TileKit.Map(S2TileKit.Flat(MovementTestKit.Block.LandBlockId & 0xFFFF0000u));
+        rig.Paths.FailWith = "no-path";
+        rig.Runner.Start(S5Rig.To(50f, 90f), rig.Body.Now);
+
+        Assert.Equal(NavRunState.Blocked, rig.Frame());
+        Assert.Equal(0, rig.Runner.TileWaits);
+    }
+
+    /// <summary>M6 7 N: the wait is <c>no-path</c>'s and <c>no-horizon</c>'s: another failure with a tile missing means something else and fails at once, by its own name.</summary>
+    [Theory]
+    [InlineData("no-tile:0xA9B30000: the start room's landblock has no tile")]
+    [InlineData("start-not-attached")]
+    [InlineData("goal-blocked")]
+    [InlineData("indoor-start-unreachable:0xA9B40141")]
+    public void Another_failure_with_a_tile_missing_does_not_wait(string reason)
+    {
+        var (rig, _, _) = LoneGoal();
+        rig.Paths.FailWith = reason;
+
+        Assert.Equal(NavRunState.Blocked, rig.Frame());
+        Assert.Contains("no path: " + reason, rig.Runner.FailureReason, StringComparison.Ordinal);
+        Assert.Equal(0, rig.Runner.TileWaits);
+    }
+
+    /// <summary>M6 7 N: <c>no-horizon</c> (no open edge the body reaches yet) waits as <c>no-path</c> does.</summary>
+    [Fact]
+    public void No_horizon_with_a_tile_missing_waits_too()
+    {
+        var (rig, _, _) = LoneGoal();
+        rig.Paths.FailWith = "no-horizon";
+
+        Assert.Equal(NavRunState.Running, rig.RunFor(0.5));
+        Assert.Equal(1, rig.Runner.TileWaits);
+    }
+
+    /// <summary>M6 7 N: a replan under a running body has the same rule (the corridor's goal tile can attach before the tile between): the keys go up, the route is dropped, and the map's change plans the run on.</summary>
+    [Fact]
+    public void A_replan_that_fails_with_a_tile_missing_stands_the_body_and_plans_on()
+    {
+        var (rig, map, between) = LoneGoal();
+        rig.Paths.FailWith = null;
+        Assert.Equal(NavRunState.Running, rig.RunFor(1.0));
+        Assert.True(rig.Body.TotalDepth > 0);
+
+        rig.Paths.FailWith = "no-path";
+        rig.Body.Xy += new Vector2(0f, NavRunner.OffRouteMetres + 1f);
+        Assert.Equal(NavRunState.Running, rig.RunFor(0.5));
+        Assert.Equal((1, 0), (rig.Runner.TileWaits, rig.Body.TotalDepth));
+        Assert.Null(rig.Runner.Path);
+
+        map.Attach(S2TileKit.Flat(between));
+        rig.Paths.FailWith = null;
+        Assert.Equal(NavRunState.Running, rig.RunFor(0.5));
+        Assert.NotNull(rig.Runner.Path);
+        Assert.True(rig.Body.TotalDepth > 0);
+    }
+
+    /// <summary>M6 7 N: the wait begins again for a resumed run: the time a station held the run is not the tiles' bound.</summary>
+    [Fact]
+    public void A_pause_does_not_spend_the_tile_wait()
+    {
+        var (rig, _, _) = LoneGoal();
+        rig.RunFor(1.0);
+        rig.Runner.Pause();
+        rig.Body.Advance(NavRunner.HorizonWaitSeconds + 5);
+        rig.Runner.Resume(rig.Body.Now);
+
+        Assert.Equal(NavRunState.Running, rig.RunFor(1.0));
+        Assert.Equal(2, rig.Runner.TileWaits);
+    }
+
+    /// <summary>The body's landblock, the next one east and the one after it (the goal's).</summary>
+    private static (uint Here, uint Between, uint Ground) Blocks()
+    {
+        var here = MovementTestKit.Block.LandBlockId & 0xFFFF0000u;
+        return (here, here + 0x01000000u, here + 0x02000000u);
+    }
+
+    /// <summary>A rig whose goal's tile is attached alone, one landblock past the body's, the source failing <c>no-path</c>, the run started.</summary>
+    private static (S5Rig Rig, NavMap Map, uint Between) LoneGoal()
+    {
+        var (here, between, ground) = Blocks();
+        var rig = new S5Rig(50f, 50f);
+        var map = S2TileKit.Map(S2TileKit.Flat(here), S2TileKit.Flat(ground));
+        rig.Paths.Map = map;
+        rig.Paths.FailWith = "no-path";
+        rig.Runner.Start(NavGoal.ToPoint(NavPoint.At(ground, 50f, 50f)), rig.Body.Now);
+        return (rig, map, between);
+    }
+
     [Fact]
     public void An_object_goal_arrives_within_range_and_without_physics_its_sight_is_a_loud_todo()
     {
@@ -434,10 +602,10 @@ public sealed class NavRunnerTests(ITestOutputHelper output)
     // M5 item 5, d1: doors on the routes. The scripted body walks north from (50, 50); a door stands in a doorway at y 65 (the crossing is given, the unit rig has no tile and no rooms).
     private const float DoorY = 65f;
 
-    private static ScriptedDoors DoorAhead(S5Rig rig, bool open = false, bool? locked = null)
+    private static ScriptedDoors DoorAhead(S5Rig rig, bool open = false, bool? locked = null, bool unusable = false)
     {
         var block = MovementTestKit.Block.LandBlockId;
-        var door = new NavDoor(0x7A000001, new CellFrame(block | 0x29, new AcFrame(new Vector3(50f, DoorY, 0f), Quaternion.Identity)), 1f, open, locked);
+        var door = new NavDoor(0x7A000001, new CellFrame(block | 0x29, new AcFrame(new Vector3(50f, DoorY, 0f), Quaternion.Identity)), 1f, open, locked, unusable);
         var doors = new ScriptedDoors { FixedCrossings = d => [new DoorCrossing(d[0], block, block | 0x29, new Vector3(50f, DoorY, 0f), new Vector2(0f, 1f), null, 0f)] }.With(door);
         doors.Where = () => rig.Body.Position;
         return doors;
@@ -568,6 +736,59 @@ public sealed class NavRunnerTests(ITestOutputHelper output)
         Assert.Contains("door-use-refused", refused.FailureReason, StringComparison.Ordinal);
         Assert.Contains("DryRun", refused.FailureReason, StringComparison.Ordinal);
         Assert.Single(doors.Used);
+    }
+
+    /// <summary>
+    /// M6 4 w6a, <c>TODO(door-lever)</c>: a shut door whose CreateObject says it cannot be used (Usable No: Fort Tethana's gate door 0x72581042, "This door cannot be activated from here.",
+    /// opened only by its lever) is never Used: the plan that crosses it ends Blocked <c>door-lever</c> naming the door, and so does the stop before one that turned unusable after the plan.
+    /// The same door open is walked through.
+    /// </summary>
+    [Fact]
+    public void A_door_that_cannot_be_used_is_never_used_and_the_walk_stops_named_door_lever()
+    {
+        var rig = new S5Rig(50f, 50f, heading: 0f);
+        var lever = DoorAhead(rig, unusable: true);
+        using var runner = new NavRunner(rig.H.Api.Move, rig.Body, rig.Paths) { Doors = lever };
+        runner.Start(S5Rig.To(50f, 80f), rig.Body.Now);
+        Assert.Equal(NavRunState.Blocked, RunDoors(rig, runner, lever, 10));
+        Assert.Contains("door-lever: the route crosses the closed door 0x7A000001", runner.FailureReason, StringComparison.Ordinal);
+        Assert.Contains("TODO(door-lever)", runner.FailureReason, StringComparison.Ordinal);
+        Assert.Empty(lever.Used);
+        Assert.Equal(50f, rig.Body.Xy.Y, 0.01f); // it never moved
+
+        // Usable when planned, unusable by the time the body stands at the stop: the check before the act stops it there, unused.
+        var late = new S5Rig(50f, 50f, heading: 0f);
+        var turning = DoorAhead(late);
+        using var stopping = new NavRunner(late.H.Api.Move, late.Body, late.Paths) { Doors = turning };
+        stopping.Start(S5Rig.To(50f, 80f), late.Body.Now);
+        var end = late.Body.Now + 40;
+        var turned = false;
+        while (late.Body.Now < end && !stopping.IsDone)
+        {
+            if (!turned && late.Body.Xy.Y > 55f)
+            {
+                turning.With(new NavDoor(0x7A000001, new CellFrame(MovementTestKit.Block.LandBlockId | 0x29, new AcFrame(new Vector3(50f, DoorY, 0f), Quaternion.Identity)), 1f, false, null, Unusable: true));
+                turned = true;
+            }
+
+            late.Body.Advance(S5Rig.Dt);
+            turning.Now = late.Body.Now;
+            stopping.Step(late.Body.Now);
+            late.H.Tick(S5Rig.Dt);
+        }
+
+        Assert.Equal(NavRunState.Blocked, stopping.State);
+        Assert.Contains("door-lever: stopped at the closed door 0x7A000001", stopping.FailureReason, StringComparison.Ordinal);
+        Assert.Empty(turning.Used);
+        Assert.InRange(late.Body.Xy.Y, 55f, DoorY - 0.5f);
+
+        // Open (its lever pulled), it is walked through without a Use.
+        var open = new S5Rig(50f, 50f, heading: 0f);
+        var pulled = DoorAhead(open, open: true, unusable: true);
+        using var through = new NavRunner(open.H.Api.Move, open.Body, open.Paths) { Doors = pulled };
+        through.Start(S5Rig.To(50f, 80f), open.Body.Now);
+        Assert.Equal(NavRunState.Arrived, RunDoors(open, through, pulled, 60));
+        Assert.Empty(pulled.Used);
     }
 
     /// <summary>A path source that answers a Found path of <c>count</c> waypoints: 0 (empty), or 1 (the goal alone, the snapped start and goal).</summary>

@@ -63,6 +63,29 @@ public sealed record BuffOptions
     /// <summary>M5 7 F25: the seconds added to the fight's mean length for the lookahead's horizon at a lull (<c>--buff-lookahead-margin-s</c>): a line with less left than the mean plus this is recast at the lull.</summary>
     public double LookaheadMarginSeconds { get; init; } = DefaultLookaheadMarginSeconds;
 
+    /// <summary>
+    /// M6 item 1 h1 (<c>m6-account-formula-callers</c>, the fight's side): the character's account name, lower case as the server stores it, or null. The level floor reads it for a school whose focus the pack does not hold (a school trained from
+    /// the level-up credits has no starter focus: its casts burn the account's full formula, <see cref="AccountFormula"/>); null: the foci formula for every school (today's rule). Set by the scenario that knows the login
+    /// (<c>FightScenario</c>'s account argument, <c>AutopilotScenario</c>'s journey context), never parsed from the command line, never printed (<see cref="ToString"/> leaves it out).
+    /// </summary>
+    public string? AccountName { get; init; }
+
+    /// <summary>
+    /// M6 7 AT: the fight's reach in metres for a pass in the ground (the autopilot's ground pass sets it from the aggro reach; 0, the default: off). An attackable creature within it that keeps her from lying down for the pass's wait cuts the pass (named, once for that creature),
+    /// so the fight shoots it first and she rests after; one beyond it but inside the quiet distance keeps the wait (<see cref="Vitals.RestBlockerRule"/>).
+    /// </summary>
+    public double ShootFirstMetres { get; init; }
+
+    /// <summary>
+    /// M6 14 (<c>m6-banes</c>; not a command-line option): the DamageType bits the creatures of the field deal, for a cycle that runs in the field (a fight's refresh and top-up, the autopilot's pass in the ground:
+    /// <see cref="ArmourBanes.FieldMask"/> of the ground); null (the default): a pass at home, which casts every armour line the book holds. With a value, one of the six other banes is wanted only when the mask holds
+    /// its damage type (<see cref="BuffCycle.FieldDamageTypes"/>); Impenetrability, Bludgeon Bane and every other line are wanted as before.
+    /// </summary>
+    public uint? FieldDamageTypes { get; init; }
+
+    /// <summary>M6 7 AT: where a pass notes the components it found the pack short of (<see cref="Mage.ComponentNeeds"/>), so the logistics counters call the trip that buys them; null (the default): the pass notes nothing. The autopilot's own passes get the session's.</summary>
+    public ComponentNeeds? ComponentNeeds { get; init; }
+
     /// <summary>M5 7 F25: the seed of the fight's mean length, in seconds (<c>--buff-fight-seed-s</c>), until the fight has measured its own.</summary>
     public double FightSeedSeconds { get; init; } = DefaultFightSeedSeconds;
 

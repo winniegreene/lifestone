@@ -14,6 +14,7 @@ public sealed partial class GamePanels
     {
         registry.Register(GameContainerPanel.RetailClassId, static (in UiElementInit init) => new GameContainerPanel(init)); // gmExternalContainerUI::Register: address unknown (TODO(m4-retail-container-window))
         registry.Register(GameVendorPanel.RetailClassId, static (in UiElementInit init) => new GameVendorPanel(init)); // gmVendorUI::Register 11.6096 0x004C3BF0 (M4 3.2 s4b)
+        registry.Register(GameSlumlordPanel.RetailClassId, static (in UiElementInit init) => new GameSlumlordPanel(init)); // gmSlumlordUI::Register: address not in the notes (TODO(villa-retail-slumlord-recv); M6 villa)
         registry.Register(UiFloatyEnvPanel.RetailClassId, static (in UiElementInit init) => new UiFloatyEnvPanel(init)); // gmFloatyEnvPanelUI::Register: address unknown
     }
 
@@ -44,6 +45,21 @@ public sealed partial class GamePanels
             else
             {
                 p.Context.Manager.Services.Log.Error(UiElementManager.Category, "gmVendorUI: the gameplay layout has no vendor window 0x10000062; there is no vendor window (TODO(m4-vendor-window-missing))");
+            }
+
+            return null;
+        });
+
+        // M6 villa: the house guardian's window (gmSlumlordUI, window 0x10000060 of the same floaty) follows the open guardian and the guardian window's model.
+        Queue(static p =>
+        {
+            if (p.Screen.Root?.GetChildRecursive(GameSlumlordPanel.WindowId) is GameSlumlordPanel window)
+            {
+                window.Attach(p.Context);
+            }
+            else
+            {
+                p.Context.Manager.Services.Log.Error(UiElementManager.Category, "gmSlumlordUI: the gameplay layout has no guardian window 0x10000060; there is no guardian window (TODO(villa-slumlord-window-missing))");
             }
 
             return null;

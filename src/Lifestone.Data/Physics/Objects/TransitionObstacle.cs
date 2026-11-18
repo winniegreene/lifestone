@@ -24,4 +24,5 @@ public enum TransitionObstacleKind : byte
 /// <param name="Object">The object that stopped it, for <see cref="TransitionObstacleKind.Object"/>.</param>
 /// <param name="CellId">The cell the object stood in after the transition (the environment it met belongs to its neighbourhood).</param>
 /// <param name="StepRefused">The transition refused a step-up or an edge slide on the way (also true for a wall: a wall is a step too high).</param>
-public readonly record struct TransitionObstacle(TransitionObstacleKind Kind, PhysicsObj? Object, uint CellId, bool StepRefused);
+/// <param name="Normal">The sliding normal, else the collision normal, of the transition (zero when it has neither): a wall's is level, a floor's or a ramp's points up.</param>
+public readonly record struct TransitionObstacle(TransitionObstacleKind Kind, PhysicsObj? Object, uint CellId, bool StepRefused, System.Numerics.Vector3 Normal = default);

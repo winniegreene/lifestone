@@ -1,0 +1,778 @@
+{
+  "key": "lubziklan-stolen-goods",
+  "name": "Lubziklan al-Luq's Stolen Goods (eight goods from the Sea Temple Catacombs, handed to Lubziklan in Yaraq)",
+  "giver": {
+    "wcid": 5178,
+    "name": "Lubziklan al-Luq"
+  },
+  "start": {
+    "cell": "0xA9B40019",
+    "point": [
+      84.0,
+      7.7,
+      94.0
+    ],
+    "name": "Holtburg's lifestone point"
+  },
+  "steps": [
+    {
+      "kind": "go",
+      "what": "to the front of the Sea Temple's door",
+      "place": {
+        "cell": "0x7966003A",
+        "point": [
+          172,
+          36,
+          50.5
+        ],
+        "name": "in front of the Sea Temple's door"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z, angles_W, angles_Z FROM landblock_instance WHERE guid = 0x77966000: weenie 5198, cell 0x79660101, (179.71, 35.965, 57); the point is on the open ground west of the door (the dats: the tile stamps the door's own front blocked, so the walk through it is the next step's authored way); the go stops short of the door",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "through the door and up the ramp to the Sea Temple portal",
+      "place": {
+        "cell": "0x79660101",
+        "point": [
+          182.5,
+          36,
+          54.5
+        ],
+        "name": "on the ramp, 2.8 m from the portal"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the dats (M6 8 B2c, TownNetworkWalkDatTests.Fetch): the Sea Temple's door opens from outside at z 52 over a step of statics the outdoor tile stamps blocked (the same shape as m6-lin-shoichi-walk), so the room graph has no lane into it; this go is an authored way (AuthoredWaySource, the confirmer still checks it) from the front of the door round the south aisle to the foot of the ramp and up it to within 2.8 m of the portal (portal 5198's ramp runs from x 185 up west to x 179 between y 35 and 37); walked by a body in the dat test, no key, no door object in the landblock (SELECT ... landblock_instance WHERE obj_Cell_Id >> 16 = 0x7966: one row, the portal)",
+      "todo": null,
+      "way": [
+        {
+          "cell": "0x7966003A",
+          "point": [
+            176.5,
+            36,
+            52
+          ],
+          "name": "the Sea Temple's doorway"
+        },
+        {
+          "cell": "0x79660100",
+          "point": [
+            178.4,
+            36,
+            52.02
+          ],
+          "name": "inside the Sea Temple's door"
+        },
+        {
+          "cell": "0x79660101",
+          "point": [
+            179.0,
+            34.2,
+            52.02
+          ],
+          "name": "the south aisle of the portal room"
+        },
+        {
+          "cell": "0x79660101",
+          "point": [
+            184.3,
+            34.4,
+            52.02
+          ],
+          "name": "along the south aisle"
+        },
+        {
+          "cell": "0x79660101",
+          "point": [
+            185.4,
+            34.9,
+            52.02
+          ],
+          "name": "the end of the aisle"
+        },
+        {
+          "cell": "0x79660101",
+          "point": [
+            185.4,
+            36,
+            52.05
+          ],
+          "name": "the foot of the ramp"
+        },
+        {
+          "cell": "0x79660101",
+          "point": [
+            182.5,
+            36,
+            54.5
+          ],
+          "name": "on the ramp, 2.8 m from the portal"
+        }
+      ]
+    },
+    {
+      "kind": "use",
+      "what": "enter the Sea Temple Catacombs",
+      "place": {
+        "cell": "0x0156018F",
+        "point": [
+          49.1,
+          -61.9,
+          0
+        ],
+        "name": "the arrival of Sea Temple Catacombs"
+      },
+      "target": {
+        "wcid": 5198,
+        "name": "Sea Temple Catacombs"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM weenie_properties_position WHERE object_Id = 5198 AND position_Type = 2: destination 0x0156018F (49.1, -61.9, 0) (the row's cell is stale: the point stands in 0x01560192, the dats; the first go's walk starts from the room the body stands in); levels MinLevel 1, MaxLevel 20 (weenie_properties_int types 86, 87), enforced (use_portal_max_level_requirement is on, the lead's read of the live database, D118)",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Cove Apple Baking Pan",
+      "place": {
+        "cell": "0x01560174",
+        "point": [
+          73.967,
+          -39.0331,
+          -5.995
+        ],
+        "name": "where the Cove Apple Baking Pan lies"
+      },
+      "target": {
+        "wcid": 30543,
+        "name": "Cove Apple Baking Pan"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x70156046: weenie 30543, cell 0x01560174; its pick-up quest YaraqBakingPanCoveApple1204 (weenie_properties_string type 33; quest row min_Delta 72000, max_Solves -1)",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Cove Apple Baking Pan from the floor",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 30543,
+        "name": "Cove Apple Baking Pan"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): the item's own Quest string YaraqBakingPanCoveApple1204 gates the pick-up for 20 h (ACE Player_Inventory.cs:1249-1262 @95ef426d); refused, the run stops pick-up:too-recent",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Hard Cove Apple Cider",
+      "place": {
+        "cell": "0x01560102",
+        "point": [
+          -2.69226,
+          -73.2425,
+          -17.955
+        ],
+        "name": "where the Hard Cove Apple Cider lies"
+      },
+      "target": {
+        "wcid": 30503,
+        "name": "Hard Cove Apple Cider"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x70156042: weenie 30503, cell 0x01560102; its pick-up quest YaraqCiderHardCoveApple1204 (weenie_properties_string type 33; quest row min_Delta 72000, max_Solves -1)",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Hard Cove Apple Cider from the floor",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 30503,
+        "name": "Hard Cove Apple Cider"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): the item's own Quest string YaraqCiderHardCoveApple1204 gates the pick-up for 20 h (ACE Player_Inventory.cs:1249-1262 @95ef426d); refused, the run stops pick-up:too-recent",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Strongbox that holds the Perfectly Aged Cider",
+      "place": {
+        "cell": "0x01560124",
+        "point": [
+          60.93,
+          -37.0219,
+          -18
+        ],
+        "name": "beside the Strongbox"
+      },
+      "target": {
+        "wcid": 5162,
+        "name": "Strongbox"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x7015600B: weenie 5162, cell 0x01560124, (62.2307, -37.0219, -18), no Locked row; the point is on the floor 1.3 m from the chest",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Perfectly Aged Cider from the Strongbox",
+      "place": null,
+      "target": {
+        "wcid": 5162,
+        "name": "Strongbox"
+      },
+      "item": {
+        "wcid": 5175,
+        "name": "Perfectly Aged Cider"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): the chest's own generator row makes the item (corpus cache/m6/8/tools/corpus-extra.sqlite: weenie_properties_generator of 5162, Contain, delay 0; the pinned copy has no generator table, section 0), unlocked; the item's Quest string PerfectlyAgedCoveCiderQuest gates it for 20 h",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Cove Apple Paring Knife",
+      "place": {
+        "cell": "0x0156010E",
+        "point": [
+          26.8594,
+          -36.298,
+          -17.976
+        ],
+        "name": "where the Cove Apple Paring Knife lies"
+      },
+      "target": {
+        "wcid": 30544,
+        "name": "Cove Apple Paring Knife"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x70156043: weenie 30544, cell 0x0156010E; its pick-up quest YaraqKnifeCoveApple1204 (weenie_properties_string type 33; quest row min_Delta 72000, max_Solves -1)",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Cove Apple Paring Knife from the floor",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 30544,
+        "name": "Cove Apple Paring Knife"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): the item's own Quest string YaraqKnifeCoveApple1204 gates the pick-up for 20 h (ACE Player_Inventory.cs:1249-1262 @95ef426d); refused, the run stops pick-up:too-recent",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Cove Apple Wine",
+      "place": {
+        "cell": "0x0156011D",
+        "point": [
+          43.7201,
+          -46.1175,
+          -17.995
+        ],
+        "name": "where the Cove Apple Wine lies"
+      },
+      "target": {
+        "wcid": 30505,
+        "name": "Cove Apple Wine"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x70156044: weenie 30505, cell 0x0156011D; its pick-up quest YaraqWineCoveApple1204 (weenie_properties_string type 33; quest row min_Delta 72000, max_Solves -1)",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Cove Apple Wine from the floor",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 30505,
+        "name": "Cove Apple Wine"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): the item's own Quest string YaraqWineCoveApple1204 gates the pick-up for 20 h (ACE Player_Inventory.cs:1249-1262 @95ef426d); refused, the run stops pick-up:too-recent",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Hot Apple Pie",
+      "place": {
+        "cell": "0x01560130",
+        "point": [
+          16.6432,
+          -73.5953,
+          -12
+        ],
+        "name": "where the Hot Apple Pie lies"
+      },
+      "target": {
+        "wcid": 30537,
+        "name": "Hot Apple Pie"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x7015600F: weenie 30537, cell 0x01560130; its pick-up quest YaraqApplePieHot1204 (weenie_properties_string type 33; quest row min_Delta 72000, max_Solves -1)",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Hot Apple Pie from the floor",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 30537,
+        "name": "Hot Apple Pie"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): the item's own Quest string YaraqApplePieHot1204 gates the pick-up for 20 h (ACE Player_Inventory.cs:1249-1262 @95ef426d); refused, the run stops pick-up:too-recent",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Aged Cove Apple Cider",
+      "place": {
+        "cell": "0x01560160",
+        "point": [
+          49.4367,
+          -16.6859,
+          -5.955
+        ],
+        "name": "where the Aged Cove Apple Cider lies"
+      },
+      "target": {
+        "wcid": 30502,
+        "name": "Aged Cove Apple Cider"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x70156045: weenie 30502, cell 0x01560160; its pick-up quest YaraqCiderCoveAppleAged1204 (weenie_properties_string type 33; quest row min_Delta 72000, max_Solves -1)",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Aged Cove Apple Cider from the floor",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 30502,
+        "name": "Aged Cove Apple Cider"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): the item's own Quest string YaraqCiderCoveAppleAged1204 gates the pick-up for 20 h (ACE Player_Inventory.cs:1249-1262 @95ef426d); refused, the run stops pick-up:too-recent",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Perfect Cove Apple",
+      "place": {
+        "cell": "0x0156017B",
+        "point": [
+          36.8774,
+          2.24336,
+          0.036
+        ],
+        "name": "where the Perfect Cove Apple lies"
+      },
+      "target": {
+        "wcid": 30504,
+        "name": "Perfect Cove Apple"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x70156047: weenie 30504, cell 0x0156017B; its pick-up quest YaraqAppleCovePerfect1204 (weenie_properties_string type 33; quest row min_Delta 72000, max_Solves -1)",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Perfect Cove Apple from the floor",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 30504,
+        "name": "Perfect Cove Apple"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): the item's own Quest string YaraqAppleCovePerfect1204 gates the pick-up for 20 h (ACE Player_Inventory.cs:1249-1262 @95ef426d); refused, the run stops pick-up:too-recent",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Catacombs' Surface portal",
+      "place": {
+        "cell": "0x01560183",
+        "point": [
+          40,
+          -48,
+          0
+        ],
+        "name": "in front of Surface"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z, angles_W, angles_Z FROM landblock_instance WHERE guid = 0x7015601C: weenie 5199, cell 0x01560183, (37.2983, -46.897, 0); the point is 2.9 m east of it on the walkable floor (the dats: the floor 3 m along the portal's facing is no ground), walked in the dat test; the go stops short of the portal so the touch is the use step's",
+      "todo": null
+    },
+    {
+      "kind": "use",
+      "what": "out of the Catacombs by their Surface portal",
+      "place": {
+        "cell": "0x7966003A",
+        "point": [
+          168.871,
+          36.099,
+          50.005
+        ],
+        "name": "the arrival of Surface"
+      },
+      "target": {
+        "wcid": 5199,
+        "name": "Surface"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM weenie_properties_position WHERE object_Id = 5199 AND position_Type = 2: destination 0x7966003A (168.871, 36.099, 50.005); levels none",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to Lubziklan al-Luq",
+      "place": {
+        "cell": "0x7D630000",
+        "point": [
+          23.5,
+          82,
+          11.97
+        ],
+        "name": "beside Lubziklan al-Luq"
+      },
+      "target": {
+        "wcid": 5178,
+        "name": "Lubziklan al-Luq"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x77D6300C: weenie 5178, cell 0x7D630000, (23.5602, 85.6381, 11.9683); the point is 3.6 m south of him (his own point and those beside it are stamped blocked: within the use reach; the give's move-to walks the rest), walked in the dat tests",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "give Lubziklan al-Luq the Cove Apple Baking Pan",
+      "place": null,
+      "target": {
+        "wcid": 5178,
+        "name": "Lubziklan al-Luq"
+      },
+      "item": {
+        "wcid": 30543,
+        "name": "Cove Apple Baking Pan"
+      },
+      "expect": {
+        "reply": "My special baking pan! You know, I made this myself - it helps keep the juicy goodness in the pie. Thank you so much!",
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): weenie_properties_emote id 44182 (object 5178, category 6 Give, weenie_Class_Id 30543): Tell, AwardNoShareXP (type 62) amount_64 4500; no quest test on the hand-in; AllowGive true (weenie_properties_bool type 8)",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "give Lubziklan al-Luq the Hard Cove Apple Cider",
+      "place": null,
+      "target": {
+        "wcid": 5178,
+        "name": "Lubziklan al-Luq"
+      },
+      "item": {
+        "wcid": 30503,
+        "name": "Hard Cove Apple Cider"
+      },
+      "expect": {
+        "reply": "Ah, some of the best stuff! You have my thanks!",
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): weenie_properties_emote id 44186 (object 5178, category 6 Give, weenie_Class_Id 30503): Tell, AwardNoShareXP (type 62) amount_64 4500; no quest test on the hand-in; AllowGive true (weenie_properties_bool type 8)",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "give Lubziklan al-Luq the Perfectly Aged Cider",
+      "place": null,
+      "target": {
+        "wcid": 5178,
+        "name": "Lubziklan al-Luq"
+      },
+      "item": {
+        "wcid": 5175,
+        "name": "Perfectly Aged Cider"
+      },
+      "expect": {
+        "reply": "Ah, some of the very good stuff! You have my thanks!",
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): weenie_properties_emote id 44185 (object 5178, category 6 Give, weenie_Class_Id 5175): Tell, AwardNoShareXP (type 62) amount_64 4500; no quest test on the hand-in; AllowGive true (weenie_properties_bool type 8)",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "give Lubziklan al-Luq the Cove Apple Paring Knife",
+      "place": null,
+      "target": {
+        "wcid": 5178,
+        "name": "Lubziklan al-Luq"
+      },
+      "item": {
+        "wcid": 30544,
+        "name": "Cove Apple Paring Knife"
+      },
+      "expect": {
+        "reply": "My special apple knife! You know, I made this myself. It's especially sharp, so that I don't bruise the apples as I cut them. Thank you so much!",
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): weenie_properties_emote id 44183 (object 5178, category 6 Give, weenie_Class_Id 30544): Tell, AwardNoShareXP (type 62) amount_64 4500; no quest test on the hand-in; AllowGive true (weenie_properties_bool type 8)",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "give Lubziklan al-Luq the Cove Apple Wine",
+      "place": null,
+      "target": {
+        "wcid": 5178,
+        "name": "Lubziklan al-Luq"
+      },
+      "item": {
+        "wcid": 30505,
+        "name": "Cove Apple Wine"
+      },
+      "expect": {
+        "reply": "I don't drink this myself, but it's popular with the mages. Thank you for returning it to me.",
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): weenie_properties_emote id 44191 (object 5178, category 6 Give, weenie_Class_Id 30505): Tell, AwardNoShareXP (type 62) amount_64 4500; no quest test on the hand-in; AllowGive true (weenie_properties_bool type 8)",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "give Lubziklan al-Luq the Hot Apple Pie",
+      "place": null,
+      "target": {
+        "wcid": 5178,
+        "name": "Lubziklan al-Luq"
+      },
+      "item": {
+        "wcid": 30537,
+        "name": "Hot Apple Pie"
+      },
+      "expect": {
+        "reply": "Thank you for returning this pie! It's even still hot - that was quick work!",
+        "stamp": null,
+        "item": {
+          "wcid": 5174,
+          "name": "Mara's Healing Pie"
+        }
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): weenie_properties_emote id 44188 (object 5178, category 6 Give, weenie_Class_Id 30537): Tell, AwardNoShareXP (type 62) amount_64 4500; no quest test on the hand-in; AllowGive true (weenie_properties_bool type 8)",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "give Lubziklan al-Luq the Aged Cove Apple Cider",
+      "place": null,
+      "target": {
+        "wcid": 5178,
+        "name": "Lubziklan al-Luq"
+      },
+      "item": {
+        "wcid": 30502,
+        "name": "Aged Cove Apple Cider"
+      },
+      "expect": {
+        "reply": "Ah, some of the good stuff! You have my thanks!",
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): weenie_properties_emote id 44184 (object 5178, category 6 Give, weenie_Class_Id 30502): Tell, AwardNoShareXP (type 62) amount_64 4500; no quest test on the hand-in; AllowGive true (weenie_properties_bool type 8)",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "give Lubziklan al-Luq the Perfect Cove Apple",
+      "place": null,
+      "target": {
+        "wcid": 5178,
+        "name": "Lubziklan al-Luq"
+      },
+      "item": {
+        "wcid": 30504,
+        "name": "Perfect Cove Apple"
+      },
+      "expect": {
+        "reply": "One of my good apples! Thank you so much!",
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): weenie_properties_emote id 44181 (object 5178, category 6 Give, weenie_Class_Id 30504): Tell, AwardNoShareXP (type 62) amount_64 4500; no quest test on the hand-in; AllowGive true (weenie_properties_bool type 8)",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "home to Holtburg",
+      "place": {
+        "cell": "0xA9B40019",
+        "point": [
+          84.0,
+          7.7,
+          94.0
+        ],
+        "name": "Holtburg's lifestone point"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): the travel file's start: Holtburg's lifestone point 0xA9B40019 (84, 7.7, 94); below level 16 she has no Lifestone Recall, so the quest ends here on foot or by the Network (D118)",
+      "todo": null
+    }
+  ],
+  "done": {
+    "stamp": null,
+    "reply": "One of my good apples! Thank you so much!",
+    "item": null
+  },
+  "timer_seconds": 72000,
+  "level": {
+    "min": 1,
+    "max": 20
+  },
+  "experience": {
+    "amount": 36000,
+    "kind": "fixed",
+    "max": null,
+    "percent": null,
+    "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): the sum of the Give emotes' AwardNoShareXP amount_64 (the give steps' sources); quest_xp_modifier and xp_modifier are 1 (the lead's read of the live database, D118)"
+  },
+  "sources": [
+    "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): (reserve B): Lubziklan al-Luq 5178 gives and receives; each of the eight goods carries its own pick-up quest (min_Delta 72000 s, max_Solves -1)",
+    "timer_seconds 72000: the pick-up quests' gate; the hand-in has no timer (section 7); the ladder band runs it once (D118)",
+    "level: min 1 and max 20 are the entry portal 5198's MinLevel and MaxLevel (weenie_properties_int types 86 and 87), enforced on this server",
+    "ladder: the band 10 to before 16 is cache/m6/8/brief-b2c.md's: low level, done before level 20 because a max-20 portal refuses level 21, and it follows Worcer's band",
+    "the order of the walk: the eight goods by the shortest plan through the dungeon (TownNetworkWalkDatTests.Fetch, the walk's legs, about 1,055 m of planned route), the Surface portal last; no locked door, no lever (section 7)"
+  ],
+  "ladder": {
+    "from_level": 12,
+    "before_level": 18,
+    "once": true
+  }
+}

@@ -43,7 +43,7 @@ public static class GroundRules
             new WorldLocation(ground.Name, new CellPosition(arrival.Cell, arrival.Origin), true, WorldLocations.HeadingFromQuaternion(arrival.HeadingW, arrival.HeadingZ)),
             $"hunting ground '{ground.Key}': the profile's arrival")
         {
-            Interior = InteriorKind.Dungeon,
+            Interior = ground.Kind == GroundKind.Dungeon ? InteriorKind.Dungeon : null, // M6 F2: only a dungeon's arrival is an interior; an outdoor ground's is not (a5's note b)
         };
     }
 

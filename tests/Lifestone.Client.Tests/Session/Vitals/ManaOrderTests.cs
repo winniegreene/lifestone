@@ -37,6 +37,142 @@ public sealed class ManaOrderTests
         FighterTransfersLeft = fighterLeft,
     };
 
+    private static readonly DanceLevel PressI = new(1676, 10, 1, BuffStatMods.TransferOf(1676)!.Value);
+
+    private static readonly DanceLevel PressII = new(1677, 20, 50, BuffStatMods.TransferOf(1677)!.Value);
+
+    private static readonly DanceLevel PressIII = new(1678, 30, 100, BuffStatMods.TransferOf(1678)!.Value);
+
+    private static ManaOrderInput Climber(uint mana, uint stamina, uint boltMana = 10) => new()
+    {
+        Mana = mana,
+        ManaMax = 133,
+        Stamina = stamina,
+        StaminaMax = 50,
+        Need = new ManaNeed(boltMana, boltMana),
+        Profile = ManaProfile.Mage,
+        StaminaFullPercent = 90,
+        BestNetPress = true,
+    };
+
+    [Theory]
+    [InlineData(50u, 0, 12.0)] // gives 22 (25 x 0.9, ACE's round to even) for 10; II 5; III -2
+    [InlineData(100u, 0, 35.0)]
+    [InlineData(120u, 1, 40.0)] // I stops at its cap of 50 drained: 35
+    [InlineData(21u, 0, 0.0)] // 10 x 0.9 rounds to 9... the best of three nets nothing or less
+    public void The_best_net_level_is_not_the_highest_at_a_low_stamina_M6_7_AD(uint stamina, int level, double net)
+    {
+        var at = ManaOrder.BestNetLevel([PressI, PressII, PressIII], stamina, 100, 0, ManaOrderOptions.Default.TryChance, out var yield);
+        Assert.Equal(level, at);
+        if (net > 0)
+        {
+            Assert.Equal(net, yield, 1);
+        }
+        else
+        {
+            Assert.True(yield <= 1, $"net {yield}");
+        }
+    }
+
+    [Fact]
+    public void The_best_net_level_counts_only_a_press_the_mana_can_pay_M6_7_AD()
+    {
+        Assert.Equal(-1, ManaOrder.BestNetLevel([PressI, PressII], 50, 9, 0, ManaOrderOptions.Default.TryChance, out _)); // r3d's 8 mana: nothing lands
+        Assert.Equal(0, ManaOrder.BestNetLevel([PressI, PressII], 150, 19, 0, ManaOrderOptions.Default.TryChance, out _)); // II would net more, but 19 cannot pay it
+    }
+
+    [Fact]
+    public void A_mage_with_no_Mana_Conversion_presses_I_at_50_stamina_whatever_else_the_book_holds_M6_7_AD()
+    {
+        var d = ManaOrder.Decide(Climber(12, 50, boltMana: 15), [PressI, PressII, PressIII], ManaOrderOptions.Default);
+        Assert.Equal((ManaStep.Dance, 0), (d.Step, d.DanceIndex));
+
+        var keeper = Climber(35, 150, boltMana: 40) with { StaminaMax = 200, BestNetPress = false }; // the callers outside the fight press their highest, as before
+        Assert.Equal(2, ManaOrder.Decide(keeper, [PressI, PressII, PressIII], ManaOrderOptions.Default).DanceIndex);
+        Assert.Equal(1, ManaOrder.Decide(keeper with { BestNetPress = true }, [PressI, PressII, PressIII], ManaOrderOptions.Default).DanceIndex); // II 55, III 52
+    }
+
+    [Theory]
+    [InlineData(71u, 0, 22.0)] // live: I gives round(36 x 0.9) = 32 for 10; II gives 36 for 20
+    [InlineData(150u, 1, 55.0)] // I stops at its cap of 50 drained (45 for 10); II gives 75 for 20
+    public void Pick_by_the_sum_reads_the_real_rows_at_her_stamina_with_no_Mana_Conversion(uint stamina, int level, double net)
+    {
+        var at = ManaOrder.PressLevelOf([PressI, PressII], stamina, 100, 0, ManaOrderOptions.Default.TryChance, out var yield);
+
+        Assert.Equal((level, net), (at, yield));
+        var d = ManaOrder.Decide(new ManaOrderInput { Mana = 25, ManaMax = 200, Stamina = stamina, StaminaMax = 200, Need = new ManaNeed(60, 60), Profile = ManaProfile.Mage, BestNetPress = true }, [PressI, PressII], ManaOrderOptions.Default);
+        Assert.Equal((ManaStep.Dance, level), (d.Step, d.DanceIndex));
+    }
+
+    [Fact]
+    public void Pick_by_the_sum_passes_her_Mana_Conversion_through()
+    {
+        var levels = new[] { PressII, PressIII };
+        Assert.Equal(0, ManaOrder.PressLevelOf(levels, 150, 100, 0, ManaOrderOptions.Default.TryChance, out _)); // untrained: II 55, III 52
+        Assert.Equal(1, ManaOrder.PressLevelOf(levels, 150, 100, 311, ManaOrderOptions.Default.TryChance, out _)); // trained, the cost discounted: III's larger give wins
+        var input = new ManaOrderInput { Mana = 25, ManaMax = 200, Stamina = 150, StaminaMax = 200, ManaConversion = 311, Need = new ManaNeed(120, 120), Profile = ManaProfile.Mage, BestNetPress = true };
+        Assert.Equal(1, ManaOrder.Decide(input, levels, ManaOrderOptions.Default).DanceIndex);
+    }
+
+    [Fact]
+    public void When_no_level_reaches_the_chance_the_press_still_happens_on_the_best_chance_above_zero()
+    {
+        Assert.Equal(-1, ManaOrder.BestNetLevel(Book, 200, 1, Mc, 0.5, out _));
+        var at = ManaOrder.PressLevelOf(Book, 200, 1, Mc, 0.5, out var net);
+
+        Assert.Equal(ManaOrder.DanceLevelOf(Book, 1, Mc, 0.5), at);
+        Assert.True(at >= 0);
+        Assert.Equal(ManaOrder.NetYield(in Book[at], 200, Mc, 1), net);
+        Assert.Equal(-1, ManaOrder.PressLevelOf(Book, 200, 0, Mc, 0.5, out var none));
+        Assert.Equal(0, none);
+    }
+
+    [Fact]
+    public void Only_the_ladders_character_picks_by_the_sum()
+    {
+        Assert.True(CharacterPolicy.For(MageTemplate.ClimberName).ManaBySum);
+        Assert.False(CharacterPolicy.For(MageTemplate.CharacterName).ManaBySum);
+        Assert.False(CharacterPolicy.For(null).ManaBySum);
+    }
+
+    [Fact]
+    public void A_mage_short_of_the_bolt_and_of_the_press_waits_and_one_with_no_net_does_not_press_M6_7_AD()
+    {
+        var empty = ManaOrder.Decide(Climber(8, 50), [PressI], ManaOrderOptions.Default); // r3d's end: the bolt costs 10, and so does the press
+        Assert.Equal(ManaStep.Wait, empty.Step);
+        Assert.Contains("no press can land", empty.Reason, StringComparison.Ordinal);
+
+        var poor = ManaOrder.Decide(Climber(14, 20, boltMana: 15), [PressI], ManaOrderOptions.Default); // gives 9 for 10
+        Assert.NotEqual(ManaStep.Dance, poor.Step);
+        Assert.Equal(0, poor.NoNetLevel);
+    }
+
+    [Fact]
+    public void With_a_Mana_Potion_held_a_mage_who_cannot_press_drinks_and_never_waits_M6_8()
+    {
+        // Live 2026-11-11 18:52 UTC, the climb's third death: mana 0, five tuskers on her, 83 Mana Potions in the pack, and the order waited.
+        var empty = ManaOrder.Decide(Climber(0, 50, boltMana: 15) with { ManaPotions = 83 }, [PressI], ManaOrderOptions.Default);
+        Assert.Equal(ManaStep.Potion, empty.Step);
+        Assert.Contains("no press can land at the mana held: a Mana Potion", empty.Reason, StringComparison.Ordinal);
+
+        var poor = ManaOrder.Decide(Climber(14, 20, boltMana: 15) with { ManaPotions = 1 }, [PressI], ManaOrderOptions.Default); // the press gives 9 for 10
+        Assert.Equal(ManaStep.Potion, poor.Step);
+
+        Assert.Equal(ManaStep.Wait, ManaOrder.Decide(Climber(0, 50, boltMana: 15), [PressI], ManaOrderOptions.Default).Step); // none held: the wait as before
+    }
+
+    [Theory]
+    [InlineData(10u, 13.0, 10u, true)] // the bolt leaves no press: press first
+    [InlineData(19u, 13.0, 10u, true)]
+    [InlineData(20u, 13.0, 10u, false)] // a press is still paid after the bolt
+    [InlineData(9u, 13.0, 10u, false)] // no press lands
+    [InlineData(15u, 1.0, 10u, false)] // a second press from half the bar nets 1: not sent
+    [InlineData(15u, 5.0, 10u, true)]
+    [InlineData(24u, 13.0, 15u, true)] // Flame Bolt III
+    [InlineData(15u, 0.0, 5u, false)]
+    public void The_press_is_kept_when_the_bolt_would_leave_none_and_it_buys_half_a_bolt_M6_7_AD(uint mana, double net, uint bolt, bool press) =>
+        Assert.Equal(press, ManaOrder.KeepPress(mana, bolt, in PressI, net));
+
     [Fact]
     public void At_or_over_the_ceiling_or_with_no_need_the_order_is_ready()
     {
@@ -184,6 +320,7 @@ public sealed class ManaOrderTests
     }
 
     [Fact]
+    [Trait("Tier", "Timing")] // m5-manaorder-alloc-flake: a zero-byte allocation count (7,104 bytes under load three times)
     public void A_decision_allocates_nothing()
     {
         var input = Input(2, stamina: 4);
@@ -242,6 +379,7 @@ public sealed class ManaOrderTests
     }
 
     [Fact]
+    [Trait("Tier", "Timing")] // m5-manaorder-alloc-flake: the same zero-byte allocation count, on the refill path
     public void A_decision_with_the_refill_allocates_nothing_M5_7_F5()
     {
         var rich = Input(200, stamina: 100, fullPercent: 90, staminaPotions: 1, staminaFloor: 40);
@@ -277,5 +415,29 @@ public sealed class ManaOrderTests
         var stamina = ManaOrder.StaminaFloorOf(in row, 275, 60, 60);
         Assert.True(ManaOrder.Give(in row, stamina) >= 120);
         Assert.True(stamina == 0 || ManaOrder.Give(in row, stamina - 1) < 120);
+    }
+
+    [Fact]
+    public void A_press_that_nets_no_mana_is_not_sent_and_the_order_rests_while_one_that_nets_some_is_M6_7_C()
+    {
+        // Stamina to Mana I (row 1676: half the stamina, 10% lost, capped at 50), an untrained caster so the cost is the base: at stamina 20 the press drains 10 and gives 9 for a cost of 10.
+        var one = new DanceLevel(1676, 10, 1, BuffStatMods.TransferOf(1676)!.Value);
+        DanceLevel[] low = [one];
+        ManaOrderInput At(uint stamina) => Input(10, stamina: stamina) with { ManaConversion = 0, Need = new ManaNeed(30, 30) };
+        var poor = ManaOrder.Decide(At(20), low, ManaOrderOptions.Default);
+        Assert.NotEqual(ManaStep.Dance, poor.Step);
+        Assert.Equal(0, poor.NoNetLevel);
+        Assert.Equal(-1.0, poor.NetYield);
+        Assert.Equal(-1.0, ManaOrder.NetYield(in one, 20, 0));
+
+        var rich = ManaOrder.Decide(At(100), low, ManaOrderOptions.Default);
+        Assert.Equal(ManaStep.Dance, rich.Step);
+        Assert.Equal(-1, rich.NoNetLevel);
+        Assert.Equal(35.0, ManaOrder.NetYield(in one, 100, 0)); // drains 50, gives 45, costs 10
+
+        // The fighters' order passes the same press over at the gate.
+        var fighter = ManaOrder.Decide(At(20) with { Profile = ManaProfile.Fighter, StaminaMax = 20 }, low, ManaOrderOptions.Default);
+        Assert.Equal(ManaStep.Wait, fighter.Step);
+        Assert.Equal(0, fighter.NoNetLevel);
     }
 }

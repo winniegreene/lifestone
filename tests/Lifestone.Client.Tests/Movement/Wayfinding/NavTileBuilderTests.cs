@@ -231,6 +231,58 @@ public sealed class NavTileBuilderTests(ITestOutputHelper output)
         }
     }
 
+    /// <summary>Level ground up to x = 72 m, then land too steep to walk (40 m a cell: normal z 0.51).</summary>
+    private static LandblockCollision LevelThenSteep() => LandblockCollisionBuilder.FromTerrain(MovementTestKit.TerrainOf(MovementTestKit.Block, (x, _) => (byte)(x <= 3 ? 0 : (x - 3) * 40)), MovementTestKit.Heights);
+
+    [Fact]
+    public void The_node_beside_too_steep_land_costs_the_top_of_the_ramp_and_stays_open()
+    {
+        var tile = NavTileBuilder.Build(LevelThenSteep(), null, out var stats);
+        output.WriteLine(stats.ToString());
+        Assert.True((tile.Flags[N(72, 100)] & NavFlags.Blocked) != 0, "the steep land itself");
+        Assert.Equal(NavFlags.Slope, tile.Flags[N(71, 100)]);
+        Assert.Equal(255, tile.SlopeCost[N(71, 100)]);
+        Assert.Equal(NavFlags.None, tile.Flags[N(70, 100)]);
+        Assert.Equal(0, tile.SlopeCost[N(70, 100)]);
+        Assert.Equal(NavTile.Size, stats.NodesBesideSteepLand);
+    }
+
+    [Fact]
+    public void A_node_a_steep_triangles_diagonal_cuts_is_marked_a_steep_edge_and_stays_open()
+    {
+        // One vertex raised 40 m: the triangles that hold it are too steep, the rest of the ground is flat, and their edges run along the cells' diagonals.
+        var peak = LandblockCollisionBuilder.FromTerrain(MovementTestKit.TerrainOf(MovementTestKit.Block, (x, y) => (byte)(x == 4 && y == 4 ? 40 : 0)), MovementTestKit.Heights);
+        var tile = NavTileBuilder.Build(peak, null, out var stats);
+        output.WriteLine(stats.ToString());
+        Assert.True(stats.NodesOnSteepEdge > 0);
+        var edges = 0;
+        for (var i = 0; i < NavTile.Size * NavTile.Size; i++)
+        {
+            if ((tile.Flags[i] & NavFlags.SteepEdge) != 0)
+            {
+                edges++;
+                Assert.Equal(NavFlags.None, tile.Flags[i] & NavFlags.Blocked);
+                Assert.Equal(255, tile.SlopeCost[i]);
+            }
+        }
+
+        Assert.Equal(stats.NodesOnSteepEdge, edges);
+        Assert.Equal(NavFlags.None, tile.Flags[N(20, 20)]);
+        Assert.Equal(0, NavTileBuilder.Build(MovementTestKit.Flat(MovementTestKit.Block), null, out var flat).Flags.Count(f => (f & NavFlags.SteepEdge) != 0));
+        Assert.Equal(0, flat.NodesOnSteepEdge);
+    }
+
+    [Fact]
+    public void A_neighbours_too_steep_land_reaches_over_the_border()
+    {
+        var east = MovementTestKit.Block.Offset(1, 0)!.Value;
+        var steep = LandblockCollisionBuilder.FromTerrain(MovementTestKit.TerrainOf(east, (x, _) => (byte)(x * 40)), MovementTestKit.Heights);
+        var tile = NavTileBuilder.Build(MovementTestKit.Flat(MovementTestKit.Block), new NavBuildOptions { Neighbours = [steep] });
+        Assert.Equal(NavFlags.Slope, tile.Flags[N(191, 100)]);
+        Assert.Equal(NavFlags.None, tile.Flags[N(190, 100)]);
+        Assert.Equal(NavFlags.None, NavTileBuilder.Build(MovementTestKit.Flat(MovementTestKit.Block)).Flags[N(191, 100)]);
+    }
+
     [Fact]
     public void Water_flags_the_cells_with_a_water_corner_and_never_blocks()
     {
@@ -254,6 +306,61 @@ public sealed class NavTileBuilderTests(ITestOutputHelper output)
                 }
             }
         }
+    }
+
+    [Fact]
+    public void An_entirely_flooded_landblock_is_a_wall_and_a_neighbour_keeps_the_bodys_reach_from_it()
+    {
+        // M6 4 w5 (W3's rule, moved into the builder): retail's CLandCell::find_env_collisions (11.6096 0x00533C60) collides every body in a landblock
+        // entirely under water, so its tile is all Blocked and Water, and a neighbour's nodes within 0.58 m of it (the edge row, not the corner node) are blocked.
+        var east = new LandblockCoord((byte)(S1TileKit.Block.X + 1), S1TileKit.Block.Y);
+        var northEast = new LandblockCoord((byte)(S1TileKit.Block.X + 1), (byte)(S1TileKit.Block.Y + 1));
+        var sea = S1TileKit.Sea(east);
+        Assert.Equal(WaterType.EntirelyWater, sea.WaterType);
+        Assert.All(NavTileBuilder.Build(sea).Flags, f => Assert.Equal(NavFlags.Blocked | NavFlags.Water, f & (NavFlags.Blocked | NavFlags.Water)));
+
+        var mine = S1TileKit.Flat();
+        Assert.All(NavTileBuilder.Build(mine).Flags, f => Assert.Equal(NavFlags.None, f));
+        var tile = NavTileBuilder.Build(mine, new NavBuildOptions { Neighbours = [sea, S1TileKit.Sea(northEast), mine] });
+        for (var y = 0; y < NavTile.Size; y++)
+        {
+            Assert.Equal(NavFlags.Blocked | NavFlags.Water, tile.Flags[N(NavTile.Size - 1, y)]);
+            Assert.True(tile.IsWalkable(NavTile.Size - 2, y));
+            Assert.Equal(1, tile.Clearance[N(NavTile.Size - 2, y)]);
+        }
+
+        // The north-east sea's corner: the node centre (191.5, 191.5) is 0.71 m from it, out of reach; the row under the north-east sea is the east sea's.
+        Assert.True(tile.IsWalkable(NavTile.Size - 2, NavTile.Size - 1));
+        Assert.True(tile.IsWalkable(0, NavTile.Size - 1));
+    }
+
+    [Fact]
+    public void A_tilted_physics_part_is_stamped_by_its_own_physics_at_walking_height_not_its_world_box()
+    {
+        // M6 4 w5, TODO(nav-static-footprint): a plate leaning at 45 degrees from the ground at y = 100 rises 1 m a metre over +Y; its world box covers
+        // y 99.7 to 105.7, x 95 to 105 and z 0 to 5.9. Placed against its physics like a body (spheres of 0.58 m from 0.63 to 1.42 m), the plate blocks
+        // where it is within the walking band (to about 2.2 m out) and leaves open the nodes it overhangs higher up, all inside the box the old stamp blocked.
+        var plate = S1TileKit.LeaningPlate(S1TileKit.Block, 100f, 100f, MathF.PI / 4f);
+        var tile = NavTileBuilder.Build(S1TileKit.FlatWith(S1TileKit.Block, plate), null, out var stats);
+        output.WriteLine(stats.ToString());
+        Assert.Equal(1, stats.StaticsStamped);
+        Assert.False(tile.IsWalkable(100, 100)); // the plate 0.5 m up
+        Assert.False(tile.IsWalkable(100, 101)); // 1.5 m up
+        Assert.True(tile.IsWalkable(100, 103)); // 3.5 m up: under the overhang
+        Assert.True(tile.IsWalkable(100, 105)); // 5.5 m up
+        Assert.True(tile.IsWalkable(93, 101)); // beside its side, past the reach
+        Assert.False(tile.IsWalkable(95, 101)); // its side edge
+        var blocked = 0;
+        for (var y = 99; y <= 106; y++)
+        {
+            for (var x = 94; x <= 105; x++)
+            {
+                blocked += tile.IsWalkable(x, y) ? 0 : 1;
+            }
+        }
+
+        output.WriteLine($"leaning plate: {blocked} of 96 nodes of its inflated world box blocked");
+        Assert.InRange(blocked, 24, 60);
     }
 
     [Fact]
@@ -325,6 +432,27 @@ public sealed class NavTileBuilderTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void A_neighbours_static_that_stops_short_of_the_border_still_marks_the_body_s_reach_over_it()
+    {
+        var east = new LandblockCoord((byte)(S1TileKit.Block.X + 1), S1TileKit.Block.Y);
+        var close = S1TileKit.Box(S1TileKit.Block, 191.73f, 100f, 0f, new Vector3(0.5f, 6f, 2f)); // x 191.48 to 191.98: no shadow in the east, but the body's 0.58 m reaches over
+        var neighbour = S1TileKit.FlatWith(S1TileKit.Block, close);
+        Assert.Empty(neighbour.ForeignShadows); // else the shadow path stamps it and this proves nothing
+        var mine = S1TileKit.FlatWith(east);
+
+        var tile = NavTileBuilder.Build(mine, new NavBuildOptions { Neighbours = [neighbour, mine] }, out var stats);
+        output.WriteLine(stats.ToString());
+        Assert.Equal(1, stats.ReachStamped);
+        Assert.False(tile.IsWalkable(0, 100)); // centre 192.5 is 0.52 m from the box
+        Assert.True(tile.IsWalkable(1, 100));
+        Assert.True(tile.IsWalkable(0, 90));
+
+        var far = NavTileBuilder.Build(mine, new NavBuildOptions { Neighbours = [S1TileKit.FlatWith(S1TileKit.Block, S1TileKit.Box(S1TileKit.Block, 191.5f, 100f, 0f, new Vector3(0.5f, 6f, 2f))), mine] }, out var farStats);
+        Assert.Equal(0, farStats.ReachStamped); // x to 191.75: 0.58 m stops at 192.33, short of the first centre
+        Assert.True(far.IsWalkable(0, 100));
+    }
+
+    [Fact]
     public void A_building_blocks_its_bounds_as_a_building_and_the_door_gets_a_lane_from_the_sill_out()
     {
         var (building, cell) = S1TileKit.HouseWithSouthDoor(1.2f);
@@ -381,6 +509,101 @@ public sealed class NavTileBuilderTests(ITestOutputHelper output)
         var (box, cell) = S1TileKit.HouseWithSouthDoor(1.2f);
         _ = NavTileBuilder.Build(S1TileKit.Assemble([], [box], [cell]), null, out var boxStats);
         Assert.Equal(1, boxStats.BuildingsByBounds);
+    }
+
+    /// <summary>
+    /// M6 4 w6a (<c>TODO(m6-tethana-grand-masters)</c>, the gate): a building's projected shell blocks a roofed passage through it (Fort Tethana's gatehouse 0x01001030 closed the fort's gate),
+    /// so a node the building blocked is opened again where the body stands clear of the shell's own physics (spheres over the walking band, the placement test), and stays blocked
+    /// against its walls and inside its rooms.
+    /// </summary>
+    [Fact]
+    public void A_passage_through_a_building_is_open_where_the_body_stands_clear_of_its_physics_and_not_in_its_rooms()
+    {
+        var (gatehouse, _) = S1TileKit.Gatehouse(room: false);
+        var tile = NavTileBuilder.Build(S1TileKit.Assemble([], [gatehouse]), null, out var stats);
+        output.WriteLine(stats.ToString());
+        Assert.Equal(1, stats.BuildingsStamped);
+        Assert.True(stats.BuildingNodesOpen > 0);
+        foreach (var x in new[] { 90, 96, 101 })
+        {
+            Assert.Equal(NavFlags.None, tile.Flags[N(x, 93)]); // y 93.5 and 94.5: 1.5 m from each wall's face, under the roof
+            Assert.Equal(NavFlags.None, tile.Flags[N(x, 94)]);
+            Assert.Equal(NavTile.NoOwner, tile.Owner[N(x, 94)]);
+            Assert.Equal(NavFlags.Blocked | NavFlags.Building, tile.Flags[N(x, 91)]); // the walls stay
+            Assert.Equal(NavFlags.Blocked | NavFlags.Building, tile.Flags[N(x, 96)]);
+        }
+
+        Assert.Equal(NavFlags.Blocked | NavFlags.Building, tile.Flags[N(96, 92)]); // y 92.5: 0.5 m from the wall's face, within the body's 0.58 m
+        Assert.True(tile.IsWalkable(85, 94) && tile.IsWalkable(107, 94)); // the way through, end to end
+        Assert.True(tile.Clearance[N(96, 94)] >= 1);
+
+        // The same shell holding a room over the passage (a closed building's inside): nothing opens there; the room graph owns it.
+        var (house, room) = S1TileKit.Gatehouse(room: true);
+        var closed = NavTileBuilder.Build(S1TileKit.Assemble([], [house], [room!]), null, out var closedStats);
+        output.WriteLine(closedStats.ToString());
+        Assert.False(closed.IsWalkable(96, 94));
+        Assert.False(closed.IsWalkable(96, 93));
+        Assert.True(closedStats.BuildingNodesOpen < stats.BuildingNodesOpen);
+    }
+
+    /// <summary>
+    /// M6 4 w6a (<c>TODO(m6-holtburg-upper-floor)</c>, the lane half): a doorway lane is cut only where the sill steps down to the ground along it over the shell's floors; a door over a porch
+    /// with no stair to the ground (Holtburg's balcony doors 0xA9B30106 and 0xA9B30110, 3 m over the street) gets none and is counted, and the same door with a stair straight out gets its lane.
+    /// </summary>
+    [Fact]
+    public void A_door_above_the_ground_gets_a_lane_only_when_a_stair_steps_down_to_the_ground_along_it()
+    {
+        var (balcony, balconyCell) = S1TileKit.RaisedDoor(3f, stairs: false);
+        var refused = NavTileBuilder.Build(S1TileKit.Assemble([], [balcony], [balconyCell]), null, out var refusedStats);
+        output.WriteLine(refusedStats.ToString());
+        Assert.Equal(0, refusedStats.LanesBuilt);
+        Assert.Equal(1, refusedStats.PortalsAboveGround);
+        Assert.Empty(refused.DoorwayLanes);
+
+        var (porch, porchCell) = S1TileKit.RaisedDoor(3f, stairs: true);
+        var cut = NavTileBuilder.Build(S1TileKit.Assemble([], [porch], [porchCell]), null, out var cutStats);
+        output.WriteLine(cutStats.ToString());
+        Assert.Equal(1, cutStats.LanesBuilt);
+        Assert.Equal(0, cutStats.PortalsAboveGround);
+        Assert.Equal(3f, Assert.Single(cut.DoorwayLanes).Sill.Z, 1e-3f);
+
+        // A ground-floor door (the sill within a step of the ground) needs no floor at all.
+        var (low, lowCell) = S1TileKit.RaisedDoor(0.5f, stairs: false);
+        _ = NavTileBuilder.Build(S1TileKit.Assemble([], [low], [lowCell]), null, out var lowStats);
+        Assert.Equal(1, lowStats.LanesBuilt);
+    }
+
+    /// <summary>
+    /// M6 7 A (D62, the Brighteyes walk): the same 3 m door with its flight off the porch's side, at right angles to the lane's line, keeps a lane: the walk turns down the flight to the
+    /// ground (<see cref="NavDoorwayLane.Climb"/>, sill height to ground height), the door's sill and way out unchanged, and only the strip on the ground past the foot is the tile's. The balcony above (no flight at all) stays refused.
+    /// </summary>
+    [Fact]
+    public void A_door_whose_stairs_turn_aside_keeps_a_lane_that_walks_down_them()
+    {
+        var (door, cell) = S1TileKit.RaisedDoor(3f, stairs: false, stairsTurnAside: true);
+        var tile = NavTileBuilder.Build(S1TileKit.Assemble([], [door], [cell]), null, out var stats);
+        output.WriteLine(stats.ToString());
+        Assert.Equal(1, stats.LanesBuilt);
+        Assert.Equal(1, stats.LanesByStairs);
+        Assert.Equal(0, stats.PortalsAboveGround);
+        var lane = Assert.Single(tile.DoorwayLanes);
+        var climb = Assert.IsAssignableFrom<IReadOnlyList<Vector3>>(lane.Climb);
+        output.WriteLine(string.Join(" ", climb));
+        Assert.Equal(3f, lane.Sill.Z, 1e-3f);
+        Assert.InRange(climb[0].Z, -0.01f, 0.01f);
+        Assert.True(climb[0].X > 97f, $"the outer end {climb[0]}: the flight runs east of the porch");
+        Assert.True(climb[^1].Z > 2.9f, $"the walk ends at the sill's height: {climb[^1]}");
+        for (var i = 1; i < climb.Count; i++)
+        {
+            Assert.True(MathF.Abs(climb[i].Z - climb[i - 1].Z) <= 0.75f, $"a step of {climb[i - 1]} to {climb[i]}");
+            Assert.True(Vector2.Distance(new Vector2(climb[i].X, climb[i].Y), new Vector2(climb[i - 1].X, climb[i - 1].Y)) <= 1.01f, $"a gap of {climb[i - 1]} to {climb[i]}");
+        }
+
+        var (x, y) = NavTile.NodeAt(new Vector2(climb[0].X, climb[0].Y));
+        Assert.True(tile.IsWalkable(x, y));
+        var points = IndoorOutdoorRoute.LanePoints(tile, lane);
+        Assert.Equal(climb.Count + 1, points.Count);
+        Assert.Equal(lane.Sill, points[^1].Local);
     }
 
     [Fact]

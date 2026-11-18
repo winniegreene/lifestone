@@ -40,6 +40,168 @@ public sealed class J3bStationTests(DatSetFixture fixture) : IClassFixture<DatSe
         Assert.Equal(0, t.Places);
     }
 
+    /// <summary>
+    /// M6 6 R1F (live round 1: the level-13 climber's tie fizzled four times and failed the bind): a read book without Lifestone Recall 1635 makes no Lifestone Tie, the one spell it serves. The station is ok on the bind alone
+    /// (<c>tied=skipped</c>), sends no cast and no magic mode, leaves the tie fact unset and says why in one line; a fighter skips its caster swap too.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("melee")]
+    public void A_book_without_lifestone_recall_skips_the_tie_and_the_station_is_ok_on_the_bind_alone_R1F(string? fighter)
+    {
+        var t = new J3bRig(fighter is null ? null : FighterTemplate.ForKey(fighter));
+        var book = t.R.H.State.Self.Spellbook;
+        book.Clear();
+        foreach (var spell in new uint[] { BindStation.LifestoneTieSpell, 47, 48 })
+        {
+            book.Learn(spell);
+        }
+
+        book.IsKnown = true;
+        var ctx = t.Context();
+        var (run, status) = t.RunStation(new BindStation(), ctx);
+
+        Assert.True(status == ScenarioStatus.Succeeded && run.Ok, run.Failure + " / " + run.VerdictFields());
+        Assert.Matches(@"^bound=yes tied=skipped swap_s=0\.0 tie_fizzles=0$", run.VerdictFields());
+        Assert.True(ctx.Facts.Bound);
+        Assert.Null(ctx.Facts.LifestoneTied);
+        Assert.DoesNotContain(t.Events, e => e.StartsWith("cast:", StringComparison.Ordinal) || e == "mode:8");
+        Assert.Single(t.R.H.Log.Entries, e => e.Message.Contains("tie skipped: the spellbook (3 spells) holds no Lifestone Recall 1635", StringComparison.Ordinal));
+        Assert.Equal(CombatModes.NonCombat, t.R.H.State.Self.Qualities.CombatMode);
+        if (t.SwapRig is { } swap)
+        {
+            Assert.DoesNotContain(swap.Ops, o => o.StartsWith("wield:", StringComparison.Ordinal)); // no caster swap without a tie
+        }
+    }
+
+    /// <summary>M6 6 R1F: with Lifestone Recall in the book the tie is cast as before, and a tie that is cast and does not link stays the named failure (<c>tied=no</c>, never <c>skipped</c>).</summary>
+    [Fact]
+    public void A_book_with_lifestone_recall_still_ties_and_a_failed_tie_stays_named_R1F()
+    {
+        var t = new J3bRig { TieFizzles = 4 };
+        t.R.H.State.Self.Spellbook.IsKnown = true;
+        Assert.True(t.R.H.State.Self.Spellbook.Knows(RecallHome.LifestoneRecallSpell));
+        var (run, _) = t.RunStation(new BindStation(), t.Context());
+        Assert.True(run.Ok, run.Failure + " / " + run.VerdictFields()); // M6 7 BC: a tie that does not link leaves the bind standing, tied=no never fails the station
+        Assert.StartsWith("bound=yes tied=no ", run.VerdictFields(), StringComparison.Ordinal);
+        Assert.Contains(t.R.H.Log.Entries, e => e.Message.Contains("Lifestone Tie did not link", StringComparison.Ordinal) && e.Message.Contains("the bind stands", StringComparison.Ordinal));
+        Assert.DoesNotContain(t.R.H.Log.Entries, e => e.Message.Contains("tie skipped", StringComparison.Ordinal));
+    }
+
+    /// <summary>M6 7 BC (live, gate A climb 19: 45 mana held, the tie costs 50): a tie short of mana rests in place until the cost is held, then ties, with a check before and after, both logged.</summary>
+    [Fact]
+    public void A_tie_short_of_mana_rests_in_place_then_ties_BC()
+    {
+        var t = new J3bRig();
+        t.Caster.Table[BindStation.LifestoneTieSpell] = WorldActionRig.Spell(BindStation.LifestoneTieSpell, DatReaderWriter.Enums.SpellType.Enchantment) with { Name = "Lifestone Tie", BaseMana = 50 };
+        t.Caster.SetVitals(45, 275);
+        t.ManaPerSecond = 0.5;
+        var ctx = t.Context();
+        var (run, status) = t.RunStation(new BindStation(), ctx);
+
+        Assert.True(status == ScenarioStatus.Succeeded && run.Ok, run.Failure + " / " + run.VerdictFields());
+        Assert.StartsWith("bound=yes tied=yes ", run.VerdictFields(), StringComparison.Ordinal);
+        Assert.True(ctx.Facts.LifestoneTied);
+        Assert.Single(t.R.H.Log.Entries, e => e.Message.Contains("mana 45 of", StringComparison.Ordinal) && e.Message.Contains("under Lifestone Tie's 50", StringComparison.Ordinal));
+        Assert.Single(t.R.H.Log.Entries, e => e.Message.Contains("mana for Lifestone Tie:", StringComparison.Ordinal) && e.Message.Contains(": met (check after)", StringComparison.Ordinal));
+        Assert.Contains(t.Events, e => e.StartsWith("cast:2644@", StringComparison.Ordinal));
+    }
+
+    /// <summary>M6 7 BC: the mana that never comes back within the limit leaves the bind standing: no cast, tied=no, the station ok, the named TODO in the log, the facts of the bind kept.</summary>
+    [Fact]
+    public void A_tie_whose_mana_does_not_come_back_leaves_the_bind_standing_BC()
+    {
+        var t = new J3bRig();
+        t.Caster.Table[BindStation.LifestoneTieSpell] = WorldActionRig.Spell(BindStation.LifestoneTieSpell, DatReaderWriter.Enums.SpellType.Enchantment) with { Name = "Lifestone Tie", BaseMana = 50 };
+        t.Caster.SetVitals(10, 275);
+        var ctx = t.Context();
+        var (run, status) = t.RunStation(new BindStation(), ctx);
+
+        Assert.True(status == ScenarioStatus.Succeeded && run.Ok, run.Failure + " / " + run.VerdictFields());
+        Assert.StartsWith("bound=yes tied=no ", run.VerdictFields(), StringComparison.Ordinal);
+        Assert.True(ctx.Facts.Bound);
+        Assert.Null(ctx.Facts.LifestoneTied);
+        Assert.DoesNotContain(t.Events, e => e.StartsWith("cast:", StringComparison.Ordinal));
+        Assert.Contains(t.R.H.Log.Entries, e => e.Message.Contains("TODO(m6-bind-tie-mana)", StringComparison.Ordinal) && e.Message.Contains("the bind stands", StringComparison.Ordinal));
+        Assert.Contains(t.R.H.Log.Entries, e => e.Message.Contains(": not met (check after)", StringComparison.Ordinal));
+    }
+
+    /// <summary>M6 7 BC (live: the recall at 47 mana for a 50 cost, the station's own need being 20% of the pool): the recall rests in place for its cost first, then casts.</summary>
+    [Fact]
+    public void A_recall_home_short_of_mana_rests_in_place_then_casts_BC()
+    {
+        var t = new J3bRig();
+        t.Caster.Table[RecallHome.LifestoneRecallSpell] = WorldActionRig.Spell(RecallHome.LifestoneRecallSpell, DatReaderWriter.Enums.SpellType.Enchantment) with { Name = "Lifestone Recall", BaseMana = 50 };
+        t.Caster.SetVitals(47, 275);
+        t.ManaPerSecond = 0.5;
+        var ctx = t.Context();
+        var (run, status) = t.RunStation(new RecallHomeStation(), ctx);
+
+        Assert.True(status == ScenarioStatus.Succeeded && run.Ok, run.Failure + " / " + run.VerdictFields());
+        Assert.Equal(1, ctx.Facts.Recalls);
+        Assert.Single(t.R.H.Log.Entries, e => e.Message.Contains("mana 47 of", StringComparison.Ordinal) && e.Message.Contains("under Lifestone Recall's 50", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// M6 item 14 (m6-recall-waits-arrival; live 2026-11-13: the recovery's recall began 40 ms into a portal space and ended recall:present, three times, a second before she arrived): a recall begun in portal space waits for the
+    /// arrival and then casts; one whose arrival never comes ends recall:present after the bounded wait.
+    /// </summary>
+    [Fact]
+    public void A_recall_home_begun_in_portal_space_waits_for_the_arrival_and_then_casts()
+    {
+        var t = new J3bRig();
+        t.R.H.State.Self.Travel = SelfTravel.TeleportArrived;
+        var ctx = t.Context();
+        var frames = 0;
+        var (run, status) = t.RunStation(new RecallHomeStation(), ctx, perFrame: _ =>
+        {
+            if (++frames == 40)
+            {
+                t.R.H.State.Self.Travel = SelfTravel.Present; // the arrival
+            }
+        });
+
+        Assert.True(status == ScenarioStatus.Succeeded && run.Ok, run.Failure + " / " + run.VerdictFields());
+        Assert.Equal(1, ctx.Facts.Recalls);
+        Assert.Single(t.R.H.Log.Entries, e => e.Message.Contains("recall-home: check before: the character is in TeleportArrived", StringComparison.Ordinal));
+        Assert.Single(t.R.H.Log.Entries, e => e.Message.Contains("recall-home: check after: travel Present after", StringComparison.Ordinal));
+
+        var never = new J3bRig();
+        never.R.H.State.Self.Travel = SelfTravel.TeleportArrived;
+        var (stuck, failed) = never.RunStation(new RecallHomeStation(), never.Context());
+        Assert.Equal(ScenarioStatus.Failed, failed);
+        Assert.Contains("present", stuck.Failure, StringComparison.Ordinal);
+        Assert.Single(never.R.H.Log.Entries, e => e.Message.Contains("still not present", StringComparison.Ordinal));
+    }
+
+    /// <summary>M6 7 BD: the recall's rest for its mana says it waits (the autopilot's one rule reads it), and the cast does not.</summary>
+    [Fact]
+    public void A_recall_homes_rest_for_its_mana_is_a_wait_by_name_and_the_cast_is_not()
+    {
+        var t = new J3bRig();
+        t.Caster.Table[RecallHome.LifestoneRecallSpell] = WorldActionRig.Spell(RecallHome.LifestoneRecallSpell, DatReaderWriter.Enums.SpellType.Enchantment) with { Name = "Lifestone Recall", BaseMana = 50 };
+        t.Caster.SetVitals(47, 275);
+        t.ManaPerSecond = 0.5;
+        var waits = new HashSet<string>(StringComparer.Ordinal);
+        var unwaited = 0;
+        var (run, status) = t.RunStation(new RecallHomeStation(), t.Context(), perFrame: r =>
+        {
+            if (((IStationWait)r).Waiting is { } wait)
+            {
+                waits.Add(wait);
+            }
+            else
+            {
+                unwaited++;
+            }
+        });
+
+        Assert.True(status == ScenarioStatus.Succeeded && run.Ok, run.Failure + " / " + run.VerdictFields());
+        Assert.Equal("the rest in place for Lifestone Recall's mana", Assert.Single(waits));
+        Assert.True(unwaited > 0);
+        Assert.Null(((IStationWait)run).Waiting);
+    }
+
     [Fact]
     public void Bind_walks_to_the_lifestones_known_point_first_when_it_is_not_in_view_and_logs_the_fallback_once_F2()
     {
@@ -97,11 +259,11 @@ public sealed class J3bStationTests(DatSetFixture fixture) : IClassFixture<DatSe
         var refused = new J3bRig { TieRefusal = 0x0400 };
         var refusedCtx = refused.Context();
         var (refusedRun, _) = refused.RunStation(new BindStation(), refusedCtx);
-        Assert.False(refusedRun.Ok);
+        Assert.True(refusedRun.Ok, refusedRun.Failure + " / " + refusedRun.VerdictFields()); // M6 7 BC: named in the log, the bind stands
         Assert.True(refusedCtx.Facts.Bound);
         Assert.Null(refusedCtx.Facts.LifestoneTied);
         Assert.StartsWith("bound=yes tied=no ", refusedRun.VerdictFields(), StringComparison.Ordinal);
-        Assert.Contains(((ScriptLeg)refusedRun).Problems, p => p.Contains("YouDontHaveAllTheComponents 0x0400", StringComparison.Ordinal));
+        Assert.Contains(refused.R.H.Log.Entries, e => e.Message.Contains("YouDontHaveAllTheComponents 0x0400", StringComparison.Ordinal) && e.Message.Contains("TODO(m6-bind-tie-mana)", StringComparison.Ordinal));
         Assert.Equal(0, refused.Places);
     }
 
@@ -124,7 +286,48 @@ public sealed class J3bStationTests(DatSetFixture fixture) : IClassFixture<DatSe
         Assert.Equal(0, stuck.Places);
     }
 
+    /// <summary>
+    /// M6 6 FXD1 (6-D5): the bind records where it bound (<see cref="JourneyFacts.BoundAt"/>, the used lifestone's cell and point, ACE's Sanctuary) at the Use that attuned the spirit, whatever its town; a Use that did not attune records
+    /// nothing, and the tie never sets it (a tie does not change where death sends one).
+    /// </summary>
+    [Fact]
+    public void M6_6_FXD1_the_bind_records_the_lifestone_it_bound_at_and_a_use_that_did_not_attune_records_nothing()
+    {
+        var t = new J3bRig();
+        var ctx = t.Context();
+        Assert.Null(ctx.Facts.BoundAt);
+        var (run, status) = t.RunStation(new BindStation(), ctx);
+
+        Assert.True(status == ScenarioStatus.Succeeded && run.Ok, run.Failure + " / " + run.VerdictFields());
+        Assert.True(t.R.H.State.Objects.TryGet(J3bRig.LifestoneGuid, out var stone) && stone.Position is not null);
+        var at = Assert.NotNull(ctx.Facts.BoundAt);
+        Assert.Equal(stone.Position!.Value, at);
+
+        var silent = new J3bRig { UseSilent = true };
+        var silentCtx = silent.Context();
+        _ = silent.RunStation(new BindStation(), silentCtx);
+        Assert.False(silentCtx.Facts.Bound);
+        Assert.Null(silentCtx.Facts.BoundAt);
+    }
+
     // ------------------------------------------------------------------------------------------------ den travel
+
+    [Fact]
+    public void A_den_recall_that_lands_moves_the_one_tie_slot_and_unties_the_other_grounds()
+    {
+        var t = new J3bRig();
+        var ctx = t.Context(f =>
+        {
+            f.SetPortalTie(J3bRig.DenKey, PortalTie.Tied);
+            f.SetPortalTie("tie-slot-other", PortalTie.Tied); // M6 4 R2 (F1): a stale record of another ground the recall must not leave tied
+        });
+        var (run, status) = t.RunStation(new DenTravelStation(), ctx);
+
+        Assert.True(status == ScenarioStatus.Succeeded && run.Ok, run.Failure + " / " + run.VerdictFields());
+        Assert.Equal(J3bRig.DenKey, ctx.Facts.PrimaryPortalSlot);
+        Assert.Equal(PortalTie.Tied, ctx.Facts.PortalTieOf(J3bRig.DenKey));
+        Assert.Equal(PortalTie.Untied, ctx.Facts.PortalTieOf("tie-slot-other"));
+    }
 
     [Fact]
     public void A_tied_mage_recalls_into_the_den_with_one_cast_one_recall_and_no_place_and_no_walk()

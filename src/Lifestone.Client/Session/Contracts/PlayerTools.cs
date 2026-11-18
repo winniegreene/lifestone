@@ -515,6 +515,13 @@ public sealed class PlayerTools
                 early = new ActionOutcome(ActionOutcomeKind.Refused, 0, e.Message);
             }
 
+            // M6 0 F5 (review 0-R4, D10, D34): the climber is never granted or placed. The one send path refuses a counted verb for the character named MageTemplate.ClimberName, loudly and by name,
+            // unless the session opted in (--allow-climber-grant, default off: item 8's one Alchemy grant).
+            if (early is null && ClimberRefusal(kind) is { } climber)
+            {
+                early = new ActionOutcome(ActionOutcomeKind.Refused, 0, climber);
+            }
+
             // M5 8 (D141): outside the world is no refusal here: the tracker waits for the world, bounded, and refuses at its turn when it never comes (ToolTracker).
             if (early is null && availabilityNow && !_api.IsOffline && Availability is not (ToolAvailability.Unknown or ToolAvailability.Ready or ToolAvailability.NotInWorld))
             {
@@ -530,6 +537,25 @@ public sealed class PlayerTools
         }
 
         return handle;
+    }
+
+    /// <summary>The TODO name the climber's grant refusal fails under (review 0-R4).</summary>
+    public const string ClimberNoGrantTodo = "m6-climber-no-grant";
+
+    /// <summary>
+    /// The refusal for a counted mod verb (<see cref="ModVerbCounter.TryVerbOf"/>: item, xp, place, corpses rot, spell learn) when the player in the world is <see cref="MageTemplate.ClimberName"/> and the session did not opt in
+    /// (<see cref="ActionApi.AllowClimberGrant"/>); null for any other request, any other character, or an opted-in session. Logs one WARNING naming the TODO.
+    /// </summary>
+    private string? ClimberRefusal(ActionKind kind)
+    {
+        if (_api.AllowClimberGrant || !ModVerbCounter.TryVerbOf(kind, out var verb) || !CharacterPolicy.For(_api.State.Self.Name).CheatFree)
+        {
+            return null;
+        }
+
+        var why = "TODO(" + ClimberNoGrantTodo + "): " + _api.State.Self.Name + " is never granted or placed (M6 D10); the " + verb + " request is refused (opt in with --allow-climber-grant, item 8's one Alchemy grant, D34)";
+        _api.Log.Warn(SessionLog.Category, why);
+        return why;
     }
 
     private void PublishNotLoopbackOnce(string? refusal)

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    World walk W7 (docs/world-walk.md): runs a list of single physics steps through ACE's own physics, from the retail dats alone (no database, no server, nothing listening), and lists where ACE and Lifestone differ.
+    It links the pinned ACE build under server/runtime/ace of the main checkout (pass AceDir), which is why it is not in Lifestone.slnx: a fresh checkout has no such folder. It holds no ACE source (docs/third-party/physics.md).
+    Build: dotnet build tools/ace-compare/AceCompare.csproj -c Release -disable-build-servers -p:AceDir=<main checkout>/server/runtime/ace/ -o cache/world-walk/bin-ace
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <OutputType>Exe</OutputType>
+    <UseAppHost>false</UseAppHost>
+    <RootNamespace>Lifestone.AceCompare</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="ACE.Server" HintPath="$(AceDir)ACE.Server.dll" Private="false" />
+    <Reference Include="ACE.Entity" HintPath="$(AceDir)ACE.Entity.dll" Private="false" />
+    <Reference Include="ACE.DatLoader" HintPath="$(AceDir)ACE.DatLoader.dll" Private="false" />
+  </ItemGroup>
+</Project>

@@ -83,7 +83,42 @@ public sealed class WornRestorerTests
         Assert.Contains(r.H.Net.Of(FakeSendKind.Identify), s => s.Guid == Fire2);
         Assert.Equal(Fire1, r.H.State.Self.Inventory.EquippedAt(SelfEquipJudge.Held));
         Assert.Contains(r.H.Log.Entries, e => e.Message.StartsWith("gear: restore: appraising ", StringComparison.Ordinal));
-        Assert.Contains(r.H.Log.Entries, e => e.Message.StartsWith("gear: restore: caster pick: 'Fire Sceptre' 0x80003EB7, the best of 2 usable caster(s) held", StringComparison.Ordinal));
+        Assert.Contains(r.H.Log.Entries, e => e.Message.StartsWith("gear: restore: caster pick: 'Fire Sceptre' 0x80003EB7 (", StringComparison.Ordinal) && e.Message.Contains("), the best of 2 usable caster(s) held", StringComparison.Ordinal)); // M6 14 (m6-caster): with its score
+        Assert.Contains(r.H.Log.Entries, e => e.Message.StartsWith("gear: restore: caster score: weights damage 0.5, mana 0.1", StringComparison.Ordinal)); // the terms, logged once at the pick
+    }
+
+    [Fact]
+    public void M6_2_e_a_confirmed_caster_wield_clears_the_out_of_mana_flag_for_that_guid()
+    {
+        // slice b's CasterSpellsDropped: the "out of Mana" line marks a caster, its next wield gives its spells back (Player_Inventory.cs:313-315 @95ef426d), so the restore's wield clears it.
+        CasterSpellsDropped.Shared.Mark("Fire Sceptre (m6-2-e)", [Fire1]);
+        Assert.True(CasterSpellsDropped.Shared.IsDropped(Fire1, "Fire Sceptre"));
+        var r = Login();
+        var restorer = new WornRestorer(GroundCatalog.Get("black-spawn-den-aluvian"), 126, new Dictionary<uint, Lifestone.Data.Magic.SpellInfo>(), r.H.Log, "autopilot", "the start-up audit", new WornMemory());
+
+        Run(r, restorer);
+
+        Assert.Equal(Fire1, r.H.State.Self.Inventory.EquippedAt(SelfEquipJudge.Held));
+        Assert.False(CasterSpellsDropped.Shared.IsDropped(Fire1, "Fire Sceptre"));
+    }
+
+    [Fact]
+    public void M6_2_e_the_restores_element_is_the_rungs_first_with_the_source_logged()
+    {
+        var outskirts = GroundCatalog.Get("holtburg-outskirts");
+        Assert.Equal(0x10u, WornRestorer.ElementFor(outskirts, 6, out var source)); // level 6 is the outskirts rung: fire
+        Assert.Contains("the rung's element fire 0x10", source, StringComparison.Ordinal);
+        Assert.Contains("(rung outskirts)", source, StringComparison.Ordinal);
+
+        WornRestorer.ElementFor(outskirts, 3, out source); // level 3 is the quest rung (no ground, no element): the plan's family or the named TODO, never silent
+        Assert.Contains("no ladder rung of level 3 names holtburg-outskirts", source, StringComparison.Ordinal);
+
+        // M6 16 E5e3: the line is written at the restore's first ask of the judge (the element is the fight's own choice on the ground, read from her book: the session is not at hand when the restorer is made)
+        var r = Login();
+        var restorer = new WornRestorer(GroundCatalog.Get("black-spawn-den-aluvian"), 126, new Dictionary<uint, Lifestone.Data.Magic.SpellInfo>(), r.H.Log, "autopilot", "the start-up audit", new WornMemory());
+        Assert.DoesNotContain(r.H.Log.Entries, e => e.Message.StartsWith("gear: restore: element 0x", StringComparison.Ordinal));
+        Run(r, restorer);
+        Assert.Single(r.H.Log.Entries, e => e.Message.StartsWith("gear: restore: element 0x", StringComparison.Ordinal));
     }
 
     /// <summary>The login of the live case: what the database held.</summary>
@@ -220,6 +255,35 @@ public sealed class WornRestorerTests
         Assert.Equal(InventoryPlaceKind.MainPack, r.H.State.Self.Inventory.Find(Wand).Kind);
         Assert.Equal(Fire1, r.H.State.Self.Inventory.EquippedAt(SelfEquipJudge.Held));
         Assert.Contains(r.H.Log.Entries, e => e.Message.Contains("the held caster 0x80004907 to the main pack (", StringComparison.Ordinal) && e.Message.Contains("the kit pack 0x8000490C is full (24 of 24)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void M6_16_E5e2_on_a_ground_without_a_keep_aside_block_the_restore_wears_the_climbers_ring_with_a_useful_major_cantrip_as_the_town_trip_does()
+    {
+        // The state E5e1 named: the climber on a ground whose profile has no keep-aside block (15 of 18), a ring casting Major Focus in her pack, a finger bare. The town trip read her default list and wore it; the restore
+        // read the ground's block alone, found no use for the ring and left it in the pack.
+        const uint FocusRing = 0x80005100, MajorFocus = 4004;
+        var ground = GroundCatalog.All.First(g => g.Loot?.KeepAside is null);
+        var spells = new Dictionary<uint, Lifestone.Data.Magic.SpellInfo> { [MajorFocus] = WorldActionRig.Spell(MajorFocus, DatReaderWriter.Enums.SpellType.Enchantment) with { Name = "Major Focus" } };
+        var r = Login();
+        r.H.State.Self.Name = MageTemplate.ClimberName;
+        Obj(r, FocusRing, "Focus Ring", 9_005, 0x8, 0x000C0000, 0, Player);
+        r.Raw(AceM3Writers.PutObjInContainer(Player, ++_seq, FocusRing, Player, 2, 0));
+        r.H.R.Reducer.OnIdentifyResponse(r.H.R.Context, new GameEventHeader(Player, ++_seq, 0x00C9), new IdentifyResponseMsg(
+            FocusRing, IdentifyResponseFlags.IntStatsTable | IdentifyResponseFlags.SpellBook, true, ImmutableDictionary<uint, int>.Empty, ImmutableDictionary<uint, long>.Empty, ImmutableDictionary<uint, bool>.Empty,
+            ImmutableDictionary<uint, double>.Empty, ImmutableDictionary<uint, string>.Empty, ImmutableDictionary<uint, uint>.Empty, [MajorFocus], null, null, null, null, null, null, null, null));
+
+        // before: the judge the restore built (the ground's own block alone) has no use for it
+        var worn = SelfEquipJudge.Worn(r.H.State);
+        var candidate = SelfEquipJudge.CandidateOf(r.H.State, r.H.State.Objects.TryGet(FocusRing, out var ring) ? ring : throw new InvalidOperationException("no ring"));
+        Assert.Equal(SelfEquipKind.None, new SelfEquipJudge(ground.Loot?.KeepAside?.SpellNames() ?? [], 0, id => spells.TryGetValue(id, out var s) ? s.Name : null).Judge(candidate, worn, new Mage()).Kind);
+
+        var restorer = new WornRestorer(ground, 80, spells, r.H.Log, "autopilot", "the start-up audit", new WornMemory());
+        Run(r, restorer);
+
+        Assert.True(r.H.State.Self.Inventory.TryGetEquipped(FocusRing, out var at));
+        Assert.Equal(0x00040000u, at.Location); // the free finger: the other holds the plain ring
+        Assert.Contains(r.H.Log.Entries, e => e.Message.StartsWith("gear: restore: wear 'Focus Ring' 0x80005100: casts Major Focus that no worn piece casts", StringComparison.Ordinal));
     }
 
     [Fact]

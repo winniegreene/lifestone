@@ -2,6 +2,7 @@ using Lifestone.Client.Session;
 using Lifestone.Client.Session.Recording;
 using Lifestone.Data.CharacterCreation;
 using Lifestone.Data.Dat;
+using Lifestone.Data.Motion;
 using Xunit.Abstractions;
 
 namespace Lifestone.Client.Tests.Session;
@@ -52,9 +53,9 @@ public sealed class QualitiesWeenieRecordingTests(ITestOutputHelper output)
                     seen++;
                     if (id == QualitiesWeenie.RunSkillId && qualities.TryGetAttribute(Endurance, out var endurance) && qualities.TryGetAttribute(Quickness, out var quickness))
                     {
-                        // CACQualities::InqSkill: formula + init + ranks, the class adds nothing.
+                        // CACQualities::InqSkill (raw): formula + init + ranks, the class adds nothing. M6 14 pits: a recording may carry buffs, which RunSkill now counts; the base is the rule checked here.
                         Assert.True(RunRule.Formula.TryCalculate(endurance.Start + endurance.Ranks, quickness.Start + quickness.Ranks, out var formula));
-                        Assert.Equal((int)formula + (int)skill.Init + skill.Ranks, new QualitiesWeenie(qualities, RunRule, RunRule).RunSkill);
+                        Assert.Equal((int)formula + (int)skill.Init + skill.Ranks, new QualitiesWeenie(qualities, RunRule, RunRule).RunSkillBase);
                     }
                 }
             }
@@ -88,11 +89,12 @@ public sealed class QualitiesWeenieRecordingTests(ITestOutputHelper output)
 
             var (e, q) = (endurance.Start + endurance.Ranks, quickness.Start + quickness.Ranks);
             var weenie = QualitiesWeenie.FromSkillTable(qualities, skills);
-            Assert.True(weenie.TryGetRunRate(out var rate));
-            output.WriteLine($"{Path.GetFileName(path)}: class {run.AdvancementClass} ranks {run.Ranks} init {run.Init}, endurance {e} quickness {q}: Run {weenie.RunSkill}, run rate {rate:0.000}");
+            Assert.True(weenie.TryGetRunRate(out var buffedRate));
+            var rate = (float)MovementSystem.GetRunRate(weenie.Load, weenie.RunSkillBase, 1f); // M6 14 pits: the pin is the bare rule; a recording's buffs (RunSkill counts them now) are printed
+            output.WriteLine($"{Path.GetFileName(path)}: class {run.AdvancementClass} ranks {run.Ranks} init {run.Init}, endurance {e} quickness {q}: Run {weenie.RunSkillBase} bare, run rate {rate:0.000}; with its {qualities.Enchantments.Length} enchantments Run {weenie.RunSkill}, run rate {buffedRate:0.000}");
             if (run is { AdvancementClass: 2, Ranks: 5, Init: 0 } && (e, q) == (LiveEndurance, LiveQuickness))
             {
-                Assert.Equal(LiveRunSkill, weenie.RunSkill);
+                Assert.Equal(LiveRunSkill, weenie.RunSkillBase);
                 Assert.Equal(LiveRunRate, rate, 3);
                 pinned++;
             }

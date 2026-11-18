@@ -49,8 +49,9 @@ public enum GroundTerrain
 /// <para>The per-frame lookups (<see cref="IsWalkable"/>, <see cref="IsNoGo"/>, <see cref="StoreyOf"/>, <see cref="RoleOf"/>, <see cref="InLandblocks"/>) allocate nothing: the cell sets are bit masks
 /// per landblock (<see cref="CellSet"/>).</para>
 /// <para>The walkable set is the storeys' cells without the no-go cells: the no-go set wins over a storey.</para>
-/// <para>TODO(m6-ground-fields): the fields M6's grounds need and M5's do not (m5-plan.md D43, section 9) are not built: entry gates, variants, damage multipliers, target roles beyond
-/// target and avoid, spawn models beyond the generator slot, hazards, interactables, exit kinds, vendor roles and the return route. A profile that needs one adds it here when it does.</para>
+/// <para>M6 item 3 a1 (<c>m6-ground-fields</c>) built the entry gate (<see cref="Entry"/>, <see cref="AdmitsLevel"/>), the exit's kind (<see cref="Exit"/>), the kill-first role (<see cref="GroundTarget.KillFirst"/>,
+/// <see cref="IsKillFirst"/>) and the target stats (<see cref="GroundTarget"/>'s health, Magic Defense, attributes, damage types and swing). TODO(m6-ground-fields): the rest M6's grounds may need and M5's do not
+/// (m5-plan.md D43, section 9) is not built: variants, damage multipliers, spawn models beyond the generator slot, hazards, interactables, vendor roles and the return route. A profile that needs one adds it here when it does.</para>
 /// </remarks>
 /// <param name="Key">The catalog key, also the profile file's name without <c>.json</c> (lower case, words joined by hyphens).</param>
 /// <param name="Name">The display name.</param>
@@ -157,6 +158,82 @@ public sealed record HuntingGround(
         return null;
     }
 
+    /// <summary>
+    /// M6 item 3 a1: true when the creature of weenie class <paramref name="wcid"/> is a kill-first target (the profile's role <c>kill-first</c>, which loads as <see cref="GroundRole.Target"/> with
+    /// <see cref="GroundTarget.KillFirst"/>); false for a plain target, an avoided creature or one the profile does not list. Allocates nothing.
+    /// </summary>
+    /// <param name="wcid">The weenie class id.</param>
+    public bool IsKillFirst(uint wcid)
+    {
+        for (var i = 0; i < Targets.Count; i++)
+        {
+            if (Targets[i].Wcid == wcid)
+            {
+                return Targets[i].KillFirst && Targets[i].Role == GroundRole.Target; // only a target is kill-first, even in a ground built by hand
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// M6 14 holding safety (the owner, 2026-11-13: every number about how she fights is computed from her live state and the creatures' facts): the place's hardest hitter, read from the facts its targets carry (<see cref="GroundTarget.DVal"/>,
+    /// <see cref="GroundTarget.DVar"/> and <see cref="GroundAttributes.Strength"/>): the creature whose largest uncritical hit (<c>Vitals.FightLines.MaxHit</c>) is the largest, or null when no creature of the profile carries its attack's facts
+    /// (the derived fight line then cannot be computed here, and the reader says so). <paramref name="damageTypes"/> is that creature's <see cref="GroundTarget.DamageTypes"/> (0: the profile does not say).
+    /// </summary>
+    /// <param name="damageTypes">The hitter's damage type bits.</param>
+    public LadderHitter? HardestHitter(out uint damageTypes)
+    {
+        LadderHitter? best = null;
+        var bestHit = 0.0;
+        damageTypes = 0;
+        for (var i = 0; i < Targets.Count; i++)
+        {
+            var t = Targets[i];
+            if (t.DVal is not { } dVal || t.DVar is not { } dVar || t.Attributes is not { } a)
+            {
+                continue;
+            }
+
+            var hitter = new LadderHitter(t.Name, t.Wcid, dVal, dVar, a.Strength);
+            var hit = Vitals.FightLines.MaxHit(hitter);
+            if (best is null || hit > bestHit)
+            {
+                (best, bestHit, damageTypes) = (hitter, hit, t.DamageTypes);
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>
+    /// M6 item 3 a1: the ground's entry portal with its level gate and whether it can be tied (the profile's optional <c>entry</c> section), or null when the profile has none (then every level is admitted).
+    /// </summary>
+    public GroundEntry? Entry { get; init; }
+
+    /// <summary>M6 item 3 a1: how the ground is left (the profile's optional <c>exit</c> section): by an exit portal, by recall or on foot; null when the profile does not say.</summary>
+    public GroundExitSection? Exit { get; init; }
+
+    /// <summary>
+    /// M6 14 pits (<c>TODO(m6-abode-pits)</c>): the pits of the ground a running jump crosses (the profile's optional <c>jumps</c> section, each crossing with its source), the room graph's jump edges
+    /// (<see cref="GroundRooms.GraphOf"/>); empty for a ground without one.
+    /// </summary>
+    public IReadOnlyList<Lifestone.Client.Movement.Routes.PitJump> Jumps { get; init; } = [];
+
+    /// <summary>
+    /// M6 14 holding plates (the owner, 2026-11-14): the ground's pressure plates (the profile's optional <c>plates</c> section: the weenie, its shape and spells, and each plate's place), walls of every walk over the ground's rooms
+    /// (<see cref="GroundRooms.GraphOf"/>, <see cref="Lifestone.Client.Movement.Wayfinding.PlateKeepOff"/>) and jumped where one blocks the way; null for a ground without plates.
+    /// </summary>
+    public GroundPlates? Plates { get; init; }
+
+    /// <summary>M6 14 holding plates: <see cref="Plates"/> as the room graph's walls (empty without plates).</summary>
+    public IReadOnlyList<Lifestone.Client.Movement.Wayfinding.KeptPlate> KeptPlates =>
+        Plates is not { } plates ? [] : [.. plates.Points.Select(p => new Lifestone.Client.Movement.Wayfinding.KeptPlate(p.Name, p.Cell, p.Point, plates.ShapeMetres, plates.TopMetres))];
+
+    /// <summary>True when the entry portal admits a character of <paramref name="level"/> (its MinLevel and MaxLevel, each when present); true when the profile has no <c>entry</c>. Pure; allocates nothing.</summary>
+    /// <param name="level">The character's level.</param>
+    public bool AdmitsLevel(int level) => Entry is null || Entry.Admits(level);
+
     /// <summary>The spell plan's row for a character level, or null when no row holds it. Allocates nothing.</summary>
     /// <param name="characterLevel">The character's level.</param>
     public SpellPlanRow? PlanFor(int characterLevel)
@@ -182,8 +259,70 @@ public sealed record HuntingGround(
     /// <summary>
     /// M5 7 F16 (D91, the owner): the health share, in percent, under which the autopilot's upkeep stops the fight for the health (the profile's optional <c>fight.retreat_health_percent</c>). 0 means never: the fight does not retreat
     /// on this ground and the emergency drain (<c>FightEmergency</c>) holds the health instead. Null (the section is absent) keeps the derived line (<c>AutopilotOptions.HealthFloorPercent</c>). The other upkeep reasons (the buff margin, the logistics) are unchanged.
+    /// M6 14 holding safety: a number sized for one character; where the targets carry their attack's facts (<see cref="HardestHitter"/>) the line derived on her live state wins (<c>Vitals.LiveFightLine</c>) and this value is logged as ignored.
     /// </summary>
     public int? FightRetreatHealthPercent { get; init; }
+
+    /// <summary>
+    /// M6 7 AB: the rest before the next pull (the profile's optional <c>fight.pull_mana_percent</c>, <c>pull_health_percent</c>, <c>pull_rest_until_percent</c>, <c>pull_rest_posture</c>, <c>pull_aggro_metres</c>; <see cref="Vitals.GroundPullRest"/>).
+    /// Null (the fields are absent): no rest rule; the den at level 80 is fed by the dance (D88) and keeps its numbers.
+    /// </summary>
+    public Vitals.GroundPullRest? PullRest { get; init; }
+
+    /// <summary>M6 7 AR: what the plain hunt leaves alone (the profile's optional <c>hunt</c> section, <see cref="GroundHunt"/>). Null: everything walkable is hunted.</summary>
+    public GroundHunt? Hunt { get; init; }
+
+    /// <summary>M6 7 AY: where a corpse on this ground is safe to reach for its coin (the profile's optional <c>corpse_fetch</c>, <see cref="GroundCorpseFetch"/>). Null: nowhere.</summary>
+    public GroundCorpseFetch? CorpseFetch { get; init; }
+
+    /// <summary>M6 14 entry recharge: the hostiles on the way to the ground's entry (the profile's optional <c>approach</c>, <see cref="GroundApproach"/>), facts with their sources. Null: none recorded.</summary>
+    public GroundApproach? Approach { get; init; }
+
+    /// <summary>M6 14 entry recharge: the approach when <paramref name="cell"/> is an outdoor cell of one of its landblocks (a drop among its hostiles), else null. Allocates nothing.</summary>
+    /// <param name="cell">The cell (a portal's drop).</param>
+    public GroundApproach? ApproachAt(uint cell)
+    {
+        if (Approach is not { } approach || (cell & 0xFFFF) >= 0x100)
+        {
+            return null;
+        }
+
+        var landblock = (ushort)(cell >> 16);
+        for (var i = 0; i < approach.Landblocks.Count; i++)
+        {
+            if (approach.Landblocks[i] == landblock)
+            {
+                return approach;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// M6 14 T: the stock bought in another town on the way out (the profile's optional <c>town_stock</c>, <see cref="TownStockLine"/>): no line of <see cref="GroundSupplies.Stock"/>, sold by no home vendor, never a stop and never a trip of
+    /// its own (<c>Mage.TownStock</c>). Empty when the section is absent.
+    /// </summary>
+    public IReadOnlyList<TownStockLine> TownStock { get; init; } = [];
+
+    /// <summary>
+    /// M6 item 14 (m6-goldscarab): the town stock line of the ware <paramref name="wcid"/>, or null. A spell component bought this way (the Gold and the Pyreal Scarab at Uziz) is no stock line and has no stop line: the pack may hold none, and
+    /// every reader that asks "does the ground carry this component" (<c>FightScenario.WarKitCarries</c>, <c>GearKit.CastBurns</c>, the profile loader's plan check) asks this beside <see cref="GroundSupplies.StockOf"/>. Allocates nothing.
+    /// </summary>
+    /// <param name="wcid">The ware's weenie class id.</param>
+    public TownStockLine? TownStockOf(uint wcid)
+    {
+        var lines = TownStock;
+        for (var i = 0; i < lines.Count; i++)
+        {
+            if (lines[i].Wcid == wcid)
+            {
+                return lines[i];
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// M5 7 P7i (D144, the owner): floor regions the walk's planner avoids (the profile's optional <c>avoid_regions</c>): each is seeded into the ground's room graph as a costly box (<c>RoomPatches.AddBox</c>), so plans go round it
@@ -239,6 +378,9 @@ public sealed record HuntingGround(
     /// </summary>
     public IReadOnlyList<LearnLine> Learn { get; init; } = [];
 
+    /// <summary>M6 8 B1: the spells the ground wants the character to know (the profile's <c>wants_known</c>; empty on every other ground): the plan's war line, the lines for a target the plan's element does not hurt, the fight's protections; a line the book lacks is a loud line at the fight's start (<see cref="GroundWants"/>).</summary>
+    public IReadOnlyList<GroundWant> WantsKnown { get; init; } = [];
+
     /// <summary>M5 7 F22: the fewest tuskers within the Ring of Fire's reach before the war picker weighs it (the profile's optional <c>fight.ring_min_targets</c>, 1 to 9); null keeps the default of three (<see cref="Lifestone.Client.Session.Mage.WarPickSettings.DefaultRingMinTargets"/>).</summary>
     public int? FightRingMinTargets { get; init; }
 
@@ -247,16 +389,25 @@ public sealed record HuntingGround(
     /// The loader allows a supply line's ware under one vendor only, so there is one answer. Allocates nothing.
     /// </summary>
     /// <param name="wcid">The ware's weenie class id.</param>
-    public GroundVendor? VendorSelling(uint wcid)
+    public GroundVendor? VendorSelling(uint wcid) => Selling(Vendors, wcid) ?? Selling(Scriveners, wcid); // M6 1 c: the home town's scriveners after the profile's vendors
+
+    /// <summary>
+    /// M6 item 1 c (D40): the scrivener catalog's scriveners of the home town (<see cref="ScrivenerCatalog.VendorsIn"/>), merged at load by <see cref="GroundCatalog"/> after the profile's own vendors (additive: a scrivener the profile
+    /// lists is the profile's): <see cref="VendorSelling"/>, <see cref="PriceOf"/> and <see cref="VendorOf"/> see them, so the resupply's buy path buys a scroll there. Each buys nothing (mask 0: no sale goes to them) and is not in
+    /// <see cref="Vendors"/>, so the loot buyers and the profile's checks are unchanged. Empty for a town with no catalog scrivener.
+    /// </summary>
+    public IReadOnlyList<GroundVendor> Scriveners { get; init; } = [];
+
+    private static GroundVendor? Selling(IReadOnlyList<GroundVendor> vendors, uint wcid)
     {
-        for (var i = 0; i < Vendors.Count; i++)
+        for (var i = 0; i < vendors.Count; i++)
         {
-            var sells = Vendors[i].Sells;
+            var sells = vendors[i].Sells;
             for (var j = 0; j < sells.Count; j++)
             {
                 if (sells[j].Wcid == wcid)
                 {
-                    return Vendors[i];
+                    return vendors[i];
                 }
             }
         }
@@ -268,15 +419,17 @@ public sealed record HuntingGround(
     /// <param name="wcid">The ware's weenie class id.</param>
     public int? PriceOf(uint wcid)
     {
-        for (var i = 0; i < Vendors.Count; i++)
+        if (VendorSelling(wcid) is not { } vendor)
         {
-            var sells = Vendors[i].Sells;
-            for (var j = 0; j < sells.Count; j++)
+            return null;
+        }
+
+        var sells = vendor.Sells;
+        for (var j = 0; j < sells.Count; j++)
+        {
+            if (sells[j].Wcid == wcid)
             {
-                if (sells[j].Wcid == wcid)
-                {
-                    return sells[j].Price;
-                }
+                return sells[j].Price;
             }
         }
 
@@ -296,6 +449,14 @@ public sealed record HuntingGround(
             if (Vendors[i].Wcid == wcid)
             {
                 return Vendors[i];
+            }
+        }
+
+        for (var i = 0; i < Scriveners.Count; i++)
+        {
+            if (Scriveners[i].Wcid == wcid)
+            {
+                return Scriveners[i];
             }
         }
 
@@ -326,10 +487,114 @@ public sealed record GroundStorey(string Name, float ZMin, float ZMax, CellSet C
 /// <param name="Name">The name (for the logs).</param>
 /// <param name="Level">The creature's level (int property 25; not on the wire, so the profile is its source).</param>
 /// <param name="Role">Target or avoid.</param>
-/// <param name="MaxHealth">The creature's maximum health (M5 7 F7: the drain picker's measure of what a Drain Health Other takes; 0 when the profile does not say: the pick then assumes a full-sized target and says so). A profile value, read from the pinned world SQL.</param>
-/// <param name="MagicDefence">The creature's Magic Defense skill (M5 7 F7: the landing chance of a resistable spell; 0 when the profile does not say).</param>
+/// <param name="MaxHealth">
+/// The creature's maximum health (M5 7 F7: the drain picker's measure of what a Drain Health Other takes; 0 when the profile does not say: the pick then assumes a full-sized target and says so). A profile value, read from the pinned
+/// world SQL: ACE's current value, <c>CreatureVital.MaxValue</c> (CreatureVital.cs:104-131 @95ef426d): the vital's start (weenie_properties_attribute_2nd type 1 init_Level) plus its ranks (level_From_C_P) plus the attribute part,
+/// Endurance / 2 rounded half up (AttributeFormula.cs:55-71), with no enchantment on a fresh spawn; ACE spawns a creature at this maximum whatever the row's current_Level says (Creature.cs:132-135), so the den's Tusker Guard 260 (its current_Level) is not ACE's 400.
+/// </param>
+/// <param name="MagicDefence">
+/// The creature's Magic Defense skill (M5 7 F7: the landing chance of a resistable spell; 0 when the profile does not say). ACE's current value, <c>CreatureSkill.Current</c> (CreatureSkill.cs:154-163 @95ef426d): the skill's
+/// init_Level plus its ranks (weenie_properties_skill type 15 level_From_P_P) plus, for a trained or specialised skill, (Focus + Self) / 7 rounded half up (the SkillTable's formula).
+/// </param>
 /// <param name="Opener">M5 7 F8 (D89): the spell line the fight opens this creature with before the bolts (the profile's optional <c>opener</c>, a profile line's name such as "Fire Vulnerability Other"), or null for bolts only. Only a target may name one.</param>
-public sealed record GroundTarget(uint Wcid, string Name, int Level, GroundRole Role, int MaxHealth = 0, int MagicDefence = 0, string? Opener = null);
+public sealed record GroundTarget(uint Wcid, string Name, int Level, GroundRole Role, int MaxHealth = 0, int MagicDefence = 0, string? Opener = null)
+{
+    /// <summary>
+    /// M6 item 3 a1: a kill-first target (the profile's role <c>kill-first</c>): <see cref="Role"/> is <see cref="GroundRole.Target"/> and the pick orders it first (the readers are the fight's). Only a target may be kill-first.
+    /// </summary>
+    public bool KillFirst { get; init; }
+
+    /// <summary>M6 item 3 a1: the creature's six attributes as its weenie's rows give them (the profile's optional <c>attributes</c>), or null when the profile does not say.</summary>
+    public GroundAttributes? Attributes { get; init; }
+
+    /// <summary>
+    /// M6 item 3 a1: the DamageType bits of the creature's body-part attacks (the profile's optional <c>damage_types</c>, a hex mask: the OR of weenie_properties_body_part's d_Type over the parts with a d_Val, the parts ACE's
+    /// <c>GetAttackPart</c> picks from, Monster_Melee.cs:590-615 @95ef426d); 0 when the profile does not say. A wielded weapon's damage type is not in it.
+    /// </summary>
+    public uint DamageTypes { get; init; }
+
+    /// <summary>
+    /// M6 item 3 a1: the seconds between a melee creature's swings (the profile's optional <c>swing_s</c>), or null when the profile does not say. ACE times the next swing as the swing animation's length at the creature's
+    /// attack speed plus a random delay up to its PowerupTime (Monster_Melee.cs:151-156 @95ef426d), so a value here is a measure or a mean, named in its source; the draft writes none (<c>TODO(f11-swing-seconds)</c>).
+    /// </summary>
+    public double? SwingSeconds { get; init; }
+
+    /// <summary>
+    /// M6 14 holding safety: the largest <c>d_Val</c> of the creature's attacking body parts (the profile's optional <c>d_val</c>, weenie_properties_body_part; ACE's <c>BaseDamage.MaxDamage</c>, Monster_Melee.cs:385-404 @95ef426d), or null when the
+    /// profile does not say. With <see cref="DVar"/> and <see cref="Attributes"/> it is the fact the derived fight line reads (<see cref="HuntingGround.HardestHitter"/>); the row's <c>attack_source</c> names the SELECT.
+    /// </summary>
+    public int? DVal { get; init; }
+
+    /// <summary>M6 14 holding safety: that part's <c>d_Var</c> (the profile's optional <c>d_var</c>; a hit is uniform between <c>d_Val x (1 - d_Var)</c> and <c>d_Val</c>, Entity/BaseDamage.cs), or null when the profile does not say.</summary>
+    public double? DVar { get; init; }
+
+    /// <summary>
+    /// M6 14 approach cost: the experience a kill gives (the profile's optional <c>xp</c>: weenie_properties_int 146, XpOverride, which ACE awards for the kill), or null when the profile does not say. A rung's planned experience rate is its
+    /// kills-an-hour floor times its ground's targets' mean (<see cref="Vitals.ApproachCost.RungRate"/>).
+    /// </summary>
+    public long? Xp { get; init; }
+
+    /// <summary>
+    /// M6 14 drain resistance (live 2026-11-14 19:42 UTC, the Tusker Armory: three Drain Health Others on three Armored Tuskers each gave 0 and the climber died): the share of a Drain Health Other's (and a Harm Other's) take the
+    /// creature lets through, the profile's optional <c>resist_health_drain</c>: its <c>ResistHealthDrain</c> (weenie_properties_float type 125; ACE's <c>GetResistanceMod(HealthDrain)</c>, Creature_Properties.cs:207-208 @95ef426d,
+    /// times a natural resistance of 1 and no life-resist rating on a creature). 1 when the profile does not say (ACE's own default); 0 takes nothing. Read through <see cref="Vitals.DrainResist"/>.
+    /// </summary>
+    public double ResistHealthDrain { get; init; } = 1.0;
+}
+
+/// <summary>M6 item 3 a1: a creature's six attributes, each its weenie's weenie_properties_attribute row's current value (init_Level plus level_From_C_P, ACE's <c>CreatureAttribute.Base</c>, CreatureAttribute.cs:93-97 @95ef426d).</summary>
+/// <param name="Strength">Strength (PropertyAttribute 1).</param>
+/// <param name="Endurance">Endurance (2).</param>
+/// <param name="Coordination">Coordination (4).</param>
+/// <param name="Quickness">Quickness (3).</param>
+/// <param name="Focus">Focus (5).</param>
+/// <param name="Self">Self (6).</param>
+public sealed record GroundAttributes(int Strength, int Endurance, int Coordination, int Quickness, int Focus, int Self);
+
+/// <summary>
+/// M6 item 3 a1: the ground's entry portal (the profile's optional <c>entry</c> section): where it stands, the point in front of it, its level gate and whether it can be tied. The level gate is the portal's MinLevel and
+/// MaxLevel (PropertyInt 86 and 87), each null when the weenie has none; <see cref="Tieable"/> is false when its PortalBitmask (PropertyInt 111) carries NoRecall (0x20, ACE.Entity/Enum/PortalBitmask.cs:15 @95ef426d), which ACE's
+/// <c>Portal.NoTie</c> reads (ACE.Server/WorldObjects/Portal_Properties.cs:14-16: NoTie is NoRecall; a weenie with no bitmask is Unrestricted, line 10).
+/// </summary>
+/// <param name="Wcid">The portal's weenie class id.</param>
+/// <param name="Guid">The portal instance's guid.</param>
+/// <param name="Cell">The cell it stands in (an outdoor row's by the x/24*8 + y/24 + 1 rule).</param>
+/// <param name="Origin">Its landblock-local origin.</param>
+/// <param name="FrontCell">The cell of the point in front of it.</param>
+/// <param name="Front">The point in front of it, 3 m along its facing (the same rule as <see cref="GroundPortal.Front"/>).</param>
+/// <param name="MinLevel">The lowest level it admits, or null.</param>
+/// <param name="MaxLevel">The highest level it admits, or null.</param>
+/// <param name="Tieable">False when the portal cannot be tied (NoRecall).</param>
+public sealed record GroundEntry(uint Wcid, uint Guid, uint Cell, Vector3 Origin, uint FrontCell, Vector3 Front, int? MinLevel, int? MaxLevel, bool Tieable)
+{
+    /// <summary>True when <paramref name="level"/> is within the gate (each bound when present). Allocates nothing.</summary>
+    /// <param name="level">The character's level.</param>
+    public bool Admits(int level) => (MinLevel is not { } min || level >= min) && (MaxLevel is not { } max || level <= max);
+}
+
+/// <summary>M6 item 3 a1: how a ground is left.</summary>
+public enum GroundExitKind
+{
+    /// <summary>By an exit portal object inside the dungeon (<see cref="GroundExitSection.Wcid"/> and its place).</summary>
+    Portal,
+
+    /// <summary>No exit portal: the character leaves by a recall spell.</summary>
+    Recall,
+
+    /// <summary>On foot: an outdoor ground.</summary>
+    Walk,
+}
+
+/// <summary>
+/// M6 item 3 a1: the ground's exit (the profile's optional <c>exit</c> section). For <see cref="GroundExitKind.Portal"/> the exit portal's weenie class, cell, origin and destination cell are set; for the other kinds they are 0 and null.
+/// </summary>
+/// <param name="Kind">Portal, recall or walk.</param>
+/// <param name="Wcid">The exit portal's weenie class id (0 unless a portal).</param>
+/// <param name="Cell">The exit portal's cell, one of the ground's (0 unless a portal).</param>
+/// <param name="Origin">The exit portal's landblock-local origin (null unless a portal).</param>
+/// <param name="Destination">The cell the exit portal leads to (0 unless a portal).</param>
+/// <param name="FromArrivalMetres">A hint: the straight-line distance from the arrival to the exit portal, in metres (the profile's optional <c>from_arrival_m</c>; a walk's length over the room graph is travel's, item 4), or null.</param>
+public sealed record GroundExitSection(GroundExitKind Kind, uint Wcid, uint Cell, Vector3? Origin, uint Destination, double? FromArrivalMetres);
 
 /// <summary>M5 7 F8: lookup of a target's opener by weenie class.</summary>
 public static class GroundOpeners
@@ -404,6 +669,15 @@ public sealed record GroundLoot(double MinValuePerBurden)
     /// <summary>M5 7 F29 (D96): the load line, in percent of the capacity: a trip is due when the burden passes it and the loot rule keeps under it; 0 keeps the supplies' <c>burden_trip_percent</c> and the rule's default.</summary>
     public int LoadLinePercent { get; init; }
 
+    /// <summary>M6 7 AT: the Value of the loot carried above which a sale trip is called while stock or scrolls are wanted and the coin cannot pay them (the profile's <c>loot.sale_trip_value</c>; <see cref="DefaultSaleTripValue"/> when absent).</summary>
+    public int SaleTripValue { get; init; } = DefaultSaleTripValue;
+
+    /// <summary>M6 7 AT: the sale trip's default line, in Value (the live stretch carried a pack of unsold loot for 70 minutes).</summary>
+    public const int DefaultSaleTripValue = 15_000;
+
+    /// <summary>M6 7 AR: the farthest corpse of a kill the loot step walks to on this ground, in metres; 0 keeps <c>--fight-loot-radius-m</c>.</summary>
+    public int RadiusMetres { get; init; }
+
     /// <summary>M5 7 F30 (the owner): the loot kept aside whatever the floors say and never sold (<see cref="GroundKeepAside"/>); null is none.</summary>
     public GroundKeepAside? KeepAside { get; init; }
 
@@ -472,6 +746,12 @@ public sealed record GroundVendor(string Name, uint Wcid, uint Guid, uint Cell, 
 /// <param name="ScrollWcid">The scroll's weenie class id.</param>
 /// <param name="VendorWcid">The weenie class id of the profile's vendor who sells the scroll.</param>
 public sealed record LearnLine(uint SpellId, string Name, uint ScrollWcid, uint VendorWcid);
+
+/// <summary>M6 8 B1: one line of a ground's <c>wants_known</c>.</summary>
+/// <param name="SpellId">The spell.</param>
+/// <param name="Name">Its name, for the line.</param>
+/// <param name="Why">Why the ground wants it.</param>
+public sealed record GroundWant(uint SpellId, string Name, string Why);
 
 /// <summary>An item a vendor sells, by weenie class id, with the price in pyreals.</summary>
 /// <param name="Wcid">The item's weenie class id.</param>
@@ -549,6 +829,24 @@ public sealed record GroundSupplies(IReadOnlyList<StockLine> Stock, IReadOnlyLis
 /// <param name="StopUnder">The count under which the loop must stop.</param>
 public sealed record StockLine(uint Wcid, string Name, int Keep, int TripUnder, int StopUnder);
 
+/// <summary>M6 14 T: one ware a ground buys in another town on the way out (the profile's <c>town_stock</c>; <c>Mage.TownStock</c> is its rule).</summary>
+/// <param name="Wcid">The ware's weenie class id.</param>
+/// <param name="Name">The ware's name.</param>
+/// <param name="Keep">The count the stop restocks to.</param>
+/// <param name="TripUnder">The count under which the stop is made.</param>
+/// <param name="Price">The vendor's price of one (ACE's <c>Vendor.GetSellCost</c> on the vendor's SellPrice).</param>
+/// <param name="Burden">The burden of one.</param>
+/// <param name="Town">The vendor's town.</param>
+/// <param name="Vendor">The vendor: his landblock_instance row; the walk's goal is his own cell and point.</param>
+public sealed record TownStockLine(uint Wcid, string Name, int Keep, int TripUnder, int Price, int Burden, string Town, GroundVendor Vendor)
+{
+    /// <summary>D138: the level from which the buff bot's fee asks for this ware (<see cref="BuffBotFee"/>), whatever the spellbook; null for a line the fee does not ask for.</summary>
+    public int? FeeFromLevel { get; init; }
+
+    /// <summary>D138: true for the line the fee alone added (no profile names the ware): under <see cref="FeeFromLevel"/> nothing asks for it.</summary>
+    public bool FeeOnly { get; init; }
+}
+
 /// <summary>Where a kit item goes.</summary>
 public enum KitSlot
 {
@@ -576,8 +874,15 @@ public sealed record KitLine(uint Wcid, string Name, KitSlot Slot, int Count = 1
 /// <param name="Coin">The pyreals in coin.</param>
 /// <param name="Notes">The trade notes.</param>
 /// <param name="MinNote">M5 7 D136 follow-up: the smallest note face the trips buy with the coin above the floor (the profile's <c>min_note</c>, default <see cref="DefaultMinNote"/>): a note under one coin stack (25,000) saves no pack slot and costs 15%.</param>
-public sealed record GroundPurse(int Coin, IReadOnlyList<PurseNote> Notes, int MinNote = GroundPurse.DefaultMinNote)
+/// <param name="TripSpendPercent">M6 7 V: the most of the purse (coin and note faces) one trip's stock buys may spend, in percent (the profile's <c>trip_spend_percent</c>, 1 to 100, default 100 = no budget): a rung that earns little keeps the rest for the next trip.</param>
+public sealed record GroundPurse(int Coin, IReadOnlyList<PurseNote> Notes, int MinNote = GroundPurse.DefaultMinNote, int TripSpendPercent = 100)
 {
+    /// <summary>M6 7 AT: the coin (and note faces) at which a learn trip goes though the next two scrolls are not both paid (the profile's <c>learn_trip_coin</c>, default <see cref="DefaultLearnTripCoin"/>).</summary>
+    public int LearnTripCoin { get; init; } = DefaultLearnTripCoin;
+
+    /// <summary>M6 7 AT: the default of <see cref="LearnTripCoin"/>.</summary>
+    public const int DefaultLearnTripCoin = 15_000;
+
     /// <summary>One coin stack, the pyreal's MaxStackSize (ACE-World-Database v0.9.296, wcid 273, PropertyInt 11).</summary>
     public const int DefaultMinNote = 25_000;
 
@@ -599,6 +904,186 @@ public sealed record PurseNote(uint Wcid, string Name, int Value, int Count);
 /// <param name="Cell">The full cell id.</param>
 /// <param name="Point">The point.</param>
 public sealed record HoldSpot(uint Cell, Vector3 Point);
+
+/// <summary>
+/// M6 7 AR: what the plain hunt of a ground leaves alone, any ground's data: below <see cref="UnderLevel"/> no pick, no tour walk and no schedule slot takes a creature in <see cref="KeepOut"/>; an attacker from there is still fought (M5 D88), and the walk may cross the cells (they are not no-go).
+/// </summary>
+/// <param name="KeepOut">The cells kept out of the hunt.</param>
+/// <param name="UnderLevel">The keep-out holds for a character under this level.</param>
+/// <param name="Pulls">The data choice of the holder to pull for a wanted trophy (<see cref="GroundPull"/>).</param>
+/// <param name="DropBackKeepOut">M6 7 AY: the cells held out while two deaths to big packs have dropped her back (<see cref="Mage.BigPackRule"/>), at any level; empty: no drop-back on this ground. It holds <see cref="KeepOut"/> too (the loader checks).</param>
+public sealed record GroundHunt(CellSet KeepOut, int UnderLevel, IReadOnlyList<GroundPull> Pulls, CellSet? DropBackKeepOut = null)
+{
+    /// <summary>The cells of the drop-back, never null.</summary>
+    public CellSet DropBack => DropBackKeepOut ?? CellSet.Empty;
+
+    /// <summary>True when this ground has a drop-back.</summary>
+    public bool HasDropBack => DropBack.Cells.Count > 0;
+
+    /// <summary>True when the keep-out holds for a character of <paramref name="level"/>.</summary>
+    /// <param name="level">The character's level.</param>
+    public bool HoldsAt(int level) => level < UnderLevel;
+}
+
+/// <summary>
+/// M6 14 entry recharge (the owner, 2026-11-13: a ground profile holds facts only): the outdoor approach to a ground's entry, where its hostiles stand: the landblocks (the drop of the portal that brings her and the walk to the entry's
+/// front) and the creatures the world spawns there, each by weenie and name. Facts with their source, never a fight number: a hop whose drop lies here is a drop among hostiles, so she tops up before it where nothing is in reach.
+/// </summary>
+/// <param name="Landblocks">The outdoor landblocks of the approach.</param>
+/// <param name="Hostiles">The creatures that stand there.</param>
+/// <param name="Source">Where the facts come from.</param>
+public sealed record GroundApproach(IReadOnlyList<ushort> Landblocks, IReadOnlyList<GroundApproachHostile> Hostiles, string Source)
+{
+    /// <summary>The hostiles' names, comma separated (the log's).</summary>
+    public string Names => string.Join(", ", Hostiles.Select(h => h.Name).Distinct(StringComparer.Ordinal));
+
+    /// <summary>
+    /// M6 14 approach cost: the encounter generators over the approach's landblocks (the profile's optional <c>encounters</c>: the world's <c>encounter</c> rows there), or null when the profile does not say. With <see cref="PerRoll"/> and the
+    /// hostiles' crossing facts it is what the crossing's cost reads (<see cref="Vitals.ApproachCost"/>); <see cref="CostSource"/> names the SELECTs.
+    /// </summary>
+    public int? Encounters { get; init; }
+
+    /// <summary>M6 14 approach cost: the creatures one roll of those generators stands up at once, every kind counted (the profile's optional <c>per_roll</c>), or null; the share the listed hostiles do not hold is the unlisted creatures'.</summary>
+    public double? PerRoll { get; init; }
+
+    /// <summary>M6 14 approach cost: where the crossing's facts come from (the profile's <c>cost_source</c>), or null.</summary>
+    public string? CostSource { get; init; }
+
+    /// <summary>The outdoor area of the approach's landblocks in square metres (192 m a side each).</summary>
+    public double AreaSquareMetres => Landblocks.Count * 192.0 * 192.0;
+}
+
+/// <summary>
+/// M6 14 entry recharge: one creature of a ground's approach (<see cref="GroundApproach"/>). M6 14 retreat attackers (live 2026-11-14 10:59:18 UTC: two Infected Assailers killed the climber on the Holding's approach while the run leg's
+/// retreat line modelled the Holding's Rampagers): with its attack's facts where the profile gives them (all or none, each from the pinned world SQL and named in its <c>attack_source</c>): its level, its health, the
+/// DamageType bits of its attacks, the hardest attack's <c>d_val</c> and <c>d_var</c>, the attribute that scales it, and the most of it one camp holds at once. Facts only: the line and the check are derived from them at run time
+/// (<see cref="Vitals.CreatureFacts"/>, <see cref="Vitals.ApproachCheck"/>).
+/// </summary>
+/// <param name="Wcid">Its weenie class id.</param>
+/// <param name="Name">Its name.</param>
+public sealed record GroundApproachHostile(uint Wcid, string Name)
+{
+    /// <summary>Its level (weenie_properties_int type 25), or null when the profile gives no facts.</summary>
+    public int? Level { get; init; }
+
+    /// <summary>Its maximum health (the vital's init_Level plus ranks plus Endurance / 2, as <see cref="GroundTarget.MaxHealth"/>), or null.</summary>
+    public int? MaxHealth { get; init; }
+
+    /// <summary>The DamageType bits of its attacks: its body parts' and a wielded weapon's (0: not given).</summary>
+    public uint DamageTypes { get; init; }
+
+    /// <summary>The hardest attack's <c>d_Val</c>: a body part's, or a thrown weapon's Damage (PropertyInt 44) when that hits harder, or null.</summary>
+    public int? DVal { get; init; }
+
+    /// <summary>That attack's variance: a body part's <c>d_Var</c> or the weapon's DamageVariance (PropertyFloat 22), or null.</summary>
+    public double? DVar { get; init; }
+
+    /// <summary>
+    /// The attribute that scales the hit: Strength for a body part and a thrown weapon (ACE <c>Creature.GetAttributeMod</c>: Coordination only for a bow or a finesse weapon, Creature_Combat.cs:412-420 @95ef426d), or null.
+    /// </summary>
+    public int? Strength { get; init; }
+
+    /// <summary>The most of it one camp of the approach's generators holds at once (the camp generator's rows' MaxCreate under its MaxGeneratedObjects, PropertyInt 81); 1 when it spawns alone.</summary>
+    public int Pack { get; init; } = 1;
+
+    /// <summary>The attack as the fight line reads it, or null when the profile gives no attack facts.</summary>
+    public LadderHitter? Hitter => DVal is { } dVal && DVar is { } dVar && Strength is { } strength ? new LadderHitter(Name, Wcid, dVal, dVar, strength) : null;
+
+    /// <summary>
+    /// M6 14 approach cost (the owner, 2026-11-14: she was fighting things with high magic resistance on the Holding's approach): its Magic Defense (ACE's <c>CreatureSkill.Current</c>, as <see cref="GroundTarget.MagicDefence"/>), or null when
+    /// the profile gives no crossing facts (all or none, with the approach's <see cref="GroundApproach.CostSource"/>).
+    /// </summary>
+    public int? MagicDefence { get; init; }
+
+    /// <summary>M6 14 approach cost: its resistance multipliers by element (weenie_properties_float 64 to 70; the keys are <see cref="Mage.SpellPlan.BoltLineNames"/>'), or null.</summary>
+    public IReadOnlyDictionary<string, double>? Resist { get; init; }
+
+    /// <summary>M6 14 approach cost: how near it notices a player (VisualAwarenessRange, weenie_properties_float 31), metres, or null.</summary>
+    public double? AwarenessMetres { get; init; }
+
+    /// <summary>M6 14 approach cost: how many of it one roll of the approach's encounter generators stands up at once (<see cref="GroundApproach.PerRoll"/>'s share), or null.</summary>
+    public double? PerRoll { get; init; }
+
+    /// <summary>M6 14 approach cost: the experience its kill gives (XpOverride, weenie_properties_int 146), or null.</summary>
+    public long? Xp { get; init; }
+
+    /// <summary>True when the crossing's facts are given (<see cref="MagicDefence"/>, <see cref="Resist"/>, <see cref="AwarenessMetres"/>, <see cref="PerRoll"/>, <see cref="Xp"/>) and its health is known.</summary>
+    public bool HasCrossingFacts => MagicDefence is not null && Resist is not null && AwarenessMetres is not null && PerRoll is not null && Xp is not null && MaxHealth is > 0;
+
+    /// <summary>
+    /// M6 14 run past (D137): its Run skill (ACE's <c>CreatureSkill.Current</c> of Run: weenie_properties_skill type 24 init_Level + level_From_P_P + Quickness / 1, CreatureSkill.cs:154-163 @95ef426d), from the profile's optional
+    /// <c>pace</c> (all of <see cref="RunSkill"/>, <see cref="MotionTable"/> and <see cref="Scale"/>, or none), or null. Its speed is derived at run time (<see cref="Vitals.CreaturePace"/>).
+    /// </summary>
+    public int? RunSkill { get; init; }
+
+    /// <summary>M6 14 run past: its motion table (weenie_properties_d_i_d type 2), whose RunForward cycle the dats give the run of, or null.</summary>
+    public uint? MotionTable { get; init; }
+
+    /// <summary>M6 14 run past: its ObjScale (weenie_properties_float type 39; 1 when the weenie has none).</summary>
+    public double Scale { get; init; } = 1.0;
+
+    /// <summary>M6 14 run past: its ranged attack (a thrown weapon it wields), or null: it attacks in melee only, as far as the facts say.</summary>
+    public GroundRanged? Ranged { get; init; }
+
+    /// <summary>M6 14 drain resistance: its <c>ResistHealthDrain</c> (the profile's optional <c>resist_health_drain</c>, as <see cref="GroundTarget.ResistHealthDrain"/>); 1 when the profile does not say.</summary>
+    public double ResistHealthDrain { get; init; } = 1.0;
+}
+
+/// <summary>
+/// M6 14 run past (D137): a creature's ranged attack, facts only (the profile's optional <c>ranged</c> of an approach hostile): the thrown weapon's Damage and DamageVariance, the DamageType it deals and the attribute that scales it (ACE's
+/// <c>GetMissileDamage</c> and <c>GetAttributeMod</c>: Strength for a thrown weapon, Monster_Melee.cs:385-388 and Creature_Combat.cs:412-420 @95ef426d), and the range it throws from (<c>GetMaxMissileRange</c>: the weapon's MaximumVelocity
+/// squared x 0.102, at most 77.7 m, Creature_Missile.cs:402-416).
+/// </summary>
+/// <param name="DVal">The thrown weapon's Damage (weenie_properties_int type 44).</param>
+/// <param name="DVar">Its DamageVariance (weenie_properties_float type 22).</param>
+/// <param name="DamageTypes">The DamageType bits it deals (type 45).</param>
+/// <param name="Strength">The thrower's Strength.</param>
+/// <param name="RangeMetres">The range it throws from.</param>
+public sealed record GroundRanged(int DVal, double DVar, uint DamageTypes, int Strength, double RangeMetres)
+{
+    /// <summary>The share of its attacks that are this one (1: every attack; a caster's war spells: the sum of their spell book chances, ACE's <c>probability</c> over 2).</summary>
+    public double Share { get; init; } = 1.0;
+
+    /// <summary>True for a war spell (a spell takes no armour, only her resistance: ACE <c>SpellProjectile.CalculateDamage</c>), false for a thrown weapon.</summary>
+    public bool Spell { get; init; }
+
+    /// <summary>The throw as the fight line reads a hit (<see cref="LadderHitter"/>).</summary>
+    /// <param name="name">The thrower's name.</param>
+    /// <param name="wcid">Its weenie class id.</param>
+    public LadderHitter Hitter(string name, uint wcid) => new(name, wcid, DVal, DVar, Strength);
+}
+
+/// <summary>M6 7 AY: where a corpse is safe to reach for its coin (the profile's optional <c>corpse_fetch</c>): anywhere on an outdoor ground, or a list of a dungeon's front cells. Absent: nowhere.</summary>
+/// <param name="Anywhere">True: every cell of the ground.</param>
+/// <param name="Cells">The cells, when not <paramref name="Anywhere"/>.</param>
+public sealed record GroundCorpseFetch(bool Anywhere, CellSet Cells)
+{
+    /// <summary>True when <paramref name="cell"/> is on the list.</summary>
+    /// <param name="cell">The corpse's cell.</param>
+    public bool Holds(uint cell) => Anywhere || Cells.Contains(cell);
+}
+
+/// <summary>M6 7 AR: for a wanted trophy, the cells of the holders to pull, a data choice. M6 7 AX: with a <see cref="Stand"/> it is a named job (<see cref="Autopilot.RungOwner"/>) and a pull (<c>FightScenario.Pull.cs</c>); a pull with none is still <c>TODO(m6-tusk-pull)</c>.</summary>
+/// <param name="Item">The trophy's weenie class.</param>
+/// <param name="Name">The trophy's name.</param>
+/// <param name="Cells">The cells of the chosen holders.</param>
+public sealed record GroundPull(uint Item, string Name, IReadOnlyList<uint> Cells)
+{
+    /// <summary>M6 7 AX: where she shoots from and at whom, or null.</summary>
+    public PullStand? Stand { get; init; }
+}
+
+/// <summary>M6 7 AX: the pull's data: the job's quest and levels, the stand point, the holder and the limits.</summary>
+/// <param name="Quest">The quest's key: the job is due while this quest is (the existing quest timers) and its trophy is not held.</param>
+/// <param name="FromLevel">The first level of the job.</param>
+/// <param name="ToLevel">The last level of the job.</param>
+/// <param name="Cell">The stand point's cell.</param>
+/// <param name="Point">The stand point, landblock-local.</param>
+/// <param name="HolderWcid">The holder's weenie class.</param>
+/// <param name="HolderCell">The holder's cell.</param>
+/// <param name="WaitSeconds">The named limit of the wait for the holder's respawn.</param>
+/// <param name="Tries">The shots a session spends on it.</param>
+public sealed record PullStand(string Quest, int FromLevel, int ToLevel, uint Cell, System.Numerics.Vector3 Point, uint HolderWcid, uint HolderCell, double WaitSeconds, int Tries);
 
 /// <summary>The respawn model: the ground's generators, each with its own delay and tick, and their slots.</summary>
 /// <param name="Generators">The generators (a ground may have several, with different delays and ticks).</param>
@@ -663,12 +1148,18 @@ public sealed record OutdoorCell(uint Cell, double North, double East, GroundTer
 /// <param name="Level">The level.</param>
 public sealed record GroundCreature(uint Wcid, string Name, int Level)
 {
+    /// <summary>M6 7 AR: the creature's maximum health (the profile's optional <c>max_health</c>, the pinned world's), 0 when not listed: the picker's number before the first health push.</summary>
+    public int MaxHealth { get; init; }
+
     /// <summary>
     /// The spawn mass (item 2 g3, D42): the chance, 0 to 1, that one roll of a spot's generator spawns this creature (the generator's cumulative-probability rows, nested generators and camps multiplied; for a
     /// ground whose spots roll different generators, the mean over its cells). The profile's <c>spawn_mass</c> is required and the loader reads it, so a profile that lacks it fails at load; the default
     /// here is only for code that builds a creature by hand. A hunt's expected usable creatures a spot is the sum over the creatures it will fight (<c>HuntGroundRow.ExpectedYield</c>).
     /// </summary>
     public double SpawnMass { get; init; }
+
+    /// <summary>M6 14 drain resistance: its <c>ResistHealthDrain</c> (the profile's optional <c>resist_health_drain</c>, as <see cref="GroundTarget.ResistHealthDrain"/>); 1 when the profile does not say.</summary>
+    public double ResistHealthDrain { get; init; } = 1.0;
 }
 
 /// <summary>
@@ -741,3 +1232,28 @@ public sealed class CellSet
 /// <param name="Min">The box's low corner.</param>
 /// <param name="Max">The box's high corner.</param>
 public sealed record GroundAvoidRegion(string Name, ushort Landblock, System.Numerics.Vector3 Min, System.Numerics.Vector3 Max);
+
+/// <summary>M6 14 holding plates: a ground's pressure plates (the profile's <c>plates</c> section), every fact sourced in its <c>source</c>.</summary>
+/// <param name="Wcid">The plates' weenie.</param>
+/// <param name="Name">Its name, as the server says it (the chat line of a plate that fires names it).</param>
+/// <param name="ShapeMetres">How far its collision shape reaches from its origin, seen from above (its Setup's sphere: offset and radius).</param>
+/// <param name="TopMetres">How high over its origin her feet must be to pass over the shape (its sphere's top less her lower sphere's centre and radius).</param>
+/// <param name="Spells">The spells a plate casts on the player who touches it.</param>
+/// <param name="Points">Each plate.</param>
+/// <param name="Source">Where the facts come from.</param>
+public sealed record GroundPlates(uint Wcid, string Name, float ShapeMetres, float TopMetres, IReadOnlyList<GroundPlateSpell> Spells, IReadOnlyList<GroundPlate> Points, string Source);
+
+/// <summary>M6 14 holding plates: a spell a plate casts.</summary>
+/// <param name="Id">The spell id.</param>
+/// <param name="Name">Its name (the dats').</param>
+public sealed record GroundPlateSpell(uint Id, string Name);
+
+/// <summary>M6 14 holding plates: one plate.</summary>
+/// <param name="Guid">Its world guid (landblock_instance).</param>
+/// <param name="Cell">The cell it stands in.</param>
+/// <param name="Point">Its origin, landblock-local.</param>
+public sealed record GroundPlate(uint Guid, uint Cell, Vector3 Point)
+{
+    /// <summary>The plate's name for the logs: its guid and cell.</summary>
+    public string Name => $"the plate 0x{Guid:X8} in 0x{Cell:X8}";
+}

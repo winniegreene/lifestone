@@ -20,16 +20,20 @@ public static class TestAccounts
     /// <summary>The tools lane's account (M4 D39): Lifestone Throwaway, the character the throwaway and mod-verb tests create, level and purge, and Lifestone Tools, its purge caller (M4 D43: created once, never levelled or reset).</summary>
     public const string Tools = "test-tools";
 
-    /// <summary>The four account keys, in lane order.</summary>
-    public static IReadOnlyList<string> Keys { get; } = [Test, Melee, Archer, Tools];
+    /// <summary>The local model's own account (the owner's decision): Qwinnie, and no lane of any gate.</summary>
+    public const string Qwinnie = "qwinnie";
+
+    /// <summary>The account keys, in lane order, the model's own last.</summary>
+    public static IReadOnlyList<string> Keys { get; } = [Test, Melee, Archer, Tools, Qwinnie];
 
     /// <summary>Per account key, its characters.</summary>
     public static IReadOnlyDictionary<string, IReadOnlyList<string>> Characters { get; } = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal)
     {
-        [Test] = ["Lifestone Smoke", "Lifestone Loopback", "BSD Mage", "Holtburg Hunter"],
+        [Test] = ["Lifestone Smoke", "Lifestone Loopback", "BSD Mage", "Holtburg Hunter", "Winnie"],
         [Melee] = ["Holtburg Brawler"],
         [Archer] = ["Holtburg Archer"],
         [Tools] = ["Lifestone Throwaway", "Lifestone Tools"],
+        [Qwinnie] = ["Qwinnie"],
     };
 
     /// <summary>True when <paramref name="account"/> is one of the four keys (ordinal, case-sensitive).</summary>

@@ -48,6 +48,41 @@ public sealed record StationNeeds(
 }
 
 /// <summary>
+/// M6 7 BD: a station that can say it stands in a wait: nothing in flight, nothing cast, only time passing (a mana wait, a rest in place for a cast). The autopilot's one rule (<c>AutopilotScenario.KeeperStands</c>) ends such a wait at once on a
+/// ground when a hostile is on her, fights back, and runs the state's station again from its start.
+/// </summary>
+public interface IStationWait
+{
+    /// <summary>What it waits for (one clause, logged), or null while it does not wait.</summary>
+    string? Waiting { get; }
+}
+
+/// <summary>M6 8 K: a station in a step the survival layer must not cut: a portal's Use has been sent and the server is walking her to it, so a cast or a sit would cancel the hop. The layer stands down while it says so.</summary>
+public interface IStationCommitted
+{
+    /// <summary>What it is committed to (one clause, logged), or null.</summary>
+    string? Committed { get; }
+}
+
+/// <summary>M6 8 K: a station whose own time limits do not count a survival hold: the layer says how long it held the station when it lets it go, so a wait that was under way when the hold began has as long left as it had.</summary>
+public interface IStationHeld
+{
+    /// <summary>The station was not stepped for <paramref name="seconds"/>.</summary>
+    /// <param name="seconds">The seconds held.</param>
+    void NoteHeld(double seconds);
+}
+
+/// <summary>
+/// M6 14 entry recharge: a station that stands still while it works (the rung change's recharge at an entry's front and its top-up before a hostile drop: the bars rising by a press, a drink or a rest, a fight-back answered): the session time of
+/// its last sign of work, which the autopilot's watchdog reads as the state's progress, as it reads a moving body. A recharge that stops filling still trips it; the recharge's own bounds end it first.
+/// </summary>
+public interface IStationWorking
+{
+    /// <summary>The session time of the last sign of work, or null while none.</summary>
+    double? WorkedAt { get; }
+}
+
+/// <summary>
 /// One running station: an embedded scenario (no login, no place of its own, no leave: <c>endSession:false</c>) that
 /// the journey steps until it ends, then reads its verdict.
 /// </summary>

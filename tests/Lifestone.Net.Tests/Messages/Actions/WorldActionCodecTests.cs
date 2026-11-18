@@ -188,6 +188,32 @@ public sealed class WorldActionCodecTests
     }
 
     [Fact]
+    public void TalkDirect_sends_the_message_then_the_target_id_as_ACE_reads_them()
+    {
+        // F7B1, the sequence, 0x0032, then String16L "tusker" (2 + 6 bytes: no padding) and the id.
+        var body = Build(w => ChatActionCodecs.WriteTalkDirect(w, 9, 0x7A9B4F14, "tusker"));
+        Assert.Equal(
+            new byte[] { 0xB1, 0xF7, 0, 0, 9, 0, 0, 0, 0x32, 0, 0, 0, 6, 0, (byte)'t', (byte)'u', (byte)'s', (byte)'k', (byte)'e', (byte)'r', 0x14, 0x4F, 0x9B, 0x7A },
+            body);
+        Assert.Equal((9u, "tusker", 0x7A9B4F14u, 0), AceClientReaders.ReadTalkDirect(body));
+
+        // "help" is 2 + 4 bytes, padded to 8 before the id.
+        var padded = Build(w => ChatActionCodecs.WriteTalkDirect(w, 10, 0x7A9B4F14, "help"));
+        Assert.Equal(new byte[] { 4, 0, (byte)'h', (byte)'e', (byte)'l', (byte)'p', 0, 0, 0x14, 0x4F, 0x9B, 0x7A }, padded[12..]);
+        Assert.Equal((10u, "help", 0x7A9B4F14u, 0), AceClientReaders.ReadTalkDirect(padded));
+    }
+
+    [Theory]
+    [InlineData(0u, "hi")]
+    [InlineData(0x7A9B4F14u, "h\u00E9llo")]
+    public void TalkDirect_refuses_no_target_or_a_non_ascii_message_before_writing(uint target, string text)
+    {
+        var writer = new PacketWriter();
+        Assert.Throws<ArgumentException>(() => ChatActionCodecs.WriteTalkDirect(writer, 1, target, text));
+        Assert.Equal(0, writer.Position);
+    }
+
+    [Fact]
     public void SetInscription_sends_the_item_then_the_text_as_ACE_reads_them_D137()
     {
         // ACE GameActionSetInscription: ReadUInt32 (the item), then ReadString16L (the text: a u16 length, the bytes, padded to 4).

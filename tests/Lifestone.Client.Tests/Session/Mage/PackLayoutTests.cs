@@ -106,13 +106,17 @@ public sealed class PackLayoutTests
         Assert.Equal(3, stays.Count);
     }
 
+    /// <summary>
+    /// Gear in the kit pack stays; the review pack keeps only the pieces the owner wants to see (the owner's ruling, 2026-11-16: only what she judges the owner will want to see goes in that side pack: the callers name the
+    /// great-cantrip pieces), so a find there that is none goes back to the main pack; misplaced side pack items move.
+    /// </summary>
     [Fact]
-    public void Gear_in_the_kit_pack_and_finds_in_the_review_pack_stay_and_misplaced_side_pack_items_move()
+    public void Gear_in_the_kit_pack_stays_the_review_pack_keeps_only_its_own_and_misplaced_side_pack_items_move()
     {
         var items = new List<PackItem>
         {
             new(0x91000001, "Fire Sceptre", 9_002, 0x8000, Pack2), // rotation gear from an earlier run: stays in the kit pack
-            new(0x91000002, "Gold Ring", 9_003, 0x8, Sack), // the owner's find: stays
+            new(0x91000002, "Gold Ring", 9_003, 0x8, Sack), // a find that is no great-cantrip piece: back to the main pack
             new(0x91000003, "Pyreal Scarab", 690, 0x1000, Sack), // a component in the review pack: moves
             new(0x91000004, "Bread", 9_004, 0x20, Pack1), // junk in the components pack: to the main pack
             new(0x91000005, "Prismatic Taper", 20631, 0x1000, Pack1), // the components pack's own
@@ -122,8 +126,9 @@ public sealed class PackLayoutTests
 
         var moves = layout.Sort(items, Rules, None, None);
 
-        Assert.Equal([(0x91000003u, PackJob.Review, PackJob.Components), (0x91000004u, PackJob.Components, PackJob.Main)], moves.Select(m => (m.Guid, m.From, m.To)));
-        Assert.Equal(Me, moves[1].Container);
+        Assert.Equal([(0x91000002u, PackJob.Review, PackJob.Main), (0x91000003u, PackJob.Review, PackJob.Components), (0x91000004u, PackJob.Components, PackJob.Main)], moves.Select(m => (m.Guid, m.From, m.To)));
+        Assert.Equal(Me, moves[0].Container);
+        Assert.Equal(Me, moves[2].Container);
     }
 
     [Fact]
@@ -147,6 +152,29 @@ public sealed class PackLayoutTests
         Assert.Equal(Me, layout.ContainerOf(PackJob.Review));
         Assert.Contains("review=the main pack (no side pack left: TODO(m5-pack-short))", layout.Why, StringComparison.Ordinal);
         Assert.Equal("packs free: main=92/102 components=24/24 kit=main review=main", layout.SlotsLine());
+    }
+
+    /// <summary>
+    /// M6 8 D (m5-pack-short): the fresh climber holds the starter Sack alone, so the kit and the review jobs fall to the main pack, named; the trip buys two Packs and the layout assigns every job, the sort puts the kit and the finds in them, and the short is not named. The
+    /// no-pack case above stays as the degradation proof for the packs a trip could not buy.
+    /// </summary>
+    [Fact]
+    public void M6_8_D_a_bought_pack_assigns_every_job_and_the_sort_fills_it()
+    {
+        var items = new List<PackItem> { new(0x90000001, "Pyreal Scarab", 690, 0x1000, Sack), InMain(0x90000009, "Compass", 9_001, 0x8), InMain(0x9000000B, "Healing Kit", 628, 0x80) };
+        var before = PackLayout.Assign(Me, 102, 2, [new(Sack, "Sack", 24, 1)], items, Rules, KeptAside, None);
+        Assert.Equal(Me, before.ContainerOf(PackJob.Kit));
+        Assert.Contains("(no side pack left: TODO(m5-pack-short))", before.Why, StringComparison.Ordinal);
+
+        var bought = new List<SidePack> { new(Sack, "Sack", 24, 1), new(Pack1, "Pack", 24, 0), new(Pack2, "Pack", 24, 0) };
+        var layout = PackLayout.Assign(Me, 102, 2, bought, items, Rules, KeptAside, None);
+
+        Assert.Equal(Sack, layout.ContainerOf(PackJob.Components)); // the scarab is in it
+        Assert.Equal(Pack1, layout.ContainerOf(PackJob.Kit));
+        Assert.Equal(Pack2, layout.ContainerOf(PackJob.Review));
+        Assert.DoesNotContain("TODO(m5-pack-short)", layout.Why, StringComparison.Ordinal);
+        Assert.Equal("packs free: main=100/102 components=23/24 kit=24/24 review=24/24", layout.SlotsLine());
+        Assert.Equal([(0x90000009u, PackJob.Review, Pack2), (0x9000000Bu, PackJob.Kit, Pack1)], layout.Sort(items, Rules, KeptAside, None).OrderBy(m => m.Guid).Select(m => (m.Guid, m.To, m.Container)));
     }
 
     [Fact]

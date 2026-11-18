@@ -181,6 +181,73 @@ public sealed class DoorLegTests(DatSetFixture fixture, ITestOutputHelper output
     }
 
     [RequiresDatsFact]
+    public void An_unknown_door_is_appraised_once_before_the_walk_and_one_that_reads_not_locked_opens_as_before()
+    {
+        var doors = new ScriptedDoors { OpenDelaySeconds = 0.6, AppraisalSays = false }.With(Door(FrontDoor, FrontDoorAt));
+
+        var leg = Run("door-appraised-open", doors, Renald(), LifestoneStart(), 120);
+
+        Assert.True(leg.Runner.State == NavRunState.Arrived, leg.Runner.FailureReason);
+        Assert.Equal([FrontDoor], doors.LockReads); // once, at the plan
+        Assert.Equal(1, leg.Runner.DoorUses);
+        Assert.Contains(leg.Log.Lines, l => l.Contains("asking the server (appraisal)", StringComparison.Ordinal));
+    }
+
+    [RequiresDatsFact]
+    public void A_door_appraised_locked_ends_the_walk_by_name_before_the_body_reaches_it()
+    {
+        var doors = new ScriptedDoors { AppraisalSays = true }.With(Door(FrontDoor, FrontDoorAt) with { Name = "Front Door" });
+
+        var leg = Run("door-appraised-locked", doors, Renald(), LifestoneStart(), 60);
+
+        Assert.Equal(NavRunState.Blocked, leg.Runner.State);
+        Assert.Contains("door-locked", leg.Runner.FailureReason, StringComparison.Ordinal);
+        Assert.Contains("0x7A9B4015 (Front Door, cell 0xA9B40150)", leg.Runner.FailureReason, StringComparison.Ordinal);
+        Assert.Contains("read from appraised", leg.Runner.FailureReason, StringComparison.Ordinal);
+        Assert.Empty(doors.Used);
+        Assert.Single(leg.Log.Lines, l => l.Contains("the closed door is locked: the walk stops", StringComparison.Ordinal) && l.Contains("locked_from=appraised", StringComparison.Ordinal));
+        Assert.True(LandDefs.IsOutdoorCell(leg.At.CellId));
+    }
+
+    [RequiresDatsFact]
+    public void A_refused_use_ends_the_walk_at_the_first_use_with_no_second_use_and_no_open_timeout()
+    {
+        var doors = new ScriptedDoors { RefusesUse = true }.With(Door(FrontDoor, FrontDoorAt));
+
+        var leg = Run("door-refused", doors, Renald(), LifestoneStart(), 60);
+
+        Assert.Equal(NavRunState.Blocked, leg.Runner.State);
+        Assert.Contains("door-locked", leg.Runner.FailureReason, StringComparison.Ordinal);
+        Assert.Contains("read from refused-use", leg.Runner.FailureReason, StringComparison.Ordinal);
+        Assert.DoesNotContain("door-closed-timeout", leg.Runner.FailureReason, StringComparison.Ordinal);
+        Assert.Single(doors.Used);
+    }
+
+    [RequiresDatsFact]
+    public void A_door_unknown_both_ways_keeps_todays_behaviour_two_uses_then_the_open_timeout_saying_unknown()
+    {
+        var doors = new ScriptedDoors { NeverOpens = true }.With(Door(FrontDoor, FrontDoorAt)); // the appraisal never answers, the Use says nothing
+
+        var leg = Run("door-unknown", doors, Renald(), LifestoneStart(), 120);
+
+        Assert.Equal([FrontDoor], doors.LockReads);
+        Assert.Equal(NavRunState.Blocked, leg.Runner.State);
+        Assert.Contains("door-closed-timeout", leg.Runner.FailureReason, StringComparison.Ordinal);
+        Assert.Contains("locked: unknown", leg.Runner.FailureReason, StringComparison.Ordinal);
+        Assert.Equal(2, doors.Used.Count);
+    }
+
+    [RequiresDatsFact]
+    public void A_door_found_open_is_never_appraised()
+    {
+        var doors = new ScriptedDoors().With(Door(FrontDoor, FrontDoorAt, open: true));
+
+        _ = Run("door-open-noread", doors, Renald(), LifestoneStart(), 120);
+
+        Assert.Empty(doors.LockReads);
+    }
+
+    [RequiresDatsFact]
     public void A_closed_door_between_the_body_and_an_object_goal_blocks_its_sight_and_an_open_one_does_not()
     {
         // The body stands in the street at the front door's lane, the object just inside the doorway (a bare object: no room is named, so the range alone arrives).
@@ -349,6 +416,15 @@ internal sealed class ScriptedDoors : INavDoorFeed
     /// <summary>What <see cref="INavDoorFeed.Version"/> answers; a test that adds a door mid-run bumps it (or leaves it, for a door the runner must find at a stuck rung).</summary>
     public int Version { get; set; }
 
+    /// <summary>What the server's appraisal of a door says (M6 8 C): true locked, false not locked, null never answers (an unknown lock).</summary>
+    public bool? AppraisalSays { get; set; }
+
+    /// <summary>True for a door that refuses the Use as a locked one does (sound 0x94): the door is then locked, read from <c>refused-use</c>, and never opens.</summary>
+    public bool RefusesUse { get; set; }
+
+    /// <summary>The doors whose lock the runner asked for, in order.</summary>
+    public List<uint> LockReads { get; } = [];
+
     /// <summary>The doors Used, in order.</summary>
     public List<uint> Used { get; } = [];
 
@@ -397,7 +473,11 @@ internal sealed class ScriptedDoors : INavDoorFeed
         }
 
         var state = _doors[guid];
-        if (!state.Door.Open && !NeverOpens && double.IsNaN(state.OpensAt))
+        if (RefusesUse)
+        {
+            state.Door = state.Door with { Locked = true, LockedFrom = "refused-use" };
+        }
+        else if (!state.Door.Open && !NeverOpens && double.IsNaN(state.OpensAt))
         {
             state.OpensAt = Now + OpenDelaySeconds;
         }
@@ -410,6 +490,16 @@ internal sealed class ScriptedDoors : INavDoorFeed
         }
 
         return null;
+    }
+
+    /// <inheritdoc/>
+    public void ReadLock(uint guid)
+    {
+        LockReads.Add(guid);
+        if (AppraisalSays is { } says)
+        {
+            _doors[guid].Door = _doors[guid].Door with { Locked = says, LockedFrom = "appraised" };
+        }
     }
 
     /// <inheritdoc/>
@@ -562,6 +652,27 @@ public sealed class DoorFeedTests
         Assert.NotNull(handle);
         Assert.Equal(ActionKind.Use, handle!.Kind);
         Assert.Equal(ActionSource.Automation, handle.Source);
+    }
+
+    [Fact]
+    public void The_locked_sound_of_a_used_door_marks_it_locked_read_from_the_refused_use_and_another_objects_sound_does_not()
+    {
+        var h = new ActionHarness(offline: true);
+        h.State.Objects.Set(Make(Door, DoorCrossings.DoorFlag, PhysicsState.None));
+        h.State.Objects.Set(Make(0x7A9B4017, 0x10, PhysicsState.None));
+        var feed = new SessionDoorFeed(new View(h));
+
+        _ = feed.Use(Door);
+        h.R.Bus.Publish(new ObjectSoundPlayed(0x7A9B4017, 0x94, 1f)); // not a door
+        h.R.Bus.Publish(new ObjectSoundPlayed(Door, 0x12, 1f)); // another sound
+        Assert.True(feed.TryGet(Door, out var before));
+        Assert.Null(before.Locked);
+
+        h.R.Bus.Publish(new ObjectSoundPlayed(Door, 0x94, 1f));
+
+        Assert.True(feed.TryGet(Door, out var door));
+        Assert.True(door.Locked);
+        Assert.Equal("refused-use", door.LockedFrom);
     }
 
     [Fact]

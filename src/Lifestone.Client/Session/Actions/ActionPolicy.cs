@@ -9,7 +9,7 @@ internal enum ActionLane : byte
     /// <summary>Login, the character operations, entering the world and logoff: one in flight at a time, in call order.</summary>
     Session,
 
-    /// <summary>Talk and Tell: rate-limited together.</summary>
+    /// <summary>Talk, Tell and TalkDirect: rate-limited together.</summary>
     Chat,
 
     /// <summary>Use: rate-limited.</summary>
@@ -130,6 +130,9 @@ internal static class ActionPolicy
     /// <summary>Tell: until the server's confirmation line.</summary>
     internal const double TellSeconds = 5;
 
+    /// <summary>TalkDirect (M6 14): until the server's confirmation line, as <see cref="TellSeconds"/> (ACE sends it in the handler, before the creature's own answer runs).</summary>
+    internal const double TalkDirectSeconds = TellSeconds;
+
     /// <summary>LogOff: until the server's F653 and F658.</summary>
     internal const double LogOffSeconds = 30;
 
@@ -153,6 +156,13 @@ internal static class ActionPolicy
 
     /// <summary>OpenContainer (M4 2.1 s2): until the 0196 and the contents' objects; ACE walks the player to the container first (the Use's 15 s walk), as <see cref="UseSeconds"/>.</summary>
     internal const double OpenContainerSeconds = UseSeconds;
+
+    /// <summary>
+    /// M6 14 recall unblock (live 2026-11-14 17:27:19 to 17:27:39 UTC: an opened corpse held the Use lane 20 s for a UseDone an older debt had taken): the bound of an opened container's lane hold, counted from its view's arrival.
+    /// ACE sends the open's UseDone in its next action tick after the 0196 (<c>TryUseItem</c>'s chain with no delay, <c>Player_Use.cs</c> 223-241 @95ef426d; captures C2 and C3: within milliseconds), so a hold still
+    /// waiting 2 s later waits for a UseDone that went elsewhere. Lifestone's own number: ten times a local round trip and more, under the cast's own bound.
+    /// </summary>
+    internal const double OpenContainerUseDoneSeconds = 2;
 
     /// <summary>
     /// CloseContainer: until the 0052. Derivation (2.1-R11): the chest's lid takes 0.42 s to close (capture C3) and a corpse answers at once (capture C2), so 5 s holds the 0.42 s animation more than ten times over,
@@ -237,7 +247,7 @@ internal static class ActionPolicy
     /// <summary>M5 8: the spacing of the <c>where</c> probes while a request waits for the mod's landblock check to pass.</summary>
     internal const double ToolWorldProbeSeconds = 1;
 
-    /// <summary>Talk and Tell together: 4 a second, bursts of 8.</summary>
+    /// <summary>Talk, Tell and TalkDirect together: 4 a second, bursts of 8.</summary>
     internal const double ChatPerSecond = 4;
 
     /// <summary>The burst of <see cref="ChatPerSecond"/>.</summary>

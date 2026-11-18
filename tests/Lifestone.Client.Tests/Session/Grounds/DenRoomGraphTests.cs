@@ -4,6 +4,7 @@ using Lifestone.Client.Movement;
 using Lifestone.Client.Movement.Routes;
 using Lifestone.Client.Movement.Wayfinding;
 using Lifestone.Client.Session.Grounds;
+using Lifestone.Client.Session.Scenarios;
 using Lifestone.Data.Dat;
 using Lifestone.Data.Physics.Geometry;
 using Lifestone.Data.Physics.World;
@@ -27,6 +28,19 @@ public sealed class DenRoomGraphTests(DatSetFixture fixture, ITestOutputHelper o
 {
     private const string DenKey = "black-spawn-den-aluvian";
 
+    /// <summary>
+    /// The dungeons whose profile hunts only the slots a body reaches (M6 4 R1; M6 14 pits): the Tusker Abode and the Tusker Holding (one 712-cell layout) are one-way-down dungeons whose upper level is cut in two by the pit
+    /// 0x...02A9 (10 m wide, no floor polygon), which a running jump crosses (the profiles' <c>jumps</c>, <see cref="HuntingGround.Jumps"/>: the room graph's jump edge), and whose lower level, with the exit, only a drop off the brink
+    /// reaches, one way (<c>TODO(m6-abode-lower-level)</c>). Their profiles hold the 305 cells of the two halves (the draft's reach with the jump) and the runtime hunts the target slots standing in them (RespawnSchedule: a target slot
+    /// in a walkable cell); the lower level's slots are named, counted and left out of the checks below, which run in full on the rest. No stale skip is possible here, the count is printed.
+    /// </summary>
+    private static readonly Dictionary<string, string> FarHalf = new(StringComparer.Ordinal)
+    {
+        ["tusker-abode"] = "TODO(m6-abode-lower-level)",
+        ["tusker-holding"] = "TODO(m6-abode-lower-level)",
+        ["crater-caves"] = "TODO(m6-crater-caves-lower)", // M6 8 B1: the room graph reaches 121 of the 493 cells: all 24 Nubilous Golems and the 4 Cursed Wisps; the 26 Magma Golems and 9 Embers stand past the floorless ramps
+    };
+
     /// <summary>The keys of every dungeon profile (D46: a new dungeon's JSON file joins every per-ground theory here with no edit).</summary>
     public static TheoryData<string> Dungeons() => new(GroundCatalog.All.Where(g => g.Kind == GroundKind.Dungeon).Select(g => g.Key));
 
@@ -36,32 +50,76 @@ public sealed class DenRoomGraphTests(DatSetFixture fixture, ITestOutputHelper o
         // TODO(ground-multi-landblock): a dungeon of several landblocks needs a graph per landblock and the crossings between them; no profile has one yet.
         var landblock = Assert.Single(ground.Landblocks);
         var all = LandblockCellSet.Load(new CellStructureLibrary(fixture.Dats), new LandblockCoord((byte)(landblock >> 8), (byte)(landblock & 0xFF)));
-        return (all, new RoomGraph(LandblockCellSet.FromCells(all.Structures, all.Coord, all.Cells.Where(c => ground.IsWalkable(c.Id))), ground.Walk.DoorwayLean));
+        var graph = GroundRooms.GraphOf(all, ground); // the walkable cells at the ground's lean, with its jumps (M6 14 pits)
+        if (ground.Plates is not null)
+        {
+            // M6 14 holding plates: a ground with pressure plates walls them off; its legs are planned as the climber who walks them (PitJumpDatTests' buffed Qwinnie, Run 103 and Jump 178), whose standing jumps cross the plates' rows
+            var climber = new OfflinePlayerWeenie(103, 178);
+            graph.JumpReachMetres = JumpReach.FlightMetres(climber);
+            graph.PlateSpeedMetresPerSecond = climber.TryGetRunRate(out var rate) ? Data.Motion.MotionInterpreter.RunAnimSpeed * rate : null;
+        }
+
+        return (all, graph);
     }
 
     /// <summary>The slots a ground hunts: a target's weenie standing in a walkable cell (a target's slot in a no-go cell is left standing: the no-go set wins).</summary>
-    private static RespawnSlot[] Hunted(HuntingGround ground) => ground.Respawn.Slots.Where(s => ground.RoleOf(s.Wcid) == GroundRole.Target && !ground.IsNoGo(s.Cell)).ToArray();
+    private static RespawnSlot[] Hunted(HuntingGround ground) => ground.Respawn.Slots.Where(s => ground.RoleOf(s.Wcid) == GroundRole.Target && !ground.IsNoGo(s.Cell) && (!FarHalf.ContainsKey(ground.Key) || ground.IsWalkable(s.Cell))).ToArray();
 
-    [RequiresDatsTheory]
+    [DatsGapTheory]
     [MemberData(nameof(Dungeons))]
     public void Every_target_slot_s_cell_is_reached_from_the_arrival_without_entering_a_no_go_cell(string key)
     {
         var ground = GroundCatalog.Get(key);
+        var unreached = ReachedSlots(key, ground, out var hunted);
+        Assert.True(unreached == 0, $"{key}: {unreached} target-slot cells are not reached from the arrival");
+        var farHalf = ground.Respawn.Slots.Count(x => ground.RoleOf(x.Wcid) == GroundRole.Target && !ground.IsNoGo(x.Cell) && !ground.IsWalkable(x.Cell));
+        if (FarHalf.TryGetValue(key, out var far))
+        {
+            output.WriteLine($"{far}: {key}: {farHalf} target slots stand on the lower level (or in the pit), which no walk or jump of the profile reaches; the {hunted.Length} the profile hunts passed the full check");
+        }
+
+        output.WriteLine($"{key}: {hunted.Length} target slots in {hunted.Select(s => s.Cell).Distinct().Count()} cells, every one reached from the arrival");
+    }
+
+    /// <summary>Checks every hunted slot's cell for a walk from the arrival; returns the number of cells with none when <paramref name="tolerateUnreached"/>, else fails at the first.</summary>
+    private int ReachedSlots(string key, HuntingGround ground, out RespawnSlot[] hunted, bool tolerateUnreached = false)
+    {
+        var unreached = 0;
         var (_, graph) = GraphOf(ground);
-        var hunted = Hunted(ground);
+        hunted = Hunted(ground);
         Assert.NotEmpty(hunted);
         foreach (var cell in hunted.Select(s => s.Cell).Distinct())
         {
+            if (tolerateUnreached && !ground.IsWalkable(cell))
+            {
+                unreached++;
+                continue;
+            }
+
             Assert.True(ground.IsWalkable(cell), $"{key}: the target slot's cell 0x{cell:X8} is in no storey");
             var path = graph.FindPath(ground.Arrival.Cell, cell);
+            if (path is null && tolerateUnreached)
+            {
+                unreached++;
+                continue;
+            }
+
             Assert.True(path is not null, $"{key}: no walk joins the arrival 0x{ground.Arrival.Cell:X8} and the target slot's cell 0x{cell:X8}");
             Assert.All(path, c => Assert.False(ground.IsNoGo(c), $"{key}: the walk to 0x{cell:X8} enters the no-go cell 0x{c:X8}"));
+            if (graph.Plates is { } walls && graph.RoomFrame(cell) is { } middle && walls.Holding(middle.Origin) is not null)
+            {
+                // M6 14 holding plates: the room's middle stands inside a plate's wall: the tour's leg ends off it (RunnerLegs.GoalOutOfAvoid), and that is the leg planned
+                var goal = new RunnerLegs(ground, new ProfileTour(ground), graph, NullLogSink.Instance).GoalOutOfAvoid(cell, ground.Arrival.Origin);
+                Assert.True(goal is { } off && graph.Plan(ground.Arrival.Cell, ground.Arrival.Origin, cell, off.Origin) is not null, $"{key}: the room graph plans no leg from the arrival to 0x{cell:X8} off its plate's wall");
+                continue;
+            }
+
             Assert.True(
                 graph.PlanScripted("slot", ground.Arrival.Frame, cell, ground.Walk.StopWithinMetres, ground.Walk.StopDwellSeconds) is not null,
                 $"{key}: the room graph plans no leg from the arrival to 0x{cell:X8}");
         }
 
-        output.WriteLine($"{key}: {hunted.Length} target slots in {hunted.Select(s => s.Cell).Distinct().Count()} cells, every one reached from the arrival");
+        return unreached;
     }
 
     [RequiresDatsTheory]
@@ -88,11 +146,16 @@ public sealed class DenRoomGraphTests(DatSetFixture fixture, ITestOutputHelper o
         output.WriteLine($"{key}: {refused} no-go cells refused from {starts.Length} starts");
     }
 
-    [RequiresDatsTheory]
+    [DatsGapTheory]
     [MemberData(nameof(Dungeons))]
     public void The_storeys_are_joined_every_walkable_cell_reached_from_the_arrival(string key)
     {
         var ground = GroundCatalog.Get(key);
+        StoreysJoined(key, ground);
+    }
+
+    private void StoreysJoined(string key, HuntingGround ground)
+    {
         var (_, graph) = GraphOf(ground);
         Assert.True(ground.IsWalkable(ground.Arrival.Cell), $"{key}: the arrival is not walkable");
         var unreached = ground.Walkable.Cells.Where(c => c != ground.Arrival.Cell && graph.FindPath(ground.Arrival.Cell, c) is null).ToArray();
@@ -100,7 +163,7 @@ public sealed class DenRoomGraphTests(DatSetFixture fixture, ITestOutputHelper o
         foreach (var storey in ground.Storeys)
         {
             var walkable = storey.Cells.Cells.Count(ground.IsWalkable);
-            Assert.True(walkable > 0, $"{key}: storey {storey.Name} has no walkable cell");
+            Assert.True(walkable > 0 || storey.Cells.Cells.All(ground.IsNoGo), $"{key}: storey {storey.Name} has no walkable cell"); // a storey of nothing but a no-go exit cell is allowed (Tusker Burrow's far end, M6 3 p1)
             output.WriteLine($"{key}: storey {storey.Name}: {walkable} walkable of {storey.Cells.Count}, every one reached from the arrival");
         }
     }
@@ -110,13 +173,18 @@ public sealed class DenRoomGraphTests(DatSetFixture fixture, ITestOutputHelper o
     /// cell cut off from the arrival; every avoided creature's slot stands in a no-go cell (the loop never walks to one); and the tour covers every hunted slot's cell. The first draft over the hunted cells is
     /// printed for the person who sets a tour (a profile's tour is hand-set from it; the tour's own logic is item 2 g6's).
     /// </summary>
-    [RequiresDatsTheory]
+    [DatsGapTheory]
     [MemberData(nameof(Dungeons))]
     public void A_dungeon_s_storeys_are_its_draft_s_the_no_go_set_cuts_nothing_off_and_the_tour_covers_the_hunted_slots(string key)
     {
         var ground = GroundCatalog.Get(key);
+        StoreysDraftAndTour(key, ground);
+    }
+
+    private void StoreysDraftAndTour(string key, HuntingGround ground)
+    {
         var (all, _) = GraphOf(ground);
-        var draft = GroundDraft.Cells(all, ground.Arrival.Cell, ground.Walk.DoorwayLean);
+        var draft = GroundDraft.Cells(all, ground.Arrival.Cell, ground.Walk.DoorwayLean, ground.Jumps);
         output.WriteLine(GroundDraft.Summary(draft, new DraftWorld([], [], [], [], null, [])));
 
         // The storeys are the draft's, band for band.
@@ -124,7 +192,7 @@ public sealed class DenRoomGraphTests(DatSetFixture fixture, ITestOutputHelper o
         Assert.Equal(draft.Storeys.Select(s => s.Cells.Cells), ground.Storeys.Select(s => s.Cells.Cells));
 
         // Nothing the no-go set cuts off is left walkable (GroundDraft.CutOff names the cells for the no-go set).
-        var cutOff = GroundDraft.CutOff(all, ground.Arrival.Cell, ground.Walk.DoorwayLean, draft.Walkable, ground.IsNoGo);
+        var cutOff = GroundDraft.CutOff(all, ground.Arrival.Cell, ground.Walk.DoorwayLean, draft.Walkable, ground.IsNoGo, ground.Jumps);
         Assert.True(cutOff.Count == 0, $"{key}: the no-go set cuts off walkable cells, which are no-go too: {string.Join(", ", cutOff.Select(c => $"\"0x{c:X8}\""))}");
 
         // The loop never walks to an avoided creature: every slot of one stands in a no-go cell.
@@ -176,11 +244,20 @@ public sealed class DenRoomGraphTests(DatSetFixture fixture, ITestOutputHelper o
     public void A_dungeon_s_draft_from_the_pinned_world_sql_equals_the_profile_s_generators_slots_targets_exits_and_arrival(string key)
     {
         var ground = GroundCatalog.Get(key);
-        var world = PinnedWorldSql.Draft(Assert.Single(ground.Landblocks), ground.Arrival.Cell); // shared with GroundDraftTownTests: two streaming passes over the dump a run
+        var world = PinnedWorldSql.Draft(Assert.Single(ground.Landblocks), key == "crater-caves" ? 0x019A02CAu : ground.Arrival.Cell); // M6 8 B1: the portal row names the stale 0x019A02CA; the profile names the room its point stands in // shared with GroundDraftTownTests: two streaming passes over the dump a run
         output.WriteLine(string.Join("\n", world.Notes));
-        Assert.Equal(ground.Respawn.Generators, world.Generators.Select(g => new GeneratorModel(g.Guid, g.Cell, g.DelaySeconds!.Value, g.TickSeconds!.Value)));
-        Assert.Equal(ground.Respawn.Slots, world.Slots.Select(s => new RespawnSlot(s.Generator, s.Cell, s.Wcid)));
-        Assert.Equal(ground.Targets.Select(t => (t.Wcid, t.Name, (int?)t.Level)).Order(), world.Creatures.Select(c => (c.Wcid, c.Name, c.Level)).Order());
+        // M6 5 q6b, TODO(ground-draft-link-generator): the draft drops a link child that is a generator of its own, and the Cave of Alabree's placed Blood Shreths (4110) and Hunter Shreth (4111) are such children of the
+        // Linkable Newbie Monster Generator 0x70162016, so the profile adds that generator, their 18 slots and the two targets by hand; the draft equals the profile without them.
+        var byHand = key == "cave-of-alabree";
+        const uint placedGenerator = 0x70162016;
+        Assert.Equal(ground.Respawn.Generators.Where(g => !byHand || g.Guid != placedGenerator), world.Generators.Select(g => new GeneratorModel(g.Guid, g.Cell, g.DelaySeconds!.Value, g.TickSeconds!.Value)));
+        Assert.Equal(ground.Respawn.Slots.Where(s => !byHand || s.Generator != placedGenerator), world.Slots.Select(s => new RespawnSlot(s.Generator, s.Cell, s.Wcid)));
+        if (byHand)
+        {
+            Assert.Equal(18, ground.Respawn.Slots.Count(s => s.Generator == placedGenerator));
+        }
+
+        Assert.Equal(ground.Targets.Where(t => !byHand || t.Wcid is not (4110 or 4111)).Select(t => (t.Wcid, t.Name, (int?)t.Level)).Order(), world.Creatures.Select(c => (c.Wcid, c.Name, c.Level)).Order());
         Assert.All(world.ExitCells, c => Assert.True(ground.IsNoGo(c), $"{key}: the exit 0x{c:X8} is no-go"));
         if (key == DenKey)
         {
@@ -188,7 +265,7 @@ public sealed class DenRoomGraphTests(DatSetFixture fixture, ITestOutputHelper o
         }
 
         Assert.NotNull(world.Arrival);
-        Assert.Equal(ground.Arrival.Origin, world.Arrival.Origin);
+        Assert.Equal(key == "crater-caves" ? ground.Arrival.Origin with { Z = 0f } : ground.Arrival.Origin, world.Arrival.Origin); // M6 8 B1: its z is 0.005 over the row's, on the floor
         Assert.Equal((ground.Arrival.HeadingW, ground.Arrival.HeadingZ), (world.Arrival.HeadingW, world.Arrival.HeadingZ));
         output.WriteLine($"{key}: {world.Generators.Count} generator(s), {world.Slots.Count} slots, {world.Creatures.Count} creature weenies, {world.ExitCells.Count} exit cell(s), the arrival 0x{ground.Arrival.Cell:X8}");
     }

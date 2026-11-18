@@ -1,0 +1,583 @@
+{
+  "key": "nen-ai-pet-drudge",
+  "name": "Nen Ai's Pet Drudge (the Greenmire cider and cheese from the Stone Cathedral, handed to Nen Ai in Shoushi)",
+  "giver": {
+    "wcid": 5197,
+    "name": "Nen Ai"
+  },
+  "start": {
+    "cell": "0xA9B40019",
+    "point": [
+      84.0,
+      7.7,
+      94.0
+    ],
+    "name": "Holtburg's lifestone point"
+  },
+  "steps": [
+    {
+      "kind": "go",
+      "what": "to the door hall of the Cathedral portal's house",
+      "place": {
+        "cell": "0xD8540103",
+        "point": [
+          84.75,
+          10.5,
+          31.3
+        ],
+        "name": "inside the door of the Cathedral portal's house"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the dats (M6 8 B2c, TownNetworkWalkDatTests.Fetch): the portal's house, a straight stair from the door's hall 0xD8540103 (z 31.3) through the floorless shaft 0xD8540100 and the stair 0xD8540101 down to the portal's room 0xD8540102 (z 26.04), ground heights probed every 0.5 m (x 84.5 to 85, y 11.5 to 17.5); the room graph has no walkable portal through the shaft, so this step is one straight run the physics confirms, named in the door hall's room (the Silencia pattern of B1): a flight, not a route the planner joins, walked by a body in the dat test",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "down the stair to the Cathedral portal's room",
+      "place": {
+        "cell": "0xD8540103",
+        "point": [
+          84.75,
+          18.5,
+          26.05
+        ],
+        "name": "at the foot of the stair of the Cathedral portal's house"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the dats (M6 8 B2c, TownNetworkWalkDatTests.Fetch): the portal's house, a straight stair from the door's hall 0xD8540103 (z 31.3) through the floorless shaft 0xD8540100 and the stair 0xD8540101 down to the portal's room 0xD8540102 (z 26.04), ground heights probed every 0.5 m (x 84.5 to 85, y 11.5 to 17.5); the room graph has no walkable portal through the shaft, so this step is one straight run the physics confirms, named in the door hall's room (the Silencia pattern of B1): a flight, not a route the planner joins, walked by a body in the dat test",
+      "todo": null,
+      "way": [
+        {
+          "cell": "0xD8540103",
+          "point": [
+            84.75,
+            10.5,
+            31.3
+          ],
+          "name": "the door hall, at the head of the stair"
+        },
+        {
+          "cell": "0xD8540103",
+          "point": [
+            84.75,
+            18.5,
+            26.05
+          ],
+          "name": "at the foot of the stair of the Cathedral portal's house"
+        }
+      ]
+    },
+    {
+      "kind": "go",
+      "what": "to the Stone Cathedral portal",
+      "place": {
+        "cell": "0xD8540102",
+        "point": [
+          84.905,
+          23.317,
+          26.044
+        ],
+        "name": "on the stair's side of Stone Cathedral"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z, angles_W, angles_Z FROM landblock_instance WHERE guid = 0x7D854002: weenie 4955, cell 0xD8540102, (85.0052, 26.3172, 26.044); the point is 3 m short of it on the stair's side: the portal's own front (y 29.3) lies past it, and the long round's walk there from the stair's foot touched the portal and was taken in a step early (M6 8): the go stops short of the portal so the touch is the use step's",
+      "todo": null
+    },
+    {
+      "kind": "use",
+      "what": "enter the Stone Cathedral",
+      "place": {
+        "cell": "0x0154017E",
+        "point": [
+          30,
+          -10,
+          -6
+        ],
+        "name": "the arrival of Stone Cathedral"
+      },
+      "target": {
+        "wcid": 4955,
+        "name": "Stone Cathedral"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM weenie_properties_position WHERE object_Id = 4955 AND position_Type = 2: destination 0x0154017E (30, -10, -6); levels MinLevel 1, MaxLevel 20 (weenie_properties_int types 86, 87), enforced (use_portal_max_level_requirement is on, the lead's read of the live database, D118)",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the east side of the bowl of the ramp room",
+      "place": {
+        "cell": "0x01540104",
+        "point": [
+          23,
+          -43,
+          -22.3
+        ],
+        "name": "beside the pile in the ramp room"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the dats (M6 8 B2c, TownNetworkWalkDatTests.Fetch): a point of the bowl of 0x01540104 east of the static pile at (18 to 20, -39 to -41), so the walks plan round the pile (the plan through the room's middle runs into it and the physics refuses it: the plan's own failure, the family of m6-ramp-step-down); the cider walk goes through here both ways",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Greenmire Cider",
+      "place": {
+        "cell": "0x01540115",
+        "point": [
+          53.8504,
+          -37.3859,
+          -23.955
+        ],
+        "name": "where the Greenmire Cider lies"
+      },
+      "target": {
+        "wcid": 30499,
+        "name": "Greenmire Cider"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x7015402B: weenie 30499, cell 0x01540115; its pick-up quest ShoushiNenAiCider1204 (weenie_properties_string type 33; quest row min_Delta 72000, max_Solves -1)",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Greenmire Cider from the floor",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 30499,
+        "name": "Greenmire Cider"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): the item's own Quest string ShoushiNenAiCider1204 gates the pick-up for 20 h (ACE Player_Inventory.cs:1249-1262 @95ef426d); refused, the run stops pick-up:too-recent",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "back to the east side of the bowl of the ramp room",
+      "place": {
+        "cell": "0x01540104",
+        "point": [
+          23,
+          -43,
+          -22.3
+        ],
+        "name": "beside the pile in the ramp room"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the dats (M6 8 B2c, TownNetworkWalkDatTests.Fetch): a point of the bowl of 0x01540104 east of the static pile at (18 to 20, -39 to -41), so the walks plan round the pile (the plan through the room's middle runs into it and the physics refuses it: the plan's own failure, the family of m6-ramp-step-down); the cider walk goes through here both ways",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Greenmire Cheese",
+      "place": {
+        "cell": "0x01540178",
+        "point": [
+          18.291,
+          -57.0226,
+          -5.964
+        ],
+        "name": "where the Greenmire Cheese lies"
+      },
+      "target": {
+        "wcid": 30500,
+        "name": "Greenmire Cheese"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x7015402C: weenie 30500, cell 0x01540178; its pick-up quest ShoushiNenAiCheese1204 (weenie_properties_string type 33; quest row min_Delta 72000, max_Solves -1)",
+      "todo": null
+    },
+    {
+      "kind": "pick-up",
+      "what": "the Greenmire Cheese from the floor",
+      "place": null,
+      "target": null,
+      "item": {
+        "wcid": 30500,
+        "name": "Greenmire Cheese"
+      },
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): the item's own Quest string ShoushiNenAiCheese1204 gates the pick-up for 20 h (ACE Player_Inventory.cs:1249-1262 @95ef426d); refused, the run stops pick-up:too-recent",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the Cathedral's Surface portal",
+      "place": {
+        "cell": "0x0154017E",
+        "point": [
+          29.008,
+          -11.018,
+          -6
+        ],
+        "name": "in front of Surface"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z, angles_W, angles_Z FROM landblock_instance WHERE guid = 0x70154015: weenie 4956, cell 0x0154017E, (26.8865, -13.1398, -6); the point is the hop's front side of it (PortalHopLeg.FrontOf), walked in the dat tests (FetchQuestWalkDatTests): the go stops short of the portal so the touch is the use step's",
+      "todo": null
+    },
+    {
+      "kind": "use",
+      "what": "out of the Cathedral by its Surface portal",
+      "place": {
+        "cell": "0xD8540019",
+        "point": [
+          84.8,
+          2.1,
+          31.8
+        ],
+        "name": "the arrival of Surface"
+      },
+      "target": {
+        "wcid": 4956,
+        "name": "Surface"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM weenie_properties_position WHERE object_Id = 4956 AND position_Type = 2: destination 0xD8540019 (84.8, 2.1, 31.8); levels MinLevel None, MaxLevel None (weenie_properties_int types 86, 87), enforced (use_portal_max_level_requirement is on, the lead's read of the live database, D118)",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "to the foot of Nen Ai's stair",
+      "place": {
+        "cell": "0xD8530101",
+        "point": [
+          80.5,
+          181.9,
+          32.05
+        ],
+        "name": "at the foot of Nen Ai's stair"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the dats (M6 8 B2c, TownNetworkWalkDatTests.Fetch): Nen Ai's tower: the ground floor of 0xD8530101, a ramp east to the landing (84.2, 181.7, z 33.6), a ramp north through the floorless shaft 0xD8530102 to the upper floor 0xD8530100 (z 36.4), ground heights probed every 0.5 m; the room graph has no walkable portal through the shaft, so each flight is a straight run the physics confirms, authored as way points: fixed points, so the confirmer's samples along the stair (steep, 0.8 m in a metre) are the same each run; walked by a body in the dat test",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "up the first flight to the landing",
+      "place": {
+        "cell": "0xD8530101",
+        "point": [
+          82.7,
+          181.9,
+          33.4
+        ],
+        "name": "on the ramp below the landing of Nen Ai's stair"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the dats (M6 8 B2c, TownNetworkWalkDatTests.Fetch): Nen Ai's tower: the ground floor of 0xD8530101, a ramp east to the landing (84.2, 181.7, z 33.6), a ramp north through the floorless shaft 0xD8530102 to the upper floor 0xD8530100 (z 36.4), ground heights probed every 0.5 m; the room graph has no walkable portal through the shaft, so each flight is a straight run the physics confirms, authored as way points: fixed points, so the confirmer's samples along the stair (steep, 0.8 m in a metre) are the same each run; walked by a body in the dat test",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "up Nen Ai's stair to the upper floor",
+      "place": {
+        "cell": "0xD8530101",
+        "point": [
+          84.25,
+          186,
+          36.4
+        ],
+        "name": "at the top of Nen Ai's stair"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the dats (M6 8 B2c, TownNetworkWalkDatTests.Fetch): Nen Ai's tower: the ground floor of 0xD8530101, a ramp east to the landing (84.2, 181.7, z 33.6), a ramp north through the floorless shaft 0xD8530102 to the upper floor 0xD8530100 (z 36.4), ground heights probed every 0.5 m; the room graph has no walkable portal through the shaft, so each flight is a straight run the physics confirms, authored as way points: fixed points, so the confirmer's samples along the stair (steep, 0.8 m in a metre) are the same each run; walked by a body in the dat test",
+      "todo": null,
+      "way": [
+        {
+          "cell": "0xD8530101",
+          "point": [
+            84.0,
+            181.6,
+            33.6
+          ],
+          "name": "on the landing of Nen Ai's stair"
+        },
+        {
+          "cell": "0xD8530101",
+          "point": [
+            84.25,
+            186,
+            36.4
+          ],
+          "name": "at the top of Nen Ai's stair"
+        }
+      ]
+    },
+    {
+      "kind": "go",
+      "what": "to Nen Ai",
+      "place": {
+        "cell": "0xD8530100",
+        "point": [
+          79.454,
+          186.352,
+          36.41
+        ],
+        "name": "Nen Ai's place"
+      },
+      "target": {
+        "wcid": 5197,
+        "name": "Nen Ai"
+      },
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): SELECT obj_Cell_Id, origin_X, origin_Y, origin_Z FROM landblock_instance WHERE guid = 0x7D853001: weenie 5197, cell 0xD8530100",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "give Nen Ai the Greenmire Cider",
+      "place": null,
+      "target": {
+        "wcid": 5197,
+        "name": "Nen Ai"
+      },
+      "item": {
+        "wcid": 30499,
+        "name": "Greenmire Cider"
+      },
+      "expect": {
+        "reply": "You have found the cider! My little friend will be so excited! It makes him the least bit tipsy, you know.",
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): weenie_properties_emote id 44374 (object 5197, category 6 Give, weenie_Class_Id 30499): Tell, AwardNoShareXP (type 62) amount_64 15000; no quest test on the hand-in; AllowGive true (weenie_properties_bool type 8)",
+      "todo": null
+    },
+    {
+      "kind": "give",
+      "what": "give Nen Ai the Greenmire Cheese",
+      "place": null,
+      "target": {
+        "wcid": 5197,
+        "name": "Nen Ai"
+      },
+      "item": {
+        "wcid": 30500,
+        "name": "Greenmire Cheese"
+      },
+      "expect": {
+        "reply": "This cheese is very strengthening. I am most grateful that you have brought it to me so that I may feed it to my beloved pet.",
+        "stamp": null,
+        "item": {
+          "wcid": 26487,
+          "name": "Directions to the Shreth Hive"
+        }
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): weenie_properties_emote id 44375 (object 5197, category 6 Give, weenie_Class_Id 30500): Tell, AwardNoShareXP (type 62) amount_64 15000, Give 26487; no quest test on the hand-in; AllowGive true (weenie_properties_bool type 8)",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "down Nen Ai's stair to the ground floor",
+      "place": {
+        "cell": "0xD8530101",
+        "point": [
+          80.5,
+          181.6,
+          32.05
+        ],
+        "name": "at the foot of Nen Ai's stair"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the dats (M6 8 B2c, TownNetworkWalkDatTests.Fetch): Nen Ai's tower: the ground floor of 0xD8530101, a ramp east to the landing (84.2, 181.7, z 33.6), a ramp north through the floorless shaft 0xD8530102 to the upper floor 0xD8530100 (z 36.4), ground heights probed every 0.5 m; the room graph has no walkable portal through the shaft, so each flight is a straight run the physics confirms, authored as way points: fixed points, so the confirmer's samples along the stair (steep, 0.8 m in a metre) are the same each run; walked by a body in the dat test",
+      "todo": null,
+      "way": [
+        {
+          "cell": "0xD8530100",
+          "point": [
+            84.2,
+            185.6,
+            36.5
+          ],
+          "name": "at the top of Nen Ai's stair"
+        },
+        {
+          "cell": "0xD8530101",
+          "point": [
+            84.2,
+            182.2,
+            33.8
+          ],
+          "name": "on the landing of Nen Ai's stair"
+        },
+        {
+          "cell": "0xD8530101",
+          "point": [
+            80.5,
+            181.6,
+            32.05
+          ],
+          "name": "at the foot of Nen Ai's stair"
+        }
+      ]
+    },
+    {
+      "kind": "go",
+      "what": "out to Shoushi's arrival",
+      "place": {
+        "cell": "0xDA55001D",
+        "point": [
+          84.8,
+          99,
+          20
+        ],
+        "name": "Shoushi's arrival"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): the way out of Nen Ai's tower to the street (weenie_properties_position object_Id 42840 position_Type 2: destination 0xDA55001D), the start of the trip home; walked by the plan in the dat test",
+      "todo": null
+    },
+    {
+      "kind": "go",
+      "what": "home to Holtburg",
+      "place": {
+        "cell": "0xA9B40019",
+        "point": [
+          84.0,
+          7.7,
+          94.0
+        ],
+        "name": "Holtburg's lifestone point"
+      },
+      "target": null,
+      "item": null,
+      "expect": {
+        "reply": null,
+        "stamp": null,
+        "item": null
+      },
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): the travel file's start: Holtburg's lifestone point 0xA9B40019 (84, 7.7, 94), the home.lifestone_point of the Holtburg grounds; below level 16 she has no Lifestone Recall, so the quest ends here on foot or by the Network (D118)",
+      "todo": null
+    }
+  ],
+  "done": {
+    "stamp": null,
+    "reply": "This cheese is very strengthening. I am most grateful that you have brought it to me so that I may feed it to my beloved pet.",
+    "item": null
+  },
+  "timer_seconds": 72000,
+  "level": {
+    "min": 1,
+    "max": 20
+  },
+  "experience": {
+    "amount": 30000,
+    "kind": "fixed",
+    "max": null,
+    "percent": null,
+    "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7): the sum of the Give emotes' AwardNoShareXP amount_64 (the give steps' sources); quest_xp_modifier and xp_modifier are 1 (the lead's read of the live database, D118)"
+  },
+  "sources": [
+    "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 7) (reserve A): Nen Ai 5197 gives and receives; the cider and the cheese carry their own pick-up quests (min_Delta 72000 s, max_Solves -1)",
+    "timer_seconds 72000: the pick-up quests' gate; the hand-in has no timer (section 7); the ladder band runs it once (D118)",
+    "level: min 1 and max 20 are the entry portal 4955's MinLevel and MaxLevel (weenie_properties_int types 86 and 87), enforced on this server",
+    "ladder: the band 8 to 14 is the owner's D118 (cache/m6/8/brief-b2a.md); the swap for the Mountain Sewer, whose gem room is behind a locked door (cache/m6/8/notes.md)",
+    "M6 8 B2c: the Cathedral portal's stair, the ramp room's pile and Nen Ai's tower are walked in the file's own named steps (the steps' sources; the dat tests walk every leg with a body or a confirmed plan); the way out is the Cathedral's Surface portal, then the travel file's way home"
+  ],
+  "ladder": {
+    "from_level": 11,
+    "before_level": 18,
+    "once": true
+  }
+}

@@ -1,7 +1,15 @@
+using System.Numerics;
 using System.Text.RegularExpressions;
 using Lifestone.Client.Options;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Client.Session.Grounds;
+using Lifestone.Client.Session.Mage;
+using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Session.Vitals;
+using Lifestone.Data.Animation;
+using Lifestone.Data.World;
+using Lifestone.Net.Messages;
+using Lifestone.Net.Types;
 using Lifestone.Tests.Shared.Net;
 
 namespace Lifestone.Client.Tests.Session.Vitals;
@@ -189,10 +197,165 @@ public sealed partial class VitalsKeeperTests
         rig.Keeper.NeedsFor(new VitalsNeeds());
         Assert.Equal(VitalsKeeperState.Ready, rig.RunToEnd());
 
-        Assert.Equal(["0x41000014 down", "0x41000014 up", "0x41000003 down"], rig.Spy.Calls);
+        Assert.Equal(["0x8000003D down", "0x41000014 down", "0x41000014 up", "0x41000003 down"], rig.Spy.Calls); // M6 7 AN: the walker's stance first
         Assert.InRange(rig.Keeper.RestSeconds, 64, 70); // 120 points at 0.6 x 3.0 a second (ACE's sleep factor 3.0): 66.7 s
         Assert.False(rig.Keeper.PostureDown);
         Assert.Equal(0u, rig.Spy.Posture);
+    }
+
+    private const uint Town = 0xA9B30034;
+
+    /// <summary>A rig whose player stands in the town with a creature 10 m off.</summary>
+    private static C2VitalsRig WithNeighbour(uint descriptionFlags, uint stamina = 40)
+    {
+        var rig = new C2VitalsRig(new C2Character { Stamina = stamina }, new VitalsOptions { Posture = RestPosture.Lie });
+        var h = rig.R.H.R;
+        h.Reducer.OnPlayerTeleport(h.Context, new PlayerTeleportMsg(2));
+        h.Reducer.OnUpdatePosition(h.Context, ReducerHarness.Move(WorldActionRig.Player, 1, 2, 2, 1, cell: Town, x: 100));
+        rig.R.H.Unhide(stateStamp: 5);
+        var weenie = new WeenieDesc { Header = WeenieHeaderFlags.None, Name = "Scrivener of Item Magic", WeenieClassId = 20214, IconId = 0x06000001, ItemType = 0x10, ObjectDescriptionFlags = descriptionFlags };
+        var physics = new PhysicsDesc { Flags = PhysicsDescFlags.None, State = PhysicsState.None, Timestamps = new PhysicsTimestamps(1, 1, 1, 1, 1, 1, 1, 1, 1) };
+        rig.R.H.State.Objects.Set(new WorldObject(new CreateObjectMsg(0x7A9B301B, ModelData.Empty, physics, weenie), isSelf: false, createdAt: 0) { Position = new CellFrame(Town, new AcFrame(new Vector3(110, 20, 30), Quaternion.Identity)) });
+        return rig;
+    }
+
+    [Fact]
+    public void A_town_npc_near_her_does_not_keep_her_on_her_feet()
+    {
+        // Stretch 4: "0x7A9B301B is within 24 m: she rests standing": the Scrivener of Item Magic, whom ACE sends with the attackable bit clear (weenie 20214, bool 19 = 0)
+        var rig = WithNeighbour(descriptionFlags: 0);
+
+        rig.Keeper.NeedsFor(new VitalsNeeds());
+        Assert.Equal(VitalsKeeperState.Ready, rig.RunToEnd());
+
+        Assert.Contains("0x41000014 down", rig.Spy.Calls);
+        Assert.InRange(rig.Keeper.RestSeconds, 64, 70);
+        Assert.DoesNotContain(rig.R.H.Log.Lines, l => l.Contains("she rests standing", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_creature_that_can_attack_her_near_her_keeps_her_on_her_feet()
+    {
+        var rig = WithNeighbour(descriptionFlags: WorldObjectTable.AttackableFlag);
+
+        rig.Keeper.NeedsFor(new VitalsNeeds());
+        Assert.Equal(VitalsKeeperState.Ready, rig.RunToEnd());
+
+        Assert.Empty(rig.Spy.Calls);
+        Assert.InRange(rig.Keeper.RestSeconds, 195, 205);
+        Assert.Contains(rig.R.H.Log.Lines, l => l.Contains("0x7A9B301B is within 24 m: she rests standing", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void The_rest_checks_the_servers_motion_after_the_key_and_ends_with_the_posture_and_the_rate_reached()
+    {
+        var rig = new C2VitalsRig(new C2Character { Stamina = 40 }, new VitalsOptions { Posture = RestPosture.Lie });
+
+        rig.Keeper.NeedsFor(new VitalsNeeds());
+        Assert.Equal(VitalsKeeperState.Ready, rig.RunToEnd());
+
+        Assert.Contains(rig.R.H.Log.Lines, l => l.Contains("vitals: lying down (0x41000014", StringComparison.Ordinal) && l.Contains("check before: peace", StringComparison.Ordinal));
+        Assert.Contains(rig.R.H.Log.Lines, l => l.Contains("vitals: check after: the server's motion shows the posture 0x0014", StringComparison.Ordinal));
+        var ended = Assert.Single(rig.R.H.Log.Lines, l => l.Contains("vitals: rest ended:", StringComparison.Ordinal));
+        Assert.Contains("posture lie (the server's motion 0x0014)", ended, StringComparison.Ordinal);
+        Assert.Contains("ACE 1.8 before Rejuvenation", ended, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void With_no_echo_the_lie_down_is_a_named_failure_and_she_rests_on_her_feet()
+    {
+        var rig = new C2VitalsRig(new C2Character { Stamina = 40 }, new VitalsOptions { Posture = RestPosture.Lie }) { EchoesPosture = false };
+
+        rig.Keeper.NeedsFor(new VitalsNeeds());
+        Assert.Equal(VitalsKeeperState.Ready, rig.RunToEnd());
+
+        Assert.Contains(rig.R.H.Log.Lines, l => l.Contains("vitals: check after: failed=no-echo: she was asked to lie down, but the server's motion shows", StringComparison.Ordinal) && l.Contains("TODO(m6-rest-lie-echo)", StringComparison.Ordinal));
+        Assert.Single(rig.Spy.Calls, c => c == "0x41000014 down"); // one try in the keeper's pass, never a loop
+        Assert.Equal("0x41000003 down", rig.Spy.Calls[3]); // she is put back on her feet by the stop key
+        Assert.DoesNotContain(rig.R.H.Log.Lines, l => l.Contains("rest ended: posture lie", StringComparison.Ordinal)); // the line reads the server, not the key
+    }
+
+    [Fact]
+    public void A_posture_lost_after_its_echo_is_named_and_she_lies_down_again_a_named_number_of_times()
+    {
+        var rig = new C2VitalsRig(new C2Character { Stamina = 40 }, new VitalsOptions { Posture = RestPosture.Lie });
+        rig.Keeper.NeedsFor(new VitalsNeeds());
+        for (var i = 0; i < 40 && !rig.R.H.Log.Lines.Any(l => l.Contains("vitals: check after: the server's motion", StringComparison.Ordinal)); i++)
+        {
+            rig.Frame(0.25);
+        }
+
+        rig.MotionIs(null); // something else put her on her feet
+        Assert.Equal(VitalsKeeperState.Ready, rig.RunToEnd());
+
+        Assert.Contains(rig.R.H.Log.Lines, l => l.Contains("vitals: check: failed=posture-lost:", StringComparison.Ordinal) && l.Contains("she lies down again", StringComparison.Ordinal));
+        Assert.Equal(2, rig.Spy.Calls.Count(c => c == "0x41000014 down"));
+    }
+
+    [Fact]
+    public void A_hit_after_the_regeneration_stands_her_at_once_though_the_health_stays_over_the_rests_start()
+    {
+        var rig = new C2VitalsRig(new C2Character { Health = 100, Stamina = 40 }, new VitalsOptions { Posture = RestPosture.Lie });
+        rig.Keeper.NeedsFor(new VitalsNeeds());
+        for (var i = 0; i < 40 && !rig.Keeper.PostureDown; i++)
+        {
+            rig.Frame(0.25);
+        }
+
+        Assert.True(rig.Keeper.PostureDown);
+        rig.Frame(0.25);
+        rig.SetHealth(150); // she regenerated at rest
+        rig.Frame(0.25);
+        rig.SetHealth(140); // the hit: 140 is still over the 100 she lay down with
+        rig.Frame(0.25);
+        rig.Frame(0.25);
+
+        Assert.Contains(rig.R.H.Log.Lines, l => l.Contains("vitals: the health fell from 150 to 140 at rest: she stands (M5 D88)", StringComparison.Ordinal));
+        Assert.Equal(0u, rig.Spy.Posture);
+    }
+
+    /// <summary>M6 7 BD: the halt: she stands at once, nothing more is decided, a new pass starts clean, and a keeper with no pass running answers false.</summary>
+    [Fact]
+    public void A_halted_pass_stands_her_up_decides_nothing_more_and_the_next_needs_start_a_new_pass()
+    {
+        var rig = new C2VitalsRig(new C2Character { Health = 100, Stamina = 40 }, new VitalsOptions { Posture = RestPosture.Lie });
+        Assert.False(rig.Keeper.Halt(0, "no pass yet")); // Idle: the check before
+        rig.Keeper.NeedsFor(new VitalsNeeds());
+        for (var i = 0; i < 40 && !rig.Keeper.PostureDown; i++)
+        {
+            rig.Frame(0.25);
+        }
+
+        Assert.True(rig.Keeper.PostureDown);
+        var calls = rig.Spy.Calls.Count;
+        Assert.True(rig.Keeper.Halt(rig.Now, "a hostile is on her"));
+        Assert.Equal(VitalsKeeperState.Idle, rig.Keeper.State);
+        Assert.True(rig.Keeper.Halting);
+        for (var i = 0; i < 40 && rig.Keeper.Halting; i++)
+        {
+            rig.Frame(0.25);
+        }
+
+        Assert.False(rig.Keeper.Halting); // the check after: on her feet
+        Assert.False(rig.Keeper.PostureDown);
+        Assert.Equal(0u, rig.Spy.Posture);
+        Assert.Equal(calls + 1, rig.Spy.Calls.Count); // the stand, nothing more
+        Assert.Contains(rig.R.H.Log.Lines, l => l.Contains("vitals: pass halted: a hostile is on her;", StringComparison.Ordinal) && l.Contains("posture down, she stands", StringComparison.Ordinal));
+        var seconds = rig.Keeper.RestSeconds;
+        for (var i = 0; i < 8; i++)
+        {
+            rig.Frame(0.25);
+        }
+
+        Assert.Equal(calls + 1, rig.Spy.Calls.Count); // halted: no rest, no posture
+        Assert.Equal(seconds, rig.Keeper.RestSeconds);
+        Assert.Equal(VitalsKeeperState.Ready, RunNew(rig));
+    }
+
+    private static VitalsKeeperState RunNew(C2VitalsRig rig)
+    {
+        rig.Keeper.NeedsFor(new VitalsNeeds());
+        return rig.RunToEnd();
     }
 
     [Fact]
@@ -203,7 +366,7 @@ public sealed partial class VitalsKeeperTests
         rig.Keeper.NeedsFor(new VitalsNeeds());
         Assert.Equal(VitalsKeeperState.Ready, rig.RunToEnd());
 
-        Assert.Equal(["0x41000013 down", "0x41000013 up", "0x41000003 down"], rig.Spy.Calls);
+        Assert.Equal(["0x8000003D down", "0x41000013 down", "0x41000013 up", "0x41000003 down"], rig.Spy.Calls);
         Assert.InRange(rig.Keeper.RestSeconds, 78, 84); // 0.6 x 2.5 a second: 80 s
     }
 
@@ -218,7 +381,7 @@ public sealed partial class VitalsKeeperTests
 
         Assert.Contains("cast:1158", rig.Used);
         Assert.All(rig.PosturesAtUse, p => Assert.Equal(0u, p));
-        Assert.Equal("0x41000003 down", rig.Spy.Calls[2]);
+        Assert.Equal("0x41000003 down", rig.Spy.Calls[3]);
     }
 
     [Fact]
@@ -245,6 +408,40 @@ public sealed partial class VitalsKeeperTests
         Assert.Equal(["mode:8", "cast:1678", "cast:1678"], rig.Used.Take(3)); // 50 -> 130 -> 155 (the rig's cost 30, ACE's transfer)
         Assert.Equal(2, rig.Keeper.Transfers);
         Assert.True(rig.Mana >= 150);
+    }
+
+    [Theory]
+    [InlineData(MageTemplate.ClimberName, 71u, "cast:1676")] // the owner's rule of picking by the sum: I nets 22, II 16; live she pressed II
+    [InlineData(MageTemplate.ClimberName, 150u, "cast:1677")] // I's cap of 50: II nets 55, I 35
+    [InlineData("BSD Mage", 71u, "cast:1677")] // every other character keeps the highest that lands
+    public void The_keepers_press_is_picked_by_the_sum_for_the_climber_alone(string name, uint stamina, string press)
+    {
+        var rig = new C2VitalsRig(new C2Character { Spells = [1676, 1677], Mana = 30, Stamina = stamina });
+        rig.R.H.State.Self.Name = name;
+
+        rig.Keeper.NeedsFor(new VitalsNeeds(NextCastMana: 60));
+        rig.RunToEnd();
+
+        Assert.Equal(press, rig.Used.First(u => u.StartsWith("cast:", StringComparison.Ordinal)));
+    }
+
+    [Theory]
+    [InlineData(MageTemplate.ClimberName, "Stamina to Mana Self I pressed until it lands")]
+    [InlineData("BSD Mage", "Stamina to Mana Self II pressed until it lands")]
+    public void The_dance_outside_the_fight_is_picked_by_the_sum_for_the_climber_alone(string name, string line)
+    {
+        var rig = new C2VitalsRig(new C2Character { Spells = [1676, 1677], Mana = 30, Stamina = 71 });
+        rig.R.H.State.Self.Name = name;
+        var dance = new ManaDance(rig.Table, GroundCatalog.Get("black-spawn-den-aluvian"), new FightOptions(), new BuffOptions(), rig.R.H.Log, "test");
+
+        for (var i = 0; i < 40 && dance.Transfers == 0; i++)
+        {
+            dance.Step(rig.Session, rig.Now, 60, 0, "the test");
+            rig.Frame();
+        }
+
+        Assert.Equal(1, dance.Transfers);
+        Assert.Contains(rig.R.H.Log.Entries, e => e.Message.Contains(line, StringComparison.Ordinal));
     }
 
     [Fact]

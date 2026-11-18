@@ -694,6 +694,7 @@ public sealed class GameSpellPageTests(DatSetFixture fixture, ITestOutputHelper 
     }
 
     [RequiresLocalDatsFact]
+    [Trait("Tier", "Timing")] // m5-spellpage-timing-flake, m4-timing-tier-candidates: an 8 ms wall-clock bound (45 ms twice under load)
     public void The_controllers_are_built_in_staged_units_under_8_ms()
     {
         var sw = Stopwatch.StartNew();

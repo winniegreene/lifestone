@@ -67,6 +67,7 @@ public sealed class HoltburgApproach : IApproachWalk
     private IDisposable? _movesSubscription;
     private OfflineWalker? _walker;
     private MoveIntents? _move;
+    private MoveLease? _lease;
     private PresenceGatedMovementSink? _gate;
     private RouteDriver? _driver;
     private bool _placed;
@@ -130,7 +131,7 @@ public sealed class HoltburgApproach : IApproachWalk
         _world.SetTime(now);
         _walker = OfflineWalker.Create(_dats, _world, _log, weenie, _geometry, id: self.Guid, sink: _gate);
         _move = session.Actions.Move; // scripted movement goes through IActionApi.Move (the human's keys, R2)
-        _move.Bind(_walker.Controller, _walker.Controller.Options.RunByDefault);
+        _lease = _move.BindOver(_walker.Controller, _walker.Controller.Options.RunByDefault); // M6 14 motes: the play host's controller is bound again at the end
         _movesSubscription = session.Events.Subscribe<ObjectMoved>((in ObjectMoved e) =>
         {
             if (e.IsSelf)
@@ -230,7 +231,7 @@ public sealed class HoltburgApproach : IApproachWalk
         _driver?.Abandon();
         if (_move is not null && _walker is not null)
         {
-            _move.Unbind(_walker.Controller);
+            _move.Release(_lease!); // M6 14 motes
         }
 
         _movesSubscription?.Dispose();

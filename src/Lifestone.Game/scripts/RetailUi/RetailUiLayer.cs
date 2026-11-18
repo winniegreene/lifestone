@@ -587,6 +587,7 @@ public partial class RetailUiLayer : CanvasLayer, IUiLoginHost, ICg3DViewHost
     /// <inheritdoc/>
     public override void _Process(double delta)
     {
+        using var framePhase = Lifestone.Game.Diagnostics.FramePhases.Ui(); // M6 16 Eperf2: this call's share of a long frame
         double now;
         if (double.IsNaN(_fixedNow))
         {

@@ -232,7 +232,7 @@ public sealed class MageKitTests(DatSetFixture fixture, ITestOutputHelper output
             Assert.Contains(line.Name, stop, StringComparison.Ordinal);
             Assert.Contains(string.Create(CultureInfo.InvariantCulture, $"stack is {line.StopUnder - 1}, under its stop line {line.StopUnder}"), stop, StringComparison.Ordinal);
             Assert.Contains(ground.Home.Town + " sells none (D8)", stop, StringComparison.Ordinal);
-            Assert.StartsWith(line.Wcid == GearKit.PlatinumScarabWcid ? "m5-platinum-stock: " : "m5-carried-stock: ", stop, StringComparison.Ordinal);
+            Assert.StartsWith("m5-carried-stock: ", stop, StringComparison.Ordinal);
         }
 
         // A sold line under its trip line is logged and the fight goes on; one stack at the stop line itself is not a stop.
@@ -250,6 +250,46 @@ public sealed class MageKitTests(DatSetFixture fixture, ITestOutputHelper output
 
         // A hand-made kit (a test's) has no foci and nothing to count.
         Assert.Null(GearKit.FightStartStop(ground, GearKit.Of([]), new Dictionary<uint, int>(), notes.Add));
+    }
+
+    [RequiresDatsFact]
+    public void Every_bolt_lines_VI_burns_the_Pyreal_Scarab_and_Prismatic_Tapers_and_its_VII_the_Platinum_Scarab_on_the_foci_formula_M6_14_cap()
+    {
+        // M6 14 cap: the climber's Crater Caves fight casts VI when the VII line is short; her VI stock lines (the Pyreal Scarab 690, the Prismatic Taper 20631) must be what the VI bolts burn, and the Platinum Scarab 8897 what the VII ones burn.
+        foreach (var (element, line) in WarSpellData.BoltLineIds)
+        {
+            var six = Wcids(line[5]);
+            var seven = Wcids(line[6]);
+            output.WriteLine($"{element}: VI {Spells[line[5]].Name} burns [{string.Join(", ", six)}]; VII {Spells[line[6]].Name} burns [{string.Join(", ", seven)}]");
+            Assert.Equal([690u, 20631u], six.Order());
+            Assert.Equal([8897u, 20631u], seven.Order());
+        }
+
+        IEnumerable<uint> Wcids(uint spell) => GearKit.FociFormulaCounts(Spells[spell].Formula).Select(c => ComponentWeenies.TryGetByComponent(c.Key, out var w) ? w.Wcid : 0u).Distinct();
+    }
+
+    [RequiresDatsFact]
+    public void On_the_Crater_Caves_the_rings_Diamond_Scarab_is_floor_only_in_the_dats_and_none_held_is_no_stop_M6_14_motes()
+    {
+        // Live 2026-11-17 00:07:58: the climber's mote hunt stopped on "the Diamond Scarab stack is 0, under its stop line 2". On the dats' formulas only the ring burns it, so it is floor-only and stops nothing.
+        var ground = GroundCatalog.Get("crater-caves");
+        var floorOnly = ComponentFloor.FloorOnly(ground, Spells);
+        Assert.Contains(7299u, floorOnly.Keys);
+        Assert.Contains("Cassius' Ring of Fire", floorOnly[7299u]);
+
+        var kit = GearKit.Build(Spells, "kit-test-account", ground: ground);
+        var none = new Dictionary<uint, int>(HeldAtKeep(ground)) { [7299] = 0 };
+        var notes = new List<string>();
+        Assert.StartsWith("m5-carried-stock: the Diamond Scarab stack is 0", GearKit.FightStartStop(ground, kit, none, notes.Add), StringComparison.Ordinal); // the old read, with no floor-only lines
+        Assert.Null(GearKit.FightStartStop(ground, kit, none, notes.Add, floorOnly));
+        Assert.Contains(notes, n => n.StartsWith("stock: the Diamond Scarab stack is 0, under its stop line 2; Holtburg sells none: no stop, only ", StringComparison.Ordinal));
+
+        // A carried line a core spell burns keeps its stop with the floor-only lines read.
+        foreach (var line in ground.Supplies.Stock.Where(s => ground.IsCarried(s.Wcid) && !floorOnly.ContainsKey(s.Wcid)))
+        {
+            var low = new Dictionary<uint, int>(HeldAtKeep(ground)) { [line.Wcid] = line.StopUnder - 1 };
+            Assert.StartsWith("m5-carried-stock: the " + line.Name, GearKit.FightStartStop(ground, kit, low, notes.Add, floorOnly), StringComparison.Ordinal);
+        }
     }
 
     [RequiresDatsTheory]

@@ -2,6 +2,7 @@ using System.Globalization;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session.Casting;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Client.Session.Creatures;
 using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Vitals;
@@ -15,7 +16,7 @@ namespace Lifestone.Client.Session.Scenarios;
 /// The drain rule of the fight (M5 7 F7, the owner's D88): the soak's level-80 mage has no Melee Defense and soaks the damage. When its health is under <c>--fight-drain-under</c> (50%) and a living target is in line and range it casts
 /// Drain Health Other on the target instead of a bolt, at the level <see cref="DrainPicker"/> judges best at that moment, and goes on until its health is at <c>--fight-drain-until</c> (75%); then the bolts begin again. With no target in
 /// reach it casts Heal Self at the highest level the pack's scarabs pay (the keeper's heal, <see cref="VitalsMeans.HealSelf"/>). A rule of the fight for any ground (D46): the numbers are options; the targets' health and Magic Defense are the
-/// ground profile's (<see cref="GroundTarget.MaxHealth"/>, <see cref="GroundTarget.MagicDefence"/>).
+/// ground profile's (<see cref="GroundTarget.MaxHealth"/>, <see cref="GroundTarget.MagicDefence"/>) and, for a creature its list gives none for, the bestiary's (M6 16 E1b, <see cref="TargetStatsOf"/>).
 /// </summary>
 /// <remarks>
 /// <para><b>What the fight did before.</b> Nothing in the fight itself: it cast bolts whatever its health, and only the vitals keeper (<c>VitalsKeeper</c>, <c>VitalsMeans</c>) healed it between fights (Heal Self, kits, potions) and
@@ -33,6 +34,7 @@ public sealed partial class FightScenario
     private DrainWhy _drainNoted = DrainWhy.Best;
     private bool _drainUnknownNoted;
     private readonly uint[] _drainFloors = new uint[FightDrain.MaxLevels];
+    private readonly Dictionary<uint, (int MaxHealth, int Defence)> _bestiaryStats = []; // M6 16 E1b: the bestiary's facts of each class the ground's list does not give both numbers for, read once a class (TargetStatsOf)
 
     /// <summary>The Drain Health Other casts that landed (<c>drains=</c>, report-only).</summary>
     public int Drains => _drain.Drains;
@@ -52,14 +54,22 @@ public sealed partial class FightScenario
     /// <summary>Reads the drain's and the heal's levels again (at the fight's start, when the level's signature changes and after each cast of the rule, which used scarabs): allocates, it reads the pack.</summary>
     private void ReadDrain(IGameSessionView session)
     {
-        if (_options.ArenaHere || _drain.UnderPercent <= 0)
+        if (_options.ArenaHere || (_drain.UnderPercent <= 0 && !_options.LifeThrough))
         {
             return;
         }
 
         var self = session.State.Self;
-        var held = LevelFloor.HeldFor(session.State, DatReaderWriter.Enums.MagicSchool.LifeMagic);
-        _drain.Fill(self.Qualities, self.Spellbook, held, _buffOptions.CastChance, _refill);
+        var held = LevelFloor.HeldForAccount(session.State, DatReaderWriter.Enums.MagicSchool.LifeMagic, _buffOptions.AccountName); // M6 1 h1: the account's formula for a school without its focus (FightRefill.Payable reads it)
+        if (_drain.UnderPercent > 0)
+        {
+            _drain.Fill(self.Qualities, self.Spellbook, held, _buffOptions.CastChance, _refill, _buffOptions.AccountName);
+        }
+
+        if (_options.LifeThrough)
+        {
+            _drain.FillHarm(self.Qualities, self.Spellbook, held, _buffOptions.CastChance, _buffOptions.AccountName); // M6 14 (m6-life-through): the Harm Other level, by the Heal Self level's rule
+        }
     }
 
     /// <summary>
@@ -80,7 +90,7 @@ public sealed partial class FightScenario
     /// The rule's hook in <c>Choose</c>, with a target picked and the bolt's mana order passed: true when the fight cast (or began to cast) a drain at <paramref name="guid"/> and the phase is now the drain's. Everything it reads is read
     /// now: the health, the mana, Life Magic, Mana Conversion, the target's health and the distance. False leaves the bolt to go.
     /// </summary>
-    private bool DrainDecide(IGameSessionView session, double clock, in CellFrame here, uint guid)
+    private bool DrainDecideOwn(IGameSessionView session, double clock, in CellFrame here, uint guid) // M6 16 E3.0: the old DrainDecide, unchanged; the name is now its wrapper (FightScenario.SurvivalShadow.cs)
     {
         var q = session.State.Self.Qualities;
         if (_drain.UnderPercent <= 0 || !q.TryGetVitalLevels(MageTemplate.MaxHealth, out var health, out var healthMax) || !_drain.Wanted(health, healthMax, clock) || _drain.Count == 0)
@@ -92,6 +102,19 @@ public sealed partial class FightScenario
         if (!q.TryGetVitalLevels(MageTemplate.MaxMana, out var mana, out _) || !GearCasts.TryCurrentSkill(q, MageTemplate.LifeMagic, out var life, out _) || !q.TryGetSkill(MageTemplate.LifeMagic, out var lifeSkill) || !objects.TryGet(guid, out var target) || target.Position is not { } at)
         {
             return false;
+        }
+
+        if (FullestDrainTarget(session, in here, q, guid) is var fullest && fullest != guid && objects.TryGet(fullest, out var fuller) && StandsAt(session, fuller) is { } fullerAt)
+        {
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"health: drain target: {fuller.Name ?? "creature"} 0x{fullest:X8} is the fullest in reach, not the picked 0x{guid:X8}"));
+            (guid, target, at) = (fullest, fuller, fullerAt); // M6 7 AN (the owner): from the fullest target in reach
+        }
+
+        var resist = DrainResistOf(target.Weenie.WeenieClassId, target.Name);
+        if (resist <= 0)
+        {
+            // M6 14 drain resistance: a drain on this kind gives nothing (and FullestDrainTarget found no other in reach): as with no target in reach, Heal Self (HealDecide's mana and way-out checks)
+            return HealDecide(session, clock, "with no target in reach that a drain takes from (the target resists drains wholly)");
         }
 
         ManaOrder.TryManaConversion(q, out var conversion); // read now, not at the build (allocates; the rule runs only while the health is low)
@@ -108,7 +131,7 @@ public sealed partial class FightScenario
         }
 
         var fraction = 1f;
-        var known = maxHealth > 0 && ReadHealth(objects, guid, clock, out fraction, out _, out _); // the one live model: the server's push or answer, less what our own casts took (M5 7 F20)
+        var known = maxHealth > 0 && ReadHealth(objects, guid, clock, out fraction, out _, out _, Threat.HealthReader.FightDrain); // the one live model: the server's push or answer, less what our own casts took (M5 7 F20)
         if (!known)
         {
             fraction = 1f; // TODO(f20-floor-unknown-health): a target never told its health and with nothing dealt is assumed unhurt here, as before; the choice waited up to 1 s for the answer (HealthWait) and the yield gate bounds the harm
@@ -117,12 +140,12 @@ public sealed partial class FightScenario
         if ((maxHealth == 0 || defence == 0) && !_drainUnknownNoted)
         {
             _drainUnknownNoted = true;
-            _log.Warn(LogCategory, $"health: the ground profile gives no {(maxHealth == 0 ? "max_health" : "magic_defence")} for target wcid {target.Weenie.WeenieClassId}; the drain pick assumes a large target and an even resist (TODO(m5-drain-target-stats))");
+            _log.Warn(LogCategory, $"health: the ground profile gives no {(maxHealth == 0 ? "max_health" : "magic_defence")} for target wcid {target.Weenie.WeenieClassId}; the drain pick assumes a large target where the health is unknown, and rolls a Magic Defense of 0 as ACE does, the 0.03 curve of her Life Magic alone (TODO(m5-drain-target-stats))");
         }
 
         // A target of unknown size is taken as far larger than the caps (the caps decide); of unknown health, as unhurt.
         var targetHealth = maxHealth > 0 ? (uint)Math.Round(maxHealth * Math.Clamp(fraction, 0f, 1f)) : 10_000u;
-        var s = new DrainSituation(health, healthMax, mana, life, lifeSkill.Init + lifeSkill.Ranks, targetHealth, (uint)defence, at.ToGlobal().DistanceTo(here.ToGlobal()));
+        var s = new DrainSituation(health, healthMax, mana, life, lifeSkill.Init + lifeSkill.Ranks, targetHealth, (uint)defence, at.ToGlobal().DistanceTo(here.ToGlobal()), resist);
         _drain.Floors(conversion, _options.Mana, _manaReserve, _drainFloors);
         var choice = DrainPicker.Pick(_drain.Levels, _drainFloors.AsSpan(0, _drain.Count), in s);
         if (choice.Index < 0)
@@ -161,7 +184,7 @@ public sealed partial class FightScenario
     /// <summary>
     /// The rule's hook in <c>Choose</c> when no target is in reach: Heal Self at the highest level the pack pays for and the mana allows while the health is under the safe line. True when the cast began.
     /// </summary>
-    private bool HealDecide(IGameSessionView session, double clock)
+    private bool HealDecideOwn(IGameSessionView session, double clock, string why) // M6 16 E3.0: the old HealDecide, unchanged; the name is now its wrapper (FightScenario.SurvivalShadow.cs)
     {
         var q = session.State.Self.Qualities;
         if (_drain.UnderPercent <= 0 || !q.TryGetVitalLevels(MageTemplate.MaxHealth, out var health, out var healthMax) || !_drain.Wanted(health, healthMax, clock) || !_drain.HasHeal)
@@ -174,7 +197,12 @@ public sealed partial class FightScenario
             return false; // the walk goes on; the mana comes back with the walk or the next bolt's order
         }
 
-        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"health: heal: {_drain.HealName} with no target in reach at health {health} of {healthMax}, mana {mana}"));
+        if (WayOutRefusesHeal(session, clock, mana, _drain.HealCeiling, Picker.Rates.Read(clock).NextHitKills(health)))
+        {
+            return false; // M6 7 BE: the mana is the recall's (FightScenario.WayOut.cs)
+        }
+
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"health: heal: {_drain.HealName} {why} at health {health} of {healthMax}, mana {mana}"));
         _drain.StartHeal(session, clock);
         _phase = Phase.Drain;
         return true;
@@ -194,7 +222,7 @@ public sealed partial class FightScenario
         _castTally.Add(in report);
         if (end is CastEnd.Cancelled or CastEnd.DryRun)
         {
-            return Fail(session, "fight: the " + (_drain.IsHeal ? "Heal Self" : "Drain Health Other") + " cast was not carried out: " + (cast.LastOutcome is { } stopped ? Describe(stopped) : end + ": " + report.Why));
+            return Fail(session, "fight: the " + (_drain.IsHeal ? "Heal Self" : _drain.IsHarm ? "Harm Other" : "Drain Health Other") + " cast was not carried out: " + (cast.LastOutcome is { } stopped ? Describe(stopped) : end + ": " + report.Why));
         }
 
         var q = session.State.Self.Qualities;
@@ -212,9 +240,24 @@ public sealed partial class FightScenario
             _tally.NoteTargetDiedMidCast(); // M5 7 D124: 0x042C on a drain is the bolt's case: counted apart, never a miss
         }
 
-        _drain.Ended(end, targetGone, health, healthMax, report.Why ?? string.Empty, clock, emergency);
+        var through = _lifeCasting; // M6 14 (m6-life-through): its casts have their own bounds and their own lines; they never set the drain rule aside
+        _lifeCasting = false;
+        if (through)
+        {
+            _drain.EndedThrough(end);
+        }
+        else
+        {
+            _drain.Ended(end, targetGone, health, healthMax, report.Why ?? string.Empty, clock, emergency);
+        }
+
         NoteDrainEnded(session, clock, end.Succeeded()); // M5 7 F10: the heal's measured seconds a health point
         ReadDrain(session);
+        if (through && LifeThroughEnded(session, clock, end, report.Why ?? string.Empty, targetGone))
+        {
+            return ScenarioStatus.Running; // the kill notice came with the cast: settled as the bolt's kill is (FightScenario.LifeThrough.cs)
+        }
+
         if (targetGone)
         {
             _deadSince = clock;
@@ -229,19 +272,125 @@ public sealed partial class FightScenario
         return ScenarioStatus.Running;
     }
 
-    /// <summary>The ground profile's maximum health and Magic Defense of the target class (0 for what it does not say).</summary>
+    /// <summary>M6 7 AN: the fullest creature in reach of the drain's longest level (the emergency's reading, <see cref="EmergencyTarget"/>), or <paramref name="picked"/> when none is read.</summary>
+    private uint FullestDrainTarget(IGameSessionView session, in CellFrame here, PlayerQualities q, uint picked)
+    {
+        if (!q.TryGetSkill(MageTemplate.LifeMagic, out var lifeSkill))
+        {
+            return picked;
+        }
+
+        var reach = 0f;
+        foreach (ref readonly var level in _drain.Levels)
+        {
+            reach = Math.Max(reach, CastRange(level.Info, lifeSkill.Init + lifeSkill.Ranks));
+        }
+
+        var best = EmergencyTarget(session, in here, reach, out _, out _);
+        return best != 0 ? best : picked;
+    }
+
+    /// <summary>
+    /// The maximum health and Magic Defense of creature class <paramref name="wcid"/>: the fight's one read of a target's facts. M6 16 E1b (docs/automation-engine.md stage E1, m6-plan.md D139; the owner, 2026-11-15: a creature's
+    /// numbers are known data, never assumed): each of the two in this order. The maximum health: the ground profile's target row (<see cref="GroundTarget.MaxHealth"/>), else the class's appraisal when the picker has read it
+    /// (<see cref="WireMaxHealth"/>, M6 7 AN), else the bestiary's (<see cref="Bestiary.Find"/>: a profile's <c>max_health</c> first, then the world database's creature table). The Magic Defense: the ground profile's target row
+    /// (<see cref="GroundTarget.MagicDefence"/>), else the bestiary's (the table's, as ACE computes it). A row that does not say one of the two (the den's avoided kinds carry neither) is read on as a class with no row is.
+    /// </summary>
+    /// <remarks>
+    /// <para>0 is left only for what none of them holds: a weenie class the bestiary does not hold at all (no creature weenie of the pinned world database's tables; M6 16 E1e took the belt's cattle in) keeps the answer
+    /// the fight gave before (the appraisal's health or 0, Magic Defense 0), and <see cref="BestiaryStatsOf"/> names it once, loudly.</para>
+    /// <para>Allocation-free: a class whose row says both costs the list's scan as before; any other costs two dictionary reads (the appraisal's and the facts kept at the class's first read).</para>
+    /// </remarks>
     private (int MaxHealth, int Defence) TargetStatsOf(uint wcid)
     {
+        var (health, defence, listed) = (0, 0, false);
         var targets = _ground.Targets;
         for (var i = 0; i < targets.Count; i++)
         {
             if (targets[i].Wcid == wcid)
             {
-                return (targets[i].MaxHealth, targets[i].MagicDefence);
+                (health, defence, listed) = (targets[i].MaxHealth, targets[i].MagicDefence, true);
+                break;
             }
         }
 
-        return (0, 0);
+        var rowHealth = health;
+        if (health <= 0 && _wireMaxHealth.TryGetValue(wcid, out var wire))
+        {
+            health = wire;
+        }
+
+        if ((health > 0 && defence > 0) || wcid == 0)
+        {
+            return (health, defence); // the ground's row says both, as before (class 0 is no creature: the policy asks it of a ground with no target and no pick)
+        }
+
+        if (!_bestiaryStats.TryGetValue(wcid, out var kind))
+        {
+            kind = BestiaryStatsOf(wcid, listed, rowHealth, defence, health);
+        }
+
+        return (health > 0 ? health : kind.MaxHealth, defence > 0 ? defence : kind.Defence);
+    }
+
+    /// <summary>M6 16 E1b: the fight's read of a creature class's maximum health and Magic Defense (<see cref="TargetStatsOf"/>; a test reads it).</summary>
+    internal (int MaxHealth, int Defence) TargetFacts(uint wcid) => TargetStatsOf(wcid);
+
+    /// <summary>
+    /// M6 16 E1b: the bestiary's maximum health and Magic Defense of class <paramref name="wcid"/>, read once a class a fight and kept (0 for what the bestiary does not hold). One line the first time: the kind's name, its class and
+    /// the two numbers "from the bestiary", so a live log shows where a creature outside the ground's list gets its facts; a class the bestiary does not hold at all is the loud stub, <c>TODO(engine-bestiary-unknown-kind)</c>, named once.
+    /// Allocates (the line and the kept entry): only at a class's first read.
+    /// </summary>
+    private (int MaxHealth, int Defence) BestiaryStatsOf(uint wcid, bool listed, int rowHealth, int rowDefence, int heldHealth)
+    {
+        var why = !listed ? "does not list it"
+            : rowHealth <= 0 && rowDefence <= 0 ? "lists it with no max_health and no magic_defence"
+            : rowHealth <= 0 ? "lists it with no max_health"
+            : "lists it with no magic_defence";
+        (int MaxHealth, int Defence) stats;
+        var numbers = KindNumbers.Of(wcid); // M6 16 E1e: the bestiary's two numbers and their words, shared with the legs' read (LegKindRead)
+        if (numbers.Kind is { } kind)
+        {
+            stats = (numbers.MaxHealth ?? 0, Math.Max(0, numbers.MagicDefence ?? 0));
+            var health = numbers.HealthWords("its appraisal's when the picker has read one, else assumed as an unknown kind's");
+            var defence = numbers.DefenceWords;
+            var line = string.Create(CultureInfo.InvariantCulture, $"target facts: {kind.Identity.Name} (class {wcid}): {health}, {defence}, from the bestiary; the ground {_ground.Key} {why}{(rowHealth > 0 ? string.Create(CultureInfo.InvariantCulture, $" (its row's max_health {rowHealth} stands)") : heldHealth > 0 ? string.Create(CultureInfo.InvariantCulture, $" (the class's appraisal, {heldHealth}, stands for the health)") : string.Empty)}{(rowDefence > 0 ? string.Create(CultureInfo.InvariantCulture, $" (its row's magic_defence {rowDefence} stands)") : string.Empty)}");
+            if (!numbers.Complete)
+            {
+                _log.Warn(LogCategory, line);
+            }
+            else
+            {
+                _log.Info(LogCategory, line);
+            }
+        }
+        else
+        {
+            if (_view is null)
+            {
+                return (0, 0); // before the fight sees the world its class cannot be named: the first read in the fight names it
+            }
+
+            stats = (0, 0);
+            _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"TODO(engine-bestiary-unknown-kind): {numbers.NotHeldWords(ClassName(wcid))} and the ground {_ground.Key} {why}: its maximum health is its appraisal's when the picker has read one, else unknown (the emergency then takes {EmergencyUnknownTargetHealth}, the drain pick and the life casts a large target), and its Magic Defense is taken as 0 (unknown: rolled as ACE rolls a Magic Defense of 0, the 0.03 curve of her skill alone, for a drain and a bolt alike); named once"));
+        }
+
+        _bestiaryStats[wcid] = stats;
+        return stats;
+    }
+
+    /// <summary>The name of the first object of class <paramref name="wcid"/> the world holds, for a line written once a class.</summary>
+    private string ClassName(uint wcid)
+    {
+        foreach (var o in _view!.State.Objects.All)
+        {
+            if (o.Weenie.WeenieClassId == wcid && !string.IsNullOrEmpty(o.Name))
+            {
+                return o.Name;
+            }
+        }
+
+        return "a creature";
     }
 }
 
@@ -272,6 +421,8 @@ internal sealed class FightDrain
     private int _count;
     private SpellInfo? _heal;
     private int _healIndex = -1;
+    private SpellInfo? _harm;
+    private int _harmIndex = -1;
     private CastAttempt? _cast;
     private CastChatProof? _proof;
     private bool _active;
@@ -294,6 +445,12 @@ internal sealed class FightDrain
 
     /// <summary>The health share at which it ends, in percent.</summary>
     public int UntilPercent { get; }
+
+    /// <summary>M6 16 E3.0: true while a run of the rule stands (started at or under <see cref="UnderPercent"/>, not yet at <see cref="UntilPercent"/>): the hysteresis as <see cref="Wanted"/> last left it. A read: it moves nothing.</summary>
+    public bool Active => _active;
+
+    /// <summary>M6 16 E3.0: how often <see cref="Fill"/> has read the levels (a reader that keeps a level of its own reads again when this moves).</summary>
+    public int Fills { get; private set; }
 
     /// <summary>The drains that landed.</summary>
     public int Drains { get; private set; }
@@ -324,6 +481,15 @@ internal sealed class FightDrain
 
     /// <summary>True while the cast in flight (or last) is a Heal Self.</summary>
     public bool IsHeal { get; private set; }
+
+    /// <summary>M6 14 (<c>m6-life-through</c>): true while the cast in flight (or last) is a Harm Other.</summary>
+    public bool IsHarm { get; private set; }
+
+    /// <summary>M6 14: the Harm Other level <see cref="FillHarm"/> chose, or null: none is known, cast at the chance and paid for by the pack.</summary>
+    public SpellInfo? Harm => _harm;
+
+    /// <summary>M6 14: why <see cref="Harm"/> is null (<see cref="VitalsMeans.Pick"/>'s words: no level is known, none reaches the chance, none the pack can pay for); empty with a level.</summary>
+    public string HarmWhy { get; private set; } = "Harm Other: not read yet";
 
     /// <summary>The spell of the cast in flight (or last).</summary>
     public string LastName { get; private set; } = "Drain Health Other";
@@ -363,7 +529,7 @@ internal sealed class FightDrain
             return false;
         }
 
-        if (!_active && (ulong)health * 100 < (ulong)max * (uint)UnderPercent)
+        if (!_active && (ulong)health * 100 <= (ulong)max * (uint)UnderPercent) // M6 7 AN: at or below the line
         {
             _active = true;
         }
@@ -377,6 +543,13 @@ internal sealed class FightDrain
     }
 
     /// <summary>
+    /// M6 14 upkeep mana: true while a cast that did not land holds the rule set aside (<see cref="AsideSeconds"/>). The vitals policy reads it: live 2026-11-14 02:04:32 UTC, a Drain Health Other out of range was chosen again every
+    /// 50 ms for 1.3 s (26 casts refused 0x0550), the policy offering the levels the rule had just set aside.
+    /// </summary>
+    /// <param name="clock">The session clock.</param>
+    public bool AsideAt(double clock) => clock < _asideUntil;
+
+    /// <summary>
     /// Fills the levels (Drain Health Other I to VII the book knows, the SpellTable and the transfer rows hold, and the pack pays for under the level floor) and the Heal Self level (the highest known one the pack pays for whose chance at the
     /// current Life Magic reaches <paramref name="castChance"/>). The picker, not this, weighs the chance of a drain at the moment of the cast.
     /// </summary>
@@ -385,8 +558,10 @@ internal sealed class FightDrain
     /// <param name="held">What the pack holds when the level floor applies, else null.</param>
     /// <param name="castChance">The least cast chance of the Heal Self level.</param>
     /// <param name="payable">The refill, whose <see cref="FightRefill.Payable"/> names a level the pack cannot pay for, once.</param>
-    public void Fill(PlayerQualities q, Spellbook? book, IReadOnlyDictionary<uint, int>? held, double castChance, FightRefill payable)
+    /// <param name="accountName">M6 1 w: the account's name (<see cref="BuffOptions.AccountName"/>), so the Heal Self pick judges a pack without the Life focus on the account's full formula (<see cref="VitalsMeans.Pick"/>); null: the foci formula (today's rule).</param>
+    public void Fill(PlayerQualities q, Spellbook? book, IReadOnlyDictionary<uint, int>? held, double castChance, FightRefill payable, string? accountName = null)
     {
+        Fills++;
         _count = 0;
         var ids = DrainPicker.Ids;
         for (var i = 0; i < ids.Count && _count < _levels.Length; i++)
@@ -407,10 +582,35 @@ internal sealed class FightDrain
 
         _heal = null;
         _healIndex = -1;
-        if (book is not null && VitalsMeans.Pick(q, book, _spells, VitalsLine.HealSelf, castChance, out _, held) is { } heal)
+        if (book is not null && VitalsMeans.Pick(q, book, _spells, VitalsLine.HealSelf, castChance, out _, held, accountName) is { } heal) // M6 1 w: the guard that handed Pick the pack only when the Life focus was held is gone; Pick takes the account (h2)
         {
             _heal = heal;
             _healIndex = IndexOf(VitalsMeans.HealSelf, heal.Id);
+        }
+    }
+
+    /// <summary>
+    /// M6 14 (<c>m6-life-through</c>): reads the Harm Other level: the highest the book holds whose cast chance at the current Life Magic reaches <paramref name="castChance"/> and whose components the pack pays for under the
+    /// level floor, as <see cref="Fill"/> reads the Heal Self level (<see cref="VitalsMeans.Pick"/>). Allocates (the reasons are strings): called where <see cref="Fill"/> is, never per frame.
+    /// </summary>
+    /// <param name="q">The player's qualities.</param>
+    /// <param name="book">The spellbook, or null (no level: an arena run reads none).</param>
+    /// <param name="held">What the pack holds when the level floor applies, else null.</param>
+    /// <param name="castChance">The least cast chance.</param>
+    /// <param name="accountName">The account's name (<see cref="BuffOptions.AccountName"/>), as <see cref="Fill"/> takes it.</param>
+    public void FillHarm(PlayerQualities q, Spellbook? book, IReadOnlyDictionary<uint, int>? held, double castChance, string? accountName = null)
+    {
+        (_harm, _harmIndex, HarmWhy) = (null, -1, "Harm Other: the spellbook is not read");
+        if (book is null)
+        {
+            return;
+        }
+
+        var harm = VitalsMeans.Pick(q, book, _spells, VitalsLine.HarmOther, castChance, out var why, held, accountName);
+        HarmWhy = why;
+        if (harm is not null && HarmOtherRows.RowOf(harm.Id) is not null)
+        {
+            (_harm, _harmIndex) = (harm, IndexOf(VitalsMeans.HarmOther, harm.Id));
         }
     }
 
@@ -439,7 +639,7 @@ internal sealed class FightDrain
     {
         _cast ??= new CastAttempt(session.Actions, session.State, _log, _spells);
         _proof ??= new CastChatProof(session.State, _spells);
-        (IsHeal, TargetGuid, LastName) = (false, guid, _levels[level].Info.Name);
+        (IsHeal, IsHarm, TargetGuid, LastName) = (false, false, guid, _levels[level].Info.Name);
         _inARow += attack ? 0 : 1;
         _cast.Start(new CastRequest { Levels = DrainPicker.Ids, Index = _index[level], Target = guid, Rules = Rules, Purpose = "fight drain", Proof = _proof }, clock);
     }
@@ -451,9 +651,37 @@ internal sealed class FightDrain
     {
         _cast ??= new CastAttempt(session.Actions, session.State, _log, _spells);
         _proof ??= new CastChatProof(session.State, _spells);
-        (IsHeal, TargetGuid, LastName) = (true, 0, HealName);
+        (IsHeal, IsHarm, TargetGuid, LastName) = (true, false, 0, HealName);
         _inARow++;
         _cast.Start(new CastRequest { Levels = VitalsMeans.HealSelf, Index = _healIndex, Rules = Rules, Purpose = "fight heal", Proof = _proof }, clock);
+    }
+
+    /// <summary>
+    /// M6 14 (<c>m6-life-through</c>): starts Harm Other at the level <see cref="FillHarm"/> chose, at <paramref name="guid"/>. No cast of the low-health run: it does not count toward <see cref="MaxInARow"/>. Its proof is ACE's
+    /// "With &lt;spell&gt; you drain N points of health from &lt;name&gt;." (<c>WorldObject_Magic.cs:548</c> @95ef426d), which <see cref="CastChatProof"/> reads; a resist is "&lt;name&gt; resists your spell" (<c>:192</c>).
+    /// </summary>
+    /// <param name="session">The session.</param>
+    /// <param name="guid">The target.</param>
+    /// <param name="clock">The session clock.</param>
+    public void StartHarm(IGameSessionView session, uint guid, double clock)
+    {
+        _cast ??= new CastAttempt(session.Actions, session.State, _log, _spells);
+        _proof ??= new CastChatProof(session.State, _spells);
+        (IsHeal, IsHarm, TargetGuid, LastName) = (false, true, guid, _harm?.Name ?? "Harm Other");
+        _cast.Start(new CastRequest { Levels = VitalsMeans.HarmOther, Index = _harmIndex, Target = guid, Rules = Rules, Purpose = "fight harm", Proof = _proof }, clock);
+    }
+
+    /// <summary>
+    /// M6 14 (<c>m6-life-through</c>): the end of one of its casts: a landed Drain Health Other is counted with the others (<c>drains=</c>); nothing sets the drain rule aside and nothing is logged here (the rule's own line
+    /// says how it ended, and counts its Harm Other casts).
+    /// </summary>
+    /// <param name="end">The cast's end.</param>
+    public void EndedThrough(CastEnd end)
+    {
+        if (end == CastEnd.Landed && !IsHarm)
+        {
+            Drains++;
+        }
     }
 
     /// <summary>Notes the end of a cast: a landing is counted; a resist is the next pick's to decide on; any other end that did not land, or a run of casts that did not end the low state, sets the rule aside (named).</summary>
@@ -471,6 +699,13 @@ internal sealed class FightDrain
         {
             // M5 7 D124: 0x042C, the target died during the wind-up (ACE no longer held it at the release): the cast never left the hand, so it neither landed nor missed; the next pick decides.
             _log.Info(FightScenario.LogCategory, string.Create(CultureInfo.InvariantCulture, $"health: {name} did not leave the hand: its target died during the wind-up ({why}); not a miss, the next pick decides"));
+            return;
+        }
+
+        if (end == CastEnd.InTheAir)
+        {
+            // M6 14 airborne: the body was in the air past the cast's bound: the moment's, not the spell's; the rule is not set aside and the next pick decides.
+            _log.Info(FightScenario.LogCategory, string.Create(CultureInfo.InvariantCulture, $"health: {name} was held in the air ({why}); not a miss and the rule is not set aside, the next pick decides"));
             return;
         }
 

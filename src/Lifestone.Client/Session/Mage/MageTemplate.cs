@@ -51,6 +51,12 @@ public sealed record MageLevelPlan(int Level, ulong TotalXp, int Credits, IReadO
     public int RanksOf(MageStatKind kind, uint id) => Targets.FirstOrDefault(t => t.Kind == kind && t.Id == id)?.Ranks ?? 0;
 
     /// <summary>The loud line for a plan that leaves a skill out (<c>TODO(m5-mage-level-credits)</c>), or an empty string when nothing is left out.</summary>
+    /// <remarks>
+    /// M6 1 b: left open, with its reason. The tag names a BUILT mage (<c>--mage-level</c>, <see cref="MageBuild.Gate126"/> asked below <see cref="MageTemplate.FullTrainingLevel"/>) whose snapshot of the credits cannot pay for every later skill; no build
+    /// the host makes reaches it (<see cref="MageTemplate.BuildFor"/> gives the traditional mage below 126, which trains its three later skills from level 32, under <see cref="MageTemplate.MinLevel"/>), and a CLIMBING character's credits are
+    /// <see cref="SkillCreditPlan"/>'s (trained at each level-up by <see cref="LevelUpSpend"/>). The built mage's den job runs no level-up spend, so the line stays the build's own record; retiring the tag (and the two tests that
+    /// assert its text) is the doc pass's call.
+    /// </remarks>
     public string LeftOutLine => LeftOut.Count == 0
         ? string.Empty
         : string.Create(
@@ -215,6 +221,7 @@ public static class MageTemplate
         WarMagic => "War Magic",
         Loyalty => "Loyalty",
         Salvaging => "Salvaging",
+        Alchemy => "Alchemy",
         _ => throw new ArgumentOutOfRangeException(nameof(id), id, "TODO(m3-template-credits): a skill the mage template has no name for"),
     };
 
@@ -325,8 +332,13 @@ public static class MageTemplate
     /// <summary>The experience a plan from scratch leaves unspent out of <see cref="Level126Xp"/> (<see cref="XpRemainder"/>).</summary>
     public static ulong Remainder(XpTableData table) => Level126Xp - TotalXp(table);
 
-    /// <summary>M5 7 F3 (D87): the shares a build or a spend at <paramref name="level"/> uses: the owner's D19 split at <see cref="TargetLevel"/> and above, the dance split below it.</summary>
+    /// <summary>M5 7 F3 (D87): the shares a build or a spend at <paramref name="level"/> uses: the D19 split, set by owner ruling, at <see cref="TargetLevel"/> and above, the dance split below it.</summary>
     public static MageShares SharesAt(int level) => level >= TargetLevel ? MageShares.D19 : MageShares.Dance;
+
+    /// <summary>M6 item 14: the shares of a spend or a projection: the ladder's character's own split (<see cref="MageShares.Climber"/>, wherever her <see cref="StatCap"/> is in force) or, for every other mage, <see cref="SharesAt"/> the level.</summary>
+    /// <param name="level">The character's level.</param>
+    /// <param name="climber">True for the ladder's character (the plan carries her cap).</param>
+    public static MageShares SharesFor(int level, bool climber) => climber ? MageShares.Climber : SharesAt(level);
 
     /// <summary>
     /// M5 7 F3 (D87): the build at <paramref name="level"/>, computed by the same planner as level 126's (<see cref="MageSpendingPlanner.Compute"/>, as <c>FighterTemplate.Compute</c> takes its level). The skill credits are
@@ -458,6 +470,266 @@ public static class MageTemplate
             checks.Add(new StatCheck(null, "Melee Defense class (untrained)", cls, HeadlessCharacter.UntrainedSkill, cls == HeadlessCharacter.UntrainedSkill));
         }
 
+        return new TemplateCheck(checks);
+    }
+
+    // ------------------------------------------------------------------------------------------------ the climber (M6 item 0 a3a)
+
+    /// <summary>The climber's name (M6 D7): the ladder's character on the account <c>test</c>, re-created at each gate by the M4 D44/D45 pattern.</summary>
+    public const string ClimberName = "Winnie";
+
+    /// <summary>The local model's own climber, on her own account (the owner's decision): cheat-free like Winnie, and played by the same rules.</summary>
+    public const string ModelClimberName = "Qwinnie";
+
+    /// <summary>The characters that get climber behaviour: the one list, read through <see cref="IsClimber"/> and, for every policy, <see cref="CharacterPolicy.For"/>.</summary>
+    public static IReadOnlyList<string> ClimberNames => ClimberNameArray;
+
+    private static readonly string[] ClimberNameArray = [ClimberName, ModelClimberName];
+
+    /// <summary>True for a character the ladder's rules and the cheat-free guards apply to (any name in <see cref="ClimberNames"/>, ignoring case).</summary>
+    /// <param name="name">The character's name, or null when it is not known.</param>
+    public static bool IsClimber(string? name)
+    {
+        if (name is null)
+        {
+            return false;
+        }
+
+        foreach (var climber in ClimberNameArray)
+        {
+            if (string.Equals(climber, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return true; // a loop over the array, not LINQ over the interface: per-frame callers (the buff cycle's waits) allocate nothing
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Alchemy's skill id. M6 D34 (amends D6): the climber's creation trains no Alchemy, and that stands. M6 14 D132 trained it by play from the level-up credits; D136 (the owner, 2026-11-13) holds it until a job needs it
+    /// (<see cref="ClimberCreditsOnNeed"/>): the credits bank meanwhile. No experience is raised into it (<see cref="ClimberSpendSkills"/>): its raises are the wand chain's, and item 8's grant for the one check stays D34's.
+    /// </summary>
+    public const uint Alchemy = 38;
+
+    /// <summary>
+    /// M6 14 D136 (the owner, 2026-11-13, amending D132): the skills her level-up credits train only when a job needs one, never by level: Alchemy. Their SkillTable trained cost is read at creation (<see cref="PlanClimberCreation"/>,
+    /// <see cref="ClimberCreationPlan.Last"/>); <see cref="SkillCreditPlan.OrderOf"/> puts one in the order only when its <c>needed</c> names it, so the credits bank until then. The creation still trains none (D34 stands there).
+    /// </summary>
+    public static IReadOnlyList<uint> ClimberCreditsOnNeed { get; } = [Alchemy];
+
+    /// <summary>
+    /// M6 D5, D34: the order the climber's creation credits are spent in after War Magic specialised: Life Magic first (the traditional mage specialises it; when the credits cannot, it is trained), then the other skills of
+    /// <see cref="ClimberCreationOrder"/> (Creature Enchantment, then Item Enchantment, then Mana Conversion: D43; the built mage's <see cref="TrainingPriority"/> keeps M5's order, Life, Creature, Mana Conversion, Item), each trained when its cost still fits. No Melee Defense (D5: the traditional mage soaks the damage).
+    /// M6 D43 (amends D34's order): Item Enchantment comes before Mana Conversion, so the travel spells (Item Enchantment) are trained at level 16 from the credits instead of 32; the dat's credit list reaches Mana Conversion's cost later (m6-plan.md section 7, D43).
+    /// </summary>
+    public static IReadOnlyList<uint> ClimberCreationOrder { get; } = [LifeMagic, CreatureEnchantment, ItemEnchantment, ManaConversion];
+
+    /// <summary>
+    /// M6 item 14, slice S3 (the owner's order of 2026-11-11 for a climber built for the buff bot): Life Magic, then Item Enchantment (her Impenetrability, her banes and Lifestone Recall are her own to cast: the bot casts on no armour, D127), then Mana Conversion,
+    /// and Creature Enchantment last (the bot casts every creature line she would, at level VII). The order of a climber created and played with <c>--autopilot-buff-bot</c> on (the default); <see cref="ClimberCreationOrder"/> stays the order with it off.
+    /// </summary>
+    public static IReadOnlyList<uint> ClimberCreationOrderWithBot { get; } = [LifeMagic, ItemEnchantment, ManaConversion, CreatureEnchantment];
+
+    /// <summary>
+    /// M6 item 14 (the owner's standing rule: what Health, Endurance and the attributes' caps leave goes to her magic skills): the skills a War and Life mage's experience may go to, by name: War Magic, Life Magic, Item Enchantment, Mana Conversion and Creature Enchantment
+    /// (the last two from the level-up that trains them: a skill held untrained is never raised). No other skill is ever raised for the ladder's character, whatever a plan lists (<see cref="XpSpendRule"/> checks each raise against <see cref="OnClimberList"/>):
+    /// the allocation of 2026-11-11 gave Jump 18 ranks and Magic Defense 14 because the pool of the older splits holds every skill the heritage trains at creation (<see cref="CreationTrained"/>). Why each of those is left out: <see cref="MageShares.Climber"/>.
+    /// </summary>
+    public static IReadOnlyList<uint> ClimberSpendSkills { get; } = [WarMagic, LifeMagic, ItemEnchantment, ManaConversion, CreatureEnchantment];
+
+    /// <summary>
+    /// M6 item 14: true for a stat the ladder's character's experience may go to: the skills of <see cref="ClimberSpendSkills"/>; Focus and Self (her magic's attributes), Endurance (health) and Strength (its floor alone, when the burden asks); Max Health, Max Mana and
+    /// Max Stamina. Coordination, Quickness and every other skill: never.
+    /// </summary>
+    /// <param name="kind">The stat's kind.</param>
+    /// <param name="id">The stat's id.</param>
+    public static bool OnClimberList(MageStatKind kind, uint id) => kind switch
+    {
+        MageStatKind.Skill => ClimberSpendSkills.Contains(id),
+        MageStatKind.Attribute => id is Strength or Endurance or Focus or Self,
+        _ => id is MaxHealth or MaxMana or MaxStamina,
+    };
+
+    /// <summary>The climber's creation and credit order for the buff bot's option:<see cref="ClimberCreationOrderWithBot"/> with it on, <see cref="ClimberCreationOrder"/> with it off.</summary>
+    /// <param name="buffBot">The option (<c>--autopilot-buff-bot</c>).</param>
+    public static IReadOnlyList<uint> ClimberOrder(bool buffBot) => buffBot ? ClimberCreationOrderWithBot : ClimberCreationOrder;
+
+    /// <summary>The one line that says which order is in force and why (the creation's and the ladder's start).</summary>
+    /// <param name="buffBot">The option (<c>--autopilot-buff-bot</c>).</param>
+    public static string ClimberOrderLine(bool buffBot) =>
+        $"skill order: {(buffBot ? "bot" : "own")}: War Magic, {string.Join(", ", ClimberOrder(buffBot).Select(SkillName))}, then the credits bank ({string.Join(", ", ClimberCreditsOnNeed.Select(SkillName))} on a need only): "
+        + (buffBot
+            ? "--autopilot-buff-bot is on (the default): the buff bot casts her creature lines at level VII, so Item Enchantment (her armour lines and Lifestone Recall) and Mana Conversion come before Creature Enchantment, which comes after them"
+            : "--autopilot-buff-bot=off: she casts her own creature lines, so Creature Enchantment comes first after Life Magic (the order of before item 14, D43)")
+        + "; Alchemy is trained from the banked credits only when a job needs it (M6 14 D136, amending D132; the creation trains none)";
+
+    /// <summary>One skill the climber's credits pay for at creation.</summary>
+    /// <param name="Skill">The skill id.</param>
+    /// <param name="Class">The advancement class (<see cref="HeadlessCharacter.SpecializedSkill"/> or <see cref="HeadlessCharacter.TrainedSkill"/>).</param>
+    /// <param name="Cost">The credits it costs (the SkillTable's, for the heritage).</param>
+    public sealed record ClimberPick(uint Skill, uint Class, int Cost);
+
+    /// <summary>One skill (or class of a skill) the climber's credits cannot pay for at creation.</summary>
+    /// <param name="Skill">The skill id.</param>
+    /// <param name="WantedClass">The class the plan wanted.</param>
+    /// <param name="Cost">What that class costs at creation.</param>
+    /// <param name="Left">The credits left when the plan reached it.</param>
+    public sealed record ClimberUnpaid(uint Skill, uint WantedClass, int Cost, int Left);
+
+    /// <summary>The climber's creation credits (<see cref="PlanClimberCreation"/>): what they pay for, in order, and what they cannot.</summary>
+    /// <param name="Credits">The heritage's skill credits.</param>
+    /// <param name="Paid">The skills paid for, in order.</param>
+    /// <param name="Unpaid">The skills (or classes) the credits cannot pay for, in order.</param>
+    /// <param name="Last">M6 14 D136: <see cref="ClimberCreditsOnNeed"/> with their trained costs (the SkillTable's), trained after the order only when a job needs one (<see cref="SkillCreditPlan.OrderOf"/>); null: none (a plan made by hand).</param>
+    public sealed record ClimberCreationPlan(int Credits, IReadOnlyList<ClimberPick> Paid, IReadOnlyList<ClimberUnpaid> Unpaid, IReadOnlyList<CreditLine>? Last = null)
+    {
+        /// <summary>The credits the picks cost.</summary>
+        public int Spent => Paid.Sum(p => p.Cost);
+
+        /// <summary>The credits left after the picks.</summary>
+        public int Left => Credits - Spent;
+
+        /// <summary>The class a skill is created with, or null when the plan buys none (it keeps the heritage's).</summary>
+        public uint? ClassOf(uint skill) => Paid.FirstOrDefault(p => p.Skill == skill)?.Class;
+
+        /// <summary>
+        /// The loud lines (<c>TODO(m6-climber-creation-credits)</c>, on the pattern of <c>TODO(m5-mage-level-credits)</c>): one per skill or class the credits cannot pay for at creation; empty when nothing is left. M6 1 b: the
+        /// trained lines are <see cref="SkillCreditPlan.OrderOf"/>'s order, trained from the levels' credits at each level-up (<see cref="LevelUpSpend"/>); the tag's text stays until the doc pass retires it with the tests that read it.
+        /// </summary>
+        public IReadOnlyList<string> LoudLines => [.. Unpaid.Select(u => string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"TODO(m6-climber-creation-credits): the heritage's {Credits} skill credits ({Spent} spent at creation, {Left} left) cannot pay {u.Cost} for {SkillName(u.Skill)} {(u.WantedClass == HeadlessCharacter.SpecializedSkill ? "specialised" : "trained")} at creation ({u.Left} left when the plan reached it); {(u.WantedClass == HeadlessCharacter.SpecializedSkill ? "the credit plan does not specialise after creation" : "the credit plan (SkillCreditPlan) trains it from the levels' credits at a level-up")}"))];
+    }
+
+    /// <summary>
+    /// M6 D5, D34: what the climber's creation credits pay for, in this order: War Magic specialised (no Alchemy, D34 amends D6), then <see cref="ClimberCreationOrder"/> (Life Magic specialised if it fits, else trained; the others trained) as far as the credits go.
+    /// A cost is the SkillTable's for the heritage (<c>ACCharGenData::GetSkillTrainedCost</c> and <c>GetSkillSpecializedCost</c>, 11.4186 0x005C26D0; <c>MageTemplateDatTests</c> reads them from the dats); a skill whose cost is not positive is a dat gap and throws.
+    /// </summary>
+    /// <param name="heritageCredits">The heritage's skill credits (<see cref="HeritageSkillCredits"/> for Aluvian).</param>
+    /// <param name="trainedCost">The credits to train a skill.</param>
+    /// <param name="specializedCost">The total credits to specialise a skill.</param>
+    /// <param name="buffBot">M6 item 14 S3: true: the order of a climber built for the buff bot (<see cref="ClimberCreationOrderWithBot"/>); false (the default): <see cref="ClimberCreationOrder"/>. The hosts pass the option (<see cref="ClimberOrder"/>).</param>
+    public static ClimberCreationPlan PlanClimberCreation(int heritageCredits, Func<uint, int> trainedCost, Func<uint, int> specializedCost, bool buffBot = false)
+    {
+        ArgumentNullException.ThrowIfNull(trainedCost);
+        ArgumentNullException.ThrowIfNull(specializedCost);
+        var left = heritageCredits;
+        var paid = new List<ClimberPick>();
+        var unpaid = new List<ClimberUnpaid>();
+
+        int Cost(Func<uint, int> price, uint skill)
+        {
+            var cost = price(skill);
+            return cost > 0 ? cost : throw new InvalidDataException($"TODO(m6-climber-creation-cost): the SkillTable gives no cost for {SkillName(skill)} ({skill})");
+        }
+
+        bool Take(uint skill, uint cls)
+        {
+            var cost = Cost(cls == HeadlessCharacter.SpecializedSkill ? specializedCost : trainedCost, skill);
+            if (cost > left)
+            {
+                unpaid.Add(new ClimberUnpaid(skill, cls, cost, left));
+                return false;
+            }
+
+            left -= cost;
+            paid.Add(new ClimberPick(skill, cls, cost));
+            return true;
+        }
+
+        Take(WarMagic, HeadlessCharacter.SpecializedSkill);
+        foreach (var skill in ClimberOrder(buffBot))
+        {
+            if (TraditionalSpecializedAtCreation.Contains(skill) && Take(skill, HeadlessCharacter.SpecializedSkill))
+            {
+                continue;
+            }
+
+            Take(skill, HeadlessCharacter.TrainedSkill);
+        }
+
+        // M6 14 D136: Alchemy is not bought at creation; its trained cost is read here, from the same SkillTable, for the line a job's need adds to the credit order.
+        return new ClimberCreationPlan(heritageCredits, paid, unpaid, [.. ClimberCreditsOnNeed.Select(skill => new CreditLine(skill, Cost(trainedCost, skill)))]);
+    }
+
+    /// <summary>
+    /// The climber's creation intent (M6 D5, D6): the traditional mage's attributes (Strength, Endurance and Quickness 10; Coordination, Focus and Self 100; the model climber's Endurance and Coordination swapped, <see cref="ClimberCreationValue"/>), the heritage's free skill classes (<paramref name="retailClasses"/>), the plan's picks and no Melee Defense
+    /// (untrained). The character is created at level 1 and gains only what it earns.
+    /// </summary>
+    /// <param name="name">The character's name (<see cref="ClimberName"/>).</param>
+    /// <param name="retailClasses"><see cref="HeadlessCharacter.RetailSkillClasses"/> of the dats.</param>
+    /// <param name="plan">What the credits pay for (<see cref="PlanClimberCreation"/>).</param>
+    public static CharacterCreateIntent ClimberCreationIntent(string name, IReadOnlyList<uint> retailClasses, ClimberCreationPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(retailClasses);
+        ArgumentNullException.ThrowIfNull(plan);
+        var classes = new uint[retailClasses.Count];
+        for (var i = 0; i < classes.Length; i++)
+        {
+            classes[i] = retailClasses[i];
+        }
+
+        foreach (var pick in plan.Paid)
+        {
+            classes[pick.Skill] = pick.Class;
+        }
+
+        classes[MeleeDefense] = HeadlessCharacter.UntrainedSkill;
+        return HeadlessCharacter.Intent(name, classes) with
+        {
+            Strength = ClimberCreationValue(name, Strength),
+            Endurance = ClimberCreationValue(name, Endurance),
+            Quickness = ClimberCreationValue(name, Quickness),
+            Coordination = ClimberCreationValue(name, Coordination),
+            Focus = ClimberCreationValue(name, Focus),
+            Self = ClimberCreationValue(name, Self),
+        };
+    }
+
+    /// <summary>
+    /// The creation value of an attribute for a climber by name. The owner's ruling of 2026-11-18 for the sprint: a character whose policy says
+    /// so (<see cref="CharacterPolicy.EnduranceForCoordination"/>: the model's climber) is created with Endurance 100 and Coordination 10 (the traditional mage's two swapped; Strength and
+    /// Quickness 10, Focus and Self 100: the same 330 credits, each attribute inside the heritage's 10 to 100, CharGenState.AttributeMin and
+    /// AttributeMax). Endurance is her health (Endurance / 2) and her stamina (Endurance) (GameAttributesTab's retail formulas; ACE
+    /// AttributeFormula.GetFormula @95ef426d); Coordination's part of Melee Defense ((Coordination + Quickness) / 3) and of Alchemy goes down.
+    /// Every other character, Winnie included, keeps <see cref="CreationValue"/>. Nothing after creation reads these values: the live health
+    /// rule reads her Endurance's start from the character (XpSpendRule), and the plan's projection (ClimberHealthRule.ProjectedBuy) stays
+    /// the traditional climber's, the lower bound the ladder's move-on compares against (SpellPlan.ProjectedWarBase).
+    /// </summary>
+    /// <param name="name">The climber's name.</param>
+    /// <param name="attributeId">The attribute id (1 to 6).</param>
+    public static uint ClimberCreationValue(string? name, uint attributeId) =>
+        CharacterPolicy.For(name).EnduranceForCoordination && attributeId is Endurance or Coordination
+            ? (attributeId == Endurance ? HighAttribute : LowAttribute)
+            : CreationValue(attributeId);
+
+    /// <summary>
+    /// The climber's template check (M6 D5, D6): level 1 (a fresh character that has earned nothing), the six attributes' creation values, each skill the plan bought in its class and Melee Defense untrained. It reads the model only.
+    /// </summary>
+    /// <param name="name">The climber's name (its creation values, <see cref="ClimberCreationValue"/>).</param>
+    /// <param name="qualities">The character's read model.</param>
+    /// <param name="plan">What the credits paid for.</param>
+    public static TemplateCheck ClimberCheck(string? name, PlayerQualities qualities, ClimberCreationPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(qualities);
+        ArgumentNullException.ThrowIfNull(plan);
+        var checks = new List<StatCheck> { new(null, "level", qualities.Level, 1, qualities.Level == 1) };
+        for (uint id = Strength; id <= Self; id++)
+        {
+            long start = qualities.TryGetAttribute(id, out var attribute) ? attribute.Start : -1;
+            var want = ClimberCreationValue(name, id);
+            checks.Add(new StatCheck(null, $"attribute {id} start", start, want, start == want));
+        }
+
+        foreach (var pick in plan.Paid)
+        {
+            long cls = qualities.TryGetSkill(pick.Skill, out var skill) ? skill.AdvancementClass : -1;
+            checks.Add(new StatCheck(null, $"{SkillName(pick.Skill)} class", cls, pick.Class, cls == pick.Class));
+        }
+
+        long melee = qualities.TryGetSkill(MeleeDefense, out var m) ? m.AdvancementClass : HeadlessCharacter.UntrainedSkill;
+        checks.Add(new StatCheck(null, "Melee Defense class (untrained)", melee, HeadlessCharacter.UntrainedSkill, melee == HeadlessCharacter.UntrainedSkill));
         return new TemplateCheck(checks);
     }
 }
