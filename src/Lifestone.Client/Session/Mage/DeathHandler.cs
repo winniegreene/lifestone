@@ -226,6 +226,7 @@ public sealed partial class DeathHandler : IDisposable
     private uint _hostile;
     private DeathDropDecision? _drop; // M6 6 C2: the drop rule's answer, read once a death (before a leg route's trip, or at the corpse leg)
     private bool _corpseRunAsked; // M6 7 AY: the rung's owner was asked for this death
+    private bool _vitaeAsked; // M6 sprint: the vitae-first rule was asked for this death
     private bool _coinFetch; // M6 7 AY: the coin rule said fetch
     private LadderCorpseCoin? _stall; // M6 8 I: set when the corpse is worth fetching (fetch:met, a need): the trip's limit is no progress, not time
     private (string Step, CellFrame At, double Since)? _stallMark; // M6 8 I: where the body stood when the stall clock last restarted
@@ -502,7 +503,7 @@ public sealed partial class DeathHandler : IDisposable
         _wornBefore = null;
         (Rearm, _shop) = (DeathLegVerdict.NotApplicable, null);
         (_drop, _legPlace, _routeRetries, _rungBackRetries, _legAllowance, _legMetres, _rungBackEnded) = (null, null, 0, 0, 0, double.NaN, double.NaN);
-        (_corpseRunAsked, _coinFetch, _stall, _stallMark) = (false, false, null, null);
+        (_corpseRunAsked, _vitaeAsked, _coinFetch, _stall, _stallMark) = (false, false, false, null, null); // M6 sprint: a newer death asks the vitae-first rule again
         _logged.Clear(); // each step is logged once per death
         Enter("second-death", now);
         return ScenarioStatus.Running;
@@ -1079,6 +1080,11 @@ public sealed partial class DeathHandler : IDisposable
             _tripStart = now; // the first look; the recall's mana wait below keeps this step and does not restart the trip's clock
         }
 
+        if (VitaeFirst(session, now) is { } deferred)
+        {
+            return deferred; // M6 sprint (the owner, 2026-11-18): the vitae is burnt on the rung below first; the corpse is owed
+        }
+
         if (CorpseRunShut(session, now) is { } shut)
         {
             return shut; // M6 7 AY: a shut gate means no fetch, before any way is taken
@@ -1467,9 +1473,11 @@ public sealed partial class DeathHandler : IDisposable
         }
 
         var age = now - _facts.DiedAt;
-        if (double.IsNaN(age) || age >= DeathScenario.PlayerCorpseMinRotSeconds)
+        var rotLevel = (_options.Facts ?? _options.Journey?.Facts)?.CorpseRotLevel ?? (session.State.Self.Qualities.TryGetInt(PlayerQualities.LevelProperty, out var levelNow) ? levelNow : 1);
+        var rot = DeathScenario.PlayerCorpseRotSeconds(rotLevel);
+        if (double.IsNaN(age) || age >= rot)
         {
-            return NoCorpse(now, DeathCorpse.Rotted, "rotted", string.Create(CultureInfo.InvariantCulture, $"the corpse 0x{_facts.CorpseGuid:X8} is {age:0} s old, at or past ACE's rot floor of {DeathScenario.PlayerCorpseMinRotSeconds:0} s (@95ef426d Corpse.cs 103-118, TimeToRot = max(3600, level * 300) at 110)"));
+            return NoCorpse(now, DeathCorpse.Rotted, "rotted", string.Create(CultureInfo.InvariantCulture, $"the corpse 0x{_facts.CorpseGuid:X8} is {age:0} s old, at or past ACE's rot time of {rot:0} s for level {rotLevel} (@95ef426d Corpse.cs 103-118, TimeToRot = max(3600, level * 300) at 110)"));
         }
 
         if (_travel is PlaceTravel)
@@ -1477,12 +1485,12 @@ public sealed partial class DeathHandler : IDisposable
             return NoCorpse(now, DeathCorpse.No, "no-runner", $"this host's travel seam is today's place and the handler never places: the corpse 0x{_facts.CorpseGuid:X8} in cell 0x{at.CellId:X8} is not walked to (TODO(m5-death-corpse-runner))");
         }
 
-        return StartCorpseWalk(at, age, session, now);
+        return StartCorpseWalk(at, age, rot, session, now);
     }
 
-    private ScenarioStatus StartCorpseWalk(CellFrame at, double age, IGameSessionView session, double now)
+    private ScenarioStatus StartCorpseWalk(CellFrame at, double age, double rot, IGameSessionView session, double now)
     {
-        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"walking: purpose=corpse (the runner over {_ground.Name}'s room graph to the corpse 0x{_facts.CorpseGuid:X8} in cell 0x{at.CellId:X8}, {age:0} s old; ACE's rot floor {DeathScenario.PlayerCorpseMinRotSeconds:0} s)"));
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"walking: purpose=corpse (the runner over {_ground.Name}'s room graph to the corpse 0x{_facts.CorpseGuid:X8} in cell 0x{at.CellId:X8}, {age:0} s old{(double.IsNaN(rot) ? string.Empty : string.Create(CultureInfo.InvariantCulture, $"; ACE's rot time {rot:0} s"))})"));
         _leg = _travel.GoTo(session, new TravelRequest(DeathScenario.CorpseDestination(at), TravelPurpose.Corpse, _facts.CorpseGuid, DeathScenario.CorpseTravelRangeMetres), now);
         return Enter("corpse-walk", now);
     }
@@ -1530,6 +1538,30 @@ public sealed partial class DeathHandler : IDisposable
         _leg = null;
         _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"handler: route retry {spent} of {RouteRetries}{whose} after {failure}; the route is decided again from cell 0x{self.Position?.CellId ?? 0:X8}"));
         return true;
+    }
+
+    /// <summary>
+    /// M6 sprint (the owner's decision of 2026-11-18: after a death the vitae is burnt on a known-good ground first and the corpse fetched after; she re-arms with her own or bought gear and buffs it herself): asked once a death, after the
+    /// re-arm, the re-wear, the replace and the re-buff and before any way is taken. The journey's rule (<see cref="JourneyFacts.DeferCorpse"/>, the ladder's autopilot: <see cref="Autopilot.VitaeBurn"/>) answers with the reason the
+    /// corpse is owed (<c>corpse_recovered=deferred trip_abort=vitae-first</c>: the handler ends where the body stands and the ladder hunts the rung below until the vitae is gone), or null: the trip goes on as before.
+    /// </summary>
+    private ScenarioStatus? VitaeFirst(IGameSessionView session, double now)
+    {
+        if (_vitaeAsked || !_options.RecoverCorpse || _options.Fight)
+        {
+            return null;
+        }
+
+        _vitaeAsked = true;
+        if ((_options.Facts ?? _options.Journey?.Facts)?.DeferCorpse is not { } rule || rule(session, _facts, now) is not { } why)
+        {
+            return null;
+        }
+
+        _tripEnd = now;
+        (Corpse, TripAbort) = (DeathCorpse.Deferred, DeathLegVerdict.TripAbortVitaeFirst);
+        _log.Warn(LogCategory, $"handler: corpse_recovered={DeathCorpse.Deferred} trip_abort={DeathLegVerdict.TripAbortVitaeFirst}: {why}; no trip now: the handler ends where the body stands");
+        return Enter("wear", now);
     }
 
     /// <summary>M6 7 AY: nothing is owed and no coin is fetched: the drop rule's none-needed, unless the coin rule said fetch.</summary>
@@ -2329,7 +2361,7 @@ public sealed partial class DeathHandler : IDisposable
 
         // M6 6 C2: the corpse walk is the route's last leg: one retry from where the body stands, else the named outcome it was
         return CanRetryRoute(session, "the corpse leg failed: " + failure) && _facts.CorpsePosition is { } at
-            ? StartCorpseWalk(at, now - _facts.DiedAt, session, now)
+            ? StartCorpseWalk(at, now - _facts.DiedAt, double.NaN, session, now)
             : NoCorpse(now, DeathCorpse.No, "travel-failed", "the corpse leg failed: " + failure);
     }
 
@@ -2734,6 +2766,9 @@ public static class DeathCorpse
 
     /// <summary>M6 6 C1: nothing but pyreals left the inventory at the death (<see cref="DeathDropRule"/>): no trip is made and the fight resumes; the judges read it as recovered.</summary>
     public const string NoneNeeded = "none-needed";
+
+    /// <summary>M6 sprint (the owner, 2026-11-18): the corpse is owed, not fetched yet: the vitae is burnt on the rung below first (<see cref="Autopilot.VitaeBurn"/>); a later run on its ground enters the death station again for it.</summary>
+    public const string Deferred = "deferred";
 }
 
 /// <summary>

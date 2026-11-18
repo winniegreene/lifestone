@@ -224,6 +224,12 @@ public partial class Main : Node3D
         }
 
         Diagnostics.VideoOptions.ApplyHideFloaties(); // --video-hide-floaties, for videos
+        Diagnostics.VideoOptions.ApplyVideoChat(); // --video-chat, for videos
+        if (Diagnostics.VideoTimer.Requested() is { } timerLevel)
+        {
+            Diagnostics.VideoTimer.Attach(this, timerLevel); // --video-timer: the clock since her creation, to the level
+        }
+
         if (Diagnostics.VideoSyncMarker.Requested())
         {
             Diagnostics.VideoSyncMarker.Attach(this, _services); // --video-sync-marker: a white frame and a click, for measuring a take's sound-to-picture offset

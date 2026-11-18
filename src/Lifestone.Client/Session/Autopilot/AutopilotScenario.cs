@@ -485,6 +485,7 @@ public sealed partial class AutopilotScenario : IScenario, IDisposable
         _context.Facts.BuffBotProfile = options.BuffBotProfile; // M6 item 14: and the same profile (--autopilot-buff-bot-word, 'all' by default): every stop of the run tells its key and is judged by its lines
         _context.Facts.Worn = _worn; // M6 6 F2: the run's own worn memory, the death station's DeathOptions.Worn (never WornMemory.Shared)
         _context.Facts.Trial = options.Job == AutopilotJob.LevelUp ? options.Trial : null; // M6 item 14: the corpse run of a death on the trial's ground reads it
+        _context.Facts.DeferCorpse = options.Job == AutopilotJob.LevelUp ? DeferCorpseRule : null; // M6 sprint (the owner's decision of 2026-11-18): the vitae burnt first, the corpse after (AutopilotScenario.VitaeBurn.cs)
         _context.Facts.EverySpell = options.EverySpell && options.Job == AutopilotJob.LevelUp; // M6 14 (the owner, 2026-11-16): the climb's trips learn every spell she can cast
         _context.Facts.EverySpellVilla = options.Villa && options.Job == AutopilotJob.LevelUp && options.Task.Kind == AutopilotTaskKind.Job; // VillaOn's rule: the reserve holds the villa's price while its track runs
         _context.Facts.QuestOwnKillLoop = options.QuestOwnKillLoop; // M6 16 Q8: the quest steps' old kill loop, the skirmish's fallback for its first live gate
@@ -876,6 +877,11 @@ public sealed partial class AutopilotScenario : IScenario, IDisposable
             _deathTally = new DeathTally();
             _deathTally.Start(session); // running from the start: a death the autopilot did not script is handled with the corpse's facts it saw
         } // else a seeded tally of a cut death (Seed): its counters are kept; the death station starts it
+
+        if (!_deathPending && LadderClimb)
+        {
+            VitaeBurnTake("the run's start"); // M6 sprint: an owed corpse on this run's ground, its burn over: the known state enters the death station for it first
+        }
         _log.Info(LogCategory, $"autopilot start: {_context.Character} on {_ground.Key} ({_options} {_options.Resilience}){(_options.HasStopRule ? string.Empty : "; no stop rule: it runs until a stop request")}");
         BeginAudit(StartReason);
         return EnterKnown("start");
@@ -2383,6 +2389,10 @@ public sealed partial class AutopilotScenario : IScenario, IDisposable
         {
             reason = KillTaskDone; // M6 14 guard task: the server's counter read complete on the task's ground, in a lull: the cycle ends and the turn-in starts from here
         }
+        else if (VitaeBurnOver(session))
+        {
+            reason = VitaeBurnt; // M6 sprint: the vitae is gone (or the owed corpse's rot is near), in a lull: the cycle ends at once and its check takes her rung again
+        }
         else if (LadderMoveOnReached(session))
         {
             reason = MoveOnReached; // M6 7 R: the rung's move-on level, in a lull: the cycle ends at once, no trip needed
@@ -2942,6 +2952,12 @@ public sealed partial class AutopilotScenario : IScenario, IDisposable
             return EnterKnown("the task's fight-back is over (D88): the task begins");
         }
 
+        if (reason == VitaeBurnt)
+        {
+            EndCycle("vitae"); // M6 sprint: the cycle's check releases the hold and takes her rung again (rung-moved:<rung>); the run there fetches the corpse
+            return EnterKnown("the vitae burn is over (M6 sprint: the vitae burnt first, the corpse after)");
+        }
+
         if (reason == MoveOnReached)
         {
             EndCycle("move-on"); // M6 7 R: the cycle's check spends, then decides: rung-moved:<rung>, or the rung changes on the same ground
@@ -3183,8 +3199,19 @@ public sealed partial class AutopilotScenario : IScenario, IDisposable
     /// <summary>The death is over (the station's end, or <see cref="CorpseLost"/>): counted, the cycle ended, then the known state, or the named stop of a fact a recall cannot change.</summary>
     private ScenarioStatus DeathCounted(int deaths, bool ok, string? why)
     {
-        _tally.Deaths += deaths > 0 ? deaths : 1;
-        TrialDeath(deaths > 0 ? deaths : 1); // M6 item 14: a death during the trial ends it; the cycle's check after the recovery takes the ladder's own rung
+        if (_vitaeFetch)
+        {
+            _vitaeFetch = false; // M6 sprint: an owed corpse's fetch: its death was counted when the corpse was deferred; a newer death on the trip is the station's own count
+            _tally.Deaths += Math.Max(0, deaths);
+        }
+        else
+        {
+            _tally.Deaths += deaths > 0 ? deaths : 1;
+            TrialDeath(deaths > 0 ? deaths : 1); // M6 item 14: a death during the trial ends it; the cycle's check after the recovery takes the ladder's own rung
+        }
+
+        _context.Facts.CorpseRotLevel = null;
+        VitaeBurnAfterDeath(); // M6 sprint: a deferred corpse's tally goes to the burn; the run keeps a new one
         PackHoldAfterDeath(); // M6 7 AY
         _deathSeen = false;
         _unscripted = false;

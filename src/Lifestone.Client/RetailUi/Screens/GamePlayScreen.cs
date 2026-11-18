@@ -823,6 +823,7 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
         }
 
         LayoutLoaded = true;
+        _chatLayoutBox ??= MainChat is { } chatWindow ? (chatWindow.Box.X0, chatWindow.Box.Y0, chatWindow.Box.Width, chatWindow.Box.Height) : null; // --video-chat works from the layout's own place, read before any saved one
         var store = manager.Services.ScreenLayouts;
         if (store is null)
         {
@@ -830,6 +831,7 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
                 "gameplay:layout-store",
                 LogSeverity.Warning,
                 "TODO(g6-layout-store): the host gave the shell no layout store; the windows' places last for the session only");
+            VideoChatPlace.Apply(Root, MainChat, _chatLayoutBox, manager.Services.Log); // --video-chat (videos only)
             return;
         }
 
@@ -840,6 +842,7 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
         Layout = new ScreenLayoutKeeper(store, manager.Services.Log);
         LastLayoutLoad = Layout.Load(LayoutFileName, Root, ChatMasks());
         LayoutReads++;
+        VideoChatPlace.Apply(Root, MainChat, _chatLayoutBox, manager.Services.Log); // --video-chat (videos only): over the layout's own place or the saved one
         manager.DisplayChanging += OnDisplayChanging;
     }
 
@@ -883,7 +886,11 @@ public sealed class GamePlayScreen : IUiScreen, IUiPlaceholderScreen
         LayoutFileName = LayoutNameAt(size);
         LastLayoutLoad = Layout.Load(LayoutFileName, Root, ChatMasks());
         LayoutReads++;
+        VideoChatPlace.Apply(Root, MainChat, _chatLayoutBox, _context.Manager.Services.Log); // --video-chat (videos only): at the new size too
     }
+
+    /// <summary>The main chat's box in the gameplay layout, before any saved layout was read (<see cref="VideoChatPlace"/>).</summary>
+    private (int X, int Y, int Width, int Height)? _chatLayoutBox;
 
     private void SaveLayout(string reason)
     {

@@ -84,7 +84,7 @@
 
 .PARAMETER Record
     Records the game window to video during step 3 (the hero cut; off by default), the way tools\soak.ps1 -Record does, through tools\WindowCapture.psm1: ffmpeg's gfxcapture source on the game window itself, never a screen
-    region (a window on top is not recorded). Needs ffmpeg 8 or later on PATH; without it, or without gfxcapture, the script refuses before anything starts. Adds --video-sync-marker to step 3's game arguments. The window is
+    region (a window on top is not recorded). Needs ffmpeg 8 or later on PATH; without it, or without gfxcapture, the script refuses before anything starts. Adds --video-sync-marker and the hero cut's screen to step 3's game arguments: --clean-hud (no diagnostic text), --video-chat (the main chat 0.37 of the window tall, 400 at 1080, and as wide as it can be short of her), --video-timer=<TargetLevel> (the clock since her creation, under the indicators, stopping at the target level) and --video-cantrip-look (each ideal great cantrip she loots looked at in the examine window with the paper doll and packs up, 3 s). The window is
     this run's Godot window (its command line holds --video-sync-marker), found after step 3 starts; if none appears within 180 s the run goes on unrecorded. Files: rec-NNN.ts (MPEG-TS: a crash loses nothing already
     written), segments.csv, record.txt and ffmpeg.log in -RecordDir. Steps 1 and 2 are headless and are not recorded. -PlanOnly prints the recording plan (no window exists then, so the window handle is a placeholder).
 
@@ -189,7 +189,7 @@ if ($Record) {
     $at = -1
     for ($i = 0; $i -lt $levelUp.Count; $i++) { if ($levelUp[$i] -like '-GameArgs:*') { $at = $i } }
     if ($at -lt 0) { Write-Host '[climb] REFUSED: the level up command has no -GameArgs: to add --video-sync-marker to'; exit 1 }
-    $levelUp[$at] += ' --video-sync-marker'
+    $levelUp[$at] += ' --video-sync-marker --clean-hud --video-chat --video-timer=' + $TargetLevel + ' --video-cantrip-look' # the hero cut's screen: no diagnostic text, the taller chat, the clock to the target level, the cantrip looks
     $commands.LevelUp = $levelUp
 }
 
@@ -202,7 +202,7 @@ if ($PlanOnly) {
     if ($TrialGround) { Write-Host "[climb] trial: ground=$TrialGround minutes=$TrialMinutes (-TrialGround: the level up job hunts it in place of the ladder's rung for $TrialMinutes minutes of fight time from her first kill there, then returns; the game refuses it by name if a rule fails)" }
     if ($Record) {
         $planArgs = Get-WindowRecordingArguments -Hwnd '<hwnd>' -LimitSeconds $recordLimitSeconds -SegmentSeconds $RecordSegmentSeconds -Folder $recordFolder
-        Write-Host "[climb] record: on (-Record), step 3 only: the game window itself by ffmpeg gfxcapture (tools\WindowCapture.psm1); dir=$recordFolder segment_s=$RecordSegmentSeconds; --video-sync-marker in the game arguments; the window is found after step 3 starts (<hwnd> is a placeholder)"
+        Write-Host "[climb] record: on (-Record), step 3 only: the game window itself by ffmpeg gfxcapture (tools\WindowCapture.psm1); dir=$recordFolder segment_s=$RecordSegmentSeconds; --video-sync-marker --clean-hud --video-chat --video-timer=$TargetLevel --video-cantrip-look in the game arguments; the window is found after step 3 starts (<hwnd> is a placeholder)"
         Write-Host "[climb] record: ffmpeg $(ConvertTo-ClimbArgumentString $planArgs)"
     }
     else { Write-Host '[climb] record: off (no -Record)' }

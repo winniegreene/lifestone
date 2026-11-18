@@ -12,6 +12,9 @@ public sealed class ApproachHolds
     private readonly ConcurrentDictionary<string, string> _held = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, string> _abandoned = new(StringComparer.Ordinal);
 
+    /// <summary>M6 sprint (the owner, 2026-11-18): the vitae burn after a death and its owed corpse (<see cref="VitaeBurn"/>), one a process like the holds, so the ladder's restarts carry it.</summary>
+    public VitaeBurn Vitae { get; } = new();
+
     /// <summary>
     /// M6 14 (live 2026-11-14 19:13, ladder14b: the run leg gave the Armory's crossing up, the way out held it and named the Quarters, the host's restart began a new run whose journey facts had forgotten the crossing, its way out priced
     /// the Armory open again and the host stopped on <c>failed:move-on-loop</c>): a crossing a run leg gave up (<see cref="Scenarios.Journey.JourneyFacts.AbandonApproach"/>) by its ground, for the rest of the process: a measured

@@ -76,6 +76,12 @@ public sealed record RungAsk(int Level, uint? Cell, PlayerQualities Qualities, F
     public Func<string, bool>? AheadHeld { get; init; }
 
     /// <summary>
+    /// M6 sprint (the owner's decision of 2026-11-18: the vitae burnt first, the corpse after): why a rung's key or a ground's key is held for the vitae burn after a death (<see cref="VitaeBurn.HeldWhy"/>), or null: none. Every check reads it, a way out
+    /// too: a held rung is never chosen, and she hunts the rung below it (<c>vitae-held:&lt;rung&gt;</c>), a ground she has climbed through.
+    /// </summary>
+    public Func<string, string?>? VitaeHeld { get; init; }
+
+    /// <summary>
     /// M6 14 guard task: the kill task whose counter is armed (<see cref="LadderKillTask.Steers"/>), or null. While it steers, its kill step's ground is chosen in place of her rung's (<see cref="RungOwner.Decide"/>, after a trial); the choice
     /// only reads it.
     /// </summary>
@@ -244,10 +250,45 @@ public static class RungOwner
         var own = ApproachHold(ladder, ask, SessionHold(ladder, ask, DecideOwn(ladder, ask)));
         if (ask.Trial is { Steers: true } trial)
         {
-            return Loud(ask, Trial(ladder, ask, trial, own)); // an explicit test of a later rung's ground comes first: the kill task waits while it lasts
+            return Loud(ask, VitaeHold(ladder, ask, Trial(ladder, ask, trial, own))); // an explicit test of a later rung's ground comes first: the kill task waits while it lasts
         }
 
-        return Loud(ask, ask.KillTask is { Steers: true } task ? KillTask(ladder, ask, task, own) : own);
+        return Loud(ask, VitaeHold(ladder, ask, ask.KillTask is { Steers: true } task ? KillTask(ladder, ask, task, own) : own));
+    }
+
+    /// <summary>
+    /// M6 sprint (the owner, 2026-11-18): the vitae burn's hold (<see cref="RungAsk.VitaeHeld"/>), over every other answer. While the chosen rung, or the ground chosen for it, is held, the choice is the ladder's own at the level under that
+    /// rung's band (no alternate of the same rung: the burn is on a ground she has climbed through), again while that one is held. The first rung (from level 1) is never held. Named <c>vitae-held:&lt;rung&gt;</c>.
+    /// </summary>
+    private static RungChoice VitaeHold(Ladder ladder, RungAsk ask, RungChoice choice)
+    {
+        if (ask.VitaeHeld is not { } held)
+        {
+            return choice;
+        }
+
+        LadderRung? heldRung = null;
+        string? why = null;
+        for (var i = 0; i < ladder.Rungs.Count; i++)
+        {
+            if (choice.Decision.Kind is not (LadderStepKind.Hunt or LadderStepKind.Moved) || choice.Decision.Rung is not { } rung || rung.Band.From <= 1)
+            {
+                break;
+            }
+
+            var reason = held(rung.Key) ?? (choice.Ground?.Key is { } ground ? held(ground) : null) ?? (rung.GroundKey is { } own ? held(own) : null);
+            if (reason is null)
+            {
+                break;
+            }
+
+            (heldRung, why) = (rung, reason);
+            choice = DecideOwn(ladder, ask with { Level = Math.Min(ask.Level, rung.Band.From - 1), LiveLevel = LiveOf(ask), NamedRung = null, PlanWar = null, Trial = null, KillTask = null });
+        }
+
+        return heldRung is null
+            ? choice
+            : choice with { Reason = "vitae-held:" + heldRung.Key, Why = $"the rung {heldRung.Key} is held ({why}): she hunts the rung below until the vitae is gone or the corpse's rot is near; {choice.Why}" };
     }
 
     /// <summary>M6 14 far below: her live level (<see cref="RungAsk.LiveLevel"/>, else <see cref="RungAsk.Level"/>).</summary>

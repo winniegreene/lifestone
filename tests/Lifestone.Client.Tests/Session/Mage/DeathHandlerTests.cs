@@ -3391,6 +3391,31 @@ public sealed class DeathHandlerTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void M6_sprint_vitae_first_the_corpse_is_owed_after_the_rebuff_and_no_way_is_taken()
+    {
+        // M6 sprint (the owner's decision of 2026-11-18: the vitae burnt first, the corpse after): the journey's rule says burn the vitae first: the handler re-arms and re-buffs, then ends where the body stands with the corpse owed
+        var (rig, handler) = CorpseRun("tusker-lodge", 17, 0x80000220, 0, LadderLoader.WarMage, gateMet: true);
+        DeathFacts? asked = null;
+        rig.Facts.DeferCorpse = (_, facts, _) =>
+        {
+            asked = facts;
+            return "test: the vitae is burnt on the rung below first";
+        };
+
+        var status = rig.Run(handler);
+        Dump(rig, handler);
+
+        Assert.Equal(ScenarioStatus.Succeeded, status);
+        Assert.Equal((DeathCorpse.Deferred, DeathLegVerdict.TripAbortVitaeFirst), (handler.Corpse, handler.TripAbort));
+        Assert.Empty(rig.Travel.Requests);
+        Assert.Equal(rig.Tally.LastCorpseGuid, asked?.CorpseGuid);
+        Assert.NotEqual(0u, asked?.CorpseGuid);
+        Assert.Contains(rig.Log.Entries, e => e.Message.StartsWith("handler: corpse_recovered=deferred trip_abort=vitae-first: test: the vitae is burnt", StringComparison.Ordinal));
+        Assert.DoesNotContain(rig.Log.Entries, e => e.Message.StartsWith("handler: corpse run: asked the rung's owner", StringComparison.Ordinal)); // asked before the gate: no way is weighed
+        Assert.Equal("corpse_recovered=deferred trip_abort=vitae-first", DeathAnswer.Of(DeathAnswer.VerdictOnly, handler.Corpse, handler.TripAbort)); // a named answer: nothing is owed to this station
+    }
+
+    [Fact]
     public void M6_7_AY_a_corpse_owed_an_item_behind_a_shut_gate_is_not_fetched_by_name_and_no_way_is_taken()
     {
         var (rig, handler) = CorpseRun("tusker-lodge", 17, 0x80000220, 0, LadderLoader.WarMage, gateMet: false);

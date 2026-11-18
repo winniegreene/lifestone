@@ -370,6 +370,11 @@ public sealed partial class AutopilotScenario
     /// </summary>
     private ScenarioStatus? LadderCycleStart(IGameSessionView session)
     {
+        if (VitaeBurnCheck(session) is { } corpse)
+        {
+            return corpse; // M6 sprint: the burn is over and the owed corpse lies on this run's ground: the death station fetches it before the check
+        }
+
         var ladder = _ladder ??= LadderLoader.WarMage;
         var level = session.State.Self.Qualities.TryGetInt(PlayerQualities.LevelProperty, out var read) ? read : 0;
         LadderJobNeeds(level); // M6 14: what the ladder errands of her band need (a roll's skill, a hunt's bolt line), before the spend reads the credit order
@@ -1016,7 +1021,7 @@ public sealed partial class AutopilotScenario
     internal RungChoice AskRung(IGameSessionView session, Ladder ladder, int level, string path, bool leaving = false, bool probe = false)
     {
         var buffs = GateBuffs(session);
-        var ask = new RungAsk(level, session.State.Self.Position?.CellId, session.State.Self.Qualities, GateKnows(session), buffs) { RunGround = _ground.Key, Leaving = leaving, MidRun = _ladderMidRun, QuestDone = LadderQuestDone, TrophyDue = key => TrophyJobDue(session, key), StandsByAnother = GateStandsNow(), Trial = _options.Trial, PlanWar = PlanWarForTest ?? SpellPlan.PlanWarOf(session.XpTable), KillTask = SteeringKillTask(), Approach = leaving ? ground => ApproachNow(session, ground, probe) : null, AheadHeld = _options.ApproachHolds.IsHeld };
+        var ask = new RungAsk(level, session.State.Self.Position?.CellId, session.State.Self.Qualities, GateKnows(session), buffs) { RunGround = _ground.Key, Leaving = leaving, MidRun = _ladderMidRun, QuestDone = LadderQuestDone, TrophyDue = key => TrophyJobDue(session, key), StandsByAnother = GateStandsNow(), Trial = _options.Trial, PlanWar = PlanWarForTest ?? SpellPlan.PlanWarOf(session.XpTable), KillTask = SteeringKillTask(), Approach = leaving ? ground => ApproachNow(session, ground, probe) : null, AheadHeld = _options.ApproachHolds.IsHeld, VitaeHeld = _options.ApproachHolds.Vitae.HeldWhy }; // M6 sprint: the vitae burn's hold
         var choice = RungOwner.Decide(ladder, ask);
         foreach (var opened in choice.ApproachOpened)
         {

@@ -54,7 +54,7 @@ public sealed class ClimbScriptTests
         Assert.Contains("record: on", plan.Output, StringComparison.Ordinal);
         Assert.Contains(dir, plan.Output, StringComparison.Ordinal);
         Assert.Contains("segment_s=600", plan.Output, StringComparison.Ordinal);
-        Assert.Contains("--max-fps=60 --mute --fight-loot=on --video-sync-marker\"", plan.Output, StringComparison.Ordinal);
+        Assert.Contains("--max-fps=60 --mute --fight-loot=on --video-sync-marker --clean-hud --video-chat --video-timer=10 --video-cantrip-look\"", plan.Output, StringComparison.Ordinal); // M6 hero video: the screen of the cut (no diagnostic text, the taller chat, the clock to the target level, the cantrip looks)
         Assert.Contains("gfxcapture=hwnd=<hwnd>", plan.Output, StringComparison.Ordinal);
         Assert.Contains("-segment_time 600", plan.Output, StringComparison.Ordinal);
         Assert.Contains("rec-%03d.ts", plan.Output, StringComparison.Ordinal);

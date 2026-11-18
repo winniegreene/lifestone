@@ -137,6 +137,9 @@ public static class DeathLegVerdict
     /// <summary>M6 14 retreat attackers (rule 7): the <c>trip_abort=</c> of a corpse in an approach she cannot survive at her state (<see cref="Vitals.CorpseApproachRule"/>; with <c>corpse_recovered=no</c>): it is not walked to.</summary>
     public const string TripAbortApproach = "approach";
 
+    /// <summary>M6 sprint (the owner, 2026-11-18): the <c>trip_abort=</c> of a corpse owed while the vitae is burnt on the rung below (<see cref="Autopilot.VitaeBurn"/>; with <c>corpse_recovered=deferred</c>).</summary>
+    public const string TripAbortVitaeFirst = "vitae-first";
+
     /// <summary><c>rebuffed=</c> when the rebuff stage's buff cycle ended with every profile line up.</summary>
     public const string RebuffedYes = "yes";
 

@@ -386,6 +386,15 @@ public sealed class JourneyFacts
     public Autopilot.LadderTrial? Trial { get; set; }
 
     /// <summary>
+    /// M6 sprint (the owner's decision of 2026-11-18: the vitae burnt first, the corpse after; <see cref="Autopilot.VitaeBurn"/>): asked once by the death handler before the corpse trip's route, after the re-arm and the re-buff: the reason the corpse is owed instead of
+    /// fetched now (the vitae is burnt on the rung below first), or null to fetch it now. The autopilot of the ladder sets it; nothing else does.
+    /// </summary>
+    public Func<IGameSessionView, Mage.DeathFacts, double, string?>? DeferCorpse { get; set; }
+
+    /// <summary>M6 sprint: her level at the death of an owed corpse taken back after a vitae burn (ACE's rot time is the level at the death's), or null: the handler reads her level now.</summary>
+    public int? CorpseRotLevel { get; set; }
+
+    /// <summary>
     /// M6 14 retreat attackers (rule 4; live 2026-11-14 10:59:16 UTC: the run leg's retreat found the mana at 49, under Lifestone Recall's 50, after the vitals guard's heals spent it down in the fight-back): the mana a travel leg's
     /// fight-back holds back for its way out (Lifestone Recall's cost plus one heal's, <see cref="Vitals.ManaWayOut"/>'s line), or null when no fight-back is under way. The leg sets it at a fight-back's start and clears it at its end;
     /// the autopilot's vitals guard reads it so that no heal it casts during the fight-back takes the mana under the recall's cost (<see cref="Vitals.ManaWayOut.Spend"/>, the heal's arm).

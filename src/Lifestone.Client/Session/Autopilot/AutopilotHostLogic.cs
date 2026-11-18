@@ -310,7 +310,7 @@ public sealed partial class AutopilotHostLogic : IAutopilotStatusSource, IDispos
     private static HuntingGround? Asked(IGameSessionView view, string? named, string path, out string why, ILogSink? log, Func<string, int, string?>? stands = null, GateStartRead? start = null, LadderTrial? trial = null, LadderKillTask? killTask = null, ApproachHolds? holds = null)
     {
         ArgumentNullException.ThrowIfNull(view);
-        var ask = new RungAsk(LevelOf(view), view.State.Self.Position?.CellId, view.State.Self.Qualities, AutopilotScenario.GateKnows(view), null, named) { StandsByAnother = stands, StartRead = start, Trial = trial, PlanWar = SpellPlan.PlanWarOf(view.XpTable), KillTask = killTask, AheadHeld = holds is null ? null : holds.IsHeld };
+        var ask = new RungAsk(LevelOf(view), view.State.Self.Position?.CellId, view.State.Self.Qualities, AutopilotScenario.GateKnows(view), null, named) { StandsByAnother = stands, StartRead = start, Trial = trial, PlanWar = SpellPlan.PlanWarOf(view.XpTable), KillTask = killTask, AheadHeld = holds is null ? null : holds.IsHeld, VitaeHeld = holds is null ? null : holds.Vitae.HeldWhy }; // M6 sprint: the vitae burn's hold
         var choice = RungOwner.Decide(LadderLoader.WarMage, ask);
         trial?.Note(choice.Trial, ask.Level, path, log ?? NullLogSink.Instance); // M6 item 14: the trial's start or its refusal, by name
         if (start is not null && log is not null)

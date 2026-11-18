@@ -18,6 +18,10 @@ public sealed partial class DeathScenario
     /// </summary>
     public const double PlayerCorpseMinRotSeconds = 3600;
 
+    /// <summary>ACE's rot time of a player corpse that holds items, for a death at <paramref name="level"/>: <c>max(3600, level x 300)</c> seconds (@95ef426d <c>Corpse.cs</c> 110, <c>RecalculateDecayTime</c>; the level is the player's at the death).</summary>
+    /// <param name="level">The level at the death (below 1 reads as 1, as ACE's <c>player.Level ?? 1</c>).</param>
+    public static double PlayerCorpseRotSeconds(int level) => Math.Max(PlayerCorpseMinRotSeconds, Math.Max(1, level) * 300.0);
+
     /// <summary>The limit on the whole trip, in seconds.</summary>
     public const double TripSeconds = 90;
 

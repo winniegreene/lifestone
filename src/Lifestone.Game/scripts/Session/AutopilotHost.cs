@@ -283,7 +283,7 @@ public sealed partial class AutopilotHost : Node
                 drill.Tick(_logic, session, session.Clock.Now); // M5 7 D145: the control drill, after the dial (it reads what the dial did this frame)
             }
 
-            TickPanels(session.Clock.Now);
+            TickPanels(session.Clock.Now, session);
             TickUnattendedEnd(delta, session);
         }
         catch (Exception e) when (Lifestone.Client.Session.Hosting.LegFaultGuard.Guards(e))
@@ -298,7 +298,7 @@ public sealed partial class AutopilotHost : Node
     }
 
     /// <summary>M5 7 G3: the panels a person would keep open by the dial's state (<see cref="AutopilotPanelDirector"/>), over the play screen's panel host; nothing without a game screen.</summary>
-    private void TickPanels(double now)
+    private void TickPanels(double now, Lifestone.Client.Session.GameSession session)
     {
         if (_ui?.Screens?.Flow.CurrentScreen is not GamePlayScreen { PanelHost: { } host })
         {
@@ -309,9 +309,63 @@ public sealed partial class AutopilotHost : Node
         {
             _panelHostWired = host;
             _panels = new AutopilotPanelDirector(new PlayPanelSurface(host), line => Log.Info(LogCategory, line));
+            _look = CantripLookRequested is { } held ? new CantripLook(new PlayLookSurface(host), (line, warn) => { if (warn) { Log.Warn(LogCategory, line); } else { Log.Info(LogCategory, line); } }, includeHeld: held, appraise: guid => _host.Session?.Actions.Identify(guid, ActionSource.Automation)) : null;
         }
 
-        _panels?.Tick(_logic.Mode is AutopilotMode.Running or AutopilotMode.Stopping, _logic.Scenario?.Stage, now);
+        var running = _logic.Mode is AutopilotMode.Running or AutopilotMode.Stopping;
+        _levelWatch.Tick(running, session.State.Self.Qualities, session.XpTable?.CharacterLevelXpList, now); // M6 hero video: a near level-up shows on the attributes page
+        if (_levelWatch.WantsPage && _look is not { Busy: true })
+        {
+            if (!host.IsOpen || host.CurrentPanel != AutopilotPanelDirector.AttributesPanel)
+            {
+                var surface = new PlayPanelSurface(host);
+                if (!surface.Open(AutopilotPanelDirector.AttributesPanel) && !_levelPageRefusedLogged)
+                {
+                    _levelPageRefusedLogged = true;
+                    Log.Warn(LogCategory, "level-up watch: the attributes page did not open");
+                }
+            }
+
+            return; // the look and the director wait
+        }
+
+        _look?.Tick(running, session.State, id => session.Spell(id)?.Name, now); // --video-cantrip-look (videos only): a look holds the panels while it runs
+        if (_look is { Busy: true })
+        {
+            return;
+        }
+
+        _panels?.Tick(running, _logic.Scenario?.Stage, now);
+    }
+
+    /// <summary><c>--video-cantrip-look</c> (M6's hero video, off by default): the ideal great cantrips she loots are looked at in the examine window with the paper doll and packs up (<see cref="CantripLook"/>).</summary>
+    /// <remarks>Null when not asked; true for <c>=held</c> (the pieces she holds now are looked at too, without the autopilot: for checking the look on screen).</remarks>
+    private static readonly bool? CantripLookRequested = CommandLineArgument.ParseAll(OS.GetCmdlineUserArgs()).FirstOrDefault(a => a.Name == "--video-cantrip-look") is { } look
+        ? string.Equals(look.Value, "held", StringComparison.Ordinal)
+        : null;
+
+    private CantripLook? _look;
+
+    private readonly LevelUpWatch _levelWatch = new(line => Log.Info(LogCategory, line));
+
+    private bool _levelPageRefusedLogged;
+
+    /// <summary>The panel host and its examine window as the cantrip look's surface: the examine is the inventory page's own (a person's examine, <see cref="ActionSource.Ui"/>).</summary>
+    private sealed class PlayLookSurface(GamePanelHost host) : ICantripLookSurface
+    {
+        private readonly PlayPanelSurface _panels = new(host);
+
+        public uint Shown => _panels.Shown;
+
+        public bool Open(uint panelId) => _panels.Open(panelId);
+
+        public void Close(uint panelId) => _panels.Close(panelId);
+
+        public bool Examine(uint guid) => host.Examine?.Open(guid) == true;
+
+        public bool ExamineShows(uint guid) => host.Examine is { IsOpen: true, Pending: false } examine && examine.ShownGuid == guid && examine.ShownSuccess == true;
+
+        public void CloseExamine() => host.Examine?.Close();
     }
 
     /// <summary>The retail UI's panel host as the director's surface: open is the toolbar button's own toggle, close hides the page.</summary>

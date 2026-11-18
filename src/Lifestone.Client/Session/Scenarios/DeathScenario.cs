@@ -712,9 +712,9 @@ public sealed partial class DeathScenario : IScenario, IDisposable, Journey.ISta
         _deathEnd = clock;
         _observedEntry = true;
         _pending = null;
-        if (LeftTheRespawn(session, observed, out var metres))
+        if (LeftTheRespawn(session, observed, out var metres) || (_options.Facts ?? _options.Journey?.Facts)?.CorpseRotLevel is not null)
         {
-            return EnterAgain(session, clock, observed, metres);
+            return EnterAgain(session, clock, observed, metres); // M6 sprint: an owed corpse's fetch after a vitae burn enters again wherever the body stands, at the lifestone too
         }
 
         _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"death: entered after a death the autopilot did not script (m5-autopilot-death-unscripted): victim notices {observed.VictimNotices}, deaths {observed.Deaths}, corpse 0x{observed.LastCorpseGuid:X8}, death teleports {observed.DeathTeleports}; no walk, no undress, no lie-down: the respawn, then the handler's order"));
