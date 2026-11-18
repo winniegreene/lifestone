@@ -3,11 +3,12 @@
 **A faithful, single-player rebuild of Asheron's Call: a new Godot client for your own game files and a local
 ACEmulator server.**
 
-> **Early development.** Milestones 1 to 4 are done: you can fly and walk through all of Dereth, rendered from your
-> own game files; log in to the bundled local server in the retail interface; watch a mage buff, fight and die in
-> the Black Spawn Den, with lights and sound; and play a fighter who hunts near Holtburg with melee or missile, loots,
-> heals and trades with vendors, with an auto-buff switch. Three characters play whole journeys on their own for the
-> tests. See [Status and roadmap](#status-and-roadmap).
+> **Early development.** Milestones 1 to 5 are done and milestone 6 is at its candidate: you can fly and walk through
+> all of Dereth, rendered from your own game files; log in to the bundled local server in the retail interface; fight
+> with magic, melee or missile, loot, heal and trade; and hand a mage to the autopilot, which plays her by itself. A
+> brand-new mage climbs from level 1 to level 80 on her own, cheat-free: she hunts dungeon after dungeon, does quests,
+> buys her spells, keeps herself buffed and alive, and forges her own Atlan wand. See
+> [Status and roadmap](#status-and-roadmap).
 
 <!--
   Hero image: add a hosted screenshot here. None are stored in the repository, because every render shows retail
@@ -20,8 +21,8 @@ in January 2017 (client 11.6096). It is written in C# on Godot 4.7.2 .NET and dr
 that you already own (the `.dat` files, or "dats"). It will play the game against
 [ACEmulator](https://github.com/ACEmulator/ACE) (ACE), the community's open-source AC server, running on your own
 machine, so monsters, loot, spells and quests follow the rules the community rebuilt in ACE. The conveniences that
-Decal-era plugins used to add are becoming features of the client itself: auto-buff is built (a re-buff driver and a
-key that turns it on and off), and AFK hunting and looting run as the test loops, not yet as a player feature.
+Decal-era plugins used to add are becoming features of the client itself: auto-buff is built, and the autopilot hunts,
+loots, sells, buys, quests and levels a mage while you watch, taking orders typed in the chat.
 
 What Lifestone is not:
 
@@ -40,9 +41,9 @@ What Lifestone is not:
 | **[M3: Fights and sound](docs/milestones/m3-lights-and-sound.md)** | **Done** | A level-126 mage buffs in all three schools, fights and dies in the Black Spawn Den: casts, projectiles and impacts on screen, dynamic lights, the game's sound, the retail panels with live content |
 | **[M4: Fights and loot](docs/milestones/m4-fights-and-loot.md)** | **Done** | A fighter on the Low B belt and in the forest near Holtburg: melee and missile with the power bar, corpses looted, kits and potions, vendors and appraisal, the shortcut bar; the retail panels with live content; auto-buff; a wayfinder that walks planned routes; three self-driving characters that play whole journeys for the tests; a 30-second hero video cut from their live takes |
 | **[M5: The first dungeon](docs/milestones/m5-first-dungeon.md)** | **Done** | A mage plays the Black Spawn Den by itself for hours, cheat-free: it buffs, fights, loots, sells, buys, dies and recovers without the server mod's help (one run: ten hours, 1,910 kills, no deaths), and `/stop` and `/auto` in the chat take the controls and hand them back; dungeons as data; the first batch of what a player at the keys needs (the Yes/No dialog, saved settings, editable spell bars, slash commands); doors and lifestones made solid |
-| M6: The level ladder | Next (in planning) | A fresh mage climbs from level 1 on its own, ground by ground |
-| More gameplay | Planned | NPCs and quests, the remaining panels, more of Dereth's rules through ACE; later, the player-run service bots of retail (buff, tinker, dye and craft bots) run by the client, and quests the game does for you |
-| Built-in automation | Started | The loops that test the game today drive the same action API the automation will use; auto-buff is done, and the BSD Mage hunts, loots, sells, buys and recovers on its own, run from the chat with `/auto` and `/stop` ([automation vision](docs/automation-vision.md)) |
+| **[M6: The level ladder](docs/milestones/m6-the-ladder.md)** | **Candidate** (the final run under way) | A fresh mage climbs from level 1 to 80 on her own, cheat-free, ground by ground: the ladder as data (from the Holtburg outskirts through the tusker dungeons to the Tusker Quarters), a first tranche of quests (kill tasks, tusk turn-ins, fetches, the Atlan wand's chain), spells bought and learned by plan, a survival layer over every fight, walk and trip, a level VII buff bot in Holtburg, orders typed in the chat, and the fight simulator that runs ACE's own combat code offline. The candidate's character reached level 80 and forged her Atlan wand; the milestone ends with a recorded sprint of a fresh character from creation to 80 |
+| More gameplay | Planned | NPCs and more quests, the remaining panels, more of Dereth's rules through ACE; later, more of retail's player-run service bots (tinker, dye and craft bots) |
+| Built-in automation | Under way | The autopilot plays a character by itself through the same action API as the UI: the BSD Mage's day in the den (M5) and the level up job's climb (M6), started and steered from the chat ([automation vision](docs/automation-vision.md), [automation engine](docs/automation-engine.md), [commands](docs/commands.md)) |
 | Polish | Planned | The remaining UI, larger window sizes, packaging |
 
 **Today** you can fly or walk anywhere in Dereth, at any time of day, into building interiors and down into
@@ -50,11 +51,17 @@ dungeons, and watch any spell cast in the spell viewer. With the bundled server 
 character screens and portal space, walk among ACE's NPCs and monsters, and play in the retail interface: the chat,
 the vitals, the inventory and paperdoll, the spellbook and spell bars, the combat window and power bar, a corpse's or
 chest's contents, a vendor's window, the examine panel and the shortcut bar. The `Pause` key turns auto-buff on and
-off; `/auto` and `/stop` in the chat start and stop the BSD Mage's autopilot. Test loops play three characters for the checks, each on its own route, planned by Lifestone's own wayfinder: the
-BSD Mage buffs, fights and dies in the Black Spawn Den and recovers; the Holtburg Brawler (melee) and the Holtburg
-Archer (missile) buff, hunt, heal, loot, sell and recall home.
+off; `/auto` and `/stop` in the chat start and stop the BSD Mage's autopilot. The level up job takes a fresh mage from
+the character screen to level 80 by herself: the Training Academy and her first gear, then one hunting ground after
+another, each entered when she is strong enough for it, with trips home to sell and to buy spells and supplies,
+quests on the way, and a buff bot in Holtburg. While she plays, orders typed in her chat (`/trip`, `/rebuff`,
+`/quest <key>`, `/ladder`, `/home`, `/status`) reach her autopilot. Test loops play three more characters for the
+checks, each on its own route, planned by Lifestone's own wayfinder: the BSD Mage buffs, fights and dies in the Black
+Spawn Den and recovers; the Holtburg Brawler (melee) and the Holtburg Archer (missile) buff, hunt, heal, loot, sell and
+recall home.
 
-**Not there yet:** quests, fellowships, crafting, housing and most NPC conversations; the panels retail had beyond
+**Not there yet:** quests beyond the autopilot's first tranche, fellowships, crafting beyond the wand's one recipe,
+housing and most NPC conversations; the panels retail had beyond
 those above answer "Not in Lifestone" for now; the window is checked at 800x600, 1280x720 and 1920x1080 (`-AllSizes`). Doors, lifestones and other
 creatures are solid on the client since M5, though creatures that crowd you can still blip back to where the server has them (`TODO(m5-den-creature-blips)`, [physics](docs/physics.md)). Details: each milestone's status
 section, and the [project goals](docs/goals.md).
@@ -86,6 +93,24 @@ section, and the [project goals](docs/goals.md).
   API, and every action is checked against what the server answers.
 - **Auto-buff:** a re-buff driver recasts any buff that is about to run out, on the session clock and never in a
   fight, and the `Pause` key switches it on and off (`--buff-auto`).
+- **The level ladder:** a fresh mage climbs from level 1 to 80 unattended and cheat-free. The ladder is data: each rung
+  names a ground, its level band and its way in, and she moves on when the next ground's portal admits her and her own
+  skill (not a buff) says she is ready. She spends her experience by rule, trains skills from her credits as jobs need
+  them, buys every spell she can cast, casts only from her spell bar and drinks only from her hotbar, as a player
+  would.
+- **Quests by the autopilot:** kill tasks, tusk turn-ins and fetches, and the Atlan wand's whole chain (the motes, the
+  Alchemy roll, the stone, the wand). The wand doubled her median bolt, from 168 to 351 damage.
+- **A survival layer:** keeping her alive sits above every fight, walk, trip and quest: self-defence against any
+  attacker, the stamina-to-mana dance, drains and heals, running past creatures on travel legs, and a trip home before
+  her buffs lapse.
+- **A buff bot:** a level VII buff bot stands in Holtburg, built into the server mod, as retail's player-run bots did.
+- **The fight simulator:** `tools\fight-sim.ps1` runs ACE's own combat code offline on the real creature and the
+  character as last saved: whether her spells land, what they hit for, how long a kill takes, what the creature does
+  to her, how many at once she survives, and every placed creature and ground ranked for her. Every fight number in
+  the project comes from it, from ACE's source or from the live logs ([fight simulator](docs/fight-sim.md)).
+- **Walking all of Dereth:** the wayfinder is checked by walking every landblock offline, indoors and out, under
+  legal physics, with a replay bench; at a portal it hands the last steps to the game's own walk
+  ([world walk](docs/milestones/world-walk.md)).
 - **Self-driving journeys:** a mage and two fighters (melee and missile) play a whole day on their own, from a wayfinder
   that plans routes over the world's real collision and yields to your own movement keys, through buffing, hunting,
   looting, healing with kits and Harm Self, vendors and Lifestone Recall home, and are judged station by station.
@@ -219,6 +244,7 @@ The game uses retail's default key map, read from your dats (movement, the panel
 | `F7` | Lifestone's tools panel: Places (search and teleport), Where am I, Add XP (needs the bundled server with the Lifestone mod) |
 | `Scroll Lock` | Lifestone's automation inspector (read-only) |
 | `Pause` | Auto-buff on or off; the chat says so in a `[Lifestone]` line. A character without a buff profile (only the BSD Mage and the two fighters have one) gets a notice and it stays off |
+| `/trip`, `/rebuff`, `/quest <key>`, `/ladder`, `/home`, `/status`, `/help` (typed in the chat) | Orders to a running autopilot: a trip home now, a buff pass, a quest's errand, back to the ladder, recall home and hold, and what she is doing. Each is checked before it acts and refused by name when a check fails; one that moves her waits for a safe point. The full list, with what is built, is in [docs/commands.md](docs/commands.md) |
 | `/auto`, `/stop` (typed in the chat) | The autopilot (M5 item 7, D145; the BSD Mage only). `/auto` starts it, or hands it back after a `/stop`, once it has read every state a fight needs from the live state and put each gap right; `/stop` stops it where it stands and gives you the movement keys. While it runs the movement keys do nothing and the chat says so; any stop it makes itself unlocks them |
 | The tools panel's autopilot button | Types `/stop` while the autopilot runs and `/auto` otherwise; its label follows the dial (Autopilot, Stop, Stopping or Resume); a placeholder label, since retail has no autopilot button |
 | `Shift`+`Esc` | Log off (retail's End Character Session) |
@@ -304,7 +330,17 @@ Playing on the local server and the test loops, which need it (`--help` lists ev
 | `--autopilot-minutes=M`, `--autopilot-level=L`, `--autopilot-trip-after-kills=N`, `--autopilot-test-death[=on\|off]` | The autopilot's stop rules (a budget of minutes on the session clock, a character level), the forced trip after N kills (once a run) and the scripted death (once a run). Section 54 |
 | `--autopilot-checkpoint-dir=DIR`, `--autopilot-watchdog-scale=F`, `--autopilot-watchdog-recoveries=N`, `--autopilot-reconnect-waits=S,S,...` | The headless run's checkpoint folder; the watchdogs' scale (default 1) and recoveries a cycle (default 2); the reconnect's waits (default 5, 15, 30, 60, 120 s). Section 54 |
 | `--autopilot-test-interrupt-at=S`, `--autopilot-test-handback-after=S` | The gate's scripted hand-off (D58; typed since D145): `/stop` typed in the chat at S seconds into the fight, then `/auto` the second value's seconds after it. Section 54 |
+| `--autopilot-job=den\|level-up`, `--autopilot-climber=NAME` | The autopilot's job (M6): `den` is M5's day in the den; `level-up` is the ladder's climb, played by a climber character |
+| `--autopilot-ladder-quests=on\|off\|KEY,...` | The level up job's quests: `on` (the default) runs every ladder errand and tusk turn-in, `off` none, and a list only the quests it names (a kill task runs only when named) |
+| `--autopilot-hold-grounds=KEY[,KEY]` | Grounds the level up job keeps out of for the session |
+| `--autopilot-steer-dir=DIR`, `--autopilot-steer-orders` | The steer desk: a run folder through which `tools\order.ps1 -Run <run> <order>` reaches a running autopilot, as the chat's orders do |
+| `--walk-awareness=pinned\|own` | How far the automation's walks keep from a hostile creature: each creature's own noticing range (`own`, the default) or one pinned distance |
 | `--play-look-shots=DIR`, `--play-panel-shots=DIR` | Save review frames of held items, or of every panel page |
+
+The climb in one command: `pwsh -File tools\climb.ps1 [-Climber <name>] [-TargetLevel <n>] [-Minutes <n>] [-Record] [-PlanOnly]`
+creates the climber fresh, walks her through the Academy and starts the level up job in the game window, recording
+the window when asked (`-PlanOnly` prints every step and starts nothing; `Get-Help tools\climb.ps1 -Full` lists the
+rest).
 
 ## How it works
 
@@ -347,7 +383,11 @@ flowchart LR
   sockets.
 - **The server** (`server/`) builds ACEmulator from source at a pinned release, unpacks a portable MariaDB,
   loads the pinned ACE world database and runs both as the current user on 127.0.0.1. AC was server-authoritative, so
-  this is where the game rules live. See [server/README.md](server/README.md).
+  this is where the game rules live. Lifestone's server mod (`server/mod`) adds the `@lifestone` tools and the buff
+  bot through ACE's public mod API. See [server/README.md](server/README.md).
+- **The automation** (`src/Lifestone.Client/Session`) is a set of jobs over the same action API as the UI: the
+  autopilot's ladder, quest runner, trips and fights, with one owner for each decision (what to fight, what to keep or
+  sell, when to go home) and the survival layer above them ([automation engine](docs/automation-engine.md)).
 
 ## Principles
 
@@ -361,7 +401,8 @@ flowchart LR
   127.0.0.1 only, and the game downloads nothing at runtime. Server setup is the only step that goes online: it clones
   ACE at a pinned commit and restores its NuGet packages from nuget.org, and downloads MariaDB and the world database,
   both checked by SHA-256. There is no plugin loading: the client loads no DLLs or other code from outside its own
-  build, and ACE's mod folder (`server/runtime/ace-mods`) is created empty. Customisation will come from data
+  build, and ACE's mod folder (`server/runtime/ace-mods`) holds only Lifestone's own server mod, built from this
+  repository's `server/mod` (the `@lifestone` tools and the buff bot). Customisation will come from data
   profiles and, later, an optional sandboxed script tier with no file or network access.
 - **Automation built in.** The client core is a game-state model plus an action API that the UI, the test loops and
   the automation all drive; every action completes only when the server's answer confirms it. Automation sends only
@@ -370,19 +411,23 @@ flowchart LR
 ## Repository layout
 
 ```text
-Lifestone.slnx          the solution: five projects and their tests
+Lifestone.slnx          the solution: six projects and their tests
 Directory.Build.props   shared build settings (net10.0, nullable, warnings as errors)
 global.json             .NET SDK pin
 NuGet.config            packages from nuget.org only
 src/Lifestone.Data/     dat decoding and retail algorithms (no engine)
 src/Lifestone.Client/   engine-agnostic client logic, the game-state session layer and the action API (no engine, no file I/O)
 src/Lifestone.Net/      the AC network protocol: transport, session, message codecs
-src/Lifestone.Headless/ a console host that plays a session without Godot (the test loops)
+src/Lifestone.Headless/ a console host that plays a session without Godot (the test loops, the climber's creation)
+src/Lifestone.WorldWalk/ the offline walk of every landblock that checks the wayfinder
 src/Lifestone.Game/     the Godot project: scenes, scripts, shaders
 tests/                  xUnit tests: Data, Client, Net, the server mod, and Lifestone.Loopback.Tests, which need the local server
-server/                 the localhost ACE and MariaDB backend (setup, start, stop)
+server/                 the localhost ACE and MariaDB backend (setup, start, stop) and Lifestone's server mod (server/mod)
 tools/                  godot.ps1 launcher, play.ps1 (the backend and the game in one command), smoke.ps1 suite, slice-check.ps1,
-                        live-gate.ps1, commit.ps1, terrain-golden.ps1, hero-video.ps1, lib/ (shared PowerShell modules), Python helpers
+                        live-gate.ps1, commit.ps1, terrain-golden.ps1, hero-video.ps1, climb.ps1 (the climb in one command),
+                        order.ps1 (orders to a running autopilot), fight-sim.ps1 and fight-sim/ (ACE's combat code offline),
+                        WindowCapture.psm1 (window-only recording), walk-bench.ps1, ace-compare/, lib/ (shared PowerShell
+                        modules), Python helpers
 docs/                   design docs, milestones, research notes and third-party sources
 client/                 your retail dats (you create it; ignored by git)
 ```
@@ -431,10 +476,10 @@ dotnet test Lifestone.slnx --disable-build-servers --filter 'Category!=Loopback&
   never beside another Godot or dotnet run. `[Trait("Status","KnownFailure")]` marks a test that is known to fail; it is never
   in the green total, and each one names its TODO row in the test's reason, so the failure stays visible in the plan. Both are
   left out of the default filter of `dotnet test`, `tools\smoke.ps1` and `tools\slice-check.ps1`; run one with
-  `--filter "Status=KnownFailure"`. One test carries Timing (the wayfinder's 1 km plan, in `PathPlannerTests`); none
-  carries KnownFailure.
+  `--filter "Status=KnownFailure"`. The tests that carry Timing are the wall-clock ones (the wayfinder's 1 km plan,
+  the frame budgets of the streaming and hub planners, and the like); none carries KnownFailure.
 - **Test count.** Coverage never decreases: `tests/Shared/test-count-baseline.json` holds the floor of the default run and
-  of the Exhaustive tier (9,238 and 736 at the end of M4), which `slice-check` enforces unless `-MinTests` is given. Only
+  of the Exhaustive tier (16,799 and 1,326 at M6's candidate; 9,238 and 736 at the end of M4), which `slice-check` enforces unless `-MinTests` is given. Only
   a deletion that names where its behaviour is proved elsewhere lowers it.
 
 ### Live tests and the live gate
@@ -448,6 +493,8 @@ The loopback tests and the live legs of `tools\smoke.ps1` play on the local back
 | `test` | BSD Mage (level 126, the Black Spawn Den), Holtburg Hunter (the baseline fighter, never re-created), and the baseline Lifestone Smoke and Lifestone Loopback (never reset or levelled) | the mage's journey, the Hunter and the raw-net and headless classes |
 | `test-melee` | Holtburg Brawler (level 55, Heavy Weapons specialised, a mismatched set of retail magic gear with the Staff of All Aspects, Creature, Item and Life Magic and Mana Conversion trained; hunts the Low B belt) | the melee journey |
 | `test-archer` | Holtburg Archer (level 55, Missile Weapons specialised, retail magic gear with the Serpent's Flight bow and Greater Frost Arrows, Creature, Item and Life Magic and Mana Conversion trained; hunts the low north forest) | the missile journey |
+| `test` (M6) | Winnie, the ladder's climber in the live gate, re-created at each gate and never granted anything | the level up job's gate lane |
+| `qwinnie` | Qwinnie, a second climber, cheat-free like Winnie, in no gate's lane | the long climbs and M6's sprint |
 | `test-tools` | Lifestone Throwaway (its tests create, use, delete and purge it) and Lifestone Tools (its purge caller; created once, never levelled or reset) | the throwaway and the mod-verb classes (headless) |
 
 - **Journeys.** A journey is one character's whole day as a list of stations (`--scenario=journey --journey=<mage|melee|archer>`
@@ -583,9 +630,14 @@ The loopback tests and the live legs of `tools\smoke.ps1` play on the local back
   - [M2: Log in](docs/milestones/m2-log-in.md), with its [plan](docs/milestones/m2-plan.md): the server, the login, retail portal space and the retail UI
   - [M3: Fights and sound](docs/milestones/m3-lights-and-sound.md), with its [plan](docs/milestones/m3-plan.md): the mage, magic, lights and sound
   - [M4: Fights and loot](docs/milestones/m4-fights-and-loot.md), with its [plan](docs/milestones/m4-plan.md): the fighters, loot, vendors, auto-buff and the journeys
+  - [M5: The first dungeon](docs/milestones/m5-first-dungeon.md), with its [plan](docs/milestones/m5-plan.md): the mage that plays the den by itself, the autopilot
+  - [M6: The level ladder](docs/milestones/m6-the-ladder.md), with its [plan](docs/milestones/m6-plan.md) and [derived rules](docs/milestones/m6-derived-rules.md): the climb from level 1, quests, the survival layer, the buff bot
+  - [World walk](docs/milestones/world-walk.md) ([notes](docs/world-walk.md)): walking every landblock to prove the wayfinder
   - [The polish pass between M3 and M4](docs/milestones/m3-m4-polish-pass.md) and [M4's own](docs/milestones/m4-polish-pass.md)
   - [Protocol](docs/protocol.md): the AC network protocol as ACE implements it
   - [Session](docs/session.md): the game-state model, the action API, the test loops and their verdicts
+  - [Automation engine](docs/automation-engine.md): one owner for each automation decision; [commands](docs/commands.md): the orders typed in the chat; [steer contract](docs/autopilot-steer-contract.md): the run folder an outside process uses
+  - [Fight simulator](docs/fight-sim.md): ACE's own combat code run offline; [pack rules](docs/pack-rules.md): what she keeps, sells and carries
   - [Local server](server/README.md): setting up and running ACE and MariaDB on 127.0.0.1
 - **Data layer**
   - [Textures](docs/textures.md): decoding and the exact retail render state
