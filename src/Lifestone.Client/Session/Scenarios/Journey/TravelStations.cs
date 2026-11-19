@@ -394,6 +394,15 @@ internal abstract partial class TravelLeg(string name, JourneyContext context) :
         // M6 8 (live 2026-11-11 19:42 UTC): the walk to the Facility Hub's portal in the Town Network ended 5.03 m from its point and failed this check by 3 cm; the route fell back to the run from the Refuge, which failed three
         // times of four and killed her once (20:12, a Jungle Reaver). The walk ends at the tolerance by the position it predicts; this check reads the position after the stop, so it allows the stop's slack.
         var ok = after is { } there && (there.CellId >> 16) == (cell >> 16) && Planar(there.Frame.Origin, at) <= JourneyTravel.ToleranceMetres + ArrivalSlackMetres;
+        if (!ok && use is { } target && after is { } handed && (handed.CellId >> 16) == (target.At.CellId >> 16))
+        {
+            // M6 redoubt (live 2026-11-18 23:13:59 UTC, the hop network-to-dryreach: `handing over to the game's walk: the line to the target is clear ... distance_m=9.7`, the run ended Arrived 6.9 m from its front point and this check failed
+            // `arrival-off-point`; the trip to Dryreach was refused for the session): a walk with a Use target ends Arrived either at its point or where the line to the target came clear (NavRunner.UseHandOver), and the hand-over is
+            // an end short of the point by design. The walk was not stopped and did not fail (both return above), so an end off the point in the target's landblock is the hand-over: the caller sends the Use and the game walks her.
+            Log(string.Create(CultureInfo.InvariantCulture, $"{name}: walk check after: handed over to the game's walk {Planar(handed.Frame.Origin, target.At.Origin):0.0} m from the Use target 0x{target.Guid:X8}, {Planar(handed.Frame.Origin, at):0.0} m from the point (read from {serverText}); walk_s={S.Clock.Now - started:0.0}"));
+            yield break;
+        }
+
         Require(ok, $"{name}: arrival-off-point: the walk to {label} ended at {(after is { } q ? string.Create(CultureInfo.InvariantCulture, $"cell 0x{q.CellId:X8} ({q.Frame.Origin.X:0.#}, {q.Frame.Origin.Y:0.#})") : "an unknown place")}, not within {JourneyTravel.ToleranceMetres:0.#} m of ({at.X:0.#}, {at.Y:0.#}) in cell 0x{cell:X8} (read from {serverText})");
         Log(string.Create(CultureInfo.InvariantCulture, $"{name}: walk check after: at the point, {Planar(after!.Value.Frame.Origin, at):0.0} m from it (read from {serverText}); walk_s={S.Clock.Now - started:0.0}"));
     }
@@ -1165,7 +1174,7 @@ public sealed class RecallHomeStation : IStation
                         Context.Facts.LifestoneTied = false;
                     }
 
-                    if (_recall.Detail?.Contains("0x0400", StringComparison.Ordinal) == true || _recall.Detail?.Contains("0x400)", StringComparison.Ordinal) == true)
+                    if (_recall.RefusedForComponents)
                     {
                         // M6 7 AV: named, so the autopilot takes the way home without the recall for the rest of the run (the trip that follows buys the components).
                         Context.Facts.LifestoneRecallUnavailable = true;

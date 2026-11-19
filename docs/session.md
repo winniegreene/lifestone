@@ -1946,7 +1946,7 @@ one place for the slices' notes; the sections above name the behaviour where it 
 - **P2, the target panel (p2).** Section 21.7 has the blank-panel rule and the auto-target rule.
 - **P3, the stance rules (p3).** Section 23.8 has the combat-mode refusals and the held-item rule. The cast guard is in §7.
 - **P4, the wall shots (p4).** Section 31 has the pick, the wall-hit rule and the frames.
-- **P5, the testing loop (p5a, p5b).** The default filter is `Category!=Loopback&Tier!=Soak&Tier!=Exhaustive&Tier!=Timing&Status!=KnownFailure` (M4 1.1 s3; README.md,
+- **P5, the testing loop (p5a, p5b).** The default filter is `Category!=Loopback&Tier!=Soak&Tier!=Exhaustive&Tier!=Timing&Status!=KnownFailure` (M4 1.1 s3; TECHNICAL.md,
   tests/Shared/README.md, CLAUDE.md's own copy is the owner's). `slice-check`'s `-MinTests` defaults to the baseline file `tests/Shared/test-count-baseline.json`,
   and the exhaustive stage is floored by that file's `exhaustive` count. `slice-check -Exhaustive` (or `-Stages exhaustive`) runs the
   `Tier=Exhaustive` tests (76, the dat sweeps: `RenderSurface`, `SceneryOracle`, `SceneryWorldSweep` with the constant test,
@@ -2995,7 +2995,7 @@ lifestone.log (below). `--log-max-mb=N` caps lifestone.log (above). `--soak-fram
 counts every error, script error and shader error Godot logs, on any thread (interlocked); warnings do not count. Lifestone's own `Log.Error`
 lines are not counted: they reach Godot through `GD.PushError`, and `GodotErrorTally.Echo` skips them, so the count holds Godot's own errors
 (an uncaught C# exception counts once). Verified live: one `GD.PushError` moved the count from 0 to 1 and printed as `ERROR:` on the console.
-The smoke suite counts the same way (`godot_errors=<n>` in each Godot step's row, judged 0; see the README's smoke suite section). The tests
+The smoke suite counts the same way (`godot_errors=<n>` in each Godot step's row, judged 0; see the smoke suite section of docs/development.md). The tests
 are `GodotErrorTallyTests` and the soak line's `SoakLineTests`.
 
 **The watcher.** `tools/soak-watch.ps1` is read-only, and the lead starts it in the background beside a run: every `-IntervalSeconds` (300)
@@ -4183,6 +4183,8 @@ The counts, gates and levels are item 0's W0 numbers, each confirmed by one SELE
 
 **The Cave of Alabree (M6 5 Q6b; D54).** `profiles/cave-of-alabree.json`, drafted at lean 0.3 (220 of 286 cells walkable, 66 floorless, no pocket) on landblock 0x0162. The arrival is 0x016201D1 (60, -10, 12); the entry is portal 4937 (guid 0x7A7B3007 in 0xA7B30100, two landblocks west of Holtburg; MinLevel 1, MaxLevel 20, PortalBitmask 1, tieable); the exit 4938 "Surface" (to 0xA7B3001E) has a no-go cell. Targets: Blood Shreth 4110 (level 8, the Kill Task's creature), Hunter Shreth 4111 (level 15), their young 26684 (level 7) and 26687 (level 11). The 17 plus 1 placed slots hang on the Linkable Newbie Monster Generator 0x70162016 (delay 90 s, tick 60 s), which the draft drops (`TODO(ground-draft-link-generator)`). The Cheap Alu. Warrior Generator 4009 makes a Womble (a container); the Armory Door 5030 is no obstacle to the draft's walk. Resistances: fire 0.5, cold 1.0, acid 1.0 (0.42 on the Hunters), lightning 0.6 and 0.5, so fire halves the damage (`TODO(m6-alabree-element)`). The kit, stock and vendors are the Lodge's (`TODO(m6-alabree-supplies)`), the plan is Flame Bolt II (1-15) and III (16-20), and the profile has no loot section. Walked share: 220 of the 220 floored cells, all 16 tour cells reached. The young are listed as targets; the Kill Task counts only the Blood Shreths (`TODO(m6-alabree-young)`).
 
+**The Tusker Retreat (M6 retreat; the owner, 2026-11-19).** `profiles/tusker-retreat.json` is the ground of the ladder's 10-14 rung, the Burrow its alternate; the rung keeps its key `burrow` (rung_gates, `FociPlan.GateRung`, the rung owner's names and the checkpoints read it). Drafted at lean 0.3 on landblock 0x5C49 (169 of 180 floored cells walkable, the same at leans 0 to 0.9; 72 floorless; 4 storeys, z 12, 6, 0 and -6). The arrival is 0x5C490138 (89.8, -116.4, 0); the entry is portal 22694 (guid 0x7F97E000 in 0xF97E0035, MinLevel 5, PortalBitmask 0x31, not tieable); the exit 22695 "Surface" in 0x5C490100 (to 0xF97E0035) is the no-go cell. One generator (wcid 7932, 240 s delay, 60 s tick) holds 71 slots: 30 Male Tusker 11, 11 Female Tusker 236, 23 Tusker Kin 22510 (a caster of level-I bolts: kill-first) and 7 Tusker Kin 22509; the Kin are Humans whose FriendType is Tusker, so a woken Kin alerts the tuskers near it. 58 slots are hunted: 2 stand in the exit's cell, 11 in pocket cells no walk reaches (a ring of eight Female Tuskers at z 6 round the open shaft over the Kin room 0x0126, and three ledges over the z -6 rooms; `TODO(m6-retreat-pockets)`, DenRoomGraphTests' `FarHalf`), and 5 under the hunt's keep-out of the Kin rooms 0x0126 and 0x012B, whose alert sets reach 11 to 14 with the ring (the ground's mean is 6.9 by ACE's AlertFriendly with the cells' visible lists; the four z 12 corners wake 6 or 7 Male Tuskers). Every way in from the arrival passes cells the ring sees, so the first walk wakes it by sight; whether its Females come down (no EdgeSlide in their PhysicsState 0x408) is `TODO(m6-retreat-balcony)`, read live. No cell near the arrival is quiet (it sees two tuskers), so the profile has no `corpse_fetch`. The kit, shops, plan and stock are the Burrow's; `retreat_health_percent` is 0 (below Lifestone Recall the way out walks through the Kin rooms). The routes (section 74): by the Refuge from 10, 921.5 m straight with 13 via points (the via run walks 1,115 m, out 0 cells noticed and 0 in a disc, back 1 and 2: `IslandDangerRunDatTests`), and from 15 by the hub's Lodge portal, 200.5 m from its drop (8 via points, 352 m walked). The rung's health is the Male Tusker's (hit 36) in a pack of 7, want 288, which no level's pay limit reaches. The Female Tusk's trophy job (`RungOwner`'s, M6 7 AX) reads a rung's live alternates, so it still pulls the Burrow's carriers: the job plays the rung on the Burrow (`AutopilotScenario.DecideOnGround`), its move stops `rung-moved:burrow@tusker-burrow`, and the host's restart, which has no quest timers, builds that ground (`RungOwner.NamedGround`, `RungAsk.NamedGround`); a stop without the mark is the rung's own ground, as before. The live trial waits for the next fresh climb (`TODO(m6-retreat-live)`: the kill rate, the supplies' burn, the pack that reaches her, the gate's lines).
+
 ## 74. The travel file (M6 item 4 t1, t3a, t4b, f2; D50, D51; DoD 5)
 
 **The file (`Session/Travel/travel-routes.json`, embedded; `TravelRoutes.cs`).** The travel between the rungs is data (D50, D26): 28 portal edges (each with its wcid, guid, cell, origin, destination, MinLevel, MaxLevel, PortalBitmask, its SQL rows and the placement's rotation, `facing`); the places they join (each with a `source`, checked by its test, D28); the routes of 13 grounds in order of preference (a start place, the portal steps each with its straight-line walk, and the run to the entry portal), each route admitted by the highest gate on it; the ways home (the hop back to a Network portal); the gems; and the lever-only doors (`lever-doors.json`, section 78). `TravelRoutes` loads it strictly, a bad field failing at load with its path: `RoutesFor`, `FirstAdmitted`, `WayHomeFrom`, `Gems`, `GemInto`. A ground with no route is the named stop `TODO(m6-ground-route)`, not an exception; a place with no way home is `TODO(m6-way-home)`. The ladder's `route` string stays a label (`war-mage.json`, item 3's file); a test checks that every rung's ground and alternates have a route. Two grounds have an empty-step route: the outskirts (`on-foot`) and the den (`recall-or-tie`, handed to den-travel).
@@ -4816,3 +4818,100 @@ failed ladder errand); a cut step waits for the next boundary; a death or the su
 hand-in's `half_pending=` is kept for the session (`VillaMemory`). The storage trip's items are the held, unworn great-cantrip pieces and kept-aside
 finds (no pack, focus or rotation gear); it is held by name (`walk-missing`) while `StorageTripStation.HousePortalWalkEstablished` is false
 (`TODO(villa-house-portal-walk)`). The sale never offers a Writ of Refuge or a Crude Lockpick (`ResupplyRun.QuestItemWcids`).
+
+## 119. The fight's fills: what pays (M6 heal spend)
+
+**The finding.** The simulator plays her fight by the client's own rules (`tools\fight-sim.ps1 matchup`, [fight-sim.md](fight-sim.md),
+"With her heals"). Against the Tusker Retreat's six (`--pack "11x3,22510x2,236x1"`) at run 5's level-10 bars, the vitals policy's fills
+cost her 387 mana and 60.5 s a fight, against 166 mana and 27.9 s with only the emergency's heals (the means of four runs of 2,000 fights).
+The trace (`--trace`) showed three causes. With six on her the policy topped up every vital whose whole give fitted (13 presses, 13 stamina
+drains and 7 health drains in the first fight), every second of it under all six, and the health those seconds cost came back as more
+drains. Drain Health Other IV, which Winnie's Life Magic casts at 14% (the simulator's `her means` line), was priced as if it always landed,
+and the health top-up chose it because its small give fitted first (five fizzles in a row in one traced fight). And at a bar of 63 stamina
+with no Mana Conversion, a stamina drain was valued at a full bar's press rate, so under the mana floor it ran a loop that gave nothing: a
+drain and two presses cost 40 mana and gave 41.
+
+**The rule** (`Vitals/VitalsPolicy.cs`; the order of the decision is unchanged, so `FightScenario` calls it as before and the simulator's
+`InFightRules` only fills the new facts):
+
+1. **Each level at its expected give and cost.** `FillLevel.Chance` is the cast chance on her live Life Magic (`GearCasts.Chance`), and
+   `FillLevel.Lands` a drain's share past its source's resist (`ManaConversionModel.SkillChance` on the source's Magic Defense, as the bolt's
+   land is read). A fizzle gives nothing and costs 5 (ACE `Player_Magic.cs` `CalculateManaUsage`, 566-572 @95ef426d); a resist gives nothing
+   and costs the cast.
+2. **A mana fill pays only over the mana its seconds cost in health.** `PressPays`: the press's expected give, less its expected cost, less
+   `IncomingMana` (the recent incoming, `RecentHits`, times the cast's seconds, times `VitalsPrices.HealMana`, the mana a health point of the
+   drain the policy prices best) is over 0. `StaminaDrainNet`: the presses the drain feeds, walked down the bar from where it leaves her (a
+   press takes its share of the bar it is cast from, `BuffStatMods.Transfer`), less the presses without it, less the drain's own cost and its
+   own seconds' `IncomingMana`. The floors read the same test: under the mana floor a press that does not pay is not cast, nor a stamina
+   drain, and the mana order decides. The upkeep's fill still reads `StaminaDrainNets`, the full bar's rate.
+3. **A health top-up waits for the best-priced level to fit** (at its whole give, as `press_waits_for_best` makes the press wait): a level that
+   fits sooner only because it gives less is dearer a point.
+4. **With more than one creature on her** (`VitalsPolicyFacts.Attackers`), a health top-up waits for the next kill (`HealthTopUpWaits`): its
+   seconds are the same after it, the kill takes its share out of the incoming, and another creature stays as the drain's source; the health
+   floor and the emergency stand guard meanwhile. A drain whose damage pays for its seconds (`TransferPick.KillSeconds` at or under 0) does
+   not wait.
+5. **Unchanged:** the floors fill at once; a bolt that likely kills goes first; the upkeep; the emergency and its lines (M5 D91); every
+   decision with one creature on her or none read; a mana top-up that pays.
+
+**Measured and dropped: a mana top-up that waits while her mana covers the kills.** A sixth rule held a press or stamina drain above the
+floor while her mana, with what she regenerates, paid for the bolts that kill every creature on her and the heals that clear needs. It cut
+the Retreat's mana no further, and it ran her dry more often where the fills carry her: the Tusker Cave's five Crimsonbacks
+(`matchup --pack "1627x5" --her Qwinnie`, seven runs of each, back to back on one save against the tool at `5a8cdee8`)
+went from 0.46% out of mana to 0.71%; with the wait taken out (four runs) it read 0.50%. On the lead's big-pack rows, where the fills carry her (the Retreat's ring of eight and its
+corners of nine and ten), it did no better than the rules above.
+
+**What the fight reads** (`FightScenario.VitalsPolicy.cs` `TryPolicyFacts`): `Attackers` is self-defence's list (`AttackersNow`); each
+level's chance and a drain's share past its source's resist (`CastChanceOf`, `LandsOn`). The `vitals policy:` line adds `heal mana a point`
+and `attackers`.
+
+**The evidence** (`tools\fight-sim.ps1` on `m6/heal-spend` against the same tool at `5a8cdee8`, 2026-11-19; each row the mean of the runs
+named, 2,000 fights a run; ACE's own rolls are unseeded, so every run's blows differ, and each run's "no fills" row plays the same blows with
+the policy's fills left out: the paired column is each run's deaths with the fills less its deaths without, meaned, the fair read of whether
+the fills cost or save lives when two runs' blows differ):
+
+| Row (command) | Runs before / after | Dies before -> after (fills less no fills, paired) | Out of mana before -> after | Mana a fight | Seconds to clear |
+|---|---|---|---|---|---|
+| Retreat six `--pack "11x3,22510x2,236x1" --her Winnie` (her own bars 39/63/160) | 4 / 4 | 1.73% -> 1.53% (-0.78 -> -1.30) | 91.88% -> 86.18% | 427.4 -> 199.8 | 77.6 -> 33.5 |
+| Retreat six, `--bars "health=84,stamina=154,mana=161"` (level 10) | 4 / 4 | 0.00% -> 0.00% (0.00 -> 0.00) | 0.05% -> 0.00% | 387.0 -> 293.7 | 60.5 -> 43.6 |
+| Retreat six, `--bars "health=100,stamina=173,mana=201"` (level 14) | 4 / 4 | 0.00% -> 0.00% (0.00 -> 0.00) | 0.03% -> 0.00% | 469.3 -> 284.4 | 71.0 -> 42.4 |
+| Burrow three `--pack "236x3"`, level-10 bars | 4 / 4 | 0.00% -> 0.00% (0.00 -> 0.00) | 0.00% -> 0.00% | 112.8 -> 102.4 | 19.1 -> 17.2 |
+| Lodge `--pack "11x6"`, `--bars "health=102,stamina=180,mana=203"` (level 15) | 4 / 4 | 0.00% -> 0.00% (0.00 -> 0.00) | 0.15% -> 0.00% | 634.9 -> 351.6 | 93.8 -> 52.0 |
+| Lodge `--pack "11x9"`, level-15 bars | 8 / 4 | 0.00% -> 0.00% (0.00 -> 0.00) | 12.51% -> 0.00% | 1104.9 -> 658.1 | 158.0 -> 93.9 |
+| Retreat ring `--pack "236x8"`, level-10 bars | 4 / 4 | 0.00% -> 0.00% (0.00 -> 0.00) | 4.03% -> 0.03% | 803.9 -> 555.3 | 117.7 -> 79.7 |
+| Retreat corner `--pack "11x6,22510x3"`, level-10 bars | 4 / 4 | 0.00% -> 0.00% (-0.05 -> -0.05) | 0.73% -> 0.05% | 720.3 -> 586.6 | 107.8 -> 83.9 |
+| Retreat corner `--pack "11x7,22510x3"`, level-10 bars | 8 / 8 | 0.01% -> 0.03% (-0.06 -> -0.03) | 1.83% -> 0.45% | 854.2 -> 742.7 | 125.3 -> 105.0 |
+| Ring and Kin `--pack "236x8,22510x3,22509x3"`, level-10 bars | 4 / 4 | 0.00% -> 0.03% (-0.13 -> -0.18) | 100.00% -> 91.25% | 771.4 -> 1182.1 | 138.3 -> 152.0 |
+| Holding `--pack "27800x1,22506x1" --her "BSD Mage"` | 8 / 4 | 45.68% -> 44.75% (-6.31 -> -6.68) | 0.00% -> 0.00% | 77.3 -> 69.7 | 52.8 -> 53.7 |
+| Holding `--pack "27800x2,22506x1" --her "BSD Mage"` | 8 / 4 | 76.08% -> 72.55% (-3.14 -> -5.20) | 0.00% -> 0.00% | 64.5 -> 66.5 | 77.4 -> 78.5 |
+| Holding `--pack "27800x1,27504x1" --her "BSD Mage"` | 4 / 4 | 100.00% -> 100.00% (0.00 -> 0.00) | 0.00% -> 0.00% | 26.5 -> 24.1 | - -> - |
+
+Reading the table:
+
+- **Winnie's own bars.** The deaths' mean moves with each run's blows (the "no fills" rows of the same runs read 2.5% before and 2.8%
+  after); against its own blows each run's fills save 1.30 points of deaths now and 0.78 before. Out of mana is still most fights: 39 health
+  and 160 mana do not clear six level-20 tuskers, so this is a pull she should not take, not a fill to tune.
+- **The corner of ten.** One death in 16,000 fights before, two in 16,000 after, inside the run-to-run band (the "no fills" rows of the same
+  runs read 0.0 to 0.2% a run); paired, the fills save 0.06 points before and 0.03 after. Out of mana fell from 1.83% to 0.45%.
+- **The ring and the Kin (14 at once).** A flee moment both ways, as the lead read it: out of mana 100.00% to 91.25%. She spends more mana
+  there (771.4 to 1,182.1) because she lasts longer before the mana runs out.
+- **The Holding.** No press or stamina drain fires (`BSD Mage` at level 127 holds 457 mana with Mana Conversion); its fills are the health
+  floor's drains, which this change leaves as they were, so its rows differ by their blows: paired, the fills save 6.68 and 5.20 points of
+  deaths against 6.31 and 3.14 before. A floor at her whole health giving way to the kill was weighed and is refuted here (those
+  drains save the deaths) and in the Cave below, where the fills carry her: the floor is kept.
+- **Won fights end fuller.** A won fight ends this far under the mana it began with, before and after: the Retreat's six at level 10 64.2
+  and 63.0, at level 14 71.8 and 63.2, the Burrow's three 52.5 and 52.1, the Lodge's six 86.3 and 61.1, its nine 138.7 and 64.7, the ring of
+  eight 80.4 and 62.9, the corners 80.8 and 64.1, 87.6 and 66.2. Winnie's own bars are the exception (133.5 and 146.0).
+- **The Cave** (`matchup 1627 --her Qwinnie`, `--pack "1627x5"`). Her save moved while this ran (she climbs live): the first baseline read
+  level 6, health 60, stamina 115, mana 115 and Force Bolt I and died in every fight of five; the final runs read level 9, health 87,
+  stamina 156, mana 166 and Flame Bolt III. So the Cave is four pairs run back to back on the level-9 save. Five at once: deaths 0.08% to
+  0.05%, out of mana 0.40% to 0.45% (32 against 36 fights in 8,000), mana 359.3 to 357.3, 53.2 to 52.9 s. One kind, one to six on her:
+  six on her out of mana 14.0% to 9.7%, deaths 0.45% to 0.40%; one to five within 0.2 points.
+- **The rank** (`rank --her Winnie --min-level 5 --max-level 40 --bars "health=84,stamina=154,mana=161"`, its healed columns, 300 fights at
+  each of the two sizes around the census's pack): the Tusker Retreat 0x5C49 (pack 6.3) dies 0.1% to 0.0%, out of mana 0.0% to 0.0%; the
+  Tusker Lodge 0x5749 (pack 8.9) 0.0% and 0.0% both; the Tusker Burrow 0x5748 (pack 3.3) 0.0% and 0.0% both.
+
+**What is assumed, named.** The simulator ends a fight at its last kill, so the time between pulls, where the pull's rest and dance pay back
+what a fight ended without (`PolicyPullRule`, section 92), is not played (`TODO(fight-sim-between-pulls)`, fight-sim.md "What is not
+played"); on every row but Winnie's own bars the won fights end as near their starting mana or nearer than before, so these
+rows add no rest. A level's chances are read from her live skill and the source's Magic Defense in the creature tables; one not read is
+taken as sure, as before.

@@ -22,8 +22,9 @@ namespace Lifestone.Client.Tests.Session.Autopilot;
 /// </summary>
 public sealed class AutopilotMoveOnLoopTests(ITestOutputHelper output)
 {
-    private const string Outskirts = "holtburg-outskirts";
-    private const string Burrow = "tusker-burrow";
+    // M6 redoubt (the owner's decision of 2026-11-18): the rung outskirts' own ground is the Holtburg Redoubt; the outdoor ground holtburg-redoubt is the rung's fallback for a climber the portal does not admit (RungFallback)
+    private const string Outskirts = "holtburg-redoubt";
+    private const string Burrow = "tusker-retreat"; // M6 retreat (the owner, 2026-11-19): the burrow rung's ground is the Tusker Retreat (the Burrow its alternate)
     internal const string StartOption = "--autopilot-start";
 
     /// <summary>What the run reads standing in a gate line's place: the bot's level VII spell, as the live log read it.</summary>
@@ -204,14 +205,14 @@ public sealed class AutopilotMoveOnLoopTests(ITestOutputHelper output)
         Assert.Equal(tripFirst, c.Trips > 0);
 
         // the run opened the gate by the standing spells, and said so; the hand-over carries that read; the dial reads the named rung's gate with it
-        Assert.Contains(c.Lines, l => l.Contains("ladder: rung: asked by the cycle's check: level=10 read_at=10", StringComparison.Ordinal) && l.Contains("run_ground=holtburg-outskirts", StringComparison.Ordinal) && l.EndsWith("-> rung=burrow ground=none reason=gate-open:burrow", StringComparison.Ordinal));
+        Assert.Contains(c.Lines, l => l.Contains("ladder: rung: asked by the cycle's check: level=10 read_at=10", StringComparison.Ordinal) && l.Contains("run_ground=holtburg-redoubt", StringComparison.Ordinal) && l.EndsWith("-> rung=burrow ground=none reason=gate-open:burrow", StringComparison.Ordinal));
         Assert.Single(c.Lines, l => l.StartsWith("autopilot stop=rung-moved:burrow: ", StringComparison.Ordinal));
         var handOver = c.HandOvers[1]!;
         Assert.Equal(["Focus Self", "Willpower Self"], handOver.GateStands!.Select(s => s.Line));
-        Assert.Contains(c.Lines, l => l.StartsWith("ladder: move-on restart: hand-over taken from the run on holtburg-outskirts", StringComparison.Ordinal) && l.Contains("gate=2 line(s) of the named rung's gate stand by another's spell (Focus Self, Willpower Self)", StringComparison.Ordinal));
+        Assert.Contains(c.Lines, l => l.StartsWith("ladder: move-on restart: hand-over taken from the run on holtburg-redoubt", StringComparison.Ordinal) && l.Contains("gate=2 line(s) of the named rung's gate stand by another's spell (Focus Self, Willpower Self)", StringComparison.Ordinal));
         Assert.Contains(c.Lines, l => l.StartsWith("ladder: move-on restart: the named rung's gate is read with the ended run's hand-over", StringComparison.Ordinal));
-        Assert.Contains(c.Lines, l => l.Contains("ladder: rung: asked by move-on: level=10 read_at=10", StringComparison.Ordinal) && l.EndsWith("named=burrow -> rung=burrow ground=tusker-burrow reason=stop-named:burrow", StringComparison.Ordinal));
-        Assert.Contains(c.Lines, l => l.StartsWith("autopilot start: ", StringComparison.Ordinal) && l.Contains(" on tusker-burrow ", StringComparison.Ordinal));
+        Assert.Contains(c.Lines, l => l.Contains("ladder: rung: asked by move-on: level=10 read_at=10", StringComparison.Ordinal) && l.EndsWith("named=burrow -> rung=burrow ground=tusker-retreat reason=stop-named:burrow", StringComparison.Ordinal));
+        Assert.Contains(c.Lines, l => l.StartsWith("autopilot start: ", StringComparison.Ordinal) && l.Contains(" on tusker-retreat ", StringComparison.Ordinal));
         Assert.DoesNotContain(c.Lines, l => l.Contains(AutopilotHostLogic.MoveOnLoopStop, StringComparison.Ordinal));
     }
 
@@ -231,8 +232,8 @@ public sealed class AutopilotMoveOnLoopTests(ITestOutputHelper output)
         Assert.Equal([Outskirts], c.Grounds); // no second run was built
         Assert.Equal((1, 0), (c.Asked, c.Logic.MoveOns));
         Assert.Equal([AutopilotHostLogic.MoveOnLoopStop], c.Stopped);
-        Assert.StartsWith("failed:move-on-loop: the run on holtburg-outskirts stopped with rung-moved:burrow to leave that ground, and the dial's own read keeps her on holtburg-outskirts", c.Logic.MoveOnRefusal, StringComparison.Ordinal);
-        Assert.Contains(c.Lines, l => l.Contains("ladder: rung: asked by move-on: level=10 read_at=9", StringComparison.Ordinal) && l.EndsWith("named=burrow -> rung=outskirts ground=holtburg-outskirts reason=gate-held:burrow", StringComparison.Ordinal)); // the live line of 05:40:44.551
+        Assert.StartsWith("failed:move-on-loop: the run on holtburg-redoubt stopped with rung-moved:burrow to leave that ground, and the dial's own read keeps her on holtburg-redoubt", c.Logic.MoveOnRefusal, StringComparison.Ordinal);
+        Assert.Contains(c.Lines, l => l.Contains("ladder: rung: asked by move-on: level=10 read_at=9", StringComparison.Ordinal) && l.EndsWith("named=burrow -> rung=outskirts ground=holtburg-redoubt reason=gate-held:burrow", StringComparison.Ordinal)); // the live line of 05:40:44.551
         Assert.Single(c.Lines, l => l.StartsWith("autopilot host: stop=failed:move-on-loop: ", StringComparison.Ordinal));
         Assert.Equal(1, c.Logic.UnattendedEnd!.ExitCode); // an unattended run ends the game by name, exit code 1
     }
@@ -252,7 +253,7 @@ public sealed class AutopilotMoveOnLoopTests(ITestOutputHelper output)
         Assert.Equal(Enumerable.Repeat(Outskirts, restarts + 1), c.Grounds);
         Assert.Equal(restarts, c.Asked); // the hook is not asked for the restart that is refused
         Assert.Equal([AutopilotHostLogic.MoveOnLoopStop], c.Stopped);
-        Assert.StartsWith("failed:move-on-loop: the run that move-on restart 1 started on holtburg-outskirts stopped with rung-moved:burrow again (the same move-on on the same ground as the run before it", c.Logic.MoveOnRefusal, StringComparison.Ordinal);
+        Assert.StartsWith("failed:move-on-loop: the run that move-on restart 1 started on holtburg-redoubt stopped with rung-moved:burrow again (the same move-on on the same ground as the run before it", c.Logic.MoveOnRefusal, StringComparison.Ordinal);
         Assert.Single(c.Lines, l => l.StartsWith("autopilot host: stop=failed:move-on-loop: ", StringComparison.Ordinal));
         Assert.Equal(1, c.Logic.UnattendedEnd!.ExitCode);
         Assert.Equal(tripFirst, c.Trips > 0);
@@ -293,6 +294,11 @@ public sealed class AutopilotMoveOnLoopTests(ITestOutputHelper output)
         Assert.Equal(Outskirts, AutopilotHostLogic.MoveOnGround(view, "rung-moved:burrow", out _, handOver: handOver with { EndedAt = c.World.Now - AutopilotHostLogic.MoveOnReadSeconds - 1 })?.Key);
         Assert.Equal(Outskirts, AutopilotHostLogic.MoveOnGround(view, "rung-moved:burrow", out _, handOver: handOver with { GateStands = [stands[0]] })?.Key); // one line still not met: shut
         Assert.Null(handOver.StandsAt("Focus Self", 3)); // a line that stood at level II says nothing of level III
+
+        // M6 retreat: a stop that names the rung's live alternate after it (a trophy job's move, rung-moved:<rung>@<ground>) restarts on that ground; the hand-over of that stop reads its gate as above
+        var onAlternate = handOver with { Stop = "rung-moved:burrow@tusker-burrow" };
+        Assert.Equal("tusker-burrow", AutopilotHostLogic.MoveOnGround(view, "rung-moved:burrow@tusker-burrow", out _, handOver: onAlternate)?.Key);
+        Assert.Equal(Burrow, AutopilotHostLogic.MoveOnGround(view, "rung-moved:burrow@tusker-lodge", out _, handOver: handOver with { Stop = "rung-moved:burrow@tusker-lodge" })?.Key); // no alternate of the rung: its own ground
     }
 
     /// <summary>

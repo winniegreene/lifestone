@@ -73,7 +73,9 @@ public static class AutopilotBuyTripRule
     /// <param name="state">The session's state.</param>
     /// <param name="ground">The run's ground.</param>
     /// <param name="routes">The travel file.</param>
-    public static TownTripInput TownInput(GameState state, HuntingGround ground, TravelRoutes routes)
+    /// <param name="facts">M6, the recall's components: the journey's facts, so Lifestone Recall counts only when castable (<see cref="RecallReadiness"/>); null: the book alone.</param>
+    /// <param name="spells">The spell table for that read, or null: the components are not judged.</param>
+    public static TownTripInput TownInput(GameState state, HuntingGround ground, TravelRoutes routes, JourneyFacts? facts = null, IReadOnlyDictionary<uint, Lifestone.Data.Magic.SpellInfo>? spells = null)
     {
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(ground);
@@ -81,7 +83,7 @@ public static class AutopilotBuyTripRule
         return new TownTripInput(
             (state.Self.Position is { } at ? TownNetworkTrip.PlaceKeyOf(at.CellId >> 16, routes) : null) ?? TownNetworkTrip.PlaceKeyOf(ground.Home.LifestoneCell >> 16, routes),
             state.Self.Qualities.Level,
-            state.Self.Spellbook.Knows(Fighter.RecallHome.LifestoneRecallSpell),
+            facts is null ? state.Self.Spellbook.Knows(Fighter.RecallHome.LifestoneRecallSpell) : RecallReadiness.Of(state, facts, spells).Castable, // M6, the recall's components (RecallReadiness)
             routes.StartLifestone.Cell >> 16 == ground.Home.LifestoneCell >> 16);
     }
 }

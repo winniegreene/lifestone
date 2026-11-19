@@ -66,7 +66,7 @@ public sealed partial class ResupplyStationTests
         Assert.Empty(row.Sells); // a loot buyer only
 
         var homed = GroundCatalog.All.Where(g => g.Home.Town == "Holtburg" && g.VendorOf(716) is not null).ToList();
-        Assert.Equal(16, homed.Count); // M6 14 armory: the Tusker Armory, the sixteenth
+        Assert.Equal(18, homed.Count); // M6 14 armory: the Tusker Armory, the sixteenth; M6 redoubt: the Holtburg Redoubt, the seventeenth; M6 retreat: the Tusker Retreat, the eighteenth
         foreach (var ground in homed)
         {
             var here = ground.VendorOf(GrocerWcid);

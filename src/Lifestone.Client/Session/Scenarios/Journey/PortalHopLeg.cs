@@ -251,7 +251,11 @@ internal abstract partial class TravelLeg
             }
             else
             {
-                var walk = FrontWalk(portal, frontCell, front, $"to the front of {portal.Name} ({why}; front={frontBasis})", life, frontKeep);
+                // M6 redoubt (live 2026-11-18 22:20:55 UTC: the first way home from the Holtburg Redoubt, `no path: portal-keep-off:Holtburg_Redoubt_exit: the goal stands 0.00 m from the walk's own portal, inside its touch and her
+                // stop (2.84 m)`, twice, and the last resort /lifestone covered it): an indoor portal with no facing is walked to itself, so the portal takes the body on touch (M6 7 U, FirstFront). The own portal's clearance (M6 14,
+                // KeepOffForFront) is for a front beside the portal; on a walk whose goal is the portal it refuses every plan. Such a walk keeps off the other portals only.
+                var walkKeep = FrontWalkKeep(frontBasis, keepOff, frontKeep);
+                var walk = FrontWalk(portal, frontCell, front, $"to the front of {portal.Name} ({why}; front={frontBasis})", life, walkKeep);
                 foreach (var h in Catching(walk, f => walkFailure = f))
                 {
                     yield return h;
@@ -575,8 +579,11 @@ internal abstract partial class TravelLeg
     /// <summary>
     /// The hub walk (the owner's go-ahead of 2026-11-18: hand a portal walk to the game's own walk once the way is clear): the portal as a walk's Use target (<see cref="TravelRequest.Use"/>), so the walk hands over to ACE's walk-to-use once the straight line to it is
     /// clear (<see cref="UseHandOver"/>); null once the hand-over stalled in this hop (<see cref="HandOverStallSeconds"/>: her own steering walks the rest, the one recovery).
+    /// <para>M6 redoubt (live 2026-11-18 23:06:51 UTC, the way home from the Holtburg Redoubt: `handing over to the game's walk: the line to the target is clear ... target=0x00000000 distance_m=8.4`, the run ended Arrived 8.4 m from the exit portal and the
+    /// walk's check after failed `arrival-off-point`, twice; the last resort /lifestone covered it): a portal the plan knows by weenie only (a ground's exit: <see cref="RungPortal.Guid"/> 0) is no Use target, since no Use can be sent to it; the walk goes
+    /// to its end and the seek, which has found the object, hands over.</para>
     /// </summary>
-    private NavUseTarget? HandOverTarget(uint guid, uint cell, Vector3 at) => _handOverStalled ? null : new NavUseTarget(guid, new CellFrame(cell, new AcFrame(at, Quaternion.Identity)), (float)DenTravelStation.PortalRangeMetres);
+    private NavUseTarget? HandOverTarget(uint guid, uint cell, Vector3 at) => _handOverStalled || guid == 0 ? null : new NavUseTarget(guid, new CellFrame(cell, new AcFrame(at, Quaternion.Identity)), (float)DenTravelStation.PortalRangeMetres);
 
     /// <summary>
     /// How long the server's walk-to-use may bring her no nearer the portal (by <see cref="HandOverStallMetres"/>) before the hop stops waiting and her own steering walks up and uses it once more (recovery=own-steering), in seconds:
@@ -905,6 +912,14 @@ internal abstract partial class TravelLeg
 
     private readonly Dictionary<uint, LandblockCellSet> _frontRooms = [];
 
+    /// <summary>
+    /// M6 redoubt: the list the walk to a hop's first point keeps. A front beside the portal keeps off the portal itself too (<paramref name="own"/>, M6 14: <see cref="RungPortal.KeepOffForFront"/>); a walk whose goal is the portal
+    /// (<see cref="FrontBasisPortal"/>, M6 7 U: an indoor portal with no facing is taken by touch) keeps off the other portals only (<paramref name="others"/>), because the own portal's clearance refuses every plan that ends on it.
+    /// </summary>
+    /// <param name="basis">The front's basis (<see cref="HopFront"/>).</param>
+    /// <param name="others">The other portals (<see cref="RungPortal.KeepOffTheOthers"/>).</param>
+    /// <param name="own">The others and the hop's own portal (<see cref="RungPortal.KeepOffForFront"/>).</param>
+    internal static PortalKeepOff FrontWalkKeep(string basis, PortalKeepOff others, PortalKeepOff own) => basis == FrontBasisPortal ? others : own;
     /// <summary>
     /// M6 7 U (r1f-climb's way home, on the dats): the first point a hop walks to. A ground's exit portal stands indoors with no facing in the travel data, and the approach side's rule (<see cref="FrontOf"/>) takes the straight line toward the body,
     /// which indoors says nothing of the way in: the Burrow's exit stands in an alcove entered from the south, the line points north into its wall, the room search snaps to (120.1, -132.2) past the alcove's floor (it ends at -132.62) and the physics

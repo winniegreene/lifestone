@@ -162,13 +162,41 @@ public sealed class HoltburgScrivenerWalkDatTests(DatSetFixture fixture, ITestOu
         new ServerObjectPhysicsHost(rig.World, Dats).Create(new ServerObjectDescription(ItemMagicGuid, OfflineWalker.HumanSetupId, 1f, ItemMagicPhysicsState, IsCreature: true, IsSelf: false, DescriptionFlags: 0), her);
         var blind = Walk(rig, goal, life.Name + " (no bodies)", null, body.Centre);
         output.WriteLine($"{life.Name} without the bodies: {blind.State} at 0x{blind.At.CellId:X8} {blind.At.Origin}; nearest her centre {blind.Nearest:F2} m");
-        Assert.Equal(NavRunState.Blocked, blind.State); // as live: stuck against her, two body radii from her centre
-        Assert.True(blind.Nearest < (2 * NavCreatures.PlayerRadiusMetres) + 0.05f, $"the blind walk stuck {blind.Nearest:F2} m from her centre");
+        // M6 sprint (2026-11-19): it sticks against her as live, two body radii from her centre; the replan then leaves the stuck spot's scar outward (the start's scar is no longer skipped by the pulled lines,
+        // ScrivenerDoorStallDatTests), so it goes round her and arrives (before: 3 plans, 12 rungs, Blocked)
+        Assert.True(blind.Nearest < (2 * NavCreatures.PlayerRadiusMetres) + 0.05f, $"the blind walk came {blind.Nearest:F2} m from her centre");
+        Assert.Equal(NavRunState.Arrived, blind.State);
         var walk = Walk(rig, goal, life.Name, feed, body.Centre);
         output.WriteLine($"{life.Name} round her: {walk.State} at 0x{walk.At.CellId:X8} {walk.At.Origin}; nearest her centre {walk.Nearest:F2} m (disc {NpcBodies.DiscRadius(radius):F2} m); stamped {walk.Stamped}; plans {walk.Plans}");
         Assert.Equal(NavRunState.Arrived, walk.State);
         Assert.Equal(1, walk.Stamped);
         Assert.True(walk.Nearest > 2 * NavCreatures.PlayerRadiusMetres, $"the walker came {walk.Nearest:F2} m from her centre (two body radii: touching)");
+        Assert.InRange(Distance(walk.At.CellId, walk.At.Origin, life.Cell, life.Point), BodyClearMetres, Reach);
+    }
+
+    /// <summary>
+    /// M6 sprint (live 2026-11-19 01:51:54 to 01:52:29 UTC, run 3, and 00:05 to 00:07 UTC, run 2): the walk from Archmage Cindrue's hall to the Life apprentice reached the street with the door found only after the plan, and
+    /// stood against the Scrivener of Item Magic at (186.883, 87.663) in 0xA9B3003C, 0.96 m from her centre, inside her disc. A disc holding the start was dropped, so each replan ran on into her: 3 plans, 12 rungs, Blocked
+    /// after 93 s. From that very spot, with her body in the physics and on the plan, the walk now leaves round her and arrives at the Life apprentice's stop.
+    /// </summary>
+    [RequiresDatsFact]
+    public void From_against_the_Scrivener_of_Item_Magic_the_walk_leaves_round_her_and_arrives()
+    {
+        var rig = Rig();
+        var radius = HostileCreatureFeed.SetupRadii(Dats)(OfflineWalker.HumanSetupId)!.Value;
+        var her = new CellFrame(ItemMagicCell, new AcFrame(ItemMagicPoint, Quaternion.Identity));
+        var body = new NavBody(ItemMagicGuid, "Scrivener of Item Magic", NavMap.FromCellFrame(her).Global, radius, ItemMagicPoint.Z, Outdoor: true);
+        var life = Holtburg().Single(v => v.Guid == 0x7A9B3009);
+        var (_, goal) = rig.Plan(life.StopCell, life.StopPoint!.Value, 0);
+        new ServerObjectPhysicsHost(rig.World, Dats).Create(new ServerObjectDescription(ItemMagicGuid, OfflineWalker.HumanSetupId, 1f, ItemMagicPhysicsState, IsCreature: true, IsSelf: false, DescriptionFlags: 0), her);
+        var stuck = new CellFrame(0xA9B3003Cu, new AcFrame(new Vector3(186.883f, 87.663f, 116.005f), Quaternion.Identity)); // the live stall point (01:52:14 UTC)
+        var layer = new NpcBodies();
+        layer.Refresh(new FixedBodies(body), NavMap.FromCellFrame(stuck).Global, 500f, 0, goal.Point.Global, rig.Map);
+        output.WriteLine($"from against her, on the dats' lattice: seen {layer.Seen.Count}, off level {layer.OffLevel} {string.Join(",", layer.OffLevelBodies.Select(o => $"{o.Body.Name} dz={o.Gap:0.00}"))}");
+        Assert.Single(layer.Seen); // on the dats' lattice she is on the street's level: the live walk left one body out as off level on every plan (named in its log from now on)
+        var walk = Walk(rig, goal, life.Name + " (from against her)", new FixedBodies(body), body.Centre, stuck);
+        output.WriteLine($"{life.Name} from against her: {walk.State} at 0x{walk.At.CellId:X8} {walk.At.Origin}; nearest her centre {walk.Nearest:F2} m; plans {walk.Plans}");
+        Assert.Equal(NavRunState.Arrived, walk.State);
         Assert.InRange(Distance(walk.At.CellId, walk.At.Origin, life.Cell, life.Point), BodyClearMetres, Reach);
     }
 
@@ -272,17 +300,18 @@ public sealed class HoltburgScrivenerWalkDatTests(DatSetFixture fixture, ITestOu
     }
 
     /// <summary>The walk on the runner over the walker's physics, with <paramref name="bodies"/> as its NPC bodies; the nearest the walker came to <paramref name="watch"/> (global metres).</summary>
-    private (NavRunState State, CellFrame At, float Nearest, int Stamped, int Plans) Walk(WalkRig rig, NavGoal goal, string name, INavBodyFeed? bodies, Vector2 watch)
+    private (NavRunState State, CellFrame At, float Nearest, int Stamped, int Plans) Walk(WalkRig rig, NavGoal goal, string name, INavBodyFeed? bodies, Vector2 watch, CellFrame? from = null)
     {
+        var at = from ?? rig.Home;
         var h = new ActionHarness(offline: true);
         var now = 0.0;
         using var audit = new MovementAudit(new RecordingMovementSink(), h.R.Bus, () => now, name);
         var walker = OfflineWalker.Create(Dats, rig.World, NullLogSink.Instance, new OfflinePlayerWeenie(230), sink: audit);
         h.Api.Move.Bind(walker.Controller, walker.Controller.Options.RunByDefault);
         rig.World.UseTime(0.0);
-        Assert.True(walker.Place(rig.Home), $"placed at {rig.Home}");
+        Assert.True(walker.Place(at), $"placed at {at}");
         using var confirmer = new RouteConfirmer(rig.World, walker.Physics.Setup!);
-        var source = rig.Planner.SourceFor(rig.Home.CellId, JourneyLegPlanner.GoalCellOf(goal), rig.Map);
+        var source = rig.Planner.SourceFor(at.CellId, JourneyLegPlanner.GoalCellOf(goal), rig.Map);
         var runner = new NavRunner(h.Api.Move, new ControllerNavBody(walker.Controller), source, confirmer, audit, new NavRunnerOptions { Name = name }) { BodyFeed = bodies };
         runner.Start(goal, now);
         var nearest = float.MaxValue;

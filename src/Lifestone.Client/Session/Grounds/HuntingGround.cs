@@ -221,6 +221,16 @@ public sealed record HuntingGround(
     public IReadOnlyList<Lifestone.Client.Movement.Routes.PitJump> Jumps { get; init; } = [];
 
     /// <summary>
+    /// M6 redoubt: the ground's galleries (the profile's optional <c>galleries</c> section), or null for a ground without one: floorless cells a body stands in, on floors that other cells hold. The gallery cells are storey cells
+    /// (<see cref="IsWalkable"/>); the cells that hold their floors join the room graph only (<see cref="GroundRooms.FloorOf"/>).
+    /// </summary>
+    public GroundGalleries? Galleries { get; init; }
+
+    /// <summary>M6 redoubt: true when the full cell id holds a gallery's floor (<see cref="GroundGalleries.Floors"/>): a cell of the room graph that is no storey's.</summary>
+    /// <param name="cell">The full cell id.</param>
+    public bool IsGalleryFloor(uint cell) => Galleries is { } galleries && galleries.Floors.Contains(cell);
+
+    /// <summary>
     /// M6 14 holding plates (the owner, 2026-11-14): the ground's pressure plates (the profile's optional <c>plates</c> section: the weenie, its shape and spells, and each plate's place), walls of every walk over the ground's rooms
     /// (<see cref="GroundRooms.GraphOf"/>, <see cref="Lifestone.Client.Movement.Wayfinding.PlateKeepOff"/>) and jumped where one blocks the way; null for a ground without plates.
     /// </summary>
@@ -1052,6 +1062,16 @@ public sealed record GroundRanged(int DVal, double DVar, uint DamageTypes, int S
     /// <param name="wcid">Its weenie class id.</param>
     public LadderHitter Hitter(string name, uint wcid) => new(name, wcid, DVal, DVar, Strength);
 }
+
+/// <summary>
+/// M6 redoubt (the Holtburg Redoubt, landblock 0x0163): a dungeon's galleries. A gallery is a walkway or a landing whose floor polygons belong to cells of the room under it, while a body on it stands in the floorless cell above
+/// them (the dats; the physics body's cell on the dat walk, <c>HoltburgRedoubtDatTests</c>). The draft's rule leaves a floorless cell out of the storeys and never reaches the cells under it (their one portal is the opening
+/// overhead), so without this section the rooms on the two sides of a gallery are not joined. Facts only, each from the dats, named in <paramref name="Source"/>.
+/// </summary>
+/// <param name="Cells">The floorless cells a body stands in on a gallery: storey cells, though they hold no floor polygon.</param>
+/// <param name="Floors">The cells that hold the galleries' floor polygons: in the room graph, on no storey (no body's cell is one of them).</param>
+/// <param name="Source">Where the facts come from.</param>
+public sealed record GroundGalleries(CellSet Cells, CellSet Floors, string Source);
 
 /// <summary>M6 7 AY: where a corpse is safe to reach for its coin (the profile's optional <c>corpse_fetch</c>): anywhere on an outdoor ground, or a list of a dungeon's front cells. Absent: nowhere.</summary>
 /// <param name="Anywhere">True: every cell of the ground.</param>

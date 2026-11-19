@@ -612,8 +612,18 @@ public sealed class BuyTripStation(bool back = true, string? accountName = null,
         private TownTripInput TownInput(HuntingGround ground) => new(
             (S.State.Self.Position is { } at ? TownNetworkTrip.PlaceKeyOf(at.CellId >> 16, Context.Routes) : null) ?? TownNetworkTrip.PlaceKeyOf(ground.Home.LifestoneCell >> 16, Context.Routes),
             S.State.Self.Qualities.Level,
-            S.State.Self.Spellbook.Knows(Fighter.RecallHome.LifestoneRecallSpell),
+            RecallRead().Castable,
             Context.Routes.StartLifestone.Cell >> 16 == ground.Home.LifestoneCell >> 16);
+
+        /// <summary>
+        /// M6, the recall's components: whether Lifestone Recall can be the way back now (<see cref="RecallReadiness"/>). A journey whose facts hold no formula account (no autopilot set it) takes this station's (the same login name), so the
+        /// rung change the way back starts judges the pack on the same formula.
+        /// </summary>
+        private RecallReadiness.Read RecallRead()
+        {
+            Context.Facts.FormulaAccount ??= accountName;
+            return RecallReadiness.Of(S.State, Context.Facts, Context.Spells);
+        }
 
         /// <summary>
         /// M6 4 t4a: the hops of a trip by the Town Network, check, act, check: before, the body stands in the first portal's place (else the walk to the home lifestone's point, the travel file's start, and the check again); each hop a
@@ -671,7 +681,7 @@ public sealed class BuyTripStation(bool back = true, string? accountName = null,
         private IEnumerable<ActionHandle?> WayBack(HuntingGround ground, TownTripPlan? trip)
         {
             uint landblock;
-            if (trip is null || trip.HomeByRecall || S.State.Self.Spellbook.Knows(Fighter.RecallHome.LifestoneRecallSpell))
+            if (trip is null || trip.HomeByRecall || RecallRead().Castable)
             {
                 landblock = ground.Home.LifestoneCell >> 16;
                 Log($"walking: purpose=home (buy-trip: Lifestone Recall to {ground.Home.Town}, the way back)");
@@ -686,7 +696,8 @@ public sealed class BuyTripStation(bool back = true, string? accountName = null,
             else
             {
                 landblock = Context.Routes.StartLifestone.Cell >> 16;
-                Log($"walking: purpose=home (buy-trip: the book lacks Lifestone Recall; the rung change direction=home by portals ({trip.Home}) to {Context.Routes.StartPlace})");
+                var read = RecallRead();
+                Log($"walking: purpose=home (buy-trip: {(read.Known ? read.WhyNot : "the book lacks Lifestone Recall")}; the rung change direction=home by portals ({trip.Home}) to {Context.Routes.StartPlace})");
                 var run = new RungChangeStation(RungDirection.Home).Start(Context);
                 while (run.Step(S, S.Clock.Now) == ScenarioStatus.Running)
                 {

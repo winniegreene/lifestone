@@ -70,6 +70,47 @@ public sealed class F3WayBackTests(DatSetFixture fixture, ITestOutputHelper outp
         Assert.False(trip.Logged("purpose=ground"));
     }
 
+    /// <summary>
+    /// M6 audit (finding 9, the owner's decision of 2026-11-19): a trip whose visit leaves a big buff pass due (more lines than the ladder's <c>pass_home_over_lines</c>; the autopilot's
+    /// <c>JourneyFacts.PassAtHomeDue</c>) casts it at home: no way back is made, and the autopilot's known state at home takes the buff state and then the way out. Live 2026-11-19 (runs 2 to 4,
+    /// level 9): the trip walked 456 to 461 m back to the Redoubt, read "5 line(s) to cast ... home first" there, and recalled home to cast them, 3 m 38 s to 4 m 28 s lost every run.
+    /// </summary>
+    [RequiresDatsFact]
+    public void M6_audit_a_trip_that_leaves_a_big_buff_pass_due_makes_no_way_back()
+    {
+        var trip = new LogisticsStationTests.Trip(Outskirts).WithOutput(output);
+        var first = trip.Ground.Outdoor!.Cells[0];
+        trip.Vendor.StandAt(first.Cell, new System.Numerics.Vector3(first.Spot.X + 40, first.Spot.Y, 0));
+        var context = Context(trip);
+        context.Facts.PassAtHomeDue = _ => "5 line(s) to cast, the line for a walk is over 4"; // the level-9 trip's count
+        var run = new LogisticsStation(forced: true).Start(context);
+
+        var status = trip.Run(run);
+
+        Assert.Equal(ScenarioStatus.Succeeded, status);
+        Assert.True(run.Ok, run.VerdictFields());
+        var purposes = trip.Travel.Requests.Select(r => r.Purpose).ToList();
+        Assert.Equal(TravelPurpose.Home, purposes[0]);
+        Assert.DoesNotContain(purposes, p => p is TravelPurpose.Ground or TravelPurpose.Cell); // no walk and no recall back
+        Assert.True(trip.Logged("the buff pass is due at home (5 line(s) to cast, the line for a walk is over 4): there is no way back"));
+    }
+
+    [RequiresDatsFact]
+    public void M6_audit_a_trip_with_a_short_pass_due_makes_its_way_back_as_before()
+    {
+        var trip = new LogisticsStationTests.Trip(Outskirts).WithOutput(output);
+        var first = trip.Ground.Outdoor!.Cells[0];
+        trip.Vendor.StandAt(first.Cell, new System.Numerics.Vector3(first.Spot.X + 40, first.Spot.Y, 0));
+        var context = Context(trip);
+        context.Facts.PassAtHomeDue = _ => null; // a short pass: the ground takes it
+        var run = new LogisticsStation(forced: true).Start(context);
+
+        trip.Run(run);
+
+        Assert.Equal(TravelPurpose.Cell, trip.Travel.Requests[^1].Purpose); // the way back, as before
+        Assert.False(trip.Logged("the buff pass is due at home"));
+    }
+
     [RequiresDatsFact]
     public void An_outdoor_ground_that_is_not_hunted_on_foot_is_a_loud_stop_by_name_and_the_trip_makes_no_place()
     {

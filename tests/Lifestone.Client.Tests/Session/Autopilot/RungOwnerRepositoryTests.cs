@@ -16,9 +16,9 @@ public sealed partial class RungOwnerRepositoryTests
         ("Session/Autopilot/RungOwner.cs", string.Empty, "the owner"),
         ("Session/Grounds/Ladder.cs", "public LadderRung RungFor(int level)", "its definition"),
         ("Session/Mage/RungGateRule.cs", string.Empty, "the gate's own rule, which the owner walks"),
-        ("Session/Mage/ClimberHealthRule.cs", "ladder.RungFor(level) is not { Health:", "the rung's health line for a level: no ground"),
+        ("Session/Mage/ClimberHealthRule.cs", "NeedFor(ladder, ladder.RungFor(level))", "the rung's health line for a level: no ground (M6 audit: NeedAt reads it through NeedFor, which the spend also gives the rung she hunts)"),
         ("Session/Mage/GearFloor.cs", "ladder.RungFor(1).MoveOn.Level", "the first rung's data: no ground"),
-        ("Session/Mage/WornRestorer.cs", "ladder.RungFor(level) is { } r && string.Equals(r.GroundKey, ground.Key", "reads the rung of the ground it is given: chooses none"),
+        ("Session/Mage/WornRestorer.cs", "ladder.RungFor(level) is { } r && (string.Equals(r.GroundKey, ground.Key", "reads the rung of the ground it is given: chooses none"),
         ("Session/Autopilot/AutopilotScenario.Ladder.cs", "internal static LadderDecision DecideRung(", "its definition"),
         ("Session/Autopilot/AutopilotScenario.Ladder.cs", "var rung = ladder.RungFor(level);", "DecideRung's own band"),
         ("Session/Autopilot/AutopilotScenario.Ladder.cs", "internal static HuntingGround? LadderGroundFor(", "its definition"),
@@ -115,9 +115,9 @@ public sealed partial class RungOwnerRepositoryTests
     [Fact]
     public void A_named_rung_is_read_for_the_book_and_never_past_a_shut_gate_or_above_her_level()
     {
-        Assert.Equal("tusker-burrow", Ask(17, named: "burrow").Ground?.Key); // the run read its buffs live
-        Assert.Equal("holtburg-outskirts", Ask(17, named: "lodge", knows: static (_, _) => false).Ground?.Key); // a book that does not hold the gate's lines: held, whoever named it
-        Assert.Equal("holtburg-outskirts", Ask(9, named: "lodge").Ground?.Key); // above her level: ignored (no plan read: no rung ahead of the band, RungOwner.Ahead)
+        Assert.Equal("tusker-retreat", Ask(17, named: "burrow").Ground?.Key); // the run read its buffs live (M6 retreat: the burrow rung's ground is the Tusker Retreat)
+        Assert.Equal("holtburg-redoubt", Ask(17, named: "lodge", knows: static (_, _) => false).Ground?.Key); // a book that does not hold the gate's lines: held, whoever named it
+        Assert.Equal("holtburg-redoubt", Ask(9, named: "lodge").Ground?.Key); // above her level: ignored (no plan read: no rung ahead of the band, RungOwner.Ahead)
     }
 
     [Fact]

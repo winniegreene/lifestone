@@ -471,6 +471,7 @@ public sealed partial class AutopilotScenario : IScenario, IDisposable
         _ground = context.Dungeon;
         _manaWatch = new WornManaWatch(_log, LogCategory);
         var formulaAccount = JourneyStations.IsHostFactory(factory) ? JourneyStations.AccountNameFor(factory, context.Log) : context.Account; // M6 1 w, 1-R9: the name the server hashes (the host's login name; null, with a warning, when the host gave none: the foci rule), not the account key h1 passed; a scripted factory (a test's) keeps the context's
+        context.Facts.FormulaAccount = formulaAccount; // M6, the recall's components: every way-home decision of the run judges Lifestone Recall's components on this account's formula (RecallReadiness)
         _options = _options with { Buff = (_options.Buff ?? new BuffOptions()) with { AccountName = formulaAccount, ComponentNeeds = ComponentNeeds.Shared } }; // M6 7 AT: the passes name a short component to the counters; M6 1 h1 (TODO(m6-account-formula-callers)): the account's name reaches the autopilot's buff cycle and vitals guard through the buff options
         _floorOnly = ComponentFloor.FloorOnly(_ground, context.Spells, formulaAccount, school => !CharacterPolicy.For(context.Character).StarterFoci || school is DatReaderWriter.Enums.MagicSchool.WarMagic or DatReaderWriter.Enums.MagicSchool.LifeMagic); // M6 1 h1: the climber holds the starter foci of War and Life only (StartupAudit.AssumedFoci); any other character holds the foci its kit lists. M5 7 P7s (D148): a carried line only the war options need drops them at its floor, not the run
         _counters = Quartermaster.TripDesk.Stated(_ground, _floorOnly.Keys); // M6 16 E5d: the job's statement; the session's trip desk adopts it at the first step (AutopilotScenario.Trips.cs)
@@ -478,6 +479,7 @@ public sealed partial class AutopilotScenario : IScenario, IDisposable
         _host = host;
         _watchdogs = new AutopilotWatchdogs(options.WatchdogScale, options.WatchdogRecoveries, AutopilotWatchdogs.FightBaseSeconds(_ground), options.Job == AutopilotJob.LevelUp ? AutopilotWatchdogs.ClimberPassSeconds(LadderLoader.WarMage.Vitals) : 0);
         _context.Facts.MinutesStopDue = TripSafePointStop; // M6 8 E: the trip's safe point reads the same rule as StopDue; M6 item 14: and a pending stop request, so no way back is begun under one
+        _context.Facts.PassAtHomeDue = options.Job == AutopilotJob.LevelUp ? PassAtHomeDue : null; // M6 audit (finding 9): a trip that leaves a big pass due casts it at home, never in the ground
         _context.Facts.BuffBotOn = BuffBotApplies; // M6 item 14: the trip's stop at the buff bot reads the same rule as the Home arrow's
         _context.Facts.CasterSpend = options.Job == AutopilotJob.LevelUp ? LadderCasterFacts : null; // M6 14 (m6-caster-spend): the trip's spend reads the held casters as the level-up spend does
         _context.Facts.LoreSpend = options.Job == AutopilotJob.LevelUp ? LadderLoreFacts : null; // M6 14 (m6-lore-spend): and the pieces that wait on her Arcane Lore
@@ -770,6 +772,7 @@ public sealed partial class AutopilotScenario : IScenario, IDisposable
         AnswerUnasked(session); // M6 5 Q5: the server's unasked Yes/No (m5-6-headless-confirm-reply)
         LadderSpendTick(session); // M6 7 R: a mid-run spend's raises, in any state
         KillTaskWatch(session); // M6 14 guard task: the server's lines of the kill tasks (the counter, the giver's talk), in any state
+        TrophyPickupWatch(session); // M6 audit: a tusk's first moment in the pack starts its quest's timer (AutopilotScenario.TrophyPickups.cs)
         VillaWatch(session); // M6 villa: the session's one HouseQuery while the status is unread, and the run's money at its start
         BuffBotCoverSync(session); // M6 item 14 S3: the plans read what the bot covers
         if (BodyApartStep(session) is { } apart)
@@ -2095,7 +2098,7 @@ public sealed partial class AutopilotScenario : IScenario, IDisposable
         }
 
         var state = session.State;
-        var input = AutopilotTravelRule.Input(state, _ground, _context.Facts, _context.Routes, RungDirection.Out, _context.Grounds);
+        var input = AutopilotTravelRule.Input(state, _ground, _context.Facts, _context.Routes, RungDirection.Out, _context.Grounds, _context.Spells);
         var decided = AutopilotTravelRule.Out(input, AutopilotTravelRule.BookRead(state.Self.Spellbook), _context.Routes);
         if (!quiet)
         {
@@ -2144,7 +2147,7 @@ public sealed partial class AutopilotScenario : IScenario, IDisposable
         }
 
         var state = session.State;
-        var input = AutopilotTravelRule.Input(state, _ground, _context.Facts, _context.Routes, RungDirection.Home, _context.Grounds);
+        var input = AutopilotTravelRule.Input(state, _ground, _context.Facts, _context.Routes, RungDirection.Home, _context.Grounds, _context.Spells);
         var decided = AutopilotTravelRule.Home(input, AutopilotTravelRule.BookRead(state.Self.Spellbook), _context.Routes);
         _log.Info(LogCategory, TravelLine("home", input, decided));
         return decided;
@@ -2440,7 +2443,7 @@ public sealed partial class AutopilotScenario : IScenario, IDisposable
                 _log.Warn(LogCategory, $"autopilot fight: the counters say stop: {verdict.Reason}");
                 reason = FightStopReason.LogisticsStop;
             }
-            else if (verdict.IsTrip && !_tripLoop.Holding(_tally.Kills + kills) && !StintHolds(verdict) && !TripWaitsForLull(verdict.Reason))
+            else if (verdict.IsTrip && !_tripLoop.Holding(_tally.Kills + kills) && !StintHolds(verdict) && !BotHourHolds(session, verdict) && !TripWaitsForLull(verdict.Reason))
             {
                 _log.Info(LogCategory, $"autopilot fight: the counters say a trip is due: {verdict.Reason}");
                 _tripCadence = verdict.Cause == LogisticsCause.Cadence;
@@ -3364,7 +3367,7 @@ public sealed partial class AutopilotScenario : IScenario, IDisposable
 
         var plan = BuyTripRule.PlanLevel(state.Self.Qualities, LadderLoader.WarMage, out var planWhy);
         var decision = BuyTripRule.Decide(_ground, TripReader, plan, planWhy, ScrivenerCatalog.Default, GroundCatalog.All); // M6 16 E5d: the counts the audit's kit read just counted (the reading twin's)
-        var call = AutopilotBuyTripRule.Call(decision, _context.Facts, state.Self.Position is { } at ? (ushort)(at.CellId >> 16) : null, ScrivenerCatalog.Default, _context.Routes, AutopilotBuyTripRule.TownInput(state, _ground, _context.Routes), LeverDoors.Default); // M6 4 F1 (4-R4): the station's own choice and inputs
+        var call = AutopilotBuyTripRule.Call(decision, _context.Facts, state.Self.Position is { } at ? (ushort)(at.CellId >> 16) : null, ScrivenerCatalog.Default, _context.Routes, AutopilotBuyTripRule.TownInput(state, _ground, _context.Routes, _context.Facts, _context.Spells), LeverDoors.Default); // M6 4 F1 (4-R4): the station's own choice and inputs
         _buyTripWhy = call.Reason;
         _log.Info(LogCategory, StartupAudit.Line("buy_trip", $"{string.Join(',', lines)}: {(call.Queue ? "queued" : "not queued")} via={call.Via}: {call.Reason}; {decision.Kind} {decision.Token}: held {decision.Held}, want {decision.Want}", call.Queue ? "the buy-trip station at the trip point; the pack is read again after it" : "the audit's named stop"));
         if (!call.Queue)
@@ -4106,7 +4109,7 @@ public sealed partial class AutopilotScenario : IScenario, IDisposable
             return null;
         }
 
-        var input = AutopilotTravelRule.Input(session.State, _ground, _context.Facts, _context.Routes, RungDirection.Home, _context.Grounds);
+        var input = AutopilotTravelRule.Input(session.State, _ground, _context.Facts, _context.Routes, RungDirection.Home, _context.Grounds, _context.Spells);
         var plan = RungRoute.Decide(input with { KnowsLifestoneRecall = false, Direction = RungDirection.Home }, _context.Routes);
         if (plan.Stop is not null || plan.Legs.Count == 0)
         {

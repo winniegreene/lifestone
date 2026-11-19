@@ -166,7 +166,7 @@ public sealed class XpSpendAccountTests(ITestOutputHelper output)
         Assert.Contains(h.Log.Lines, l => l.Contains("xp: held: Max Health 2 -> 3 (a floor's rank): it has taken 146 of this allocation's 4,013, and rank 3 (73) would pass its 5% of the allocation (200): the cap wins; it waits for the next allocation and the stats after it are tried", StringComparison.Ordinal));
         Assert.Contains(h.Log.Lines, l => l.Contains("xp: held: Focus 3 -> 4: it has taken 330 of this allocation's 4,013, and rank 4 (110) would pass its 10% of the allocation (401)", StringComparison.Ordinal));
         Assert.True(Raised(server, S, MageTemplate.WarMagic) > 0, "a floor the account holds does not make the pool wait: the shares after it are bought");
-        Assert.Equal(["cap: health: the floor wants base health 142 on the rung burrow and the cap allows 13 (129 short): Max Health and Endurance are each held to 5% of the experience earned (500 of 10,000); the cap wins (the owner's rule, D112): what the floor cannot buy goes to her magic"], rule.CapConflicts);
+        Assert.Equal(["cap: health: the floor wants base health 288 on the rung burrow and the cap allows 13 (275 short): Max Health and Endurance are each held to 5% of the experience earned (500 of 10,000); the cap wins (the owner's rule, D112): what the floor cannot buy goes to her magic"], rule.CapConflicts);
         Assert.Contains("| Endurance 110 2.7% run 1.1%/5% |", rule.SharesNote, StringComparison.Ordinal);
         Assert.Contains("| Max Health 146 3.6% run 1.5%/5% |", rule.SharesNote, StringComparison.Ordinal);
         Assert.Contains("| Focus 330 8.2% run 3.3%/10% |", rule.SharesNote, StringComparison.Ordinal);

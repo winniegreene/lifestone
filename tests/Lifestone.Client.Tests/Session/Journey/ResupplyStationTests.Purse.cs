@@ -46,7 +46,7 @@ public sealed partial class ResupplyStationTests
     {
         var row = GroundCatalog.Get("holtburg-outskirts").VendorOf(716)!;
         var homed = GroundCatalog.All.Where(g => g.Home.Town == "Holtburg" && g.Vendors.Count > 0).ToList();
-        Assert.Equal(16, homed.Count); // M6 14 armory: the Tusker Armory, the sixteenth
+        Assert.Equal(18, homed.Count); // M6 14 armory: the Tusker Armory, the sixteenth; M6 redoubt: the Holtburg Redoubt, the seventeenth; M6 retreat: the Tusker Retreat, the eighteenth
         foreach (var ground in homed)
         {
             var here = ground.VendorOf(716);
@@ -214,16 +214,17 @@ public sealed partial class ResupplyStationTests
         Assert.Equal(ScenarioStatus.Succeeded, home.Stations.Run(run, 900, pump: home.Shops.Pump));
 
         var dump = string.Join(" | ", home.Lines.Where(l => l.Contains("town trip", StringComparison.Ordinal) || l.Contains("learn_trip", StringComparison.Ordinal)));
-        Assert.True(home.Logged("check before: to Stonehold for Flame Bolt VI, Drain Health Other VI, Heal Self VI at Grand Master Scrivener of War Magic, Grand Master Scrivener of Life Magic; hops holtburg-to-network,network-to-stonehold; home by portals:stonehold; the coin 25000 and the notes 0 (0 held) do not cover the cheapest of the scrolls (Flame Bolt VI at 50000; 150000 in all): no trip to this town"), dump);
-        Assert.True(home.Logged("learn_trip: town=Stonehold vendors=20224+20220 spells=85+1242+1161 hops=holtburg-to-network,network-to-stonehold travel=town-network bought=0 learned=0 home=portals:stonehold ok=no reason=purse-short"), dump);
+        // M6 sprint (2026-11-19): the sustain lines stop at the plan's level on her skill (SustainLevelTests): Drain Health Other VI and Heal Self VI are no longer Stonehold's, nor Drain Health Other V Dryreach's
+        Assert.True(home.Logged("check before: to Stonehold for Flame Bolt VI at Grand Master Scrivener of War Magic; hops holtburg-to-network,network-to-stonehold; home by portals:stonehold; the coin 25000 and the notes 0 (0 held) do not cover the cheapest of the scrolls (Flame Bolt VI at 50000; 50000 in all): no trip to this town"), dump);
+        Assert.True(home.Logged("learn_trip: town=Stonehold vendors=20224 spells=85 hops=holtburg-to-network,network-to-stonehold travel=town-network bought=0 learned=0 home=portals:stonehold ok=no reason=purse-short"), dump);
         Assert.True(home.Logged("learn: town trip: recovery: no trip to Stonehold (purse-short); the plan's next town is tried, and the next trip checks Stonehold again"), dump);
 
         // the same trip goes on to Dryreach and buys what the purse pays there, cheapest first; the two it cannot pay wait by name
-        Assert.True(home.Logged("check before: to Dryreach for Armor Self V, Drain Health Other V, Heal Self V, Mana Renewal Self V at Master Scrivener of Life Magic; hops holtburg-to-network,network-to-dryreach; home by portals:dryreach; the coin 25000 and the notes 0 (0 held) cover 20000 of the scrolls 40000: buys Armor Self V, Drain Health Other V (cheapest first); Heal Self V, Mana Renewal Self V wait(s) for the purse; the coin pays: no note is changed"), dump);
-        Assert.True(home.Logged("learn: town trip: Heal Self V (1160) waits: the purse pays 20000 of Dryreach's 40000 and its scroll costs 10000"), dump);
+        Assert.True(home.Logged("check before: to Dryreach for Armor Self V, Heal Self V, Mana Renewal Self V at Master Scrivener of Life Magic; hops holtburg-to-network,network-to-dryreach; home by portals:dryreach; the coin 25000 and the notes 0 (0 held) cover 20000 of the scrolls 30000: buys Armor Self V, Heal Self V (cheapest first); Mana Renewal Self V wait(s) for the purse; the coin pays: no note is changed"), dump);
+        Assert.True(home.Logged("learn: town trip: Mana Renewal Self V (216) waits: the purse pays 20000 of Dryreach's 30000 and its scroll costs 10000"), dump);
         Assert.Contains(home.Lines, l => l.Contains("learn_trip_hop: n=1 edge=holtburg-to-network", StringComparison.Ordinal)); // she left for Dryreach (the rig holds no portal: the hop is the named stop)
-        Assert.True(home.Logged("learn_trip: town=Dryreach vendors=20219 spells=1311+1241 hops=holtburg-to-network,network-to-dryreach travel=town-network bought=0 learned=0 home=portals:dryreach ok=no reason=hop:"), dump);
-        Assert.Equal(["85:purse-short", "1242:purse-short", "1161:purse-short", "1160:purse-short", "216:purse-short"], run.LearnRefusals.Where(r => r.EndsWith(":purse-short", StringComparison.Ordinal)));
-        Assert.All(new uint[] { 85, 1242, 1161, 1160, 216 }, id => Assert.False(memory.LearnRefused.ContainsKey(id))); // a purse refusal is not remembered: the next trip checks again
+        Assert.True(home.Logged("learn_trip: town=Dryreach vendors=20219 spells=1311+1160 hops=holtburg-to-network,network-to-dryreach travel=town-network bought=0 learned=0 home=portals:dryreach ok=no reason=hop:"), dump);
+        Assert.Equal(["85:purse-short", "216:purse-short"], run.LearnRefusals.Where(r => r.EndsWith(":purse-short", StringComparison.Ordinal)));
+        Assert.All(new uint[] { 85, 216 }, id => Assert.False(memory.LearnRefused.ContainsKey(id))); // a purse refusal is not remembered: the next trip checks again
     }
 }

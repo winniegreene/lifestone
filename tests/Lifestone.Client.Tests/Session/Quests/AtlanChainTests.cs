@@ -44,7 +44,7 @@ public sealed class AtlanChainTests
     {
         var q = File;
         Assert.Null(q.Giver);
-        Assert.Equal(new QuestLadder(75, 126, true), q.Ladder);
+        Assert.Equal(new QuestLadder(65, 126, true), q.Ladder); // M6 audit (the owner's decision of 2026-11-19, fix 10): from 65, where the projection reaches the wand's 290; the roll's floor gates the start
         Assert.Null(q.TimerSeconds);
         Assert.Null(q.Level);
         Assert.Equal(StonedWand, q.Done.Item!.Wcid);

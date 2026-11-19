@@ -206,20 +206,22 @@ public sealed partial class RungChangeStation : IStation
             var recallSpell = ground.Portal?.RecallSpell ?? DenTravelStation.PortalRecallSpell;
             var tieSpell = ground.Portal?.TieSpell ?? DenTravelStation.PortalTieSpell;
             var holdsGem = gem is not null && HeldOf(gem.Wcid).Count > 0;
+            var recallRead = RecallReadiness.Of(S.State, Context.Facts, Context.Spells);
             var input = new RungRouteInput(
                 ground,
                 direction,
                 where,
                 place?.Key ?? RungRoute.Hex(landblock),
                 _level,
-                book.Knows(Fighter.RecallHome.LifestoneRecallSpell) && !Context.Facts.LifestoneRecallUnavailable, // M6 7 AV: a recall refused for components is not available this run
+                recallRead.Castable, // M6 7 AV: a recall refused for components is not available this run; M6, the recall's components: nor is one the pack is short for (RecallReadiness)
                 book.Knows(recallSpell),
                 book.Knows(tieSpell),
                 Context.Facts.TieOf(ground), // M6 4 F1 (4-R2): the one slot holding another ground is untied here
                 holdsGem,
                 where == RungWhere.Elsewhere ? RungRoute.BodyGroundOf(here.CellId, ground, Context.Grounds) : null, // M6 4 F1 (4-R3): the way home from the ground that holds the body
                 stopAt, // M6 6 C2: the plan cut at the corpse's place
-                Context.Facts.FailedRoutesOf(ground.Key)); // M6 7 M: a route that failed on a hop this run is planned last
+                Context.Facts.FailedRoutesOf(ground.Key), // M6 7 M: a route that failed on a hop this run is planned last
+                recallRead.WhyNot);
             _plan = RungRoute.Decide(input, routes);
             if (direction == RungDirection.Home && input.KnowsLifestoneRecall && RungRoute.Decide(input with { KnowsLifestoneRecall = false }, routes) is { Stop: null, Legs.Count: > 0, Hops: 0 } onFoot)
             {

@@ -31,7 +31,7 @@ internal static class Commands
     /// <summary>Her sheet as the server last saved her.</summary>
     public static int Her(Options options)
     {
-        var her = World.RestoreHer(options.Her, options.Wield);
+        var her = World.RestoreHer(options.Her, options.Wield, options.Bars);
         var text = new StringBuilder();
         text.AppendLine(Line($"{her.Name}, level {her.Level}, as the server last saved her (ACE saves a player every {PropertyManager.GetLong("player_save_interval").Item} s and at logout)"));
         text.AppendLine(Line($"  health {her.Health.Current}/{her.Health.MaxValue}  stamina {her.Stamina.Current}/{her.Stamina.MaxValue}  mana {her.Mana.Current}/{her.Mana.MaxValue}"));
@@ -81,7 +81,7 @@ internal static class Commands
     /// <summary>One of her spells: its cast as the server times it, its fizzle chance and its mana.</summary>
     public static int Cast(Options options)
     {
-        var her = World.RestoreHer(options.Her, options.Wield);
+        var her = World.RestoreHer(options.Her, options.Wield, options.Bars);
         var subject = options.Subject ?? throw new ArgumentException("cast needs a spell's name or id");
         var spells = (her.Biota.PropertiesSpellBook?.Keys ?? []).Select(id => new Spell((uint)id)).Where(s => !s.NotFound).ToList();
         var spell = uint.TryParse(subject, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id)
@@ -146,7 +146,7 @@ internal static class Commands
     public static int Matchup(Options options)
     {
         var monster = World.BuildCreature(options.Subject ?? throw new ArgumentException("matchup needs a creature's name or weenie class id"));
-        var her = World.RestoreHer(options.Her, options.Wield);
+        var her = World.RestoreHer(options.Her, options.Wield, options.Bars);
         Console.Write(MatchupReport(her, monster, options));
         return 0;
     }
@@ -263,6 +263,30 @@ internal static class Commands
                 text.AppendLine(Line($"    {pack} on her: {kill.MeanSeconds * pack,6:0.0} s to clear, {lost,7:0.0} health lost on average, she dies in {dies,6:P1} of fights{(dies > 0 ? "  <- she must heal, drain or leave" : string.Empty)}"));
             }
 
+            // With her heals: the same creature and the same sampled attacks, her bolt the client's war pick, every cast chosen by the client's own rules and played through ACE (InFight.cs).
+            var herFight = HerFight.Of(her, options.CastOverhead, World.TriedIds(options.With));
+            var picked = hers.OrderBy(s => InFightRules.KillPrice(s.Kill.MeanSeconds, s.Kill.MeanCasts, s.Kill.MeanMana)).First();
+            var foe = FoeFight.Of(herFight, monster, picked.Strike, race);
+            var fights = options.HealedFights ?? DefaultHealedFights;
+            var sizes = Enumerable.Range(1, 6).Concat(options.AtOnce > 6 ? [options.AtOnce] : []).ToList();
+            var traced = new StringBuilder();
+            var healed = sizes.Select(n => (Label: Line($"{n} on her"),
+                Healed: InFight.Run(herFight, Enumerable.Repeat(foe, n).ToList(), FightMode.Heals, fights, 20261119 + n, options.Trace ? s => traced.AppendLine(s) : null),
+                BoltsOnly: (PackVerdict?)InFight.Run(herFight, Enumerable.Repeat(foe, n).ToList(), FightMode.BoltsOnly, fights, 20261119 + n))).ToList();
+            text.AppendLine();
+            text.Append(HealedHeader(her, fights));
+            text.Append(InFight.Table(healed));
+            text.AppendLine(InFight.Casts(healed));
+            if (options.Trace)
+            {
+                text.AppendLine("  the first fight of each pack, step by step (--trace):");
+                text.Append(traced);
+            }
+            text.AppendLine(Line($"  her bolt here: {picked.Strike.Spell.Name}, the client's war pick (WarSpellPicker: the least seconds a kill with each cast's overhead and its mana at the dance's seconds a point): {InFightRules.KillPrice(picked.Kill.MeanSeconds, picked.Kill.MeanCasts, picked.Kill.MeanMana):0.0} s a kill all in{(picked.Strike.Spell.Id == best.Spell.Id ? string.Empty : Line($"; the race above uses the fastest killer, {best.Spell.Name}, {InFightRules.KillPrice(kill.MeanSeconds, kill.MeanCasts, kill.MeanMana):0.0} s all in"))}"));
+            text.AppendLine("  her means: " + herFight.Describe());
+            text.AppendLine("  'bolts only' is the same engine with no heal, no fill and no mana count: the race's model above played again (a fight past a sampled fight's 60 s goes on with the second half of another, where the race stops counting)");
+            text.AppendLine("  " + InFight.Gaps);
+
             var modifier = her.GetXPAndLuminanceModifier(XpType.Kill) * PropertyManager.GetDouble("xp_modifier").Item;
             var xp = (monster.XpOverride ?? 0) * modifier;
             text.AppendLine();
@@ -290,10 +314,143 @@ internal static class Commands
                 var earned = dies <= 0.1 ? Line($"{rate,7:0.00}") : "      -";
                 text.AppendLine(Line($"  {pack,8} {fight,8:0.0} {lost,12:0.0} {healSeconds,7:0.0} {mana,11:0.0} {manaSeconds,7:0.0} {earned} {dies,36:P1}"));
             }
+
+            // The same with the fight played by her own rules: its seconds, and the health and mana it leaves missing, paid back between pulls as above.
+            text.AppendLine();
+            text.AppendLine(Line($"ALL IN WITH HER HEALS   the fight as WITH HER HEALS plays it (her heals, drains and presses inside it); then the health and the mana it leaves missing paid back before the next pull, as above"));
+            text.AppendLine(Line($"  {"at once",-10} {"fight s",8} {"health lost",12} {"heal s",7} {"mana spent",11} {"mana s",7} {"M xp/h",7} {"she dies",9} {"out of mana",12}"));
+            foreach (var (label, v, _) in healed)
+            {
+                var pack = int.Parse(label.Split(' ')[0], CultureInfo.InvariantCulture);
+                var lost = double.IsNaN(v.EndHealthWon) ? double.NaN : her.Health.MaxValue - v.EndHealthWon;
+                var healSeconds = healRate > 0 ? lost / healRate : double.PositiveInfinity;
+                var mana = Math.Max(0, v.ManaNetWon) + (lost * manaPerHealth);
+                var manaSeconds = manaRate > 0 ? mana / manaRate : double.PositiveInfinity;
+                var rate = xp * pack / (v.ClearSeconds + healSeconds + manaSeconds) * 3600 / 1e6;
+                // As above: past one fight in ten that is not won (a death, or out of mana with creatures alive) the pull is not a way to earn.
+                var earned = v.NotWon <= 0.1 && !double.IsNaN(rate) ? Line($"{rate,7:0.00}") : "      -";
+                text.AppendLine(Line($"  {label,-10} {Num(v.ClearSeconds),8} {Num(lost),12} {Num(healSeconds),7} {Num(mana),11} {Num(manaSeconds),7} {earned} {v.Dies,9:P1} {v.OutOfMana,12:P1}"));
+            }
         }
 
         return text.ToString();
     }
+
+    /// <summary>The fights of each pack with her heals in matchup (2,000, as the race's).</summary>
+    public const int DefaultHealedFights = 2000;
+
+    /// <summary>The header of a table of fights with her heals.</summary>
+    private static string HealedHeader(Player her, int fights)
+    {
+        var text = new StringBuilder();
+        text.AppendLine(Line($"WITH HER HEALS   the fight with every cast of hers chosen by the client's own rules and played through ACE on these objects ({fights:N0} fights each, from her full health {her.Health.MaxValue}, stamina {her.Stamina.MaxValue} and mana {her.Mana.MaxValue}):"));
+        text.AppendLine("  the emergency's heal line and pick (FightEmergency, HealPick.ChooseNow: Heal Self or Drain Health Other at the fullest creature), then the climber's fills (VitalsPolicy.Decide on the ladder's lines: presses, stamina drains,");
+        text.AppendLine("  health drains), then her bolt at the target the kill order keeps (TargetSwitch); a drain takes its share of what its target holds now; mana, stamina and health spent and regained as ACE does; the creatures attack throughout");
+        text.AppendLine("  'out of mana' ends a fight with creatures alive and no bolt or press her mana lets her try: a flee-or-die moment, not a win; 'lowest health' counts a death as 0; 'heals cast' and 'mana spent' are a fight's");
+        return text.ToString();
+    }
+
+    /// <summary>Her against a mixed pack on her at once (<c>matchup --pack</c>): with her heals, and with bolts only.</summary>
+    public static int MatchupPack(Options options)
+    {
+        var her = World.RestoreHer(options.Her, options.Wield, options.Bars);
+        var herFight = HerFight.Of(her, options.CastOverhead, World.TriedIds(options.With));
+        var bolts = Strikes.BoltsOf(her);
+        if (bolts.Count == 0)
+        {
+            throw new ArgumentException($"{her.Name} knows no single-projectile war spell: no fight to play");
+        }
+
+        var text = new StringBuilder();
+        var entries = ParsePack(options.Pack ?? string.Empty);
+        var pack = new List<FoeFight>();
+        text.AppendLine(Line($"{her.Name.ToUpperInvariant()} (level {her.Level}) AGAINST A PACK OF {entries.Sum(e => e.Count)} AT ONCE"));
+        text.AppendLine("Every number is ACE's own code run offline on these objects: nothing here is an estimate.");
+        text.AppendLine();
+        text.AppendLine(Line($"  {"creature",-28} {"wcid",6} {"lvl",4} {"count",5} {"health",6} {"her bolt",-20} {"s a kill",8} {"its hp/s on her",15} {"her Life lands",14} {"drain takes",11}"));
+        foreach (var (subject, count) in entries)
+        {
+            var monster = World.BuildCreature(subject);
+            var health = (int)monster.Health.MaxValue;
+            var regen = RegenPerTick(monster);
+            var (strike, kill) = bolts.Select(b => Strikes.Of(her, monster, b, options.Casts)).Select(s => (Strike: s, Kill: Kills(s, health, regen, options.CastOverhead)))
+                .OrderBy(s => InFightRules.KillPrice(s.Kill.MeanSeconds, s.Kill.MeanCasts, s.Kill.MeanMana)).First(); // the client's war pick (WarSpellPicker), as matchup's fights with her heals
+            var blows = Blows.Sample(monster, her, options.Fights, options.FightSeconds, applyDebuffs: false);
+            if (blows.Blows.Any(b => b.Kind == BlowKind.SpellDebuff))
+            {
+                blows = Blows.Sample(monster, her, options.Fights, options.FightSeconds, applyDebuffs: true); // the race's: its debuffs staying on her
+            }
+
+            var foe = FoeFight.Of(herFight, monster, strike, blows);
+            pack.AddRange(Enumerable.Repeat(foe, count));
+            text.AppendLine(Line($"  {Clip(monster.Name, 28),-28} {monster.WeenieClassId,6} {monster.Level ?? 0,4} {count,5} {health,6} {Clip(strike.Spell.Name, 20),-20} {kill.MeanSeconds,8:0.0} {blows.DamagePerSecond,15:0.00} {foe.Rules.DrainLand,14:P1} {foe.Rules.DrainResist,11:P0}"));
+            foreach (var note in blows.Notes)
+            {
+                text.AppendLine("    NOTE " + note);
+            }
+        }
+
+        // The kill order at full health: TargetSwitch folded over the pack, each kill taking the next.
+        var view = new FightView { Foes = [.. pack.Select(p => new Foe(p.Rules))] };
+        var order = new List<string>();
+        for (var target = InFightRules.ChooseTarget(view); target >= 0; target = InFightRules.ChooseTarget(view))
+        {
+            order.Add(view.Foes[target].Kind.Name);
+            view.Foes[target].Health = 0;
+        }
+
+        text.AppendLine("  kill order at full health (TargetSwitch: the most damage a second on her removed for each second of casting): " + string.Join(", ", order));
+        var fights = options.HealedFights ?? DefaultHealedFights;
+        var label = Line($"{pack.Count} at once");
+        var traced = new StringBuilder();
+        var rows = new List<(string Label, PackVerdict Healed, PackVerdict? BoltsOnly)>
+        {
+            (label, InFight.Run(herFight, pack, FightMode.Heals, fights, 20261119, options.Trace ? s => traced.AppendLine(s) : null), InFight.Run(herFight, pack, FightMode.BoltsOnly, fights, 20261119)),
+            (Line($"{pack.Count} no fills"), InFight.Run(herFight, pack, FightMode.EmergencyOnly, fights, 20261119), null),
+        };
+        text.AppendLine();
+        text.Append(HealedHeader(her, fights));
+        text.Append(InFight.Table(rows));
+        text.AppendLine(InFight.Casts(rows));
+        if (options.Trace)
+        {
+            text.AppendLine("  the first fight, step by step (--trace):");
+            text.Append(traced);
+        }
+        var won = rows[0].Healed;
+        text.AppendLine(Line($"  her mana: {her.Mana.MaxValue} at the start; her casts cost {won.ManaSpentMean:0.0} a fight; a won fight ends {(double.IsNaN(won.ManaNetWon) ? "-" : won.ManaNetWon.ToString("0.0", CultureInfo.InvariantCulture))} under its start (her presses and regeneration counted)"));
+        text.AppendLine(Line($"  'no fills' is the same fight with the vitals policy's fills left out (the emergency's heals and the bolt; a press only when the bolt cannot be tried): not a rule of the client, a measure of what its fills add or cost"));
+        text.AppendLine("  her means: " + herFight.Describe());
+        text.AppendLine("  " + InFight.Gaps);
+        Console.Write(text);
+        return 0;
+    }
+
+    /// <summary>A mixed pack: "A x N" entries separated by commas, A a weenie class id or an exact creature name, N how many (1 when absent).</summary>
+    /// <param name="pack">The entries.</param>
+    public static IReadOnlyList<(string Subject, int Count)> ParsePack(string pack)
+    {
+        var entries = new List<(string, int)>();
+        foreach (var entry in pack.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var cut = entry.LastIndexOf('x');
+            if (cut > 0 && int.TryParse(entry[(cut + 1)..].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var count) && count > 0)
+            {
+                entries.Add((entry[..cut].Trim(), count));
+            }
+            else
+            {
+                entries.Add((entry, 1));
+            }
+        }
+
+        return entries.Count == 0 ? throw new ArgumentException("--pack names no creature (\"WCID x N,WCID x N\")") : entries;
+    }
+
+    private static string Clip(string text, int width) => text.Length <= width ? text : text[..(width - 1)] + "~";
+
+    /// <summary>A figure to one decimal, or "-" where no fight gave one (none won).</summary>
+    private static string Num(double value) => double.IsNaN(value) || double.IsInfinity(value) ? "-" : value.ToString("0.0", CultureInfo.InvariantCulture);
 
     private static string BlowTable(BlowReport report)
     {

@@ -226,8 +226,9 @@ public static class GroundDraft
     /// <param name="arrival">The arrival cell (a full cell id in the landblock).</param>
     /// <param name="doorwayLean">The ground's doorway lean.</param>
     /// <param name="jumps">M6 14 pits: the pits a running jump crosses (the profile's <c>jumps</c>, <see cref="HuntingGround.Jumps"/>), each an edge both ways between its two rooms; null or empty: walks only.</param>
+    /// <param name="galleries">M6 redoubt: the ground's galleries (the profile's <c>galleries</c>, <see cref="HuntingGround.Galleries"/>): a reached floorless cell named there is walkable (a body stands in it, on a floor other cells hold); null: none.</param>
     /// <exception cref="ArgumentException">The arrival is not a cell of the landblock.</exception>
-    public static DraftCells Cells(LandblockCellSet all, uint arrival, float doorwayLean, IReadOnlyList<Lifestone.Client.Movement.Routes.PitJump>? jumps = null)
+    public static DraftCells Cells(LandblockCellSet all, uint arrival, float doorwayLean, IReadOnlyList<Lifestone.Client.Movement.Routes.PitJump>? jumps = null, GroundGalleries? galleries = null)
     {
         ArgumentNullException.ThrowIfNull(all);
         if (all.GetCell(arrival) is null)
@@ -262,7 +263,7 @@ public static class GroundDraft
         }
 
         var floorless = all.Cells.Where(c => all.GetStructure(c).Floors.Count == 0).Select(c => c.Id).Order().ToArray();
-        var walkable = all.Cells.Where(c => reached.Contains(c.Id) && all.GetStructure(c).Floors.Count > 0).ToArray();
+        var walkable = all.Cells.Where(c => reached.Contains(c.Id) && (all.GetStructure(c).Floors.Count > 0 || galleries?.Cells.Contains(c.Id) == true)).ToArray();
         var pockets = all.Cells.Where(c => !reached.Contains(c.Id) && all.GetStructure(c).Floors.Count > 0).Select(c => c.Id).Order().ToArray();
         var storeys = walkable
             .GroupBy(c => Band(c.Frame.Origin.Z))
@@ -283,14 +284,15 @@ public static class GroundDraft
     /// <param name="walkable">The draft's walkable cells.</param>
     /// <param name="noGo">The no-go test of the cells set by hand.</param>
     /// <param name="jumps">M6 14 pits: the pits a running jump crosses (<see cref="Cells"/>); null or empty: walks only.</param>
+    /// <param name="galleries">M6 redoubt: the ground's galleries (<see cref="Cells"/>): the cells that hold their floors join the graph, as <see cref="GroundRooms.FloorOf"/> joins them; null: none.</param>
     /// <returns>The cut-off cells, in id order.</returns>
-    public static IReadOnlyList<uint> CutOff(LandblockCellSet all, uint arrival, float doorwayLean, IEnumerable<uint> walkable, Func<uint, bool> noGo, IReadOnlyList<Lifestone.Client.Movement.Routes.PitJump>? jumps = null)
+    public static IReadOnlyList<uint> CutOff(LandblockCellSet all, uint arrival, float doorwayLean, IEnumerable<uint> walkable, Func<uint, bool> noGo, IReadOnlyList<Lifestone.Client.Movement.Routes.PitJump>? jumps = null, GroundGalleries? galleries = null)
     {
         ArgumentNullException.ThrowIfNull(all);
         ArgumentNullException.ThrowIfNull(walkable);
         ArgumentNullException.ThrowIfNull(noGo);
         var keep = walkable.Where(c => !noGo(c)).ToHashSet();
-        var graph = new RoomGraph(LandblockCellSet.FromCells(all.Structures, all.Coord, all.Cells.Where(c => keep.Contains(c.Id))), doorwayLean) { Jumps = jumps ?? [] };
+        var graph = new RoomGraph(LandblockCellSet.FromCells(all.Structures, all.Coord, all.Cells.Where(c => keep.Contains(c.Id) || galleries?.Floors.Contains(c.Id) == true)), doorwayLean) { Jumps = jumps ?? [] };
         return keep.Where(c => c != arrival && graph.FindPath(arrival, c) is null).Order().ToArray();
     }
 

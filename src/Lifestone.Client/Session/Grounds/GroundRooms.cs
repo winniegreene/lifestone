@@ -27,14 +27,14 @@ public static class GroundRooms
             : throw new NotSupportedException($"ground '{ground.Key}' lies in {ground.Landblocks.Count} landblocks; the room graph covers one (TODO(ground-multi-landblock))");
     }
 
-    /// <summary>The ground's walkable cells out of a loaded landblock: the cells <see cref="HuntingGround.IsWalkable"/> accepts.</summary>
+    /// <summary>The ground's walkable cells out of a loaded landblock: the cells <see cref="HuntingGround.IsWalkable"/> accepts, and (M6 redoubt) the cells that hold its galleries' floors (<see cref="HuntingGround.IsGalleryFloor"/>).</summary>
     /// <param name="all">Every cell of the ground's landblock.</param>
     /// <param name="ground">The ground.</param>
     public static LandblockCellSet FloorOf(LandblockCellSet all, HuntingGround ground)
     {
         ArgumentNullException.ThrowIfNull(all);
         ArgumentNullException.ThrowIfNull(ground);
-        return LandblockCellSet.FromCells(all.Structures, all.Coord, all.Cells.Where(c => ground.IsWalkable(c.Id)));
+        return LandblockCellSet.FromCells(all.Structures, all.Coord, all.Cells.Where(c => ground.IsWalkable(c.Id) || ground.IsGalleryFloor(c.Id))); // M6 redoubt: a gallery's floor is held by cells of no storey
     }
 
     /// <summary>The ground's room graph over a loaded landblock: the walkable cells at the ground's doorway lean.</summary>
@@ -64,7 +64,7 @@ public static class GroundRooms
         ArgumentNullException.ThrowIfNull(all);
         ArgumentNullException.ThrowIfNull(ground);
         var way = ExitWay(all, ground);
-        return new RoomGraph(LandblockCellSet.FromCells(all.Structures, all.Coord, all.Cells.Where(c => ground.IsWalkable(c.Id) || IsExitCell(ground, c.Id) || way.Contains(c.Id))), ground.Walk.DoorwayLean) { Jumps = ground.Jumps, PlateList = ground.KeptPlates };
+        return new RoomGraph(LandblockCellSet.FromCells(all.Structures, all.Coord, all.Cells.Where(c => ground.IsWalkable(c.Id) || ground.IsGalleryFloor(c.Id) || IsExitCell(ground, c.Id) || way.Contains(c.Id))), ground.Walk.DoorwayLean) { Jumps = ground.Jumps, PlateList = ground.KeptPlates };
     }
 
     /// <summary>

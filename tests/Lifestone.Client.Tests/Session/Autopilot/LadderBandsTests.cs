@@ -125,7 +125,7 @@ public sealed class LadderBandsTests(DatSetFixture fixture) : IClassFixture<DatS
     [InlineData(24, 199u, "strength: her base War Magic 199 is under the plan's 200 at abode's first level 25")] // the plan's own climber: the band moves her
     [InlineData(29, 400u, "portal: no entry portal and route of tusker-quarters admit level 29")] // the hub's Quarters portal is MinLevel 30
     [InlineData(59, 400u, "portal: no entry portal and route of tusker-holding admit level 59")] // the Holding's entry is MinLevel 60
-    [InlineData(9, 400u, "portal: no entry portal and route of tusker-burrow admit level 9")] // the Town Network's island portals are MinLevel 10
+    [InlineData(9, 400u, "portal: no entry portal and route of tusker-retreat admit level 9")] // the Town Network's island portals are MinLevel 10 (M6 retreat: the burrow rung's ground is the Tusker Retreat)
     [InlineData(70, 400u, "band: holding is the last rung")]
     [InlineData(3, 400u, "band: academy-and-chest is a quest rung")]
     public void The_move_on_ahead_names_the_rule_that_stops_it(int level, uint war, string why)

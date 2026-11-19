@@ -86,7 +86,7 @@ public sealed partial class AutopilotScenario
 
         _comfortReadAt = _clock;
         double? heal = _guard is { } guard && guard.Race(session, _clock, out var race, out _) ? race.HealPerSecond : null;
-        var way = AutopilotTravelRule.Home(AutopilotTravelRule.Input(session.State, _ground, _context.Facts, _context.Routes, RungDirection.Home, _context.Grounds), AutopilotTravelRule.BookRead(session.State.Self.Spellbook), _context.Routes);
+        var way = AutopilotTravelRule.Home(AutopilotTravelRule.Input(session.State, _ground, _context.Facts, _context.Routes, RungDirection.Home, _context.Grounds, _context.Spells), AutopilotTravelRule.BookRead(session.State.Self.Spellbook), _context.Routes);
         var trial = _options.Trial is { Phase: LadderTrialPhase.On } on && string.Equals(on.Ground, _ground.Key, StringComparison.Ordinal);
         var input = new ComfortInput(_ground.Key, _ground.Jumps.Count, way.WayName, trial, Approach: false, _tally.Retreats, _survivalLeavesRun - _hourLeavesAtBegin, _tally.Deaths, load.RacesLost, load.Health, load.IncomingPeak, load.IncomingMean, heal, MageLootThresholds.LoadLineOf(_ground), load.TopPercent);
         var verdict = ComfortRule.Decide(in input);

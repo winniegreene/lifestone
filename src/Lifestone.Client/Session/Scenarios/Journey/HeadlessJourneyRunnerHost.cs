@@ -592,8 +592,7 @@ public sealed class HeadlessJourneyScenario(JourneyPlan plan, IReadOnlyList<stri
             JourneyScenario.BindPitLog(log); // M6 4 R2: TODO(m6-abode-pits) reaches the run's log file
             var keeper = JourneyStations.CreateKeeper(Plan, session, spells, arguments, log, kitAccount); // M6 1 w: the keeper's floors read the login name
             var context = JourneyScenario.NewContext(Plan, log, spells, keeper, dats, Host, dungeon: JourneyLimits.FightOf(arguments).GroundProfile); // --fight-ground: a bad key is the station factory's error and keeps the default
-            context.Facts.BuffBotOn = BotStopOf(Plan, arguments); // M6 item 14: the Pathwarden station's stop at the buff bot before the chest reads the same option as the autopilot
-            context.Facts.BuffBotProfile = BotProfileOf(arguments); // and the same word (--autopilot-buff-bot-word, 'all' by default)
+            JourneyBotFacts.Apply(context.Facts, Plan, arguments); // M6 item 14: the Pathwarden station's stop at the buff bot before the chest reads the same option and word as the autopilot (the game window's BuildParts sets them the same way)
             _journey = new JourneyScenario(Plan, JourneyStations.Create(Plan, arguments, dats, kitAccount), context);
         }
 

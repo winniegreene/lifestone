@@ -954,6 +954,33 @@ public sealed partial class ResupplyStationTests
         }
     }
 
+    [Fact]
+    public void M6_sprint_an_item_ace_marks_unsellable_is_appraised_before_the_sale_and_never_offered()
+    {
+        // Runs 1-5 (2026-11-19): "The Health Draughts is unsellable." and the like, 19 times in run 5: weenies 2457, 377, 379 and 2460 carry IsSellable 0 (world weenie_properties_bool type 69) and ACE refuses them
+        // (Player_Commerce.cs 268-272 @95ef426d); they reached the sale as the pack budget's surplus drinks. The rule is the class's, whatever offers it: the appraisal carries the bool, so the sale looks first, the item stays
+        // in the pack and the vendor never answers "is unsellable". A class with no use (9_998) stands for them here: a drink she uses is kept by its own rule before the sale.
+        var home = new Home(Den, 1_000);
+        var shirt = home.Own("Shirt", 130, ClothingType, 100);
+        var charm = home.Own("Odd Charm", 9_998, MiscType, 85);
+        home.Shops.AnswersIdentify = true;
+        home.Shops.NotSellable.Add(9_998);
+        home.Shops.Get(home.Ground.Vendors.Single(v => v.Name == "Shopkeeper Renald the Elder").Guid).Unsellable.Add(9_998);
+        var memory = new SaleMemory();
+        var run = home.Start(new ResupplyOptions(true, () => [shirt, charm], null, memory));
+
+        Assert.Equal(ScenarioStatus.Succeeded, home.Run(run));
+        Assert.Contains(charm, home.Shops.Identified);
+        Assert.True(home.Logged("marked unsellable on the wire"));
+        Assert.True(home.Logged("m6-sale-appraise"));
+        Assert.Equal(1, run.Sold);
+        Assert.Equal(["unsellable"], run.Refusals); // the client's own check before the send; no 02EB from the vendor
+        Assert.True(home.Vendor.State.Self.Inventory.Contains(charm));
+        Assert.False(home.Vendor.State.Self.Inventory.Contains(shirt));
+        Assert.False(memory.SellableClass[9_998]);
+        Assert.True(memory.SellableClass[130]);
+    }
+
     [Theory]
     [InlineData(2457u, "Health Draught")]
     [InlineData(2460u, "Mana Draught")]

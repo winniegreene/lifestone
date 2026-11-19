@@ -18,9 +18,9 @@ public sealed class TravelRoutesSqlTests
 
     /// <summary>
     /// M6 4 t4b: the nine island dungeons' "Surface" exit portals (type 7, named Surface, placed in the dungeon's own landblock: Burrow 0x5748 22664, Lodge 0x5749 22689, Cave 0x5B46 22666, Cavern 0x5C43 22668, Abode 0x5C45 22655, Habitat 0x5B47 22679,
-    /// Quarters 0x5B4A 22693, Barracks 0x5A48 22662, Holding 0x5B48 22681; M6 14 armory: Armory 0x5948 22658), whose destination landblocks are the island place's.
+    /// Quarters 0x5B4A 22693, Barracks 0x5A48 22662, Holding 0x5B48 22681; M6 14 armory: Armory 0x5948 22658; M6 retreat: Retreat 0x5C49 22695, to 0xF97E0035), whose destination landblocks are the island place's.
     /// </summary>
-    private static readonly uint[] IslandExitWcids = [22664, 22689, 22666, 22668, 22655, 22679, 22693, 22662, 22681, 22658];
+    private static readonly uint[] IslandExitWcids = [22664, 22689, 22666, 22668, 22655, 22679, 22693, 22662, 22681, 22658, 22695];
 
     /// <summary>M6 4 t4b: a town's lifestone (weenie 509, guid 0x72780000 in 0x2780) and Zisaha's room (weenie 2314, guid 0x72481001 in 0x2481) are Fort Tethana's.</summary>
     private static readonly uint[] FortTethanaGuids = [0x72780000, 0x72481001];

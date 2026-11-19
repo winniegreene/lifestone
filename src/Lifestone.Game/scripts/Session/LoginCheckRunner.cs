@@ -258,6 +258,12 @@ public sealed partial class LoginCheckRunner : Node
             return;
         }
 
+        if (kind == LoginCheckKind.ClimberStart)
+        {
+            ClimberStartRunner.Install(main, services, host, mode, ui); // a kind of its own (M6 onscreen start): the climber's re-creation through the screens, her journey and, past the gate, the level up job, in one window; never part of 'all'
+            return;
+        }
+
         if (kind == LoginCheckKind.Autopilot)
         {
             AutopilotLegRunner.Install(main, services, host, mode, ui); // a kind of its own (M5 4 h1): BSD Mage's autopilot until its stop rules, never part of 'all'

@@ -284,8 +284,11 @@ public enum PackBudgetVerdict
     /// <summary>The supplies at their keeps are over the budget: the keeps are scaled toward the needs.</summary>
     Scaled,
 
-    /// <summary>The needs alone are over the budget: every cuttable ware is at its need; the loot's room is less than it wanted.</summary>
+    /// <summary>The needs alone are over the line even with no room for the loot: every cuttable ware stands between its need and one interval's use, by one scale.</summary>
     AtNeeds,
+
+    /// <summary>M6 audit (the owner, 2026-11-19: about 75 minutes of consumables): the needs fit only with the loot's room cut: the loot yields, every cuttable ware stands at its need, the room left is the loot's.</summary>
+    KitFirst,
 }
 
 /// <summary>The budget of one visit (<see cref="PackBudgetRule.Plan"/>): its numbers, the verdict and the cuts.</summary>
@@ -309,6 +312,9 @@ public enum PackBudgetVerdict
 public sealed record PackBudget(PackBudgetVerdict Verdict, int Capacity, int LoadLinePercent, long Line, long Burden, long SaleBurden, long SuppliesHeld, long Fixed, long Room, double Minutes, long Budget, long AtTop, long AtLow, long Planned, double Scale,
     IReadOnlyList<PackCut> Cuts, IReadOnlyList<PackLine> Uncut)
 {
+    /// <summary>M6 audit: the room the loot wanted between the two visits (<see cref="PackUseMeasure.LootWanted"/>); <see cref="Room"/> is what it is given, less when the needs come first (<see cref="PackBudgetVerdict.KitFirst"/>).</summary>
+    public long Wanted { get; init; }
+
     /// <summary>The room the plan leaves for the loot: the line less the fixed and the planned wares.</summary>
     public long RoomLeft => Line - Fixed - Planned;
 
@@ -354,8 +360,9 @@ public sealed record PackBudget(PackBudgetVerdict Verdict, int Capacity, int Loa
         {
             PackBudgetVerdict.Unmeasured => head + string.Create(c, $"; not measured yet (m6-pack-budget-unmeasured: no visit of this session to measure her use and the loot from): the keeps are the profile's this visit; at them the supplies weigh {AtTop} and leave {Line - Fixed - AtTop} for the loot; the full-pack line calls the trip when it fills, and this visit's end starts the measure"),
             PackBudgetVerdict.Within => head + string.Create(c, $"; the loot's room {Room} ({Minutes:0.0} min of it since the last visit); the budget {Budget}; at the keeps the supplies weigh {AtTop}: within it, no keep is cut (room left {RoomLeft})"),
+            PackBudgetVerdict.KitFirst => head + string.Create(c, $"; the loot wanted {Wanted} ({Minutes:0.0} min of it since the last visit); at the keeps {AtTop}, at the needs ({PackBudgetRule.SupplyMinutes:0} min of her use) {AtLow}: the needs come first, so the loot's room is cut to {Room} and every cut ware stands at its need: planned {Planned}, room left {RoomLeft}"),
             PackBudgetVerdict.Scaled => head + string.Create(c, $"; the loot's room {Room} ({Minutes:0.0} min of it since the last visit); the budget {Budget}; at the keeps {AtTop}, at the needs {AtLow}: over by {AtTop - Budget}, so the keeps stand {Scale:0.00} of the way from the needs to the keeps: planned {Planned}, room left {RoomLeft}"),
-            _ => head + string.Create(c, $"; the loot's room {Room} ({Minutes:0.0} min of it since the last visit); the budget {Budget}; at the keeps {AtTop}, at the needs {AtLow}: over even at the needs by {AtLow - Budget}, so every cut ware stands at its need: planned {Planned}, room left {RoomLeft} (under the {Room} wanted: the full-pack line calls the trip when it fills)"),
+            _ => head + string.Create(c, $"; the loot wanted {Wanted} ({Minutes:0.0} min of it since the last visit); the line less the fixed {Budget}; at the keeps {AtTop}, at the needs ({PackBudgetRule.SupplyMinutes:0} min of her use) {AtLow}: over even with no room for the loot by {AtLow - Budget}, so every cut ware stands {Scale:0.00} of the way from one interval's use to its need: planned {Planned}, room left {RoomLeft} (the full-pack line calls the trip when it fills)"),
         };
     }
 
@@ -368,7 +375,7 @@ public sealed record PackBudget(PackBudgetVerdict Verdict, int Capacity, int Loa
             var line = cut.Line;
             var need = line.Kind == PackLineKind.LootDrink
                 ? string.Create(c, $"need {cut.Need}: {cut.Use} drunk in {Minutes:0.0} min, no line names it")
-                : string.Create(c, $"need {cut.Need}: its line {line.Floor} and {cut.Use} used in {Minutes:0.0} min");
+                : string.Create(c, $"need {cut.Need}: its line {line.Floor} and {PackBudgetRule.SupplyMinutes:0} min of her use ({cut.Use} used in {Minutes:0.0} min)");
             yield return string.Create(c, $"pack budget: cut {line.Name} ({line.Wcid}, {line.Kind}): {cut.Top} -> {cut.Target} (held {line.Held}, keep {line.Keep}; {need}; burden {line.Unit} each, {cut.Saved} saved){(cut.Sell > 0 ? $"; sells {cut.Sell}, the drinks over {cut.Target} (m6-pack-room amends m6-sale-keeps-drinks)" : string.Empty)}");
         }
     }
@@ -388,6 +395,12 @@ public sealed record PackBudget(PackBudgetVerdict Verdict, int Capacity, int Loa
 /// </summary>
 public static class PackBudgetRule
 {
+    /// <summary>
+    /// M6 audit (the owner's decision of 2026-11-19): the minutes of her own measured use a consumable's need holds over its line, about 75, so a supply lasts past the hourly town trip that the buff bot's
+    /// rebuff calls (its lines last an hour; the trip home is due at <c>BuffBotRule</c>'s 420 s left) with a margin. A policy figure, the owner's, not a game fact.
+    /// </summary>
+    public const double SupplyMinutes = 75;
+
     /// <summary>
     /// The burden of one of <paramref name="wcid"/>: the supply weenies (<see cref="GearKit.FloorWeenieOf"/>: the foci, the Mana Potion, the Potion of Healing), the spell components (<see cref="GearKit.PrismaticTaperBurden"/>,
     /// <see cref="GearKit.ComponentBurden"/>), the ground's town stock line, else the drinks she uses (<see cref="DrinkBurdens"/>); 0 when none knows it (the ware is weighed by the caller's live read or not at all).
@@ -467,14 +480,16 @@ public static class PackBudgetRule
         var uncut = lines.Where(l => !l.Cuttable).ToList();
         var uncutBurden = uncut.Sum(l => (long)l.Held * l.Unit);
         var cuts = new List<PackCut>();
+        var shortLows = new List<int>(); // M6 audit: each ware's low at one interval's use, where the budget falls back to when even the needs do not fit the line
         foreach (var l in lines.Where(l => l.Cuttable))
         {
             var top = Math.Max(l.Held, l.Keep);
             var use = measure?.UseOf(l.Wcid) ?? 0;
-            var need = (int)Math.Min(top, (long)l.Floor + (l.Kind == PackLineKind.LootDrink ? use : Math.Max(use, 1))); // a line at least one over its line: cut to it, her first use would call a trip (the M6 14 T failure)
-            var low = l.Drink ? need : Math.Max(l.Held, need);
-            low = Math.Min(top, Math.Max(low, Math.Min(l.Floor, top)));
-            cuts.Add(new PackCut(l, use, need, top, low, top, 0));
+            var interval = (long)l.Floor + (l.Kind == PackLineKind.LootDrink ? use : Math.Max(use, 1)); // a line at least one over its line: cut to it, her first use would call a trip (the M6 14 T failure)
+            var horizon = measure is { Minutes: > 0 } m && use > 0 ? (long)l.Floor + (long)Math.Ceiling(use * SupplyMinutes / m.Minutes) : interval; // M6 audit (the owner, 2026-11-19): 75 minutes of her use over its line
+            var need = (int)Math.Min(top, Math.Max(interval, horizon));
+            cuts.Add(new PackCut(l, use, need, top, LowOf(l, need, top), top, 0));
+            shortLows.Add(LowOf(l, (int)Math.Min(top, interval), top));
         }
 
         var atTop = uncutBurden + cuts.Sum(x => (long)x.Top * x.Line.Unit);
@@ -484,11 +499,43 @@ public static class PackBudgetRule
             return new PackBudget(PackBudgetVerdict.Unmeasured, capacity, percent, line, burden, saleBurden, held, fixedBurden, 0, 0, line - fixedBurden, atTop, atLow, atTop, 1, cuts, uncut);
         }
 
-        var room = Math.Max(0, measure.LootWanted);
+        var wanted = Math.Max(0, measure.LootWanted);
+        var room = wanted;
         var budget = line - fixedBurden - room;
         if (atTop <= budget)
         {
-            return new PackBudget(PackBudgetVerdict.Within, capacity, percent, line, burden, saleBurden, held, fixedBurden, room, measure.Minutes, budget, atTop, atLow, atTop, 1, cuts, uncut);
+            return new PackBudget(PackBudgetVerdict.Within, capacity, percent, line, burden, saleBurden, held, fixedBurden, room, measure.Minutes, budget, atTop, atLow, atTop, 1, cuts, uncut) { Wanted = wanted };
+        }
+
+        if (budget < atLow)
+        {
+            // M6 audit (the owner, 2026-11-19: about 75 minutes of consumables, a town trip an hour with the bot's rebuff): the needs come before the loot's room. Live 2026-11-19 04:03:03 and 04:26:05 UTC
+            // (run 4, level 11, the Burrow): the rule of before cut the tapers to their line and one interval's use (200 -> 79, then 92), and the next trip came 23 minutes after the last.
+            var free = line - fixedBurden;
+            if (free >= atLow)
+            {
+                for (var i = 0; i < cuts.Count; i++)
+                {
+                    var x = cuts[i];
+                    cuts[i] = x with { Target = x.Low, Sell = x.Line.Drink ? Math.Max(0, x.Line.Held - x.Low) : 0 };
+                }
+
+                var kit = uncutBurden + cuts.Sum(x => (long)x.Target * x.Line.Unit);
+                return new PackBudget(PackBudgetVerdict.KitFirst, capacity, percent, line, burden, saleBurden, held, fixedBurden, free - atLow, measure.Minutes, atLow, atTop, atLow, kit, 0, cuts, uncut) { Wanted = wanted };
+            }
+
+            // Even with no room for the loot the needs are over the line: from the needs toward one interval's use, by one scale (at worst one interval, the rule of before).
+            var atShort = uncutBurden + cuts.Select((x, i) => (long)shortLows[i] * x.Line.Unit).Sum();
+            var back = atLow == atShort ? 0 : Math.Clamp((double)(free - atShort) / (atLow - atShort), 0, 1);
+            for (var i = 0; i < cuts.Count; i++)
+            {
+                var x = cuts[i];
+                var target = shortLows[i] + (int)Math.Floor((x.Low - shortLows[i]) * back);
+                cuts[i] = x with { Target = target, Sell = x.Line.Drink ? Math.Max(0, x.Line.Held - target) : 0 };
+            }
+
+            var squeezed = uncutBurden + cuts.Sum(x => (long)x.Target * x.Line.Unit);
+            return new PackBudget(PackBudgetVerdict.AtNeeds, capacity, percent, line, burden, saleBurden, held, fixedBurden, 0, measure.Minutes, free, atTop, atLow, squeezed, back, cuts, uncut) { Wanted = wanted };
         }
 
         var scale = atTop == atLow ? 0 : Math.Clamp((double)(budget - atLow) / (atTop - atLow), 0, 1);
@@ -500,6 +547,13 @@ public static class PackBudgetRule
         }
 
         var planned = uncutBurden + cuts.Sum(x => (long)x.Target * x.Line.Unit);
-        return new PackBudget(budget < atLow ? PackBudgetVerdict.AtNeeds : PackBudgetVerdict.Scaled, capacity, percent, line, burden, saleBurden, held, fixedBurden, room, measure.Minutes, budget, atTop, atLow, planned, scale, cuts, uncut);
+        return new PackBudget(PackBudgetVerdict.Scaled, capacity, percent, line, burden, saleBurden, held, fixedBurden, room, measure.Minutes, budget, atTop, atLow, planned, scale, cuts, uncut) { Wanted = wanted };
+    }
+
+    /// <summary>M6 audit: a ware's low for a need: a drink may go down to it (the rest is sold), any other ware never under the count held (it is only not bought); never under its floor.</summary>
+    private static int LowOf(PackLine l, int need, int top)
+    {
+        var low = l.Drink ? need : Math.Max(l.Held, need);
+        return Math.Min(top, Math.Max(low, Math.Min(l.Floor, top)));
     }
 }

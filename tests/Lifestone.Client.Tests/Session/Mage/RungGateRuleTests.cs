@@ -135,8 +135,8 @@ public sealed class RungGateRuleTests
     [InlineData(15, "holtburg", false, 9)] // live 2026-11-06 (at 17, then): every line learned, no buff up: not the Lodge, not the Burrow (its gate reads the same)
     [InlineData(15, "holtburg", true, 15)] // with the buffs read standing the gates open; M6 7 AW: never on the book alone
     [InlineData(15, "tusker-lodge", false, 15)] // standing on the Lodge: its gate is not read, she is not stranded
-    [InlineData(15, "tusker-burrow", false, 14)] // standing in the Burrow: the Lodge's gate holds her there, the Burrow's is not read
-    [InlineData(20, "tusker-burrow", false, 14)]
+    [InlineData(15, "tusker-retreat", false, 14)] // standing in the 10-14 rung's ground (M6 retreat: the Tusker Retreat): the Lodge's gate holds her there, the rung's own is not read
+    [InlineData(20, "tusker-retreat", false, 14)]
     public void A_restart_never_picks_a_rung_behind_a_gate_on_the_book_alone_M6_7_AV(int level, string standing, bool buffsUp, int expected)
     {
         uint? cell = standing == "holtburg" ? 0xA9B40001 : CellIn(standing);

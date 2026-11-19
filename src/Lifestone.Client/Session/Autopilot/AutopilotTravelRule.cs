@@ -69,7 +69,8 @@ public static class AutopilotTravelRule
     /// <param name="routes">The travel file.</param>
     /// <param name="direction">Out or home.</param>
     /// <param name="grounds">M6 4 F1 (4-R3): the grounds whose landblocks may hold the body (<see cref="RungRoute.BodyGroundOf"/>; <see cref="JourneyContext.Grounds"/>), or null for the catalog's.</param>
-    public static RungRouteInput Input(GameState state, HuntingGround ground, JourneyFacts facts, TravelRoutes routes, RungDirection direction, IReadOnlyList<HuntingGround>? grounds = null)
+    /// <param name="spells">M6, the recall's components: the spell table, so Lifestone Recall counts as the way home only when the pack holds one cast's components (<see cref="RecallReadiness"/>); null: the book and the run's refusal alone.</param>
+    public static RungRouteInput Input(GameState state, HuntingGround ground, JourneyFacts facts, TravelRoutes routes, RungDirection direction, IReadOnlyList<HuntingGround>? grounds = null, IReadOnlyDictionary<uint, Lifestone.Data.Magic.SpellInfo>? spells = null)
     {
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(ground);
@@ -89,18 +90,20 @@ public static class AutopilotTravelRule
         }
 
         var book = self.Spellbook;
+        var recall = RecallReadiness.Of(state, facts, spells); // M6 7 AV: a recall refused for components is not available this run; M6, the recall's components: nor is one the pack is short for (the check before the first cast)
         return new RungRouteInput(
             ground,
             direction,
             where,
             place,
             self.Qualities.Level,
-            book.Knows(Fighter.RecallHome.LifestoneRecallSpell) && !facts.LifestoneRecallUnavailable, // M6 7 AV: a recall refused for components is not available this run
+            recall.Castable,
             book.Knows(ground.Portal?.RecallSpell ?? DenTravelStation.PortalRecallSpell),
             book.Knows(ground.Portal?.TieSpell ?? DenTravelStation.PortalTieSpell),
             facts.TieOf(ground),
             false,
-            body);
+            body,
+            RecallWhyNot: recall.WhyNot);
     }
 
     /// <summary>The way out to the ground (see the class).</summary>
@@ -180,9 +183,9 @@ public static class AutopilotTravelRule
         var plan = RungRoute.Decide(input with { Direction = RungDirection.Home }, routes);
         if (plan.Stop is null && plan.Legs.Count > 0)
         {
-            return new(TravelWay.RungChange, string.Create(CultureInfo.InvariantCulture, $"the spellbook lacks Lifestone Recall (D43) and {input.Place} has a way home: route {plan.RouteKey}, {plan.Hops} portals"), plan.RouteKey);
+            return new(TravelWay.RungChange, string.Create(CultureInfo.InvariantCulture, $"{input.RecallWhyNot ?? "the spellbook lacks Lifestone Recall"} (D43) and {input.Place} has a way home: route {plan.RouteKey}, {plan.Hops} portals"), plan.RouteKey);
         }
 
-        return new(TravelWay.Recall, $"the spellbook lacks Lifestone Recall and {input.Place} has no way home by portals ({plan.Stop ?? plan.Why}): the recall as before, its refusal stops the run by name");
+        return new(TravelWay.Recall, $"{input.RecallWhyNot ?? "the spellbook lacks Lifestone Recall"} and {input.Place} has no way home by portals ({plan.Stop ?? plan.Why}): the recall as before, its refusal stops the run by name");
     }
 }

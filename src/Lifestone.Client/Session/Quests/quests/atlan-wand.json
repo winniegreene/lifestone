@@ -639,11 +639,11 @@
     "giver: none; no NPC starts it and no quest row covers the chain (the golem's Give emote 40757 checks and stamps nothing)",
     "timer_seconds: null, done once: the only timer is the stone's pick-up quest (3600 s) on one step; the ladder band runs it once (D118)",
     "level: none in the file: no portal on the way has a level gate; the wield rule is base War Magic 290 (46128's WieldDifficulty, the ladder's from_level 75 is about where she reaches it)",
-    "ladder: from 75, before 126, once (cache/m6/8/brief-b2b.md, D118); the trigger's live proof is items 10 and 11's",
+    "ladder: from 75, before 126, once (cache/m6/8/brief-b2b.md, D118); the trigger's live proof is items 10 and 11's. M6 audit (the owner's decision of 2026-11-19, fix 10): from 65, the first level whose projected base War Magic reaches the wand's WieldDifficulty 290 (SpellPlan.ProjectedWarBase; SELECT type, value FROM weenie_properties_int WHERE object_Id = 46128 AND type IN (158, 159, 160): 2, 34, 290); the errand also waits until her Alchemy gives the roll at least 0.80 (RecipeChance.RollFloor, AutopilotScenario.ErrandWaitsForRoll), which the level-up spend buys toward in the caster rule's reach (Mage.RecipeSpend)",
     "recipe 789 is the one Alchemy check (skill 38, difficulty 150): M6 14 D132 and D136 train Alchemy from her credits on the job's need and the station raises it before the roll; no grant"
   ],
   "ladder": {
-    "from_level": 75,
+    "from_level": 65,
     "before_level": 126,
     "once": true
   }

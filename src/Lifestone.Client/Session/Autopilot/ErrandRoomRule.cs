@@ -70,12 +70,16 @@ public static class ErrandRoomRule
             switch (step.Kind)
             {
                 case QuestStepKind.HuntUntil:
-                    fights = true;
                     if (step.Item?.Wcid is { } hunted)
                     {
                         var want = step.Count ?? 1;
                         var chain = QuestCombineChain.Of(quest, hunted);
                         var have = QuestCombineChain.HuntHeld(quest, step, held); // M6 14 combine3: the equivalents along the quest's no-roll chain
+
+                        // M6 audit (the owner's decision of 2026-11-19: tusks only on town runs, no trip of their own): a hunt held to its count is done at once with no hunt (QuestStation: "held already: done at once, no hunt"), so
+                        // it fights nothing. Live, run 4 (cache/m6/sprint/run4/step3-levelup.log 04:25:50 UTC): a held Female Tusk's turn-in read as a fight, a low stock line sent the sale first, and the turn-in ran as a trip of
+                        // its own from the Burrow one second after the sale trip walked her back there (04:34:37 to 04:34:38).
+                        fights |= have < want;
                         if (chain.Count > 1)
                         {
                             // M6 14 combine3: the hunt combines as it goes, so its room is the chain's end state, not the loose count: each item of the chain changes by its end count less what she holds now, and the most objects held on the
@@ -103,6 +107,7 @@ public static class ErrandRoomRule
                     }
                     else
                     {
+                        fights = true;
                         what.Add("hunt-until (no item named): its fight's loot");
                     }
 

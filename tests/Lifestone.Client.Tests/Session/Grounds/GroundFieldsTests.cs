@@ -72,7 +72,7 @@ public sealed class GroundFieldsTests
         Assert.Equal(with.Walkable.Cells, without.Walkable.Cells);
 
         // Every other embedded profile has neither section, and the den's two measures are still its own.
-        var spine = new[] { "tusker-burrow", "tusker-lodge", "tusker-cave", "tusker-temple-20-40", "tusker-cavern", "tusker-habitat", "tusker-barracks", "tusker-abode", "tusker-quarters", "tusker-holding", "tusker-armory", "cave-of-alabree", "crater-caves", "black-spawn-den-sho" }; // M6 item 14: the Sho den carries both sections for the den run (its entrance 7246 and its Surface Portal 7247); M6 5 q6b: the Cave of Alabree has an entry and an exit too; M6 3 p1, p2 and p3: the spine and alternate tusker profiles carry both sections
+        var spine = new[] { "tusker-burrow", "tusker-lodge", "tusker-cave", "tusker-temple-20-40", "tusker-cavern", "tusker-habitat", "tusker-barracks", "tusker-abode", "tusker-quarters", "tusker-holding", "tusker-armory", "cave-of-alabree", "crater-caves", "black-spawn-den-sho", "holtburg-redoubt", "tusker-retreat" }; // M6 redoubt: the Holtburg Redoubt has an entry and an exit; M6 item 14: the Sho den carries both sections for the den run (its entrance 7246 and its Surface Portal 7247); M6 5 q6b: the Cave of Alabree has an entry and an exit too; M6 3 p1, p2 and p3: the spine and alternate tusker profiles carry both sections
         Assert.All(GroundCatalog.All.Where(g => g.Key != TempleKey && !spine.Contains(g.Key)), g => Assert.Equal((GroundEntry?)null, g.Entry));
         Assert.All(GroundCatalog.All.Where(g => g.Key != TempleKey && !spine.Contains(g.Key)), g => Assert.Equal((GroundExitSection?)null, g.Exit));
         var den = GroundCatalog.Get("black-spawn-den-aluvian");

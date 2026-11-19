@@ -825,6 +825,13 @@ internal sealed class ActionApi : IActionApi, IDisposable
     }
 
     /// <inheritdoc/>
+    public void PlaceOnBar(uint spellId, string when, ActionSource source = ActionSource.Automation)
+    {
+        CheckThread("IActionApi.PlaceOnBar");
+        PlayerRules.BeforeCast(spellId, source, when);
+    }
+
+    /// <inheritdoc/>
     public ActionHandle AddSpellFavorite(uint spellId, int index, int bar, ActionSource source = ActionSource.Host)
     {
         CheckThread("IActionApi.AddSpellFavorite");

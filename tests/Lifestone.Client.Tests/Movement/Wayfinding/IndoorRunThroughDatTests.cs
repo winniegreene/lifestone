@@ -41,11 +41,18 @@ public sealed class IndoorRunThroughDatTests(DatSetFixture fixture, ITestOutputH
     public const float MaxWalkedShareOfAllLegs = 0.15f;
 
     /// <summary>
-    /// The grounds whose run-through check is a named gap, the TODO to remove when the check passes (M6 3 F1, 3-R4). None now. Closed: <c>m6-burrow-walk</c>, <c>m6-cave-doorway-0113-0114</c>, <c>m6-quarters-walk</c>, <c>m6-abode-walk</c>, <c>m6-holding-walk</c>,
+    /// The grounds whose run-through check is a named gap, the TODO to remove when the check passes (M6 3 F1, 3-R4). One now, of the ordinary steering alone: <c>m6-redoubt-walk-0158-0150</c>. Closed: <c>m6-burrow-walk</c>, <c>m6-cave-doorway-0113-0114</c>, <c>m6-quarters-walk</c>, <c>m6-abode-walk</c>, <c>m6-holding-walk</c>,
     /// <c>m6-dungeon-run-share</c> (M6 7 F: <c>NavRunner.WalkNearDungeonDoorwayMetres</c>), and, in M6 7 Q, the four whose legs the physics refused: <c>m6-cave-ground-probe-021E</c>, <c>m6-cavern-ground-probe-0209</c>, <c>m6-habitat-ground-probe-011A</c> and <c>m6-alabree-run-through</c>:
     /// the room graph planned through floor-to-ceiling pillars whose origins stand over a human's head and through rocks on a crossing's approach (<see cref="CellRoutePlanner.InStatic"/>, <see cref="AlabreeCaveWalkDatTests"/>).
     /// </summary>
-    private static readonly Dictionary<string, string> WalkGapTodo = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, string> WalkGapTodo = new(StringComparer.Ordinal)
+    {
+        // M6 redoubt: with the ordinary steering the leg 0x01630158 to 0x01630150 (20 m, through the door cell 0x0163015A) arrives on its second fallback rung; the predictive steering, the fight walks', runs every leg on its first plan
+        ["holtburg-redoubt" + OrdinarySteering] = "m6-redoubt-walk-0158-0150",
+    };
+
+    /// <summary>M6 redoubt: the suffix of a <see cref="WalkGapTodo"/> key that names a gap of the ordinary steering alone (a ground's bare key names a gap of both).</summary>
+    private const string OrdinarySteering = "@ordinary";
 
     /// <summary>The most legs a ground's walk is measured over (its first tour cells, from the arrival).</summary>
     private const int MaxLegs = 12;
@@ -144,7 +151,7 @@ public sealed class IndoorRunThroughDatTests(DatSetFixture fixture, ITestOutputH
         output.WriteLine(string.Create(CultureInfo.InvariantCulture, $"{key}: {legs} legs, {walked:0.0} of {metres:0.0} m walked (share {all:0.000}) in {seconds:0.0} s, {(seconds > 0 ? metres / seconds : 0):0.00} m/s, the track passed every doorway vertex within {worstMiss:0.00} m, {totalWall} frames of wall contact once under way"));
         // M6 3 F1 (3-R4): a ground with a named walk gap SKIPS (reported as skipped, with the TODO and the measured numbers) while the check fails, and FAILS "stale skip" once the check passes, so a walk fix removes the skip; a ground with no named gap fails as before.
         var passes = legs > 0 && failures.Count == 0 && totalWall == 0 && all <= MaxWalkedShareOfAllLegs;
-        if (WalkGapTodo.TryGetValue(key, out var todo))
+        if (WalkGapTodo.TryGetValue(key, out var todo) || (!predictive && WalkGapTodo.TryGetValue(key + OrdinarySteering, out todo)))
         {
             Assert.False(passes, $"stale skip: remove TODO({todo}) ({key}'s run-through check passes: {legs} legs, share {all:0.000}, {totalWall} wall frames)");
             DynamicSkipException.Skip(string.Create(CultureInfo.InvariantCulture, $"TODO({todo}): {key}: {failures.Count} of {legs} legs failed or walked too much, {walked:0.0} of {metres:0.0} m walked (share {all:0.000}), {totalWall} wall frames; this check waits for the walk fix"));

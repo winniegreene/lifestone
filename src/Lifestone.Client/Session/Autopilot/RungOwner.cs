@@ -27,6 +27,12 @@ public sealed record RungBuffRead(Func<string, int> Active, Func<string, int> Re
 public sealed record RungAsk(int Level, uint? Cell, PlayerQualities Qualities, Func<string, int, bool> Knows, RungBuffRead? Buffs, string? NamedRung = null)
 {
     /// <summary>
+    /// M6 retreat: the live alternate ground the stop named after <see cref="NamedRung"/> (<see cref="RungOwner.NamedGround"/>), or null: the named rung is played there (a trophy job's ground), not on its own ground. Read only with
+    /// <see cref="NamedRung"/>.
+    /// </summary>
+    public string? NamedGround { get; init; }
+
+    /// <summary>
     /// M6 item 14 (the gates' second form): what stands in a learned line's place (<see cref="RungGateRule.Standing"/>'s <c>stands</c>), or null: a line that stands by the buff bot's stronger spell needs no scroll of her own
     /// while it stands. Set by a run whose stop at the bot is on; a host that has no run sets none (the book alone).
     /// </summary>
@@ -187,6 +193,12 @@ public sealed record RungChoice(LadderDecision Decision, HuntingGround? Ground, 
     /// </summary>
     public string? FarBelow { get; init; }
 
+    /// <summary>
+    /// M6 redoubt: the entry portal's refusal by name (<c>gate:entry:&lt;ground&gt;:&lt;level&gt;&gt;&lt;max&gt;</c>) when the choice is on the rung's outdoor fallback ground because the rung's own ground's portal does not admit her
+    /// (<see cref="RungOwner.EntryFallback"/>; the ground is <see cref="Alternate"/>), or null. The reason stays the ladder's own (a gate's hold, the vitae burn's): this says which ground, not why the rung.
+    /// </summary>
+    public string? EntryRefused { get; init; }
+
     /// <summary>The choice on one log line.</summary>
     /// <param name="path">Which path asked.</param>
     /// <param name="ask">Its ask.</param>
@@ -237,7 +249,45 @@ public static class RungOwner
         }
 
         var key = stop[MovedPrefix.Length..];
+        var at = key.IndexOf(GroundMark, StringComparison.Ordinal);
+        key = at < 0 ? key : key[..at]; // M6 retreat: rung-moved:<rung>@<ground>, a rung played on one of its alternates
         return ladder.Rungs.Any(r => r.Key == key) ? key : null;
+    }
+
+    /// <summary>M6 retreat: the mark between a move's rung and the alternate ground it is played on (<c>rung-moved:&lt;rung&gt;@&lt;ground&gt;</c>, <see cref="NamedGround"/>).</summary>
+    public const char GroundMark = '@';
+
+    /// <summary>
+    /// M6 retreat (the owner, 2026-11-19: the 10-14 rung hunts the Tusker Retreat, the Burrow its alternate, whose Female Tusk carriers the trophy job still pulls): the ground a move-on stop names after its rung
+    /// (<c>rung-moved:&lt;rung&gt;@&lt;ground&gt;</c>), when it is a live alternate of that rung, else null (the rung's own ground). A trophy job on an alternate ground stops so (<see cref="AutopilotScenario.DecideOnGround"/>), and the
+    /// host's restart, which has no quest timers, reads it here, so the next run is on the job's ground and not the rung's own.
+    /// </summary>
+    /// <param name="ladder">The ladder.</param>
+    /// <param name="stop">The run's stop name.</param>
+    public static string? NamedGround(Ladder ladder, string? stop)
+    {
+        ArgumentNullException.ThrowIfNull(ladder);
+        if (NamedRung(ladder, stop) is not { } key)
+        {
+            return null;
+        }
+
+        var at = stop!.IndexOf(GroundMark, StringComparison.Ordinal);
+        var ground = at < 0 ? null : stop[(at + 1)..];
+        return ground is not null && ladder.Rungs.Single(r => r.Key == key).Alternates.Any(a => !a.Pending && string.Equals(a.GroundKey, ground, StringComparison.Ordinal)) ? ground : null;
+    }
+
+    /// <summary>The rung played on <paramref name="ground"/>: the rung itself when it is its own ground, the rung with that alternate's ground and landblock when it is a live alternate of it, else null.</summary>
+    private static LadderRung? PlayedOn(LadderRung rung, string ground)
+    {
+        if (string.Equals(rung.GroundKey, ground, StringComparison.Ordinal))
+        {
+            return rung;
+        }
+
+        return rung.Alternates.FirstOrDefault(a => !a.Pending && string.Equals(a.GroundKey, ground, StringComparison.Ordinal)) is { } alternate
+            ? rung with { GroundKey = alternate.GroundKey, Landblock = alternate.Landblock, Pending = false, PendingReason = null }
+            : null;
     }
 
     /// <summary>The rung and its named reason. See the class.</summary>
@@ -250,10 +300,40 @@ public static class RungOwner
         var own = ApproachHold(ladder, ask, SessionHold(ladder, ask, DecideOwn(ladder, ask)));
         if (ask.Trial is { Steers: true } trial)
         {
-            return Loud(ask, VitaeHold(ladder, ask, Trial(ladder, ask, trial, own))); // an explicit test of a later rung's ground comes first: the kill task waits while it lasts
+            return Loud(ask, EntryFallback(ask, VitaeHold(ladder, ask, Trial(ladder, ask, trial, own)))); // an explicit test of a later rung's ground comes first: the kill task waits while it lasts
         }
 
-        return Loud(ask, VitaeHold(ladder, ask, ask.KillTask is { Steers: true } task ? KillTask(ladder, ask, task, own) : own));
+        return Loud(ask, EntryFallback(ask, VitaeHold(ladder, ask, ask.KillTask is { Steers: true } task ? KillTask(ladder, ask, task, own) : own)));
+    }
+
+    /// <summary>
+    /// M6 redoubt (the rung <c>outskirts</c> hunts the Holtburg Redoubt, whose portal admits levels 1 to 20): the last word of every choice. A hunt or a move on a rung's own ground whose entry portal does not admit her live level
+    /// (<see cref="LiveOf"/>: a climber above the portal's limit, held down to the rung by shut gates or by the vitae burn) is made on the rung's outdoor fallback ground instead (<see cref="RungFallback"/>, an alternate of the rung
+    /// hunted from home on foot): the rung's band, gate, bolt plan and target margin, the fallback's ground (<see cref="RungChoice.Alternate"/>), the refusal by name on the choice (<see cref="RungChoice.EntryRefused"/>, logged loudly by
+    /// <see cref="WarnLoud"/>); the choice's reason stays the ladder's own (<c>gate-held:&lt;rung&gt;</c>, <c>vitae-held:&lt;rung&gt;</c>). A rung with no such ground keeps its choice,
+    /// and the travel names the gate before any walk, as before. A choice already on an alternate, a trial's or a kill task's ground whose portal admits her, and a rung with no entry are untouched.
+    /// </summary>
+    private static RungChoice EntryFallback(RungAsk ask, RungChoice choice)
+    {
+        if (choice.Decision.Kind is not (LadderStepKind.Hunt or LadderStepKind.Moved) || choice.Alternate is not null || choice.Decision.Rung is not { GroundKey: { } own } rung
+            || GroundCatalog.TryGet(own) is not { Entry: { } entry } || entry.Admits(LiveOf(ask)) || RungFallback.Of(rung) is not { } fallback)
+        {
+            return choice;
+        }
+
+        var live = LiveOf(ask);
+        var refusal = Scenarios.Journey.RungRoute.GateRefusal("entry:" + own, live, entry.MinLevel, entry.MaxLevel) ?? "entry:" + own;
+        var onFallback = rung with { GroundKey = fallback.GroundKey, Landblock = fallback.Landblock, Pending = false, PendingReason = null };
+        var decision = AutopilotScenario.DecideEntryFallback(onFallback, choice.Decision.Level, live, ask.RunGround ?? fallback.GroundKey, refusal);
+        var built = decision.Kind == LadderStepKind.Hunt ? GroundCatalog.TryGet(fallback.GroundKey) : null;
+        return choice with
+        {
+            Decision = decision,
+            Ground = built,
+            Alternate = fallback.GroundKey,
+            EntryRefused = refusal,
+            Why = $"the rung {rung.Key}'s own ground {own} is entered by a portal that does not admit level {live} ({refusal}), so she hunts its outdoor ground {fallback.GroundKey} in its place; {decision.Why}",
+        };
     }
 
     /// <summary>
@@ -393,6 +473,11 @@ public static class RungOwner
         if (choice.FarBelow is { } far)
         {
             log.Warn(category, far);
+        }
+
+        if (choice.EntryRefused is { } refused && choice.Decision.Rung is { } rung)
+        {
+            log.Warn(category, $"ladder: rung: entry refused: {refused}: the rung {rung.Key}'s own ground is entered by a portal that does not admit her, so she hunts its outdoor ground {choice.Alternate} in its place (reason={choice.Reason}; M6 redoubt)");
         }
     }
 
@@ -787,6 +872,16 @@ public static class RungOwner
         var decision = ask.RunGround is { } ground2
             ? AutopilotScenario.DecideRung(ladder, held, ground2, null, ask.QuestDone)
             : AutopilotScenario.LadderDecisionFor(ladder, held, ask.QuestDone ?? (static _ => true));
+
+        // M6 retreat: a rung played on a live alternate of its own: the trophy job's ground (a run's check) or the ground the stop named after the rung (the host's restart of that move)
+        var playedOn = job is { } onJob && held == from ? onJob.Rung
+            : named is not null && ask.NamedGround is { } askedGround ? PlayedOn(named, askedGround)
+            : null;
+        if (playedOn is not null && decision.Rung?.Key == playedOn.Key && !string.Equals(decision.Rung.GroundKey, playedOn.GroundKey, StringComparison.Ordinal))
+        {
+            decision = AutopilotScenario.DecideOnGround(playedOn, held, ask.RunGround ?? playedOn.GroundKey!);
+        }
+
         if (ahead is not null && named is null && job is null && held == ask.Level && decision.Kind is LadderStepKind.Hunt or LadderStepKind.Moved
             && decision.Rung?.Key == ladder.RungFor(ask.Level).Key && AheadGate(ladder, ask, ahead, read, ref standing))
         {
@@ -1081,17 +1176,26 @@ public static class RungOwner
 
         foreach (var rung in ladder.Rungs)
         {
-            if (rung.GroundKey is not { } key || rung.Band.To >= ask.Level || GroundCatalog.TryGet(key) is not { Hunt: { } hunt } ground)
+            if (rung.GroundKey is null || rung.Band.To >= ask.Level)
             {
                 continue; // the job is for a rung below her band: on its own band the hunt is already there
             }
 
-            foreach (var pull in hunt.Pulls)
+            // M6 retreat: the rung's own ground, then its live alternates (the 10-14 rung hunts the Retreat; the Female Tusk's carriers stand in its alternate, the Burrow): the job's rung is played on the ground that holds the pull
+            foreach (var key in rung.Alternates.Where(a => !a.Pending).Select(a => a.GroundKey).Prepend(rung.GroundKey))
             {
-                if (pull.Stand is { } stand && ask.Level >= stand.FromLevel && ask.Level <= stand.ToLevel && due(stand.Quest)
-                    && (ask.RunGround == key || (ask.Cell is { } cell && ground.InLandblocks(cell)) || ladder.GateOf(rung.Key) is not { } gate || RungGateRule.Check(gate, ask.Qualities, ask.Knows, buffs.Active, buffs.Reach, ask.StandsByAnother).All(c => c.Met)))
+                if (GroundCatalog.TryGet(key) is not { Hunt: { } hunt } ground)
                 {
-                    return (rung, stand);
+                    continue;
+                }
+
+                foreach (var pull in hunt.Pulls)
+                {
+                    if (pull.Stand is { } stand && ask.Level >= stand.FromLevel && ask.Level <= stand.ToLevel && due(stand.Quest)
+                        && (ask.RunGround == key || (ask.Cell is { } cell && ground.InLandblocks(cell)) || ladder.GateOf(rung.Key) is not { } gate || RungGateRule.Check(gate, ask.Qualities, ask.Knows, buffs.Active, buffs.Reach, ask.StandsByAnother).All(c => c.Met)))
+                    {
+                        return (PlayedOn(rung, key)!, stand);
+                    }
                 }
             }
         }
@@ -1099,13 +1203,14 @@ public static class RungOwner
         return null;
     }
 
-    /// <summary>The rung ground that holds <paramref name="cell"/>, or null: the corpse lies on no rung's ground (a road).</summary>
+    /// <summary>The rung ground that holds <paramref name="cell"/> (a rung's own ground, or, M6 redoubt, its outdoor fallback ground: <see cref="RungFallback"/>), or null: the corpse lies on no rung's ground (a road).</summary>
     /// <param name="ladder">The ladder.</param>
     /// <param name="cell">The cell.</param>
     public static HuntingGround? GroundOf(Ladder ladder, uint cell)
     {
         ArgumentNullException.ThrowIfNull(ladder);
-        return ladder.Rungs.Where(r => r.GroundKey is not null).Select(r => GroundCatalog.TryGet(r.GroundKey!)).FirstOrDefault(g => g is not null && g.InLandblocks(cell));
+        return ladder.Rungs.Where(r => r.GroundKey is not null).Select(r => GroundCatalog.TryGet(r.GroundKey!)).FirstOrDefault(g => g is not null && g.InLandblocks(cell))
+            ?? ladder.Rungs.Select(r => RungFallback.Of(r) is { } f ? GroundCatalog.TryGet(f.GroundKey) : null).FirstOrDefault(g => g is not null && g.InLandblocks(cell));
     }
 
     /// <summary>
@@ -1130,7 +1235,7 @@ public static class RungOwner
             return new CorpseRunAnswer(open, (open ? "trial:" : "trial-gate-held:") + trial.Ground, trialRung.Key);
         }
 
-        if (corpseGround is null || ladder.Rungs.FirstOrDefault(r => string.Equals(r.GroundKey, corpseGround, StringComparison.Ordinal)) is not { } rung)
+        if (corpseGround is null || ladder.Rungs.FirstOrDefault(r => string.Equals(r.GroundKey, corpseGround, StringComparison.Ordinal) || RungFallback.Names(r, corpseGround)) is not { } rung)
         {
             return new CorpseRunAnswer(true, "no-rung", null);
         }

@@ -274,7 +274,7 @@ public sealed partial class AutopilotHostLogic : IAutopilotStatusSource, IDispos
             }
         }
 
-        return Asked(view, RungOwner.NamedRung(LadderLoader.WarMage, stop), "move-on", out why, log, stands, trial: trial, killTask: killTasks?.FirstOrDefault(t => t.Steers), holds: holds);
+        return Asked(view, RungOwner.NamedRung(LadderLoader.WarMage, stop), "move-on", out why, log, stands, trial: trial, killTask: killTasks?.FirstOrDefault(t => t.Steers), holds: holds, namedGround: RungOwner.NamedGround(LadderLoader.WarMage, stop));
     }
 
     /// <summary>Lifestone's own: the seconds a hand-over's read of the named rung's gate is used by the move-on (it is taken in the frame of the stop; a read older than this is no read of now).</summary>
@@ -307,10 +307,10 @@ public sealed partial class AutopilotHostLogic : IAutopilotStatusSource, IDispos
         return null;
     }
 
-    private static HuntingGround? Asked(IGameSessionView view, string? named, string path, out string why, ILogSink? log, Func<string, int, string?>? stands = null, GateStartRead? start = null, LadderTrial? trial = null, LadderKillTask? killTask = null, ApproachHolds? holds = null)
+    private static HuntingGround? Asked(IGameSessionView view, string? named, string path, out string why, ILogSink? log, Func<string, int, string?>? stands = null, GateStartRead? start = null, LadderTrial? trial = null, LadderKillTask? killTask = null, ApproachHolds? holds = null, string? namedGround = null)
     {
         ArgumentNullException.ThrowIfNull(view);
-        var ask = new RungAsk(LevelOf(view), view.State.Self.Position?.CellId, view.State.Self.Qualities, AutopilotScenario.GateKnows(view), null, named) { StandsByAnother = stands, StartRead = start, Trial = trial, PlanWar = SpellPlan.PlanWarOf(view.XpTable), KillTask = killTask, AheadHeld = holds is null ? null : holds.IsHeld, VitaeHeld = holds is null ? null : holds.Vitae.HeldWhy }; // M6 sprint: the vitae burn's hold
+        var ask = new RungAsk(LevelOf(view), view.State.Self.Position?.CellId, view.State.Self.Qualities, AutopilotScenario.GateKnows(view), null, named) { StandsByAnother = stands, StartRead = start, Trial = trial, PlanWar = SpellPlan.PlanWarOf(view.XpTable), KillTask = killTask, AheadHeld = holds is null ? null : holds.IsHeld, VitaeHeld = holds is null ? null : holds.Vitae.HeldWhy, NamedGround = namedGround }; // M6 sprint: the vitae burn's hold
         var choice = RungOwner.Decide(LadderLoader.WarMage, ask);
         trial?.Note(choice.Trial, ask.Level, path, log ?? NullLogSink.Instance); // M6 item 14: the trial's start or its refusal, by name
         if (start is not null && log is not null)

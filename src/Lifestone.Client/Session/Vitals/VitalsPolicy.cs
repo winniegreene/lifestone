@@ -59,7 +59,10 @@ public readonly record struct VitalsUpkeep(uint Target, uint Wanted, int Lines, 
 /// <param name="Power">The spell's power (Mana Conversion's difficulty).</param>
 /// <param name="Seconds">The cast's seconds (the ladder's measured table).</param>
 /// <param name="Row">ACE's transfer row: the share taken, the loss, the cap.</param>
-public readonly record struct FillLevel(int Index, int Level, uint BaseMana, uint Power, double Seconds, TransferRow Row);
+/// <param name="Chance">M6 heal spend: the chance the cast does not fizzle, on her live skill (1: taken as sure, not read). A fizzle gives nothing and costs <see cref="ManaConversionModel.FizzleMana"/> (ACE <c>Player_Magic.cs</c>
+/// <c>CalculateManaUsage</c>, 566-572 @95ef426d), so the policy prices a level at its expected give and cost; 0 or less: not offered.</param>
+/// <param name="Lands">M6 heal spend: of the casts that do not fizzle, the share that lands: for a drain, the source's failing its resist (1: a self cast, or not read). A resisted cast gives nothing and costs its whole mana.</param>
+public readonly record struct FillLevel(int Index, int Level, uint BaseMana, uint Power, double Seconds, TransferRow Row, double Chance = 1, double Lands = 1);
 
 /// <summary>What <see cref="VitalsPolicy.Decide"/> reads: every number live from her character, the fight's own measurements and the target; nothing fixed but the ladder's <see cref="LadderVitalsPolicy"/>.</summary>
 public readonly record struct VitalsPolicyFacts
@@ -165,6 +168,12 @@ public readonly record struct VitalsPolicyFacts
 
     /// <summary>M6 14 upkeep mana: what the mana drink she would drink gives (the biggest held that fits whole in the missing mana; 0: none held, none fits, or the drinks are set aside).</summary>
     public uint ManaDrinkGive { get; init; }
+
+    /// <summary>
+    /// M6 heal spend: the creatures attacking her now (the fight's attackers, heard swinging and alive; 0: not read). Over one, the next kill takes its share out of the incoming while another stays on her as a drain's source: a top-up
+    /// stands under less incoming after it (<see cref="VitalsPolicy.HealthTopUpWaits"/>).
+    /// </summary>
+    public int Attackers { get; init; }
 }
 
 /// <summary>One kill's budget of each vital (<see cref="VitalsPolicy.Budget"/>): what a kill costs her and what she regenerates over it.</summary>
@@ -201,7 +210,8 @@ public readonly record struct VitalsLines(uint ManaFloor, uint HealthFloor, uint
 /// <param name="Damage">A point of damage by the bolt: its seconds over its expected damage.</param>
 /// <param name="Stamina">A point of stamina: the best stamina drain's seconds over its give while stamina runs short, else 0.</param>
 /// <param name="Mana">A point of mana: the best press's seconds over its net from a full bar while mana runs short, else 0 (a drain's own mana is priced at it).</param>
-public readonly record struct VitalsPrices(double Damage, double Stamina, double Mana = 0);
+/// <param name="HealMana">M6 heal spend: the mana a point of health costs her through the health drain the policy prices best at the fullest source (its expected cost over its whole give; 0: no drain offered).</param>
+public readonly record struct VitalsPrices(double Damage, double Stamina, double Mana = 0, double HealMana = 0);
 
 /// <summary>A choice: the move, the level's index in its list, what it gives, its price in seconds a point and the reason.</summary>
 /// <param name="Move">The move.</param>
@@ -241,7 +251,7 @@ public readonly record struct VitalsPlan(VitalsChoice Choice, VitalsBudget Budge
     {
         var b = Budget;
         var l = Lines;
-        return string.Create(CultureInfo.InvariantCulture, $"vitals policy: {Choice.Move.ToString().ToLowerInvariant()}{(Choice.Index >= 0 ? $" level {Choice.Index}" : string.Empty)} ({Choice.Why}; gives {Choice.Give:0.#} at {Choice.Price:0.###} s a point): health {f.Health}/{f.HealthMax} stamina {f.Stamina}/{f.StaminaMax} mana {f.Mana}/{f.ManaMax}; a kill {b.SecondsAKill:0.#} s{(b.Measured ? string.Empty : " (seed)")} {b.BoltsAKill:0.##} bolts; mana {b.ManaAKill:0.#} regen {b.ManaRegenAKill:0.#} short {b.ManaShort:0.#}; stamina {b.StaminaAKill:0.#} regen {b.StaminaRegenAKill:0.#} short {b.StaminaShort:0.#}; health {b.HealthAKill:0.#} regen {b.HealthRegenAKill:0.#}; floors mana {l.ManaFloor} health {l.HealthFloor}; stamina ready {l.StaminaReady}; pull mana {l.PullMana} health {l.PullHealth}; prices damage {Prices.Damage:0.####} stamina {Prices.Stamina:0.####} mana {Prices.Mana:0.####}; target {(f.TargetHealth < 0 ? "unread" : f.TargetHealth.ToString("0", CultureInfo.InvariantCulture))} next bolt kills {NextBoltKills:P0}; fullest health {f.FullestHealth:0} stamina {f.FullestStamina}; incoming {f.DamagePerSecond:0.##}/s burst {f.BurstPerSecond:0.##}/s biggest {f.BiggestHit:0} attacks {f.AttacksPerSecond:0.##}/s; regen a second health {f.HealthRegen:0.###} stamina {f.StaminaRegen:0.###} mana {f.ManaRegen:0.###}; Mana Conversion {f.ManaConversion}{UpkeepText()}");
+        return string.Create(CultureInfo.InvariantCulture, $"vitals policy: {Choice.Move.ToString().ToLowerInvariant()}{(Choice.Index >= 0 ? $" level {Choice.Index}" : string.Empty)} ({Choice.Why}; gives {Choice.Give:0.#} at {Choice.Price:0.###} s a point): health {f.Health}/{f.HealthMax} stamina {f.Stamina}/{f.StaminaMax} mana {f.Mana}/{f.ManaMax}; a kill {b.SecondsAKill:0.#} s{(b.Measured ? string.Empty : " (seed)")} {b.BoltsAKill:0.##} bolts; mana {b.ManaAKill:0.#} regen {b.ManaRegenAKill:0.#} short {b.ManaShort:0.#}; stamina {b.StaminaAKill:0.#} regen {b.StaminaRegenAKill:0.#} short {b.StaminaShort:0.#}; health {b.HealthAKill:0.#} regen {b.HealthRegenAKill:0.#}; floors mana {l.ManaFloor} health {l.HealthFloor}; stamina ready {l.StaminaReady}; pull mana {l.PullMana} health {l.PullHealth}; prices damage {Prices.Damage:0.####} stamina {Prices.Stamina:0.####} mana {Prices.Mana:0.####} heal mana a point {Prices.HealMana:0.###}; attackers {(f.Attackers > 0 ? f.Attackers.ToString(CultureInfo.InvariantCulture) : "unread")}; target {(f.TargetHealth < 0 ? "unread" : f.TargetHealth.ToString("0", CultureInfo.InvariantCulture))} next bolt kills {NextBoltKills:P0}; fullest health {f.FullestHealth:0} stamina {f.FullestStamina}; incoming {f.DamagePerSecond:0.##}/s burst {f.BurstPerSecond:0.##}/s biggest {f.BiggestHit:0} attacks {f.AttacksPerSecond:0.##}/s; regen a second health {f.HealthRegen:0.###} stamina {f.StaminaRegen:0.###} mana {f.ManaRegen:0.###}; Mana Conversion {f.ManaConversion}{UpkeepText()}");
     }
 }
 
@@ -372,7 +382,7 @@ public static class VitalsPolicy
         var fresh = BestTransfer(f.HealthDrains.Span, (uint)Math.Max(0, f.KillHealth), uint.MaxValue, damagePrice, 0, f.ManaConversion, health: true);
         var healthAKill = f.DamagePerSecond * seconds;
         var healthRegen = f.HealthRegen * seconds;
-        var drains = fresh.Give > 0 ? Math.Max(0, healthAKill - healthRegen) / fresh.Give : 0;
+        var drains = fresh.ExpectedGive > 0 ? Math.Max(0, healthAKill - healthRegen) / fresh.ExpectedGive : 0;
         var manaAKill = (bolts * boltCost) + (drains * fresh.Cost);
         var manaRegen = f.ManaRegen * seconds;
         var press = BestTransfer(f.Presses.Span, f.StaminaMax, uint.MaxValue, 0, 0, f.ManaConversion, health: false, mana: true);
@@ -405,7 +415,64 @@ public static class VitalsPolicy
             mana = press.Index >= 0 ? press.Price : 0;
         }
 
-        return new VitalsPrices(DamagePrice(in f), stamina, mana);
+        var heal = BestTransfer(f.HealthDrains.Span, (uint)Math.Max(0, f.FullestHealth > 0 ? f.FullestHealth : f.KillHealth), uint.MaxValue, DamagePrice(in f), 0, f.ManaConversion, health: true);
+        return new VitalsPrices(DamagePrice(in f), stamina, mana, heal.Index >= 0 && heal.ExpectedGive > 0 ? heal.Cost / heal.ExpectedGive : 0);
+    }
+
+    /// <summary>
+    /// M6 heal spend: the mana the health a fill's seconds cost her would take to heal: the incoming now (<see cref="VitalsPolicyFacts.BurstPerSecond"/>, the recent hits) over the fill's seconds, at the mana a health point of the heal the
+    /// policy would cast (<see cref="VitalsPrices.HealMana"/>). Every second not killing stands under every creature on her; in a fight whose health is kept by drains, that damage is paid for in mana.
+    /// </summary>
+    /// <param name="f">The facts.</param>
+    /// <param name="prices">The prices.</param>
+    /// <param name="seconds">The fill's seconds.</param>
+    public static double IncomingMana(in VitalsPolicyFacts f, in VitalsPrices prices, double seconds) => Math.Max(0, f.BurstPerSecond) * Math.Max(0, seconds) * prices.HealMana;
+
+    /// <summary>M6 heal spend: true when a press pays: its give less its own expected cost and the mana its seconds' incoming costs to heal (<see cref="IncomingMana"/>) is over 0.</summary>
+    /// <param name="f">The facts.</param>
+    /// <param name="prices">The prices.</param>
+    /// <param name="press">The press's pick.</param>
+    internal static bool PressPays(in VitalsPolicyFacts f, in VitalsPrices prices, in TransferPick press) => press.Index >= 0 && press.ExpectedGive - press.Cost - IncomingMana(in f, in prices, press.Seconds) > 0;
+
+    /// <summary>
+    /// M6 heal spend: the mana a stamina drain of <paramref name="give"/> buys her through the presses it feeds, each paying (<see cref="PressPays"/>): the presses from her stamina with the drain's give in it, less the presses from her stamina as it
+    /// is, less the drain's own expected <paramref name="cost"/> and the mana its seconds' incoming costs to heal. A press takes its share of the bar it is cast from (ACE's transfer arithmetic, <see cref="BuffStatMods.Transfer"/>: the
+    /// proportion of the source's current), so each press after the first gives less for the same cost: the presses are walked down the bar, not priced at a full bar's rate (<see cref="StaminaDrainNets"/>, which the upkeep's fill still
+    /// reads). Over 0: the drain pays. Allocation-free (at most <see cref="MaxPressWalk"/> presses a walk).
+    /// </summary>
+    /// <param name="f">The facts.</param>
+    /// <param name="prices">The prices.</param>
+    /// <param name="give">The drain's give (cut to the stamina she is missing).</param>
+    /// <param name="cost">The drain's expected mana.</param>
+    /// <param name="seconds">The drain's seconds.</param>
+    public static double StaminaDrainNet(in VitalsPolicyFacts f, in VitalsPrices prices, double give, double cost, double seconds)
+    {
+        var with = PressedMana(in f, in prices, (uint)Math.Min(f.StaminaMax, f.Stamina + Math.Max(0, give)));
+        var without = PressedMana(in f, in prices, f.Stamina);
+        return with - without - cost - IncomingMana(in f, in prices, seconds);
+    }
+
+    /// <summary>The most presses a walk of <see cref="PressedMana"/> counts (a press takes at least a share of the bar, so a bar empties in a few).</summary>
+    public const int MaxPressWalk = 16;
+
+    /// <summary>The mana the presses that pay give her from a bar of <paramref name="stamina"/>, each at the policy's best-priced level from the bar it is cast from, until one would not pay.</summary>
+    private static double PressedMana(in VitalsPolicyFacts f, in VitalsPrices prices, uint stamina)
+    {
+        var net = 0.0;
+        var bar = stamina;
+        for (var i = 0; i < MaxPressWalk && bar > 0; i++)
+        {
+            var press = BestTransfer(f.Presses.Span, bar, uint.MaxValue, 0, prices.Stamina, f.ManaConversion, health: false, mana: true);
+            if (!PressPays(in f, in prices, in press) || press.ExpectedTaken <= 0)
+            {
+                break;
+            }
+
+            net += press.ExpectedGive - press.Cost - IncomingMana(in f, in prices, press.Seconds);
+            bar = press.ExpectedTaken >= bar ? 0 : bar - (uint)Math.Ceiling(press.ExpectedTaken);
+        }
+
+        return net;
     }
 
     /// <summary>
@@ -418,7 +485,7 @@ public static class VitalsPolicy
     public static bool StaminaDrainNets(in VitalsPolicyFacts f, double give, double cost)
     {
         var press = BestTransfer(f.Presses.Span, f.StaminaMax, uint.MaxValue, 0, 0, f.ManaConversion, health: false, mana: true);
-        return press.Index >= 0 && press.Taken > 0 && (give * (press.Give - press.Cost) / press.Taken) - cost > 0;
+        return press.Index >= 0 && press.ExpectedTaken > 0 && (give * (press.ExpectedGive - press.Cost) / press.ExpectedTaken) - cost > 0;
     }
 
     /// <summary>The lines.</summary>
@@ -461,6 +528,11 @@ public static class VitalsPolicy
     /// The decision before a bolt, in this order: under the health floor, the best-priced health drain at once; under the mana floor, the best-priced press (or the stamina drain first when no press pays); the bolt when it more likely
     /// than not kills (<see cref="LadderVitalsPolicy.BoltFirstChance"/>); the best-priced health drain whose whole give fits what she is missing; while mana runs short over a kill and her stamina is ready, the best-priced press when its
     /// whole give fits; while stamina runs short over a kill, the stamina drain when its whole give fits; else the bolt.
+    /// <para>M6 heal spend (the owner's ruling of 2026-11-19: her in-fight fills overspent; <c>docs/session.md</c> section 119, the simulator's evidence in <c>docs/fight-sim.md</c>, "With her heals"): every level is priced at its
+    /// expected give and cost (<see cref="FillLevel.Chance"/>, <see cref="FillLevel.Lands"/>); a mana fill pays only when the mana it nets is more than the mana the health its seconds cost would take to heal (<see cref="PressPays"/>,
+    /// <see cref="StaminaDrainNet"/>: the incoming now over its seconds, at the heal's mana a point; a stamina drain through the presses it feeds, walked down the bar); a health top-up waits for the best-priced level to fit; and with
+    /// more than one on her, a health top-up waits for the next kill (<see cref="HealthTopUpWaits"/>, a drain whose damage pays for its seconds excepted). The floors fill at once as before, by the same test of what pays. A mana top-up
+    /// that waited while her mana covered the kills on her was measured and dropped: it saved nothing the other rules did not, and in the Tusker Cave's five it ran her dry more often (docs/session.md section 119).</para>
     /// </summary>
     /// <param name="f">The facts.</param>
     /// <param name="rules">The ladder's lines.</param>
@@ -577,7 +649,7 @@ public static class VitalsPolicy
         if (staminaSource > 0)
         {
             var drain = BestTransfer(f.StaminaDrains.Span, staminaSource, uint.MaxValue, 0, 0, f.ManaConversion, health: false, manaPrice: prices.Mana);
-            if (drain.Index >= 0 && drain.Give <= staminaMissing && StaminaDrainNets(in f, drain.Give, drain.Cost))
+            if (drain.Index >= 0 && drain.Give <= staminaMissing && StaminaDrainNets(in f, drain.ExpectedGive, drain.Cost))
             {
                 return new VitalsChoice(VitalsMove.DrainStamina, drain.Index, drain.Give, drain.Price, "upkeep: the stamina first, the press after it", Upkeep: true);
             }
@@ -599,6 +671,17 @@ public static class VitalsPolicy
         return null;
     }
 
+    /// <summary>The reason a health top-up waits (<see cref="HealthTopUpWaits"/>), the log's key.</summary>
+    public const string HealthTopUpWaitsWhy = "a health top-up waits: the next kill lowers the incoming and another stays on her";
+
+    /// <summary>
+    /// M6 heal spend: true when a health top-up (a health drain above the floor whose whole give fits) waits for the next kill. Its seconds are the same now or after the next kill, but every second not killing stands under the incoming of
+    /// every creature on her. With more than one on her (<see cref="VitalsPolicyFacts.Attackers"/>) the next kill takes its share out of the incoming and another stays as the drain's source, so the same heal after it costs less health; the
+    /// health floor and the emergency stand guard in the meantime. With one on her (or none read) the moment is the hunt's own, as before; a drain whose damage pays for its seconds never waits (<see cref="TransferPick.KillSeconds"/>).
+    /// </summary>
+    /// <param name="f">The facts.</param>
+    public static bool HealthTopUpWaits(in VitalsPolicyFacts f) => f.Attackers > 1;
+
     private static VitalsChoice Choose(in VitalsPolicyFacts f, in VitalsBudget budget, in VitalsPrices prices, in VitalsLines lines, LadderVitalsPolicy rules, double nextKills, in VitalsUpkeep upkeep)
     {
         var healthMissing = f.HealthMax > f.Health ? f.HealthMax - f.Health : 0;
@@ -619,13 +702,13 @@ public static class VitalsPolicy
         if (f.Mana < lines.ManaFloor)
         {
             var press = BestTransfer(f.Presses.Span, f.Stamina, manaMissing, 0, prices.Stamina, f.ManaConversion, health: false, mana: true);
-            if (press.Index >= 0 && press.Give > press.Cost)
+            if (PressPays(in f, in prices, in press))
             {
                 return new VitalsChoice(VitalsMove.Press, press.Index, press.Give, press.Price, "under the mana floor");
             }
 
             var drain = BestTransfer(f.StaminaDrains.Span, staminaSource, staminaMissing, 0, 0, f.ManaConversion, health: false, manaPrice: prices.Mana);
-            if (drain.Index >= 0 && StaminaDrainNets(in f, drain.Give, drain.Cost))
+            if (drain.Index >= 0 && StaminaDrainNet(in f, in prices, drain.ExpectedGive, drain.Cost, drain.Seconds) > 0)
             {
                 return new VitalsChoice(VitalsMove.DrainStamina, drain.Index, drain.Give, drain.Price, "under the mana floor: no press pays, the stamina first");
             }
@@ -643,10 +726,15 @@ public static class VitalsPolicy
             return fill; // M6 14 upkeep mana: a line due within the window: its fill before the optional fills and the bolt (the current kill's finishing bolt went above)
         }
 
+        var healthWaited = false;
         if (budget.HealthShort > 0 && healthSource > 0)
         {
-            var heal = BestTransfer(f.HealthDrains.Span, healthSource, healthMissing, prices.Damage, 0, f.ManaConversion, health: true, fitsOnly: true, manaPrice: prices.Mana);
-            if (heal.Index >= 0)
+            // M6 heal spend: the best-priced level at its whole give, when that give fits (as a press waits for the best): a level that fits sooner only because it gives less is dearer a point, and one she seldom lands (a
+            // fizzle still costs 5) dearer still; the best fits after a few more hits, and the floor and the emergency stand guard meanwhile.
+            var heal = BestTransfer(f.HealthDrains.Span, healthSource, uint.MaxValue, prices.Damage, 0, f.ManaConversion, health: true, manaPrice: prices.Mana);
+            heal = heal.Give <= healthMissing ? heal : TransferPick.None;
+            healthWaited = heal.Index >= 0 && heal.KillSeconds > 0 && HealthTopUpWaits(in f);
+            if (heal.Index >= 0 && !healthWaited)
             {
                 return new VitalsChoice(VitalsMove.DrainHealth, heal.Index, heal.Give, heal.Price, "the health drain's whole give fits");
             }
@@ -657,7 +745,7 @@ public static class VitalsPolicy
             var press = rules.PressWaitsForBest
                 ? BestTransfer(f.Presses.Span, f.Stamina, uint.MaxValue, 0, prices.Stamina, f.ManaConversion, health: false, mana: true) // the cheapest level, when its whole give fits
                 : BestTransfer(f.Presses.Span, f.Stamina, manaMissing, 0, prices.Stamina, f.ManaConversion, health: false, fitsOnly: true, mana: true); // the cheapest of the levels whose whole give fits now
-            if (press.Index >= 0 && press.Give <= manaMissing && press.Give > press.Cost)
+            if (press.Index >= 0 && press.Give <= manaMissing && PressPays(in f, in prices, in press))
             {
                 return new VitalsChoice(VitalsMove.Press, press.Index, press.Give, press.Price, "the press's whole give fits");
             }
@@ -666,19 +754,20 @@ public static class VitalsPolicy
         if (budget.StaminaShort > 0 && staminaSource > 0)
         {
             var drain = BestTransfer(f.StaminaDrains.Span, staminaSource, uint.MaxValue, 0, 0, f.ManaConversion, health: false, manaPrice: prices.Mana);
-            if (drain.Index >= 0 && drain.Give <= staminaMissing && StaminaDrainNets(in f, drain.Give, drain.Cost))
+            if (drain.Index >= 0 && drain.Give <= staminaMissing && StaminaDrainNet(in f, in prices, drain.ExpectedGive, drain.Cost, drain.Seconds) > 0)
             {
                 return new VitalsChoice(VitalsMove.DrainStamina, drain.Index, drain.Give, drain.Price, "the stamina drain's whole give fits");
             }
         }
 
-        return new VitalsChoice(VitalsMove.Bolt, -1, 0, 0, budget.ManaShort > 0 && f.Stamina < lines.StaminaReady ? "no fill is due: the stamina is not ready for a press" : "no fill is due");
+        return new VitalsChoice(VitalsMove.Bolt, -1, 0, 0, healthWaited ? HealthTopUpWaitsWhy : budget.ManaShort > 0 && f.Stamina < lines.StaminaReady ? "no fill is due: the stamina is not ready for a press" : "no fill is due");
     }
 
     /// <summary>
     /// The level of <paramref name="levels"/> with the fewest seconds a point given: (its seconds, plus the stamina it takes at <paramref name="staminaPrice"/>, less the damage it deals at <paramref name="damagePrice"/> for a health drain)
     /// over its give (ACE's transfer, <see cref="BuffStatMods.Transfer"/>, cut to <paramref name="missing"/>; the transfer cap binds both), for a press with <paramref name="mana"/> its give less its expected cost, for a drain its own mana at
     /// <paramref name="manaPrice"/>. With <paramref name="fitsOnly"/>, only a level whose whole give fits <paramref name="missing"/>; with <paramref name="minGive"/> (M6 14 upkeep mana), only a level whose net (its give, less its own expected cost for a press) is at least it.
+    /// M6 heal spend: every give, take and cost is the expected one at the level's chances (<see cref="FillLevel.Chance"/>, <see cref="FillLevel.Lands"/>): a fizzle costs 5 and gives nothing, a resist costs the cast and gives nothing.
     /// </summary>
     internal static TransferPick BestTransfer(ReadOnlySpan<FillLevel> levels, uint source, uint missing, double damagePrice, double staminaPrice, uint manaConversion, bool health, bool fitsOnly = false, bool mana = false, double manaPrice = 0, uint minGive = 0)
     {
@@ -698,9 +787,18 @@ public static class VitalsPolicy
                 continue;
             }
 
-            var cost = ManaConversionModel.ExpectedCost(level.BaseMana, level.Power, manaConversion);
-            var seconds = level.Seconds + (health ? -damagePrice * taken : staminaPrice * taken) + (mana ? 0 : manaPrice * cost);
-            var net = mana ? give - cost : give; // a press's own cost comes out of the mana it gives; a drain's mana is a few points of the mana a kill (Budget counts the health drain's)
+            if (level.Chance <= 0)
+            {
+                continue;
+            }
+
+            // M6 heal spend: at the chance it lands (FillLevel.Chance, Lands): the give and take as expected; the cost a cast's expected cost (resisted or not) or a fizzle's 5 (Player_Magic.cs 566-572).
+            var chance = Math.Min(1, level.Chance);
+            var landed = chance * Math.Clamp(level.Lands, 0, 1);
+            var cost = (chance * ManaConversionModel.ExpectedCost(level.BaseMana, level.Power, manaConversion)) + ((1 - chance) * ManaConversionModel.FizzleMana);
+            var takenExpected = landed * taken;
+            var seconds = level.Seconds + (health ? -damagePrice * takenExpected : staminaPrice * takenExpected) + (mana ? 0 : manaPrice * cost);
+            var net = mana ? (landed * give) - cost : landed * give; // a press's own cost comes out of the mana it gives; a drain's mana is a few points of the mana a kill (Budget counts the health drain's)
             if (net <= 0 || net < minGive)
             {
                 continue;
@@ -709,16 +807,25 @@ public static class VitalsPolicy
             var price = seconds / net;
             if (best.Index < 0 || price < best.Price)
             {
-                best = new TransferPick(level.Index, give, taken, cost, price);
+                best = new TransferPick(level.Index, give, taken, cost, price, level.Seconds, level.Seconds - (health ? damagePrice * takenExpected : 0), landed);
             }
         }
 
         return best;
     }
 
-    /// <summary>A level's pick: its index, give, take, expected mana and price.</summary>
-    internal readonly record struct TransferPick(int Index, double Give, double Taken, double Cost, double Price)
+    /// <summary>
+    /// A level's pick: its index, its give and take when it lands, its expected mana (a fizzle's counted) and price; its cast's seconds; the kill seconds it costs (its seconds less, for a health drain, the damage it is expected to deal counted
+    /// as bolt seconds); and the share of its casts that land (neither fizzled nor resisted).
+    /// </summary>
+    internal readonly record struct TransferPick(int Index, double Give, double Taken, double Cost, double Price, double Seconds = 0, double KillSeconds = 0, double Chance = 1)
     {
         public static TransferPick None => new(-1, 0, 0, 0, double.PositiveInfinity);
+
+        /// <summary>The give as expected: the give when it lands, at the chance it lands.</summary>
+        public double ExpectedGive => Chance * Give;
+
+        /// <summary>The take as expected.</summary>
+        public double ExpectedTaken => Chance * Taken;
     }
 }

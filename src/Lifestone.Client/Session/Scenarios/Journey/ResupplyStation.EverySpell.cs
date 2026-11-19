@@ -201,7 +201,7 @@ public sealed partial class ResupplyRun
 
         var planned = listed + town + saving + leather;
         var why = string.Create(c, $"this trip's list {listed} ({buys.Count} line(s): the spell plan's scrolls and the focus), the plan's town learns {town}, the scrolls it saves for {saving}, the leather set's missing pieces {leather}");
-        return EverySpellPlan.ReserveOf(ground, S.State.Self.Qualities.Level, Context.Facts.BuffBotOn?.Invoke() ?? false, Context.Facts.EverySpellVilla, S.State.HouseStatus, planned, why);
+        return EverySpellPlan.ReserveOf(ground, S.State.Self.Qualities.Level, Context.Facts.BuffBotOn?.Invoke() ?? false, Context.Facts.EverySpellVilla, S.State.HouseStatus, planned, why, PackRoomMemory.For(S.State).DrinksDitched is not null); // M6 audit (fix 6)
     }
 
     /// <summary>

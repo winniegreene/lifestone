@@ -2,6 +2,7 @@ using System.Globalization;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Mage;
+using Lifestone.Client.Session.Quartermaster;
 
 namespace Lifestone.Client.Session.Fighter;
 
@@ -70,6 +71,7 @@ public sealed class CorpseLooter
     private readonly int[] _skipped = new int[ReasonSlots];
     private ActionHandle? _pending;
     private uint _pendingItem;
+    private bool _pendingByMerge;
     private int _packFullRun;
     private int _takenBurden;
     private int _burdenAtSend;
@@ -268,7 +270,18 @@ public sealed class CorpseLooter
                 into = 0;
             }
 
+            if (_mergeStacks && (into == 0 || into == state.Self.Guid) && PackView.MainPackFree(state) == 0 && StackMerge.TryPlanWhole(state, item, _scratch, out var held, out var size, out var room))
+            {
+                // M6 sprint (run 5, "Unable to put Pyreal into container" eight times at main=0/102): with no free slot a pick-up is refused, but the stack joins a held one from the corpse (MergeStackTracker, retail's drag
+                // onto a stack); the move settles as any pick-up (a Confirmed one is Looted), and the stack is gone from the corpse.
+                _pending = actions.MergeStack(entry.Guid, held, size, ActionSource.Automation);
+                _pendingByMerge = true;
+                _log.Info(_category, string.Create(CultureInfo.InvariantCulture, $"loot: taking '{item.Name}' 0x{entry.Guid:X8} (x{size}) by a merge into the held stack 0x{held:X8} (room {room}): the main pack has no free slot, so a pick-up would be refused (m6-loot-merge-from-corpse)"));
+                return LootStatus.Running;
+            }
+
             _pending = actions.PickUp(entry.Guid, into == 0 ? state.Self.Guid : into, 0, ActionSource.Automation);
+            _pendingByMerge = false;
             _log.Info(_category, string.Create(CultureInfo.InvariantCulture, $"loot: taking '{item.Name}' 0x{entry.Guid:X8} (wcid {item.Weenie.WeenieClassId}, type 0x{item.ItemType:X}, value {item.Weenie.Value ?? 0}, burden {item.Weenie.Burden ?? 0}){(into == 0 || into == state.Self.Guid ? string.Empty : string.Create(CultureInfo.InvariantCulture, $" into the side pack 0x{into:X8}"))}"));
             return LootStatus.Running;
         }
@@ -329,7 +342,11 @@ public sealed class CorpseLooter
                 {
                     _takenBurden = _burdenAtSend + (item!.Weenie.Burden ?? 0); // the burden the move started from plus the item's: the server's property may or may not show it yet
                     NoteStack(state, item);
-                    if (!late)
+                    if (_pendingByMerge)
+                    {
+                        _mergedAway.Add(guid); // joined a held stack from the corpse: the guid is gone, the items are held
+                    }
+                    else if (!late)
                     {
                         PlanMerge(state, guid);
                     }

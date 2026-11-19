@@ -1,0 +1,1739 @@
+{
+  "key": "tusker-retreat",
+  "name": "Tusker Retreat",
+  "kind": "dungeon",
+  "sources": {
+    "landblocks": "the dats: landblock 0x5C49 (GroundDraft)",
+    "arrival": "the pinned world SQL v0.9.296: weenie 22694's Destination (PositionType 2) is the arrival cell 0x5C490138 at (89.8429, -116.371, 0.005) (GroundDraft; a read-only SELECT on weenie_properties_position object_Id 22694 position_Type 2 agrees)",
+    "walk": "the doorway lean 0.3, the island re-draft's (M6 4 R1) and the Burrow's: GroundDraft from the arrival 0x5C490138 reaches 169 of the landblock's 180 floored cells at lean 0, 0.3, 0.6 and 0.9 alike (72 of the 252 cells floorless); the 11 floored cells it does not reach are pockets: 0x5C49010B, 0x010F and 0x0113 (z 0, each joined only to a floorless cell over the z -6 rooms) and 0x0182, 0x0183, 0x0187, 0x018A, 0x018B, 0x018E, 0x018F and 0x0190 (z 6, a ring round the floorless cells 0x0188, 0x0189, 0x018C and 0x018D, the open shaft over the z 0 room 0x0126): every portal out of them fits the body but is neither a doorway, a floor crossing nor a stair (RoomGraph.IsPassable false), so 11 of the 71 slots stand where no walk goes: the profile hunts the slots its walk reaches (RespawnSchedule: a target slot in a walkable cell), TODO(m6-retreat-pockets) (see targets and hunt). The leg's stop rules are the Burrow's (stop within 1.0 m, dwell 0.25 s, a leg at most 90 s), not measured on this ground",
+    "storeys": "the dats (GroundDraft.Cells): every cell the arrival 0x5C490138 reaches over the doorways RoomGraph.IsPassable accepts at lean 0.3, grouped by origin z; 169 walkable cells in 4 storeys (z 12: 75, z 6: 48, z 0: 37, z -6: 9) of 252; 72 floorless and 11 unreached pocket cells left out",
+    "no_go": "the pinned world SQL v0.9.296: the exit portal's cell (a portal whose Destination is outside 0x5C49): 0x5C490100 (wcid 22695 'Surface' to 0xF97E0035); it holds two Tusker Kin slots (22510 and 22509, guids 0x75C49001 and 0x75C49002), so 69 slots stand outside it; no other cell is held back here (the hunt's keep-out is in hunt)",
+    "targets": "the pinned world SQL v0.9.296 through GroundDraft.World: the four weenies of the generator's 71 slots with Name and Level: Male Tusker 11 (level 20, 30 slots), Female Tusker 236 (15, 11), Tusker Kin 22509 (15, 7) and Tusker Kin 22510 (20, 23); none carries a tusk (no create-list row of 22423 or 22427 on these four weenies: the Female Tusk errand stays on tusker-burrow). Roles: all targets; 22510 kill-first: it casts (weenie_properties_spell_book: Flame, Frost, Acid Stream, Shock Wave, Lightning, Force and Whirling Blade I, Imperil Other I and Bludgeoning Vulnerability Other I) and the simulator puts its harm at 0.64 health a second against a Male Tusker's 0.60 for 1.14 casts of Flame Bolt III a kill against 2.12 (pwsh -File tools\\fight-sim.ps1 matchup 22510 --her Winnie and matchup 11 --her Winnie, 2026-11-19, Winnie at level 8), so a cast on it takes twice the harm off her a cast on a Male does; the level-15 Kin 22509 hits for 0 (its two body parts DVal 2; matchup 22509: 0.00 health a second over 4,777 attacks). The Kin are CreatureType 31 (Human) with FriendType 8 (Tusker), the tuskers CreatureType 8 with no FriendType (weenie_properties_int types 2 and 72): a woken Kin alerts the tuskers near it, a woken tusker no Kin (Monster_Awareness.cs AlertFriendly @95ef426d). Stats: max_health and magic_defence from the bestiary (from_bestiary, the same pinned rows: GroundCreatureNumbersTests); attributes and damage_types as GroundDraft drafted them (weenie_properties_attribute types 1 to 6, the OR of weenie_properties_body_part d_Type); swing_s not drafted (TODO(f11-swing-seconds))",
+    "level_band": "the pinned world SQL v0.9.296 through GroundDraft.World, the draft's rule (the targets' levels only, GroundDraft.LevelBandOf): the targets are level 15 to 20; the climber's band is the ladder rung's 10-14 (ladder/war-mage.json, rung burrow), and a dungeon's pick is not banded by the rung's margin (TODO(m6-dungeon-band))",
+    "portal": "none: the entry portal, weenie 22694 Tusker Retreat (guid 0x7F97E000), has PortalBitmask 0x31 (PropertyInt 111; a read-only SELECT reads 49), which carries NoRecall (0x20, ACE.Entity/Enum/PortalBitmask.cs:15 @95ef426d), and ACE's Portal.NoTie is NoRecall (Portal_Properties.cs:14-16), so it cannot be tied and the ground has no tie record (the entry section holds its place)",
+    "home": "Holtburg's lifestone in cell 0xA9B40019 and the known point (84, 7.7) off it, z 94, the Burrow's and the Lodge's home (tusker-burrow.json sources.home; D48: the island has no lifestone and the tusker portals are NoRecall); the draft's town half named the same lifestone, guid 0x7A9B404F at (81.3304, 11.7974, 94.005), 18,545 m from the portal; the point is the climber's standing point (TODO(m6-ground-live-facts))",
+    "vendors": "the Burrow's rows verbatim (tusker-burrow.json sources.vendors has each row's source and price rule): the 10-14 rung's Holtburg shops, the same climber at the same levels; Oolutanga's Refuge's Mage 22721 and Healer 22725 are not vendors here (TODO(m6-island-vendors), D48)",
+    "spell_plan": "the Burrow's rows verbatim (tusker-burrow.json sources.spell_plan): Flame Bolt II for 10-15 (the projected base War Magic 110 at level 10 and 133 at 14, II at 0.95; III needs 143: SpellPlan.LevelAt, ladder rung burrow sources.spell_level) and III for 16-21; the fight casts by the live cap on her buffed War Magic (D129), which these rows do not lower",
+    "components": "the Burrow's lines verbatim (tusker-burrow.json sources.components): the foci formula of Flame Bolt II and III and the account test's formula beside it",
+    "supplies": "the Burrow's stock, kit, burden line and purse verbatim (tusker-burrow.json sources.supplies has each line's sizing): the same rung (10-14), spells and shops. The lines were sized on the Burrow's kill rate; the Retreat's is not measured (the simulator's casting-only ceiling, 2.21 M XP an hour, pwsh -File tools\\fight-sim.ps1 rank --her Winnie --min-level 5 --max-level 40, cache/fight-sim/rank-Winnie-5-40.grounds.tsv, is no rate): TODO(m6-retreat-live) reads the burn on the first fresh climb",
+    "hold_spots": "none: the loop walks the tour and holds no spot",
+    "respawn": "the pinned world SQL v0.9.296: the one generator instance of the landblock, guid 0x75C49013 (wcid 7932, the Lodge's generator weenie) in 0x5C490137, its delay 240 s from its first profile row (weenie_properties_generator) and its tick 60 s from RegenerationInterval (PropertyFloat 41); its 71 slots are its landblock_instance_link children (cell, wcid)",
+    "tour": "a first draft (GroundDraft.FirstTour), as the Burrow's: the cells of the target slots in walkable cells but the exit's, storey by storey from the highest z down, nearest first by cell origin from the arrival",
+    "outdoor": "none: a dungeon"
+  },
+  "landblocks": [
+    "0x5C49"
+  ],
+  "arrival": {
+    "cell": "0x5C490138",
+    "origin": {
+      "x": 89.8429,
+      "y": -116.371,
+      "z": 0.005
+    },
+    "heading": {
+      "w": 1,
+      "z": 0
+    }
+  },
+  "walk": {
+    "doorway_lean": 0.3,
+    "stop_within_m": 1.0,
+    "stop_dwell_s": 0.25,
+    "leg_s": 90
+  },
+  "storeys": [
+    {
+      "name": "z 12",
+      "z_min": 12,
+      "z_max": 12,
+      "cells": [
+        "0x5C490191",
+        "0x5C490192",
+        "0x5C490193",
+        "0x5C490194",
+        "0x5C490195",
+        "0x5C490196",
+        "0x5C490197",
+        "0x5C490198",
+        "0x5C490199",
+        "0x5C49019A",
+        "0x5C49019B",
+        "0x5C49019C",
+        "0x5C49019D",
+        "0x5C49019E",
+        "0x5C49019F",
+        "0x5C4901A0",
+        "0x5C4901A3",
+        "0x5C4901A4",
+        "0x5C4901A5",
+        "0x5C4901A6",
+        "0x5C4901A7",
+        "0x5C4901AA",
+        "0x5C4901AB",
+        "0x5C4901AC",
+        "0x5C4901AD",
+        "0x5C4901AE",
+        "0x5C4901AF",
+        "0x5C4901B0",
+        "0x5C4901B1",
+        "0x5C4901B4",
+        "0x5C4901B5",
+        "0x5C4901B6",
+        "0x5C4901B7",
+        "0x5C4901B8",
+        "0x5C4901B9",
+        "0x5C4901BA",
+        "0x5C4901BB",
+        "0x5C4901BC",
+        "0x5C4901BD",
+        "0x5C4901BE",
+        "0x5C4901BF",
+        "0x5C4901C0",
+        "0x5C4901C3",
+        "0x5C4901C4",
+        "0x5C4901C5",
+        "0x5C4901C6",
+        "0x5C4901C7",
+        "0x5C4901C8",
+        "0x5C4901CB",
+        "0x5C4901CC",
+        "0x5C4901CD",
+        "0x5C4901CE",
+        "0x5C4901CF",
+        "0x5C4901D0",
+        "0x5C4901D1",
+        "0x5C4901D2",
+        "0x5C4901D3",
+        "0x5C4901D4",
+        "0x5C4901D5",
+        "0x5C4901D8",
+        "0x5C4901DB",
+        "0x5C4901DC",
+        "0x5C4901DD",
+        "0x5C4901DE",
+        "0x5C4901DF",
+        "0x5C4901E2",
+        "0x5C4901E3",
+        "0x5C4901E4",
+        "0x5C4901E5",
+        "0x5C4901E6",
+        "0x5C4901E7",
+        "0x5C4901E8",
+        "0x5C4901E9",
+        "0x5C4901EA",
+        "0x5C4901EB"
+      ]
+    },
+    {
+      "name": "z 6",
+      "z_min": 6,
+      "z_max": 6,
+      "cells": [
+        "0x5C490143",
+        "0x5C490144",
+        "0x5C490145",
+        "0x5C490146",
+        "0x5C490147",
+        "0x5C490148",
+        "0x5C490149",
+        "0x5C49014C",
+        "0x5C49014D",
+        "0x5C49014E",
+        "0x5C490151",
+        "0x5C490152",
+        "0x5C490153",
+        "0x5C490156",
+        "0x5C490157",
+        "0x5C490158",
+        "0x5C49015A",
+        "0x5C49015B",
+        "0x5C49015C",
+        "0x5C49015D",
+        "0x5C49015E",
+        "0x5C490161",
+        "0x5C490162",
+        "0x5C490163",
+        "0x5C490164",
+        "0x5C490165",
+        "0x5C490168",
+        "0x5C490169",
+        "0x5C49016A",
+        "0x5C49016C",
+        "0x5C49016D",
+        "0x5C49016E",
+        "0x5C49016F",
+        "0x5C490170",
+        "0x5C490173",
+        "0x5C490174",
+        "0x5C490175",
+        "0x5C490178",
+        "0x5C490179",
+        "0x5C49017A",
+        "0x5C49017D",
+        "0x5C49017E",
+        "0x5C49017F",
+        "0x5C490180",
+        "0x5C490181",
+        "0x5C490184",
+        "0x5C490185",
+        "0x5C490186"
+      ]
+    },
+    {
+      "name": "z 0",
+      "z_min": 0,
+      "z_max": 0,
+      "cells": [
+        "0x5C490114",
+        "0x5C490115",
+        "0x5C490116",
+        "0x5C490117",
+        "0x5C490118",
+        "0x5C490119",
+        "0x5C49011A",
+        "0x5C49011B",
+        "0x5C49011C",
+        "0x5C49011D",
+        "0x5C49011E",
+        "0x5C49011F",
+        "0x5C490120",
+        "0x5C490123",
+        "0x5C490124",
+        "0x5C490125",
+        "0x5C490126",
+        "0x5C490127",
+        "0x5C490128",
+        "0x5C490129",
+        "0x5C49012A",
+        "0x5C49012B",
+        "0x5C49012C",
+        "0x5C49012D",
+        "0x5C490130",
+        "0x5C490131",
+        "0x5C490132",
+        "0x5C490133",
+        "0x5C490134",
+        "0x5C490135",
+        "0x5C490136",
+        "0x5C490137",
+        "0x5C490138",
+        "0x5C490139",
+        "0x5C49013A",
+        "0x5C49013B",
+        "0x5C49013C"
+      ]
+    },
+    {
+      "name": "z -6",
+      "z_min": -6,
+      "z_max": -6,
+      "cells": [
+        "0x5C490100",
+        "0x5C490101",
+        "0x5C490102",
+        "0x5C490103",
+        "0x5C490104",
+        "0x5C490105",
+        "0x5C490106",
+        "0x5C490109",
+        "0x5C49010A"
+      ]
+    }
+  ],
+  "no_go": [
+    "0x5C490100"
+  ],
+  "targets": [
+    {
+      "wcid": 11,
+      "name": "Male Tusker",
+      "level": 20,
+      "role": "target",
+      "from_bestiary": [
+        "max_health",
+        "magic_defence"
+      ],
+      "attributes": {
+        "strength": 170,
+        "endurance": 140,
+        "coordination": 50,
+        "quickness": 80,
+        "focus": 30,
+        "self": 20
+      },
+      "damage_types": "0x0004"
+    },
+    {
+      "wcid": 236,
+      "name": "Female Tusker",
+      "level": 15,
+      "role": "target",
+      "from_bestiary": [
+        "max_health",
+        "magic_defence"
+      ],
+      "attributes": {
+        "strength": 160,
+        "endurance": 130,
+        "coordination": 40,
+        "quickness": 70,
+        "focus": 20,
+        "self": 20
+      },
+      "damage_types": "0x0004"
+    },
+    {
+      "wcid": 22509,
+      "name": "Tusker Kin",
+      "level": 15,
+      "role": "target",
+      "from_bestiary": [
+        "max_health",
+        "magic_defence"
+      ],
+      "attributes": {
+        "strength": 90,
+        "endurance": 50,
+        "coordination": 90,
+        "quickness": 60,
+        "focus": 80,
+        "self": 80
+      },
+      "damage_types": "0x0004"
+    },
+    {
+      "wcid": 22510,
+      "name": "Tusker Kin",
+      "level": 20,
+      "role": "kill-first",
+      "from_bestiary": [
+        "max_health",
+        "magic_defence"
+      ],
+      "attributes": {
+        "strength": 40,
+        "endurance": 50,
+        "coordination": 30,
+        "quickness": 30,
+        "focus": 130,
+        "self": 130
+      },
+      "damage_types": "0x0004"
+    }
+  ],
+  "level_band": {
+    "min": 15,
+    "max": 20
+  },
+  "portal": null,
+  "entry": {
+    "wcid": 22694,
+    "guid": "0x7F97E000",
+    "cell": "0xF97E0035",
+    "origin": {
+      "x": 166.295,
+      "y": 115.594,
+      "z": -0.095
+    },
+    "front_cell": "0xF97E0035",
+    "front_point": {
+      "x": 165.6443,
+      "y": 118.5226,
+      "z": -0.1
+    },
+    "min_level": 5,
+    "max_level": null,
+    "tieable": false,
+    "source": "the pinned world SQL v0.9.296 (GroundDraft, M6 3 a1): weenie 22694 Tusker Retreat, whose Destination (weenie_properties_position, PositionType 2) is 0x5C490138; its landblock_instance row guid 0x7F97E000 at the row's origin, in the cell its point lies in (0xF97E0035, x/24*8 + y/24 + 1 for an outdoor row); the front point 3 m along the row's facing (quaternion w -0.994031, z -0.109099), z to the centimetre, in its cell (GroundDraft.FrontOf); min_level from weenie_properties_int type 86 (MinLevel), max_level from type 87 (MaxLevel), none; tieable from PortalBitmask 0x31 (PropertyInt 111), which carries NoRecall (0x20): ACE's Portal.NoTie is NoRecall (ACE.Server/WorldObjects/Portal_Properties.cs:14-16 @95ef426d; the flag ACE.Entity/Enum/PortalBitmask.cs:15)"
+  },
+  "exit": {
+    "kind": "portal",
+    "wcid": 22695,
+    "cell": "0x5C490100",
+    "origin": {
+      "x": 10.2802,
+      "y": -72.1304,
+      "z": -5.995
+    },
+    "destination": "0xF97E0035",
+    "from_arrival_m": 91.2,
+    "source": "the pinned world SQL v0.9.296 (GroundDraft, M6 3 a1): the exit portal, landblock_instance guid 0x75C49000 (wcid 22695) in 0x5C490100 at the row's origin, whose weenie's Destination (weenie_properties_position, PositionType 2) is 0xF97E0035, outside the landblock; from_arrival_m 91.2 is a hint, the straight-line distance from the arrival in 0x5C490138 to the portal's origin (a walk over the room graph is longer: item 4's); no exit by emote"
+  },
+  "home": {
+    "town": "Holtburg",
+    "lifestone_cell": "0xA9B40019",
+    "lifestone_point": {
+      "x": 84,
+      "y": 7.7,
+      "z": 94
+    }
+  },
+  "vendors": [
+    {
+      "name": "Archmage Cindrue",
+      "wcid": 2304,
+      "guid": "0x7A9B4033",
+      "cell": "0xA9B4011B",
+      "point": {
+        "x": 152.347,
+        "y": 132.546,
+        "z": 69.005
+      },
+      "stop_cell": "0xA9B40117",
+      "stop_point": {
+        "x": 152.3,
+        "y": 132.5,
+        "z": 66
+      },
+      "buys_item_types": "0x000CB000",
+      "buy_price": 0.9,
+      "sells": [
+        {
+          "wcid": 689,
+          "name": "Iron Scarab",
+          "price": 68
+        },
+        {
+          "wcid": 20631,
+          "name": "Prismatic Taper",
+          "price": 30
+        },
+        {
+          "wcid": 2472,
+          "name": "Wand",
+          "price": 270
+        },
+        {
+          "wcid": 4612,
+          "name": "Tiny Mana Charge",
+          "price": 473
+        },
+        {
+          "wcid": 4613,
+          "name": "Small Mana Charge",
+          "price": 878
+        },
+        {
+          "wcid": 4614,
+          "name": "Moderate Mana Charge",
+          "price": 2025
+        },
+        {
+          "wcid": 4615,
+          "name": "High Mana Charge",
+          "price": 3375
+        },
+        {
+          "wcid": 2625,
+          "name": "Trade Note (10,000)",
+          "price": 11500
+        },
+        {
+          "wcid": 686,
+          "name": "Copper Scarab",
+          "price": 135
+        },
+        {
+          "wcid": 1646,
+          "name": "Grey Taper",
+          "price": 34
+        },
+        {
+          "wcid": 772,
+          "name": "Hawthorn",
+          "price": 14
+        },
+        {
+          "wcid": 790,
+          "name": "Powdered Onyx",
+          "price": 7
+        },
+        {
+          "wcid": 762,
+          "name": "Turpeth",
+          "price": 7
+        },
+        {
+          "wcid": 741,
+          "name": "Birch Talisman",
+          "price": 7
+        },
+        {
+          "wcid": 691,
+          "name": "Lead Scarab",
+          "price": 14
+        },
+        {
+          "wcid": 778,
+          "name": "Saffron",
+          "price": 14
+        },
+        {
+          "wcid": 759,
+          "name": "Quicksilver",
+          "price": 7
+        },
+        {
+          "wcid": 1651,
+          "name": "Violet Taper",
+          "price": 34
+        },
+        {
+          "wcid": 1645,
+          "name": "Green Taper",
+          "price": 34
+        },
+        {
+          "wcid": 1644,
+          "name": "Brown Taper",
+          "price": 34
+        },
+        {
+          "wcid": 1643,
+          "name": "Blue Taper",
+          "price": 34
+        },
+        {
+          "wcid": 1654,
+          "name": "Turquoise Taper",
+          "price": 34
+        },
+        {
+          "wcid": 1648,
+          "name": "Orange Taper",
+          "price": 34
+        },
+        {
+          "wcid": 1652,
+          "name": "White Taper",
+          "price": 34
+        },
+        {
+          "wcid": 780,
+          "name": "Wormwood",
+          "price": 14
+        },
+        {
+          "wcid": 756,
+          "name": "Cobalt",
+          "price": 7
+        },
+        {
+          "wcid": 743,
+          "name": "Cedar Talisman",
+          "price": 7
+        },
+        {
+          "wcid": 764,
+          "name": "Vitriol",
+          "price": 7
+        },
+        {
+          "wcid": 776,
+          "name": "Mugwort",
+          "price": 14
+        },
+        {
+          "wcid": 783,
+          "name": "Powdered Amber",
+          "price": 7
+        },
+        {
+          "wcid": 758,
+          "name": "Gypsum",
+          "price": 7
+        },
+        {
+          "wcid": 751,
+          "name": "Willow Talisman",
+          "price": 7
+        },
+        {
+          "wcid": 1650,
+          "name": "Red Taper",
+          "price": 34
+        },
+        {
+          "wcid": 1647,
+          "name": "Indigo Taper",
+          "price": 34
+        },
+        {
+          "wcid": 768,
+          "name": "Damiana",
+          "price": 14
+        },
+        {
+          "wcid": 627,
+          "name": "Alder Talisman",
+          "price": 7
+        },
+        {
+          "wcid": 775,
+          "name": "Mandrake",
+          "price": 14
+        },
+        {
+          "wcid": 747,
+          "name": "Hemlock Talisman",
+          "price": 7
+        },
+        {
+          "wcid": 688,
+          "name": "Silver Scarab",
+          "price": 338
+        },
+        {
+          "wcid": 1653,
+          "name": "Yellow Taper",
+          "price": 34
+        },
+        {
+          "wcid": 1649,
+          "name": "Pink Taper",
+          "price": 34
+        },
+        {
+          "wcid": 789,
+          "name": "Powdered Moonstone",
+          "price": 7
+        },
+        {
+          "wcid": 782,
+          "name": "Powdered Agate",
+          "price": 7
+        },
+        {
+          "wcid": 626,
+          "name": "Powdered Hematite",
+          "price": 7
+        },
+        {
+          "wcid": 755,
+          "name": "Cinnabar",
+          "price": 7
+        },
+        {
+          "wcid": 763,
+          "name": "Verdigris",
+          "price": 7
+        },
+        {
+          "wcid": 760,
+          "name": "Realgar",
+          "price": 7
+        },
+        {
+          "wcid": 754,
+          "name": "Cadmia",
+          "price": 7
+        },
+        {
+          "wcid": 750,
+          "name": "Rowan Talisman",
+          "price": 7
+        },
+        {
+          "wcid": 740,
+          "name": "Ashwood Talisman",
+          "price": 7
+        },
+        {
+          "wcid": 774,
+          "name": "Hyssop",
+          "price": 14
+        },
+        {
+          "wcid": 757,
+          "name": "Colcothar",
+          "price": 7
+        },
+        {
+          "wcid": 746,
+          "name": "Hazel Talisman",
+          "price": 7
+        },
+        {
+          "wcid": 767,
+          "name": "Comfrey",
+          "price": 14
+        },
+        {
+          "wcid": 769,
+          "name": "Dragonsblood",
+          "price": 14
+        },
+        {
+          "wcid": 788,
+          "name": "Powdered Malachite",
+          "price": 7
+        },
+        {
+          "wcid": 792,
+          "name": "Powdered Turquoise",
+          "price": 7
+        }
+      ]
+    },
+    {
+      "name": "Thelnoth Cort the Healer",
+      "wcid": 715,
+      "guid": "0x7A9B4027",
+      "cell": "0xA9B40111",
+      "point": {
+        "x": 30.0196,
+        "y": 159.683,
+        "z": 66.005
+      },
+      "stop_cell": "0xA9B40111",
+      "buys_item_types": "0x00044080",
+      "buy_price": 0.9,
+      "sells": [
+        {
+          "wcid": 377,
+          "name": "Potion of Healing",
+          "price": 230
+        },
+        {
+          "wcid": 379,
+          "name": "Mana Potion",
+          "price": 230
+        }
+      ]
+    },
+    {
+      "name": "Ecutha the Tailor",
+      "wcid": 719,
+      "guid": "0x7A9B4025",
+      "cell": "0xA9B4012A",
+      "point": {
+        "x": 56.52,
+        "y": 132,
+        "z": 66.12
+      },
+      "stop_cell": "0xA9B4012A",
+      "buys_item_types": "0x00040004",
+      "buy_price": 0.9,
+      "sells": [
+        {
+          "wcid": 5851,
+          "name": "Faran Robe with Hood",
+          "price": 68
+        }
+      ]
+    },
+    {
+      "name": "Monyra the Jeweler",
+      "wcid": 716,
+      "guid": "0x7A9B4020",
+      "cell": "0xA9B40117",
+      "point": {
+        "x": 157.19,
+        "y": 135.298,
+        "z": 66.12
+      },
+      "stop_cell": "0xA9B40117",
+      "buys_item_types": "0x00040808",
+      "buy_price": 0.9,
+      "sells": []
+    },
+    {
+      "name": "Shopkeeper Renald the Elder",
+      "wcid": 718,
+      "guid": "0x7A9B4021",
+      "cell": "0xA9B40141",
+      "point": {
+        "x": 139.234,
+        "y": 18.3293,
+        "z": 94.005
+      },
+      "stop_cell": "0xA9B4013F",
+      "stop_point": {
+        "x": 133.9,
+        "y": 15.7,
+        "z": 94
+      },
+      "buys_item_types": "0x480467A7",
+      "buy_price": 0.9,
+      "sells": [
+        {
+          "wcid": 56,
+          "name": "Leather Gauntlets",
+          "price": 1485
+        },
+        {
+          "wcid": 136,
+          "name": "Pack",
+          "price": 88
+        }
+      ]
+    },
+    {
+      "name": "Fispur Ansel the Grocer",
+      "wcid": 714,
+      "guid": "0x7A9B4024",
+      "cell": "0xA9B4016A",
+      "point": {
+        "x": 78.9714,
+        "y": 38.5313,
+        "z": 94.005
+      },
+      "stop_cell": "0xA9B4016A",
+      "buys_item_types": "0x00446220",
+      "buy_price": 0.9,
+      "sells": []
+    }
+  ],
+  "spell_plan": [
+    {
+      "min_level": 10,
+      "max_level": 15,
+      "family": "Flame Bolt",
+      "spell_level": 2
+    },
+    {
+      "min_level": 16,
+      "max_level": 21,
+      "family": "Flame Bolt",
+      "spell_level": 3
+    }
+  ],
+  "components": [
+    {
+      "wcid": 689,
+      "name": "Iron Scarab",
+      "spell_level": 2,
+      "per_cast": 1
+    },
+    {
+      "wcid": 20631,
+      "name": "Prismatic Taper",
+      "spell_level": 2,
+      "per_cast": 2
+    },
+    {
+      "wcid": 1646,
+      "name": "Grey Taper",
+      "spell_level": 2,
+      "per_cast": 1
+    },
+    {
+      "wcid": 772,
+      "name": "Hawthorn",
+      "spell_level": 2,
+      "per_cast": 1
+    },
+    {
+      "wcid": 790,
+      "name": "Powdered Onyx",
+      "spell_level": 2,
+      "per_cast": 1
+    },
+    {
+      "wcid": 762,
+      "name": "Turpeth",
+      "spell_level": 2,
+      "per_cast": 1
+    },
+    {
+      "wcid": 741,
+      "name": "Birch Talisman",
+      "spell_level": 2,
+      "per_cast": 1
+    },
+    {
+      "wcid": 686,
+      "name": "Copper Scarab",
+      "spell_level": 3,
+      "per_cast": 1
+    },
+    {
+      "wcid": 20631,
+      "name": "Prismatic Taper",
+      "spell_level": 3,
+      "per_cast": 3
+    },
+    {
+      "wcid": 1650,
+      "name": "Red Taper",
+      "spell_level": 3,
+      "per_cast": 1
+    },
+    {
+      "wcid": 772,
+      "name": "Hawthorn",
+      "spell_level": 3,
+      "per_cast": 1
+    },
+    {
+      "wcid": 1647,
+      "name": "Indigo Taper",
+      "spell_level": 3,
+      "per_cast": 1
+    },
+    {
+      "wcid": 790,
+      "name": "Powdered Onyx",
+      "spell_level": 3,
+      "per_cast": 1
+    },
+    {
+      "wcid": 762,
+      "name": "Turpeth",
+      "spell_level": 3,
+      "per_cast": 1
+    },
+    {
+      "wcid": 741,
+      "name": "Birch Talisman",
+      "spell_level": 3,
+      "per_cast": 1
+    }
+  ],
+  "supplies": {
+    "stock": [
+      {
+        "wcid": 20631,
+        "name": "Prismatic Taper",
+        "keep": 200,
+        "trip_under": 60,
+        "stop_under": 4
+      },
+      {
+        "wcid": 689,
+        "name": "Iron Scarab",
+        "keep": 6,
+        "trip_under": 3,
+        "stop_under": 2
+      },
+      {
+        "wcid": 686,
+        "name": "Copper Scarab",
+        "keep": 5,
+        "trip_under": 1,
+        "stop_under": 1
+      },
+      {
+        "wcid": 377,
+        "name": "Potion of Healing",
+        "keep": 30,
+        "trip_under": 6,
+        "stop_under": 0
+      },
+      {
+        "wcid": 379,
+        "name": "Mana Potion",
+        "keep": 100,
+        "trip_under": 10,
+        "stop_under": 0
+      },
+      {
+        "wcid": 1646,
+        "name": "Grey Taper",
+        "keep": 2,
+        "trip_under": 2,
+        "stop_under": 2
+      },
+      {
+        "wcid": 772,
+        "name": "Hawthorn",
+        "keep": 2,
+        "trip_under": 2,
+        "stop_under": 2
+      },
+      {
+        "wcid": 790,
+        "name": "Powdered Onyx",
+        "keep": 2,
+        "trip_under": 2,
+        "stop_under": 2
+      },
+      {
+        "wcid": 762,
+        "name": "Turpeth",
+        "keep": 2,
+        "trip_under": 2,
+        "stop_under": 2
+      },
+      {
+        "wcid": 741,
+        "name": "Birch Talisman",
+        "keep": 2,
+        "trip_under": 2,
+        "stop_under": 2
+      },
+      {
+        "wcid": 1650,
+        "name": "Red Taper",
+        "keep": 2,
+        "trip_under": 2,
+        "stop_under": 2
+      },
+      {
+        "wcid": 1647,
+        "name": "Indigo Taper",
+        "keep": 2,
+        "trip_under": 2,
+        "stop_under": 2
+      },
+      {
+        "wcid": 1651,
+        "name": "Violet Taper",
+        "keep": 2,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 1645,
+        "name": "Green Taper",
+        "keep": 2,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 1644,
+        "name": "Brown Taper",
+        "keep": 2,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 1643,
+        "name": "Blue Taper",
+        "keep": 2,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 1654,
+        "name": "Turquoise Taper",
+        "keep": 2,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 1648,
+        "name": "Orange Taper",
+        "keep": 2,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 1652,
+        "name": "White Taper",
+        "keep": 2,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 780,
+        "name": "Wormwood",
+        "keep": 2,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 756,
+        "name": "Cobalt",
+        "keep": 2,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 743,
+        "name": "Cedar Talisman",
+        "keep": 2,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 764,
+        "name": "Vitriol",
+        "keep": 2,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 776,
+        "name": "Mugwort",
+        "keep": 2,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 783,
+        "name": "Powdered Amber",
+        "keep": 4,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 758,
+        "name": "Gypsum",
+        "keep": 2,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 751,
+        "name": "Willow Talisman",
+        "keep": 2,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 691,
+        "name": "Lead Scarab",
+        "keep": 2,
+        "trip_under": 1,
+        "stop_under": 1
+      },
+      {
+        "wcid": 778,
+        "name": "Saffron",
+        "keep": 4,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 759,
+        "name": "Quicksilver",
+        "keep": 4,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 688,
+        "name": "Silver Scarab",
+        "keep": 3,
+        "trip_under": 1,
+        "stop_under": 0
+      },
+      {
+        "wcid": 1653,
+        "name": "Yellow Taper",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 1649,
+        "name": "Pink Taper",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 789,
+        "name": "Powdered Moonstone",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 782,
+        "name": "Powdered Agate",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 626,
+        "name": "Powdered Hematite",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 755,
+        "name": "Cinnabar",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 763,
+        "name": "Verdigris",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 760,
+        "name": "Realgar",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 754,
+        "name": "Cadmia",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 750,
+        "name": "Rowan Talisman",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 740,
+        "name": "Ashwood Talisman",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 774,
+        "name": "Hyssop",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 757,
+        "name": "Colcothar",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 627,
+        "name": "Alder Talisman",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 768,
+        "name": "Damiana",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 775,
+        "name": "Mandrake",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 747,
+        "name": "Hemlock Talisman",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      }
+    ],
+    "kit": [],
+    "burden_trip_percent": 150,
+    "purse": {
+      "coin": 34000,
+      "min_note": 10000,
+      "trip_spend_percent": 60,
+      "notes": [
+        {
+          "wcid": 2625,
+          "name": "Trade Note (10,000)",
+          "value": 10000,
+          "count": 1
+        }
+      ]
+    }
+  },
+  "town_stock": [
+    {
+      "wcid": 27319,
+      "name": "Health Tincture",
+      "keep": 12,
+      "trip_under": 6,
+      "price": 775,
+      "burden": 50,
+      "town": "Dryreach",
+      "vendor": {
+        "name": "Ludora the Healer",
+        "wcid": 2229,
+        "guid": "0x7DA75026",
+        "cell": "0xDA75003C",
+        "point": {
+          "x": 177.166,
+          "y": 78.3451,
+          "z": 18.005
+        }
+      },
+      "source": "M6 14 T (the owner, 2026-11-11: carry health tinctures): Ludora the Healer 2229 of Dryreach, landblock_instance guid 0x7DA75026 at (177.166, 78.3451, 18.005) in landblock 0xDA75, outdoors (the row stores cell 0; the cell is the point's, x/24*8 + y/24 + 1 = 0x3C); her create list (destination 4) holds the Health Tincture 27319 (BoostValue 50 on Health, Value 500, burden 50) and her SellPrice is 1.55: 775 pyreals (max(1, ceil(1.55 x 500 - 0.1))); SELECTs on the world copy. Thelnoth of Holtburg does not sell it. The stop is made on the way out, from the Town Network (network-to-dryreach drops 48.8 m from her, dryreach-to-network stands 59.9 m from her: travel-routes.json). keep 12, trip_under 6: with a pack on her (8 to 11.6 health a second, 2026-11-11) a tincture a drink of 2.5 s is 20 health a second, the one drink that out-heals it; a stand of 20 to 30 s takes about 6, so the keep is two stands and the trip line one. The walk from the drop to her is not walked live yet (TODO(m6-town-stock-live))."
+    },
+    {
+      "wcid": 27322,
+      "name": "Mana Tincture",
+      "keep": 30,
+      "trip_under": 10,
+      "price": 775,
+      "burden": 50,
+      "town": "Dryreach",
+      "vendor": {
+        "name": "Ludora the Healer",
+        "wcid": 2229,
+        "guid": "0x7DA75026",
+        "cell": "0xDA75003C",
+        "point": {
+          "x": 177.166,
+          "y": 78.3451,
+          "z": 18.005
+        }
+      },
+      "source": "M6 14 T (the owner, 2026-11-11: Mana Tinctures too): Ludora's create list (destination 4) holds the Mana Tincture 27322 (BoostValue 50 on Mana, Value 500, burden 50): 775 pyreals at her SellPrice 1.55; a SELECT on the world copy. It is the main mana drink while held (ManaDrinks: the biggest drink that fits whole in the missing mana). keep 30, trip_under 10: the Tusker Cave drank about 4,000 mana an hour on 2026-11-11 between trips about 35 minutes apart, 2,333 mana a stretch; 30 tinctures are 1,500 mana and the 100 Mana Potions of the home walk 2,500, so the two cover a stretch and two thirds of the next, and the potions alone still cover one when the stop fails or the purse holds it back. The burden: 30 x 50 + 100 x 15 + 12 x 50 + 30 x 15 = 4,050 for the four drinks."
+    }
+  ],
+  "hold_spots": [],
+  "respawn": {
+    "generators": [
+      {
+        "guid": "0x75C49013",
+        "cell": "0x5C490137",
+        "delay_s": 240,
+        "tick_s": 60
+      }
+    ],
+    "slots": [
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C490100",
+        "wcid": 22510
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C490100",
+        "wcid": 22509
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C490101",
+        "wcid": 22510
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C490101",
+        "wcid": 22509
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C490101",
+        "wcid": 22509
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C490102",
+        "wcid": 22509
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C49010B",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C49010F",
+        "wcid": 236
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C490113",
+        "wcid": 236
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C490115",
+        "wcid": 22509
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C490115",
+        "wcid": 22510
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C490115",
+        "wcid": 22510
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C490126",
+        "wcid": 22510
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C490126",
+        "wcid": 22510
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C490126",
+        "wcid": 22510
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C49012A",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C49012B",
+        "wcid": 22509
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C49012B",
+        "wcid": 22509
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C49013C",
+        "wcid": 236
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C490158",
+        "wcid": 22510
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C490158",
+        "wcid": 22510
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C490158",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C49016A",
+        "wcid": 22510
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C49016A",
+        "wcid": 22510
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C49016A",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C490182",
+        "wcid": 236
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C490183",
+        "wcid": 236
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C490187",
+        "wcid": 236
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C49018A",
+        "wcid": 236
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C49018B",
+        "wcid": 236
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C49018E",
+        "wcid": 236
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C49018F",
+        "wcid": 236
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C490190",
+        "wcid": 236
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C490191",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C490192",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C490193",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C490194",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C490195",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C490197",
+        "wcid": 22510
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C490198",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C490199",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C49019C",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C49019D",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C49019E",
+        "wcid": 22510
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C49019E",
+        "wcid": 22510
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C4901AC",
+        "wcid": 22510
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C4901AC",
+        "wcid": 22510
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C4901AD",
+        "wcid": 22510
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C4901AE",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C4901AF",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C4901B0",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C4901B6",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C4901BF",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C4901C5",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C4901C6",
+        "wcid": 22510
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C4901D2",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C4901D3",
+        "wcid": 22510
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C4901D4",
+        "wcid": 22510
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C4901D5",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C4901DD",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C4901DE",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C4901DF",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C4901E2",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C4901E3",
+        "wcid": 22510
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C4901E4",
+        "wcid": 22510
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C4901E5",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C4901E6",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C4901E8",
+        "wcid": 22510
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C4901E9",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C4901EA",
+        "wcid": 11
+      },
+      {
+        "generator": "0x75C49013",
+        "cell": "0x5C4901EB",
+        "wcid": 11
+      }
+    ]
+  },
+  "loot": {
+    "min_value_per_burden": 10,
+    "min_free_slots": 3,
+    "load_line_percent": 110,
+    "radius_m": 25,
+    "sale_trip_value": 100000,
+    "source": "the Burrow's and the Lodge's rule verbatim (tusker-burrow.json and tusker-lodge.json loot's source): min_free_slots 3, sale_trip_value 100,000, min_value_per_burden 10, radius_m 25, load_line_percent 110; the Retreat's DeathTreasureType rows are 457 (Male Tusker 11, the Lodge's), 459 (Female Tusker 236, the Burrow's) and 453 (both Tusker Kin): weenie_properties_d_i_d type 35, a read-only SELECT; not measured here"
+  },
+  "fight": {
+    "retreat_health_percent": 0,
+    "pull_mana_percent": 60,
+    "pull_full_percent": 100,
+    "pull_health_percent": 70,
+    "pull_rest_until_percent": 90,
+    "pull_rest_posture": "lie",
+    "pull_rest_potions": 1,
+    "pull_potion_mana_percent": 75,
+    "pull_potion_stamina_percent": 15,
+    "pull_aggro_metres": 24,
+    "source": "the Burrow's pull and rest lines verbatim (tusker-burrow.json fight's source: pull_full_percent 100 is the owner's, M6 7 AN; the rest lie, ACE GetStanceMod), the same rung and climber; pull_aggro_metres 24 is VisualAwarenessRange (PropertyFloat 31) of Male Tusker 11 and Female Tusker 236 (the Kin's is 15), a read-only SELECT. retreat_health_percent 0 (stand and fight, as the Lodge): the rung's band is 10-14, below Lifestone Recall (learned with Item Enchantment at 16, D43), so a retreat is the walk to the exit 0x5C490100, and the room graph's path there from the arrival (142 m by room middles) passes under the z 6 ring and through the Kin rooms: by ACE's CheckMonsters rule (a sleeping creature within its VisualAwarenessRange of her, in a cell her cell sees) it wakes slots 16 and 19 at the arrival, the eight Female Tuskers of the ring and the Kin 13 to 18 in the first 40 m, then 10 to 12 and the exit's 1 to 9 (the M6 retreat survey (a scratch dat read on m6/retreat, not committed: the room graph at lean 0.3 from the arrival, the slots' landblock_instance rows, ACE's AlertFriendly and CheckMonsters rules)). Under the vitals policy the line is derived live from the rung's pack and the hardest hitter (FightLines.Derive), which ignores this value and says so"
+  },
+  "hunt": {
+    "keep_out": [
+      "0x5C490126",
+      "0x5C49012B"
+    ],
+    "keep_out_under_level": 1000,
+    "pulls": [],
+    "source": "the slots' packs by ACE's AlertFriendly (Monster_Awareness.cs @95ef426d: a woken creature alerts the sleeping ones of its CreatureType or FriendType within the alerted one's aural range, 24 m for a tusker and 15 m for a Kin, in a cell the alerter's cell sees), the M6 retreat survey (a scratch dat read on m6/retreat, not committed: the room graph at lean 0.3 from the arrival, the slots' landblock_instance rows, ACE's AlertFriendly and CheckMonsters rules): the four z 12 corners hold 7, 6, 6 and 7 Male Tuskers (slots numbered 1 to 71 in guid order: 34 35 38 40 43 50 51 with the Kin 39 44 45; 36 37 41 42 49 52 with 46 47 48; 53 54 56 59 61 62 with 55 57 58; 60 63 66 67 69 70 71 with 64 65 68), so a Male hit there wakes 6 or 7 and a Kin caster 9 or 10; the z 0 Kin rooms 0x5C490126 (slots 13 to 15, Kin 22510) and 0x5C49012B (17 and 18, Kin 22509) stand under the z 6 ring of eight Female Tuskers (slots 26 to 33, the pocket cells), and a Kin woken there alerts the ring and the Male in 0x012A: packs of 14, 12, 12, 11 and 11, the ground's largest (its mean is 6.9 by this rule; the simulator's census, distance only, gives 6.3: pwsh -File tools\\fight-sim.ps1 rank --her Winnie --min-level 5 --max-level 40). So the plain hunt leaves those two rooms alone: no pick, no tour walk and no slot of them counts (5 of the 58 hunted slots); an attacker from there is still fought (M5 D88). keep_out_under_level 1000 (always): whether the ring's Females come down to her is not known offline: the ring is reached by no walk, and their PhysicsState 0x408 (Gravity and ReportCollisions, no EdgeSlide: weenie_properties_int type 93, a read-only SELECT) lets a chase step off its edge, 6 m down: TODO(m6-retreat-balcony), read live. The keep-out does not keep the ring asleep: every way in from the arrival passes cells the ring sees (147 of the 169 walkable cells are out of its sight, and the arrival reaches only 0x0137 and 0x0138 through them), so the first walk of every entry wakes the ring by sight. No pulls: no tusk carrier stands here (the Female Tusk errand is tusker-burrow's). No corpse_fetch section: no cell is quiet, the arrival room itself sees slots 16 (Male Tusker, 0x5C49012A) and 19 (Female Tusker, 0x5C49013C) within 24 m, so a corpse's coin is never fetched here (CorpseCoinRule.Safe)"
+  },
+  "tour": [
+    "0x5C4901E2",
+    "0x5C4901E3",
+    "0x5C4901E4",
+    "0x5C4901DD",
+    "0x5C4901E5",
+    "0x5C4901E9",
+    "0x5C4901E8",
+    "0x5C4901EB",
+    "0x5C4901EA",
+    "0x5C4901E6",
+    "0x5C4901B6",
+    "0x5C4901AD",
+    "0x5C4901AC",
+    "0x5C490199",
+    "0x5C490193",
+    "0x5C490194",
+    "0x5C49019C",
+    "0x5C4901AE",
+    "0x5C490198",
+    "0x5C490197",
+    "0x5C490192",
+    "0x5C490191",
+    "0x5C490195",
+    "0x5C49019D",
+    "0x5C49019E",
+    "0x5C4901AF",
+    "0x5C4901B0",
+    "0x5C4901BF",
+    "0x5C4901C6",
+    "0x5C4901C5",
+    "0x5C4901D2",
+    "0x5C4901D3",
+    "0x5C4901D4",
+    "0x5C4901D5",
+    "0x5C4901DF",
+    "0x5C4901DE",
+    "0x5C490158",
+    "0x5C49016A",
+    "0x5C490115",
+    "0x5C490126",
+    "0x5C49012B",
+    "0x5C49012A",
+    "0x5C49013C",
+    "0x5C490102",
+    "0x5C490101"
+  ],
+  "outdoor": null
+}

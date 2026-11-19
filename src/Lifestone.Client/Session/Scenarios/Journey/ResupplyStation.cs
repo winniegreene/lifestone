@@ -53,6 +53,12 @@ public sealed class SaleMemory
     /// <summary>The owner's rule of 2026-11-09 (D116): the components bought scrolls need and a trip could not supply, by weenie class id: the next trip buys them first, ahead of new scrolls, until the pack holds the count (<see cref="ResupplyRun"/>). Session memory; after a restart the buff passes name a missing component again (<see cref="ComponentNeeds"/>).</summary>
     public Dictionary<uint, ComponentShoppingLine> ComponentShopping { get; } = [];
 
+    /// <summary>
+    /// M6 sprint (runs 1 to 5: "The Health Draughts is unsellable." and the like, 19 times in run 5): ACE's IsSellable verdict by weenie class, learned from appraisals (the bool rides an appraisal, an AssessmentProperty, and its
+    /// absence on a successful one means sellable, <c>WorldObject_Properties.cs</c> 1460-1463 @95ef426d). A class is appraised once a session; the sale reads the verdict for every item of it.
+    /// </summary>
+    public Dictionary<uint, bool> SellableClass { get; } = [];
+
     /// <summary>The memory of the run's journeys: every fight station builds its own factory, so the memory outlives them (item guids are unique within a session).</summary>
     public static SaleMemory Shared { get; } = new();
 
@@ -169,15 +175,16 @@ public static class ResupplyPlanner
         ArgumentNullException.ThrowIfNull(counters);
         var rows = RowsOf(ground, counters);
         var budget = purse < 0 || ground.Supplies.Purse.TripSpendPercent >= 100 ? long.MaxValue : purse * ground.Supplies.Purse.TripSpendPercent / 100; // 100: no budget (BSD Mage, as before)
+        var left = budget == long.MaxValue ? long.MaxValue : purse; // M6 sprint: the whole purse, for the casting components' last pass
         var order = Enumerable.Range(0, rows.Count).OrderBy(r => counters.LineAt(rows[r].Index).StopUnder > 0 ? 0 : 1).ToList(); // stable: the profile's order within a class
-        for (var pass = 0; pass < 3; pass++)
+        for (var pass = 0; pass < 4; pass++)
         {
             foreach (var r in pass == 1 ? ClearOrder(ground, counters, rows, order, called) : order)
             {
                 var (index, vendor, bought) = rows[r];
                 var line = counters.LineAt(index);
                 var have = counters.HeldOf(index) + bought;
-                var target = pass switch { 0 => Math.Min(line.Keep, Math.Max(line.TripUnder, line.StopUnder)), 1 => ClearTarget(line), _ => line.Keep };
+                var target = pass switch { 0 => Math.Min(line.Keep, Math.Max(line.TripUnder, line.StopUnder)), 1 => ClearTarget(line), 2 => line.Keep, _ => CastingComponentKeep(line) }; // M6 sprint: pass 3, from the whole purse
                 var want = target - have;
                 if (want <= 0)
                 {
@@ -186,8 +193,9 @@ public static class ResupplyPlanner
 
                 if (ground.PriceOf(line.Wcid) is { } price && price > 0 && budget != long.MaxValue)
                 {
-                    want = (int)Math.Min(want, budget / price);
-                    budget -= (long)want * price;
+                    want = (int)Math.Min(want, (pass == 3 ? left : Math.Min(budget, left)) / price);
+                    budget = Math.Max(0, budget - ((long)want * price));
+                    left -= (long)want * price;
                 }
 
                 rows[r] = (index, vendor, bought + want);
@@ -196,6 +204,14 @@ public static class ResupplyPlanner
 
         return ListOf(rows, counters);
     }
+
+    /// <summary>
+    /// M6 sprint (the owner's decision of 2026-11-19): the count a casting component's line is topped up to from the rest of the purse, once the trip's share is spent: its keep when it has a stop line (one short of it and she
+    /// cannot cast, so the fight stops for a trip) and the item is a spell component; 0 otherwise (a line with no stop line has its one of each from the whole purse already). Live, run 5's first trip
+    /// (cache/m6/sprint/run5/step3-levelup.log 14:24:12 UTC, purse 10,009, the share 60%): nine scrolls took the share first, so 12 herb, powder and talisman lines were bought only to their stop line 2 of keep 4 and the Red and
+    /// Indigo Tapers to 1 of 2, one burn from a trip each; their keeps would have cost 324 pyreals more, and she left with 2,051.
+    /// </summary>
+    private static int CastingComponentKeep(StockLine line) => line.StopUnder > 0 && ComponentWeenies.TryGetByWcid(line.Wcid, out _) ? line.Keep : 0;
 
     /// <summary>M6 14 T: the count the clear pass lifts a line to: clear of its trip line (<see cref="LogisticsCounters.ClearOf"/>), never over its keep.</summary>
     private static int ClearTarget(StockLine line) => Math.Min(line.Keep, LogisticsCounters.ClearOf(line));
@@ -384,6 +400,7 @@ public static class ResupplyPlanner
         Fill(line => Math.Min(line.Keep, Math.Max(line.TripUnder, line.StopUnder)), wholePurse: false);
         Fill(ClearTarget, wholePurse: false, cheapestFirst: true); // M6 14 T: every line clear of its trip line, the cheapest lift first, before any is topped up to its keep
         Fill(line => line.Keep, wholePurse: false);
+        Fill(CastingComponentKeep, wholePurse: true); // M6 sprint: a casting component's line to its keep from the rest of the purse (CastingComponentKeep)
         return [.. ListOf(rows, counters), .. extras, .. kept];
     }
 
@@ -1781,6 +1798,45 @@ public sealed partial class ResupplyRun : ShopLeg
         return Math.Sqrt((flat * flat) + (dz * dz));
     }
 
+    /// <summary>
+    /// M6 sprint (runs 1 to 5; owner ruling 2026-11-19: no error a retail player would not see): ACE refuses an item whose IsSellable is false with "The X is unsellable." (<c>Player_Commerce.cs</c> 268-272 @95ef426d); Health Draught 2457, Potion of
+    /// Healing 377, Mana Potion 379 and Mana Draught 2460 carry IsSellable 0 (world weenie_properties_bool type 69). Before the offer, each item the vendor's mask takes whose class has no verdict yet (<see cref="SaleMemory.SellableClass"/>)
+    /// and that no successful appraisal covers is appraised, one per class, as a player looks before selling; the offer then leaves the ones marked unsellable.
+    /// </summary>
+    private IEnumerable<ActionHandle?> AppraiseForSale(VendorStock stock, List<(uint Guid, WorldObject Object)> kept)
+    {
+        var asked = new HashSet<uint>();
+        foreach (var (item, o) in kept)
+        {
+            var wcid = o.Weenie.WeenieClassId;
+            if (!S.State.Self.Inventory.Contains(item) || !stock.BuysType(o.ItemType) || SellableOnWire(item, o) is not null || !asked.Add(wcid))
+            {
+                continue;
+            }
+
+            yield return S.Actions.Identify(item, ActionSource.Host);
+        }
+
+        if (asked.Count > 0)
+        {
+            Log(Text($"sale: appraised {asked.Count} offered item(s), one of each class with no IsSellable verdict yet (PropertyBool {IsSellableBool}): the offer leaves the ones marked unsellable (m6-sale-appraise)"));
+        }
+    }
+
+    /// <summary>The item's IsSellable as ACE holds it: a successful appraisal of it (the bool, or sellable when the bool is absent), else the verdict its class taught (<see cref="SaleMemory.SellableClass"/>), else null (unknown).</summary>
+    private bool? SellableOnWire(uint item, WorldObject o)
+    {
+        var wcid = o.Weenie.WeenieClassId;
+        if (S.TryGetAppraisal(item, out var appraisal) && appraisal.Success)
+        {
+            var sellable = appraisal.Bool(IsSellableBool) ?? true;
+            _memory.SellableClass[wcid] = sellable;
+            return sellable;
+        }
+
+        return _memory.SellableClass.TryGetValue(wcid, out var learned) ? learned : null;
+    }
+
     /// <summary>Sells the kept items the loot buyer's mask takes; an item IsSellable marks false (from the wire when an appraisal carries it, else ACE's class list) is left and named, as is one ACE kept.</summary>
     private IEnumerable<ActionHandle?> SellLoot(HuntingGround ground, GroundVendor vendor, uint guid, List<(uint Guid, WorldObject Object)> kept)
     {
@@ -1788,6 +1844,8 @@ public sealed partial class ResupplyRun : ShopLeg
         {
             yield break;
         }
+
+        foreach (var h in AppraiseForSale(stock, kept)) { yield return h; }
 
         var offer = new List<uint>();
         var noWire = 0;
@@ -1810,10 +1868,10 @@ public sealed partial class ResupplyRun : ShopLeg
                 continue;
             }
 
-            var wire = S.TryGetAppraisal(item, out var appraisal) ? appraisal.Bool(IsSellableBool) : null;
+            var wire = SellableOnWire(item, o);
             if (wire == false)
             {
-                Refuse("unsellable", Text($"{o.Name} is marked unsellable on the wire (IsSellable=0): left in the pack"));
+                Refuse("unsellable", Text($"{o.Name} is marked unsellable on the wire (IsSellable=0, by its appraisal or its class's): left in the pack, not offered (m6-sale-appraise)"));
                 NoteRefusal(item, o.Name, dropping);
                 continue;
             }

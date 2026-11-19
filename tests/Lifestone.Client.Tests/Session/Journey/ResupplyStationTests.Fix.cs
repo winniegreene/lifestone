@@ -35,8 +35,9 @@ public sealed partial class ResupplyStationTests
     [Fact]
     public void M6_2_f_a_looted_piece_the_judge_would_replace_with_is_worn_before_the_sale_and_not_sold()
     {
-        // M6 14 (m6-armour): the wear pick weighs armour by the rung's hits: a cap of 150 over 100 against the outskirts' Mite Scion (hit 7) is 0.05% of her hour, under the swap margin 0.1, so it stays; one of 500 is 0.16%
-        var (f, worn, held) = CapsWorld(heldLevel: 500);
+        // M6 14 (m6-armour): the wear pick weighs armour by the rung's hits: a cap of 150 over 100 against the outskirts' Mite Scion (hit 7) was 0.05% of her hour, under the swap margin 0.1, so it stayed; one of 500 was 0.16%.
+        // M6 redoubt: the rung's hitter is the Redoubt's Drudge Prowler (hit 4) now, against which 500 no longer clears the margin; 1000 does (the assertions below)
+        var (f, worn, held) = CapsWorld(heldLevel: 1000);
         var run = f.Home.Start(new ResupplyOptions(true, () => [], Gear: true));
 
         Assert.Equal(ScenarioStatus.Succeeded, f.Run(run));
@@ -54,7 +55,7 @@ public sealed partial class ResupplyStationTests
     [Fact]
     public void M6_2_f_a_replace_whose_wield_is_refused_puts_the_old_piece_back_on_and_names_the_refusal()
     {
-        var (f, worn, held) = CapsWorld(heldLevel: 500, refuseHeld: true); // M6 14 (m6-armour): 500 beats the swap margin on the outskirts' hits (above)
+        var (f, worn, held) = CapsWorld(heldLevel: 1000, refuseHeld: true); // M6 14 (m6-armour), M6 redoubt: 1000 beats the swap margin on the rung outskirts' hits (above)
         var run = f.Home.Start(new ResupplyOptions(true, () => [], Gear: true));
 
         f.Run(run);

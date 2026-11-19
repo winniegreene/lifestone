@@ -32,10 +32,17 @@
         "stamp": null,
         "item": null
       },
-      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/5/facts.md): weenie_properties_create_list id 59849: object 22599 (Rampager) holds 22429 (Rampager Tusk) at destination_Type 1 (Contain), stack 1, so it is on the corpse for sure (ACE Creature_Death.cs:646-705 @95ef426d); the carrier is on the ground profile tusker-holding's targets; the pickup is gated by the tusk's own Quest string TuskRampagerPickup (quest id 5063 'TuskRampagerPickUp', min_Delta 72000 s, max_Solves -1; ACE Player_Inventory.cs:1249-1262)",
+      "source": "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/5/facts.md): weenie_properties_create_list id 59849: object 22599 (Rampager) holds 22429 (Rampager Tusk) at destination_Type 1 (Contain), stack 1, so it is on the corpse for sure (ACE Creature_Death.cs:646-705 @95ef426d); the carrier is on the ground profile tusker-holding's targets; the pickup is gated by the tusk's own Quest string TuskRampagerPickup (quest id 5063 'TuskRampagerPickUp', min_Delta 72000 s, max_Solves -1; ACE Player_Inventory.cs:1249-1262); carriers (M6 audit, the owner's decision of 2026-11-19: every tusk when it is due): 22599 only, row 59849 at destination_Type 1 (Contain), which ACE gives at every death (Creature_Death.cs:646-705 @95ef426d), so its shade is 1; the ground's other creatures of the same name hold no tusk, and the fight's tour goes to this carrier's spawn slots first while the tusk is wanted",
       "todo": null,
       "count": 1,
-      "ground": "tusker-holding"
+      "ground": "tusker-holding",
+      "carriers": [
+        {
+          "wcid": 22599,
+          "shade": 1,
+          "row": 59849
+        }
+      ]
     },
     {
       "kind": "go",
@@ -95,6 +102,7 @@
     }
   },
   "timer_seconds": 72000,
+  "timer_from": "pickup",
   "level": {
     "min": 60,
     "max": null
@@ -112,6 +120,7 @@
     "level: min 60 and max null are the ground tusker-holding's entry portal 22680 MinLevel 60 and MaxLevel (none) (weenie_properties_int types 86 and 87; the profile's entry block)",
     "experience: fixed 8,000,000 (the AwardXP amount_64 of emote 48433), not level-proportional",
     "hunt-until: the carrier 22599 Rampager is on the tusker-holding profile's targets; the item is the tusk 22429 (one per kill, a guaranteed Contain row); the step's count 1 is checked before the hunt, so a tusk already held skips it (the autopilot's errand runs this same file)",
-    "The Aphus Lassel Portal Gem 22729 that Brighteyes gives is the rung change's fallback (item 4's travel file gems, 'aphus-lassel': spell 2936 'Entrance to Tusker Island', arriving at the Refuge 0xF6820033): the turn-in's reward is also the way back to the Refuge, and item 4's travel file names this item as its source"
+    "The Aphus Lassel Portal Gem 22729 that Brighteyes gives is the rung change's fallback (item 4's travel file gems, 'aphus-lassel': spell 2936 'Entrance to Tusker Island', arriving at the Refuge 0xF6820033): the turn-in's reward is also the way back to the Refuge, and item 4's travel file names this item as its source",
+    "timer_from pickup (M6 audit, 2026-11-19): ACE stamps the tusk's own Quest string when it is picked up from a corpse, not at the turn-in: VerifyQuest (Player_Inventory.cs:1249-1262 @95ef426d) passes CanSolve and sets questSolve, then the pickup runs EmoteManager.OnQuest (:1093-1094), which adds or stamps the quest (EmoteManager.cs:2021-2041); the giver stamps nothing. So the 20 h run from the pickup: the client counts them from the moment the tusk is first seen in the pack (never before the pickup, so never early), and from the turn-in when that moment is not known (a new session)"
   ]
 }

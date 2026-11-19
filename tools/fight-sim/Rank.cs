@@ -27,10 +27,15 @@ namespace Lifestone.FightSim;
 /// <param name="Caster">Whether it has a spell book.</param>
 /// <param name="Death">Her chance of dying with one to six on her at once, from full health with no healing (Commands.DeathChance); index 0 is one on her.</param>
 /// <param name="Notes">Gaps, each named.</param>
+/// <param name="DiesPackHealed">Her chance of dying against its own pack size with her heals in the fight (InFight.cs; NaN: not played).</param>
+/// <param name="OutOfManaPack">Her chance of standing out of mana with some of that pack alive, with her heals in the fight (NaN: not played).</param>
 internal sealed record Verdict(
     uint Wcid, string Name, int Level, int Health, uint MagicDefense, double Xp, string Spell, double Land, double CastsPerKill, double SecondsPerKill, double ManaPerKill, double Incoming, double LossPerKill, int BiggestHit, bool Caster,
-    double[] Death, IReadOnlyList<string> Notes)
+    double[] Death, IReadOnlyList<string> Notes, double DiesPackHealed = double.NaN, double OutOfManaPack = double.NaN)
 {
+    /// <summary>Her chance of a fight against its own pack that is not won with her heals: a death or out of mana (NaN: not played).</summary>
+    public double NotWonHealed => DiesPackHealed + OutOfManaPack;
+
     /// <summary>Her chance of dying with one on her.</summary>
     public double Death1 => Death[0];
 
@@ -50,20 +55,38 @@ internal sealed record Verdict(
 /// <summary>Every placed creature ranked for her.</summary>
 internal static partial class Ranking
 {
-    /// <summary>Her against <paramref name="monster"/>: her bolts screened with a few casts, the best two sampled in full; its attacks over the simulated stretch.</summary>
-    public static Verdict Evaluate(Player her, Creature monster, IReadOnlyList<ACE.Server.Entity.Spell> bolts, Options options, double xpModifier)
+    /// <summary>The largest pack the healed fights of rank play: a mean pack over it is played at it (Lifestone's own bound on the run's time).</summary>
+    public const int MaxHealedPack = 12;
+
+    /// <summary>The fights of each pack size with her heals in rank (<c>--healed-fights</c>).</summary>
+    public const int DefaultHealedFights = 300;
+
+    /// <summary>
+    /// Her against <paramref name="monster"/>: her bolts screened with a few casts, the best two sampled in full; its attacks over the simulated stretch; with <paramref name="herFight"/>, the fights with her heals at
+    /// <paramref name="company"/> on her (the census's mean pack: the two whole sizes around it, taken in proportion, at most <see cref="MaxHealedPack"/>).
+    /// </summary>
+    public static Verdict Evaluate(Player her, Creature monster, IReadOnlyList<ACE.Server.Entity.Spell> bolts, Options options, double xpModifier, HerFight? herFight = null, double company = 0)
     {
         var health = (int)monster.Health.MaxValue;
         var regen = Commands.RegenPerTick(monster);
-        var screened = bolts.Select(b => Strikes.Of(her, monster, b, 200)).OrderByDescending(s => s.DamagePerSecond).Take(2).ToList();
+        var screening = bolts.Select(b => Strikes.Of(her, monster, b, 200)).ToList();
+        var screened = screening.OrderByDescending(s => s.DamagePerSecond).Take(2).ToList();
+        // With her heals the fight bolts with the client's war pick (InFightRules.KillPrice): the screen's best by its price a cast is sampled in full too when it is not one of the two.
+        var priced = herFight is null ? null : screening.OrderByDescending(s => s.MeanPerCast * s.CastChance / Math.Max(1e-9, InFightRules.KillPrice(s.CastSeconds + options.CastOverhead, 1, s.ManaPerAttempt))).First();
         (Strike Strike, KillStats Kill)? best = null;
-        foreach (var candidate in screened)
+        (Strike Strike, KillStats Kill)? pick = null;
+        foreach (var candidate in priced is null || screened.Any(s => s.Spell.Id == priced.Spell.Id) ? screened : [.. screened, priced])
         {
             var strike = Strikes.Of(her, monster, candidate.Spell, options.Casts);
             var kill = Commands.Kills(strike, health, regen, options.CastOverhead, 1500);
-            if (best is null || kill.MeanSeconds < best.Value.Kill.MeanSeconds)
+            if (screened.Contains(candidate) && (best is null || kill.MeanSeconds < best.Value.Kill.MeanSeconds))
             {
                 best = (strike, kill);
+            }
+
+            if (pick is null || InFightRules.KillPrice(kill.MeanSeconds, kill.MeanCasts, kill.MeanMana) < InFightRules.KillPrice(pick.Value.Kill.MeanSeconds, pick.Value.Kill.MeanCasts, pick.Value.Kill.MeanMana))
+            {
+                pick = (strike, kill);
             }
         }
 
@@ -81,16 +104,30 @@ internal static partial class Ranking
             }
         }
 
+        var (diesHealed, outOfMana) = (double.NaN, double.NaN);
+        if (herFight is not null && pick is not null && company >= 1)
+        {
+            // With her heals (InFight.cs): the client's war pick and the same sampled attacks, at the pack's two whole sizes.
+            var size = Math.Min(company, MaxHealedPack);
+            var low = (int)Math.Floor(size);
+            var high = Math.Min(MaxHealedPack, low + 1);
+            var foe = FoeFight.Of(herFight, monster, pick.Value.Strike, blows);
+            var fights = options.HealedFights ?? DefaultHealedFights;
+            var atLow = InFight.Run(herFight, Enumerable.Repeat(foe, low).ToList(), FightMode.Heals, fights, 20261119 + low);
+            var atHigh = size > low ? InFight.Run(herFight, Enumerable.Repeat(foe, high).ToList(), FightMode.Heals, fights, 20261119 + high) : atLow;
+            (diesHealed, outOfMana) = PackVerdict.Between(atLow, atHigh, size);
+        }
+
         return new Verdict(
             monster.WeenieClassId, monster.Name, monster.Level ?? 0, health, monster.GetEffectiveMagicDefense(), (monster.XpOverride ?? 0) * xpModifier, best?.Strike.Spell.Name ?? "none",
             best?.Strike.LandChance ?? 0, best?.Kill.MeanCasts ?? double.PositiveInfinity, best?.Kill.MeanSeconds ?? double.PositiveInfinity, best?.Kill.MeanMana ?? double.PositiveInfinity, blows.DamagePerSecond, loss1,
-            blows.Blows.Select(b => b.Damage).DefaultIfEmpty(0).Max(), monster.Biota.PropertiesSpellBook is { Count: > 0 }, death, blows.Notes);
+            blows.Blows.Select(b => b.Damage).DefaultIfEmpty(0).Max(), monster.Biota.PropertiesSpellBook is { Count: > 0 }, death, blows.Notes, diesHealed, outOfMana);
     }
 
     /// <summary>The rank command.</summary>
     public static int Run(Options options)
     {
-        var her = World.RestoreHer(options.Her, options.Wield);
+        var her = World.RestoreHer(options.Her, options.Wield, options.Bars);
         var bolts = Strikes.BoltsOf(her);
         if (bolts.Count == 0)
         {
@@ -105,8 +142,11 @@ internal static partial class Ranking
         var verdicts = new Dictionary<uint, Verdict>();
         var failed = 0;
         var wcids = slots.Select(s => s.Wcid).Distinct().ToList();
+        var bySlots = slots.GroupBy(s => s.Wcid).ToDictionary(g => g.Key, g => (Count: g.Sum(s => s.Count), Blocks: g.Select(s => s.Landblock).Distinct().Count(), Company: g.Sum(s => s.Count * s.Company) / g.Sum(s => s.Count)));
+        var herFight = HerFight.Of(her, options.CastOverhead, World.TriedIds(options.With)); // with her heals (InFight.cs): her spells and figures, read once
         Console.Error.WriteLine(Line($"census: {slots.Count} creature slots groups, {wcids.Count} creature classes placed, {slots.Select(s => s.Landblock).Distinct().Count()} landblocks"));
         var done = 0;
+        var herState = HerState(her);
         foreach (var wcid in wcids)
         {
             if (++done % 200 == 0)
@@ -124,8 +164,16 @@ internal static partial class Ranking
                     continue;
                 }
 
-                verdicts[wcid] = Evaluate(her, monster, bolts, options, xpModifier);
+                verdicts[wcid] = Evaluate(her, monster, bolts, options, xpModifier, herFight, bySlots.GetValueOrDefault(wcid).Company);
                 monster.Destroy(false);
+
+                // Every creature is fought by the one restored her: a change to her that outlives a creature's fights is said, loudly, with the creature that made it (the creatures after it met the changed her).
+                var now = HerState(her);
+                if (now != herState)
+                {
+                    notes.Insert(0, Line($"TODO(fight-sim-rank-her-drift): her own state changed while weenie {wcid} ({monster.Name}) was fought offline: maximum health {herState.Health} -> {now.Health}, stamina {herState.Stamina} -> {now.Stamina}, mana {herState.Mana} -> {now.Mana}, enchantments {herState.Enchantments} -> {now.Enchantments}; every creature after it in this run met the changed her"));
+                    herState = now;
+                }
             }
             catch (Exception e) when (e is NullReferenceException or InvalidOperationException or ArgumentException or KeyNotFoundException or InvalidCastException)
             {
@@ -139,23 +187,24 @@ internal static partial class Ranking
         text.AppendLine("xp/s is experience for a second of casting at it; 'loss a kill' is her health lost over one kill with ONE of them on her (its debuffs staying on her). Walking, looting, recovery and waits are not in these numbers.");
         text.AppendLine(Line($"'dies 1' is her chance of dying with one on her from full health ({her.Health.MaxValue}) if she never heals: how hard it hits against how fast she kills it. 'pack' is how many come when one is woken, by the server's alert rule"));
         text.AppendLine("and the placements (Census.cs), the mean over where it stands; 'dies pack' is her chance of dying against that many at once.");
+        text.AppendLine(Line($"'dies pack healed' and 'oom pack' are the same pack with her heals in the fight (InFight.cs: the client's own rules choose each cast, {options.HealedFights ?? DefaultHealedFights} fights at each of the two whole sizes around the pack,"));
+        text.AppendLine(Line($"taken in proportion, at most {MaxHealedPack} at once, not capped at six): her chance of dying, and of standing out of mana with some of them alive. {InFight.Gaps}."));
         text.AppendLine();
         text.AppendLine("CREATURES, by experience for her casting time");
-        text.AppendLine(Line($"  {"creature",-34} {"wcid",6} {"lvl",4} {"health",6} {"MD",4} {"xp a kill",10} {"best spell",-20} {"lands",6} {"casts",6} {"s",6} {"mana",6} {"xp/s",7} {"hp/s in",8} {"loss a kill",11} {"biggest",7} {"dies 1",7} {"pack",5} {"dies pack",9} {"slots",6} {"blocks",6}"));
-        var bySlots = slots.GroupBy(s => s.Wcid).ToDictionary(g => g.Key, g => (Count: g.Sum(s => s.Count), Blocks: g.Select(s => s.Landblock).Distinct().Count(), Company: g.Sum(s => s.Count * s.Company) / g.Sum(s => s.Count)));
+        text.AppendLine(Line($"  {"creature",-34} {"wcid",6} {"lvl",4} {"health",6} {"MD",4} {"xp a kill",10} {"best spell",-20} {"lands",6} {"casts",6} {"s",6} {"mana",6} {"xp/s",7} {"hp/s in",8} {"loss a kill",11} {"biggest",7} {"dies 1",7} {"pack",5} {"dies pack",9} {"slots",6} {"blocks",6} {"dies pack healed",16} {"oom pack",8}"));
         foreach (var v in verdicts.Values.OrderByDescending(v => v.XpPerSecond).Take(options.Top))
         {
             var where = bySlots.GetValueOrDefault(v.Wcid);
-            text.AppendLine(Line($"  {Clip(v.Name + (v.Caster ? " (casts)" : string.Empty), 34),-34} {v.Wcid,6} {v.Level,4} {v.Health,6} {v.MagicDefense,4} {v.Xp,10:N0} {Clip(v.Spell, 20),-20} {v.Land,6:P0} {v.CastsPerKill,6:0.0} {v.SecondsPerKill,6:0.0} {v.ManaPerKill,6:0} {v.XpPerSecond,7:N0} {v.Incoming,8:0.00} {v.LossPerKill,11:0.0} {v.BiggestHit,7} {v.Death1,7:P1} {where.Company,5:0.0} {v.DeathAt(where.Company),9:P1} {where.Count,6:0.#} {where.Blocks,6}"));
+            text.AppendLine(Line($"  {Clip(v.Name + (v.Caster ? " (casts)" : string.Empty), 34),-34} {v.Wcid,6} {v.Level,4} {v.Health,6} {v.MagicDefense,4} {v.Xp,10:N0} {Clip(v.Spell, 20),-20} {v.Land,6:P0} {v.CastsPerKill,6:0.0} {v.SecondsPerKill,6:0.0} {v.ManaPerKill,6:0} {v.XpPerSecond,7:N0} {v.Incoming,8:0.00} {v.LossPerKill,11:0.0} {v.BiggestHit,7} {v.Death1,7:P1} {where.Company,5:0.0} {v.DeathAt(where.Company),9:P1} {where.Count,6:0.#} {where.Blocks,6} {Share(v.DiesPackHealed),16} {Share(v.OutOfManaPack),8}"));
         }
 
         // Grounds: a landblock's whole population, cleared in turn and waited for.
         text.AppendLine();
         text.AppendLine("GROUNDS, by experience an hour of casting when she clears the whole landblock over and over (the cycle is the longer of her casting time for all of it and its respawn; walking, looting and recovery not counted)");
         text.AppendLine("'pack' is the mean number that come at once there; 'dies 1' and 'dies pack' are the slot-weighted chances over the landblock's creatures; 'way in' is the portal the world database places that leads there, with its level limits (outdoor land is walked to).");
-        text.AppendLine(Line($"  {"landblock",-9} {"name",-30} {"slots",6} {"xp a clear",12} {"cast time",10} {"respawn",8} {"M xp/h",7} {"hp/s in",8} {"pack",5} {"dies 1",7} {"dies pack",9} {"way in",-34} {"mostly",-40}"));
+        text.AppendLine(GroundsHeader());
         var reach = Reach(her.Level ?? 0);
-        var grounds = new List<(double Rate, string Row, bool Open, double WorstDeath, string Tsv)>();
+        var grounds = new List<(double Rate, string Row, bool Open, double WorstDeath, string Tsv, double WorstHealed)>();
         foreach (var block in slots.GroupBy(s => s.Landblock))
         {
             var fought = block.Where(s => verdicts.ContainsKey(s.Wcid) && !double.IsInfinity(verdicts[s.Wcid].SecondsPerKill)).ToList();
@@ -183,8 +232,12 @@ internal static partial class Ranking
             var worst = fought.GroupBy(s => s.Wcid).Where(g => g.Sum(s => s.Count) >= count / 20)
                 .Select(g => verdicts[g.Key].DeathAt(g.Sum(s => s.Count * s.Company) / g.Sum(s => s.Count))).DefaultIfEmpty(0).Max();
             var mostly = string.Join(", ", fought.GroupBy(s => verdicts[s.Wcid].Name).OrderByDescending(g => g.Sum(s => s.Count)).Take(3).Select(g => Line($"{g.Sum(s => s.Count):0.#} {g.Key}")));
-            grounds.Add((rate, Line($"  0x{block.Key:X4}    {Clip(names.GetValueOrDefault(block.Key, string.Empty), 30),-30} {count,6:0.#} {xp,12:N0} {castTime,8:0} s {(double.IsNaN(respawn) ? "none" : Line($"{respawn:0} s")),8} {rate,7:0.00} {incoming,8:0.00} {pack,5:0.0} {dies1,7:P1} {diesPack,9:P1} {Clip(wayIn, 34),-34} {Clip(mostly, 70),-40}"), open, worst,
-                Line($"0x{block.Key:X4}\t{names.GetValueOrDefault(block.Key, string.Empty)}\t{count:0.#}\t{xp:0}\t{castTime:0}\t{(double.IsNaN(respawn) ? string.Empty : Line($"{respawn:0}"))}\t{rate:0.00}\t{incoming:0.00}\t{pack:0.0}\t{dies1:0.000}\t{diesPack:0.000}\t{worst:0.000}\t{wayIn}\t{mostly}")));
+            // With her heals: slot-weighted as dies pack is, and the worst share of fights not won (dead or out of mana) among the creatures that make up a twentieth of it.
+            var diesHealed = fought.Sum(s => s.Count * verdicts[s.Wcid].DiesPackHealed) / count;
+            var outOfMana = fought.Sum(s => s.Count * verdicts[s.Wcid].OutOfManaPack) / count;
+            var worstHealed = fought.GroupBy(s => s.Wcid).Where(g => g.Sum(s => s.Count) >= count / 20).Select(g => verdicts[g.Key].NotWonHealed).DefaultIfEmpty(0).Max();
+            grounds.Add((rate, Line($"  0x{block.Key:X4}    {Clip(names.GetValueOrDefault(block.Key, string.Empty), 30),-30} {count,6:0.#} {xp,12:N0} {castTime,8:0} s {(double.IsNaN(respawn) ? "none" : Line($"{respawn:0} s")),8} {rate,7:0.00} {incoming,8:0.00} {pack,5:0.0} {dies1,7:P1} {diesPack,9:P1} {Clip(wayIn, 34),-34} {Clip(mostly, 70),-40} {Share(diesHealed),16} {Share(outOfMana),8}"), open, worst,
+                Line($"0x{block.Key:X4}\t{names.GetValueOrDefault(block.Key, string.Empty)}\t{count:0.#}\t{xp:0}\t{castTime:0}\t{(double.IsNaN(respawn) ? string.Empty : Line($"{respawn:0}"))}\t{rate:0.00}\t{incoming:0.00}\t{pack:0.0}\t{dies1:0.000}\t{diesPack:0.000}\t{worst:0.000}\t{wayIn}\t{mostly}\t{diesHealed:0.000}\t{outOfMana:0.000}\t{worstHealed:0.000}"), worstHealed));
         }
 
         foreach (var ground in grounds.OrderByDescending(g => g.Rate).Take(options.Top))
@@ -194,8 +247,16 @@ internal static partial class Ranking
 
         text.AppendLine();
         text.AppendLine(Line($"GROUNDS OPEN TO HER NOW (level {her.Level}) WHERE ITS PACKS DO NOT KILL HER: a placed portal lets her in at her level and asks no quest flag (or it is outdoor land), and no creature that makes up a twentieth of it killed her in more than 1 of 200 fights against its own pack size, from full health with no healing"));
-        text.AppendLine(Line($"  {"landblock",-9} {"name",-30} {"slots",6} {"xp a clear",12} {"cast time",10} {"respawn",8} {"M xp/h",7} {"hp/s in",8} {"pack",5} {"dies 1",7} {"dies pack",9} {"way in",-34} {"mostly",-40}"));
+        text.AppendLine(GroundsHeader());
         foreach (var ground in grounds.Where(g => g.Open && g.WorstDeath <= 0.005).OrderByDescending(g => g.Rate).Take(options.Top))
+        {
+            text.AppendLine(ground.Row);
+        }
+
+        text.AppendLine();
+        text.AppendLine(Line($"GROUNDS OPEN TO HER NOW (level {her.Level}) WHERE ITS PACKS DO NOT KILL HER WITH HER HEALS: as above, with the fight played by her own rules (InFight.cs): no creature that makes up a twentieth of it ended more than 1 fight in 100 against its own pack with her dead or out of mana"));
+        text.AppendLine(GroundsHeader());
+        foreach (var ground in grounds.Where(g => g.Open && g.WorstHealed <= 0.01).OrderByDescending(g => g.Rate).Take(options.Top))
         {
             text.AppendLine(ground.Row);
         }
@@ -215,16 +276,16 @@ internal static partial class Ranking
         var outFile = options.Out ?? Path.Combine(Checkout.Innermost(), "cache", "fight-sim", Line($"rank-{her.Name}-{options.MinLevel}-{(options.MaxLevel == int.MaxValue ? "any" : options.MaxLevel.ToString(CultureInfo.InvariantCulture))}.txt"));
         Directory.CreateDirectory(Path.GetDirectoryName(outFile)!);
         File.WriteAllText(outFile, report);
-        var table = new StringBuilder("wcid\tname\tlevel\thealth\tmagic_defense\txp\tspell\tland\tcasts\tseconds\tmana\txp_per_s\thp_per_s_in\tloss_a_kill\tbiggest\tdies_1\tdies_2\tdies_3\tdies_4\tdies_5\tdies_6\tpack\tdies_pack\tcaster\tslots\tlandblocks\n");
+        var table = new StringBuilder("wcid\tname\tlevel\thealth\tmagic_defense\txp\tspell\tland\tcasts\tseconds\tmana\txp_per_s\thp_per_s_in\tloss_a_kill\tbiggest\tdies_1\tdies_2\tdies_3\tdies_4\tdies_5\tdies_6\tpack\tdies_pack\tcaster\tslots\tlandblocks\tdies_pack_healed\tout_of_mana_pack\n");
         foreach (var v in verdicts.Values.OrderByDescending(v => v.XpPerSecond))
         {
             var where = bySlots.GetValueOrDefault(v.Wcid);
-            table.AppendLine(Line($"{v.Wcid}\t{v.Name}\t{v.Level}\t{v.Health}\t{v.MagicDefense}\t{v.Xp:0}\t{v.Spell}\t{v.Land:0.000}\t{v.CastsPerKill:0.00}\t{v.SecondsPerKill:0.0}\t{v.ManaPerKill:0.0}\t{v.XpPerSecond:0}\t{v.Incoming:0.00}\t{v.LossPerKill:0.0}\t{v.BiggestHit}\t{string.Join("\t", v.Death.Select(d => d.ToString("0.000", CultureInfo.InvariantCulture)))}\t{where.Company:0.0}\t{v.DeathAt(where.Company):0.000}\t{v.Caster}\t{where.Count:0.#}\t{where.Blocks}"));
+            table.AppendLine(Line($"{v.Wcid}\t{v.Name}\t{v.Level}\t{v.Health}\t{v.MagicDefense}\t{v.Xp:0}\t{v.Spell}\t{v.Land:0.000}\t{v.CastsPerKill:0.00}\t{v.SecondsPerKill:0.0}\t{v.ManaPerKill:0.0}\t{v.XpPerSecond:0}\t{v.Incoming:0.00}\t{v.LossPerKill:0.0}\t{v.BiggestHit}\t{string.Join("\t", v.Death.Select(d => d.ToString("0.000", CultureInfo.InvariantCulture)))}\t{where.Company:0.0}\t{v.DeathAt(where.Company):0.000}\t{v.Caster}\t{where.Count:0.#}\t{where.Blocks}\t{v.DiesPackHealed:0.000}\t{v.OutOfManaPack:0.000}"));
         }
 
         File.WriteAllText(Path.ChangeExtension(outFile, ".tsv"), table.ToString());
         File.WriteAllText(Path.ChangeExtension(outFile, ".grounds.tsv"),
-            "landblock\tname\tslots\txp_a_clear\tcast_seconds\trespawn_seconds\tm_xp_per_h\thp_per_s_in\tpack\tdies_1\tdies_pack\tworst_dies_pack\tway_in\tmostly\n" + string.Join("\n", grounds.OrderByDescending(g => g.Rate).Select(g => g.Tsv)) + "\n");
+            "landblock\tname\tslots\txp_a_clear\tcast_seconds\trespawn_seconds\tm_xp_per_h\thp_per_s_in\tpack\tdies_1\tdies_pack\tworst_dies_pack\tway_in\tmostly\tdies_pack_healed\tout_of_mana_pack\tworst_not_won_healed\n" + string.Join("\n", grounds.OrderByDescending(g => g.Rate).Select(g => g.Tsv)) + "\n");
         Console.Error.WriteLine($"written: {outFile}, its .tsv (every creature class) and its .grounds.tsv (every landblock)");
         return 0;
     }
@@ -317,6 +378,17 @@ internal static partial class Ranking
     private static partial Regex LandblockField();
 
     private static string Clip(string text, int width) => text.Length <= width ? text : text[..(width - 1)] + "~";
+
+    /// <summary>What a creature's fights must leave of her as they found it: her three maximums and how many enchantments she holds.</summary>
+    private static (uint Health, uint Stamina, uint Mana, int Enchantments) HerState(Player her) =>
+        (her.Health.MaxValue, her.Stamina.MaxValue, her.Mana.MaxValue, her.Biota.PropertiesEnchantmentRegistry?.Count ?? 0);
+
+    /// <summary>A share in percent, or "-" when it was not played.</summary>
+    private static string Share(double share) => double.IsNaN(share) ? "-" : share.ToString("P1", CultureInfo.InvariantCulture);
+
+    /// <summary>The grounds tables' header.</summary>
+    private static string GroundsHeader() =>
+        Line($"  {"landblock",-9} {"name",-30} {"slots",6} {"xp a clear",12} {"cast time",10} {"respawn",8} {"M xp/h",7} {"hp/s in",8} {"pack",5} {"dies 1",7} {"dies pack",9} {"way in",-34} {"mostly",-40} {"dies pack healed",16} {"oom pack",8}");
 
     private static string Line(FormattableString text) => text.ToString(CultureInfo.InvariantCulture);
 }

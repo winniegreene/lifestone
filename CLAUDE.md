@@ -4,7 +4,7 @@ Lifestone is a faithful, single-player Asheron's Call. It is a Godot 4.7 (.NET, 
 - renders the user's own retail dats;
 - talks the AC protocol to a bundled ACE server on localhost.
 
-Read `README.md` and `docs/goals.md` for the project. The current milestone is **M6, "the level ladder"**, under way: a fresh mage that climbs from level 1 on its own over
+Read `README.md`, `TECHNICAL.md` and `docs/goals.md` for the project. The current milestone is **M6, "the level ladder"**, under way: a fresh mage that climbs from level 1 on its own over
 varied grounds, cheat-free. Its plan is [docs/milestones/m6-plan.md](docs/milestones/m6-plan.md) (canonical) and its spec
 [docs/milestones/m6-the-ladder.md](docs/milestones/m6-the-ladder.md); items 0-7 are done; items 8 and 14 (the buff bot) are merged unfinished (D134), and the climb is built out as the climber Qwinnie climbs (D131). The seed list of grounds is in [docs/milestones/m5-first-dungeon.md](docs/milestones/m5-first-dungeon.md)
 section 7.1. M5 ([docs/milestones/m5-first-dungeon.md](docs/milestones/m5-first-dungeon.md), **"the first dungeon"**: a mage
@@ -158,7 +158,7 @@ $env:DOTNET_ROOT = "$env:LOCALAPPDATA\Microsoft\dotnet"; $env:PATH = "$env:DOTNE
 $env:DOTNET_ADD_GLOBAL_TOOLS_TO_PATH = 'false'; $env:DOTNET_GENERATE_ASPNET_CERTIFICATE = 'false'
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'; $env:DOTNET_NOLOGO = '1'
 dotnet build Lifestone.slnx --disable-build-servers
-dotnet test Lifestone.slnx --disable-build-servers --filter "Category!=Loopback&Tier!=Soak"   # Loopback/Soak: README, Development
+dotnet test Lifestone.slnx --disable-build-servers --filter "Category!=Loopback&Tier!=Soak"   # Loopback/Soak: TECHNICAL.md, Development
 pwsh -File tools\smoke.ps1
 ```
 

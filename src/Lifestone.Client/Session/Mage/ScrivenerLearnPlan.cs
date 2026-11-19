@@ -115,14 +115,17 @@ public static class ScrivenerLearnPlan
     /// <summary>The element-free debuff lines the fight casts (<see cref="FightDebuffs"/>'s Imperil, Vulnerability and Magic Yield rows).</summary>
     public static IReadOnlyList<string> PlainDebuffLines { get; } = ["Imperil Other", "Vulnerability Other", "Magic Yield Other"];
 
-    /// <summary>The rung of <paramref name="ladder"/> that names <paramref name="groundKey"/> for a character of <paramref name="level"/>, or null when no rung names the ground.</summary>
+    /// <summary>
+    /// The rung of <paramref name="ladder"/> that names <paramref name="groundKey"/> for a character of <paramref name="level"/>, or null when no rung names the ground. A rung names the ground it plays (<see cref="PlayedGround"/>) and,
+    /// M6 redoubt, its outdoor fallback ground (<see cref="RungFallback"/>: the outdoor ground of a rung whose own ground a level-limited portal guards), so a run that stands on the fallback keeps the band's learn plan.
+    /// </summary>
     /// <param name="ladder">The ladder.</param>
     /// <param name="groundKey">The ground's profile key.</param>
     /// <param name="level">The character's level.</param>
     public static LadderRung? RungOf(Ladder ladder, string groundKey, int level)
     {
         ArgumentNullException.ThrowIfNull(ladder);
-        var naming = ladder.Rungs.Where(r => string.Equals(PlayedGround(r), groundKey, StringComparison.Ordinal)).ToList();
+        var naming = ladder.Rungs.Where(r => string.Equals(PlayedGround(r), groundKey, StringComparison.Ordinal) || RungFallback.Names(r, groundKey)).ToList();
         return naming.FirstOrDefault(r => r.Band.Holds(level)) ?? naming.LastOrDefault(r => r.Band.From <= level) ?? naming.FirstOrDefault();
     }
 
@@ -284,8 +287,12 @@ public static class ScrivenerLearnPlan
 
             if (line.Kind == ScrivenerLineKind.Sustain)
             {
-                // M6 7 AN: every level the catalog holds is a scroll of its own, lowest first (Drain Health I and II): the top level alone would leave a fresh book without I
-                var missing = catalog.LineSpells(line.Name).Where(s => !book.Knows(s.SpellId)).ToList();
+                // M6 7 AN: every level up to the plan's is a scroll of its own, lowest first (Drain Health I and II): the top level alone would leave a fresh book without I.
+                // M6 sprint (live 2026-11-19 03:16-03:23 UTC, run 4, level 9, Life Magic 158 standing): every level the catalog holds was planned, capped only by what ACE lets her read, so the plan bought Heal Self IV (cast
+                // chance 0.636) and Drain Health Other IV (her level at the plan's 0.95 was II) and sent her by the Town Network to Dryreach for Heal Self V (chance 0.050, 10,000 pyreals, its Gold Scarabs not held). Now the
+                // levels stop at the plan's level on her skill (Need's target at the plan's chance), level I at the least.
+                var top = Math.Max(1, Need(ground, rung, chance, q, book, catalog, line, ladder, reach, 0, stable).Target);
+                var missing = catalog.LineSpells(line.Name).Where(s => s.Level <= top && !book.Knows(s.SpellId)).ToList();
                 if (missing.Count > 0)
                 {
                     needs.AddRange(missing.Select(s => Need(ground, rung, chance, q, book, catalog, line, ladder, reach, s.Level, stable)));

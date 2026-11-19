@@ -84,7 +84,7 @@ public sealed class ProtectivePlanTests
     public void The_hits_in_the_table_are_the_ladders_hitters()
     {
         var lodge = LadderLoader.WarMage.Rungs.Single(r => r.Key == "lodge").Health!.Hitter;
-        Assert.Equal(34, LadderLoader.WarMage.Rungs.Single(r => r.Key == "burrow").Health!.Hitter.Hit); // M6 7 AR: the Female Tusker, the rung is back
+        Assert.Equal(("Male Tusker", 36), (LadderLoader.WarMage.Rungs.Single(r => r.Key == "burrow").Health!.Hitter.Name, LadderLoader.WarMage.Rungs.Single(r => r.Key == "burrow").Health!.Hitter.Hit)); // M6 7 AR: the rung is back; M6 retreat: its ground is the Tusker Retreat, whose hardest hitter is the Male Tusker (the Burrow's Female hit 34)
         Assert.Equal(("Male Tusker", 36), (lodge.Name, lodge.Hit));
     }
 
@@ -104,8 +104,13 @@ public sealed class ProtectivePlanTests
         var names = ScrivenerLearnPlan.LinesFor(rung, ScrivenerCatalog.Default).Where(l => l.Kind is not (ScrivenerLineKind.SelfBuff or ScrivenerLineKind.ItemArmor)).Select(l => l.Name); // M6 7 AK's lines stand after the dance and after the protections: BuffBootstrapPlanTests
         Assert.Equal(["Flame Bolt", "Stamina to Mana Self", "Revitalize Self", "Armor Self", "Bludgeoning Protection Self", "Lifestone Recall", "Lifestone Tie", "Drain Health Other", "Drain Stamina Other", "Heal Self", "Harm Other", "Mana Renewal Self", "Regeneration Self", "Rejuvenation Self", "Spirit Drinker", "Hermetic Link", "Defender", "Fire Vulnerability Other", "Imperil Other", "Vulnerability Other", "Magic Yield Other"], names); // M6 7 AD: the press after the bolt; M6 14: Revitalize Self right after the press; M6 14 (m6-life-through): Harm Other with the drains she fights with; M6 14 (m6-caster): the caster auras before the debuffs
 
-        var outskirts = ScrivenerLearnPlan.RungOf(LadderLoader.WarMage, "holtburg-outskirts", 6)!;
-        Assert.DoesNotContain("Bludgeoning Protection Self", ScrivenerLearnPlan.LinesFor(outskirts, ScrivenerCatalog.Default).Select(l => l.Name));
+        // M6 redoubt: the rung outskirts hunts the Holtburg Redoubt, whose drudges bludgeon (the profile's targets' damage types 0x0004), so its plan holds the protection too; a run on the rung's outdoor ground reads the same rung
+        var outskirts = ScrivenerLearnPlan.RungOf(LadderLoader.WarMage, "holtburg-redoubt", 6)!;
+        Assert.Equal("outskirts", outskirts.Key);
+        Assert.Same(outskirts, ScrivenerLearnPlan.RungOf(LadderLoader.WarMage, "holtburg-outskirts", 6));
+        Assert.Contains("Bludgeoning Protection Self", ScrivenerLearnPlan.LinesFor(outskirts, ScrivenerCatalog.Default).Select(l => l.Name));
+        Assert.Equal(["bludgeon"], ScrivenerLearnPlan.IncomingElements(GroundCatalog.Get("holtburg-redoubt")));
+        Assert.Empty(ScrivenerLearnPlan.IncomingElements(GroundCatalog.Get("holtburg-outskirts"))); // the outdoor profile names no creature's damage type
         Assert.Null(ScrivenerLearnPlan.RungOf(LadderLoader.WarMage, "black-spawn-den-aluvian", 80)); // BSD Mage's den: no rung names it, so his plan is the ground's own list, unchanged
     }
 

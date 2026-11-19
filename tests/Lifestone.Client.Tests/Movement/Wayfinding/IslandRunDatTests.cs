@@ -78,6 +78,8 @@ public sealed class IslandRunDatTests(DatSetFixture fixture, ITestOutputHelper o
         new("hub-barracks", 0xF07E0040, new(171.613f, 188.834f, 10.9496f), "armory", 0xEF7F0000, new(31.9169f, 92.1597f), 345), // M6 14 armory: 22657 Tusker Armory 0x7EF7F000 (31.9169, 92.1597, 12.005)
         new("hub-cavern", 0xF8800027, new(97.682f, 147.319f, 12.005f), "cavern", 0xF8800000, new(103.346f, 133.513f), 15),
         new("hub-habitat", 0xF77E0017, new(57.8188f, 165.736f, 18.0187f), "habitat", 0xF77E0000, new(53.7317f, 154.137f), 12),
+        new("refuge", 0xF6820033, new(145.7f, 49.9f, 58.0f), "retreat", 0xF97E0000, new(166.295f, 115.594f), 921), // M6 retreat: 22694 Tusker Retreat 0x7F97E000 (166.295, 115.594, -0.095) front (165.64, 118.52)
+        new("hub-lodge", 0xF97F003E, new(187.876f, 122.937f, 46.1508f), "retreat", 0xF97E0000, new(166.295f, 115.594f), 200), // M6 retreat: the Retreat from 15 by the hub's Lodge portal (no hub portal leads to it)
         new("new-colier", 0xA6CB001F, new(82.544f, 154.642f, 56.892f), "temple-20-40", 0xA2CA0000, new(186.042f, 34.587f), 734),
         new("holtburg", 0xA9B40019, new(84.0f, 7.1f, 94.0f), "new-colier", 0xABB10000, new(68.63f, 126.407f), 590),
     ];

@@ -133,11 +133,14 @@ internal abstract class ItemMoveTracker(ActionHandle handle, uint item, double t
     /// <inheritdoc/>
     internal override void OnInventoryFailed(in InventoryFailed e)
     {
-        if (OwnsFailure(e.Item))
+        if (OwnsFailure(e.Item) || (e.Item == 0 && OwnsUnnamedFailure(e.Error)))
         {
             Resolve(Refused(e.Error));
         }
     }
+
+    /// <summary>True when a 0x00A0 that names no item (guid 0) with <paramref name="error"/> refuses this action; none by default.</summary>
+    protected virtual bool OwnsUnnamedFailure(uint error) => false;
 
     /// <inheritdoc/>
     internal override void Poll(ActionApi api)
@@ -255,6 +258,13 @@ internal sealed class PickUpTracker(ActionHandle handle, uint item, uint contain
             Confirm(api, "in " + ActionText.Hex(e.Container) + " slot " + e.Placement);
         }
     }
+
+    /// <summary>
+    /// M6 sprint (run 5, cache/m6/sprint/run5/step3-levelup.log 15:58:51-15:59:16 UTC: a second Female Tusker Tusk's pick-up waited its whole timeout, 25 s, standing): ACE refuses a quest-gated pick-up with a 0x00A0 that names
+    /// no item, guid 0 (<c>QuestManager.HandleSolveError</c>, QuestManager.cs:558-578 @95ef426d: 0x043E YouHaveSolvedThisQuestTooRecently or 0x043F YouHaveSolvedThisQuestTooManyTimes, after its two chat lines), called from the
+    /// pick-up's <c>VerifyQuest</c> (Player_Inventory.cs:1260) and a quest chest's open (Chest.cs:160); a pick-up meets only the first, so either code ends it as refused.
+    /// </summary>
+    protected override bool OwnsUnnamedFailure(uint error) => error is 0x043E or 0x043F;
 }
 
 /// <summary>

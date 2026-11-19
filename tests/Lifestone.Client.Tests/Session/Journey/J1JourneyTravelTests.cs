@@ -95,6 +95,35 @@ public sealed class J1JourneyTravelTests
         Assert.Equal((false, 0, 0), (t.Facts.LifestoneTied, t.Facts.Recalls, t.Facts.Teleports));
     }
 
+    /// <summary>
+    /// M6, the recall's components (live 2026-11-18 20:29:54 UTC: the seam's recall home from Dryreach was refused 0x0400 and the fact stayed unset until the recall-home station was refused too): the seam names the refusal in the
+    /// journey's facts, as that station does (M6 7 AV), so the caller's recovery and every later way home leave the recall out; the tie is not touched.
+    /// </summary>
+    [Fact]
+    public void Home_refused_for_a_component_fails_naming_0x0400_and_marks_the_recall_unavailable_for_the_run()
+    {
+        var t = new J1JourneyRig(J1JourneyRig.BeltCell) { LifestoneRecallRefusal = 0x0400 };
+        t.Context();
+        Assert.False(t.Facts.LifestoneRecallUnavailable);
+        var leg = t.Travel!.GoTo(t.View, Home(), t.Now);
+        Assert.Equal(TravelStatus.Failed, t.RunLeg(leg));
+        Assert.StartsWith("travel:recall:cast: ", leg.Failure, StringComparison.Ordinal);
+        Assert.Contains("0x0400", leg.Failure, StringComparison.Ordinal);
+        Assert.Equal((true, null, 0), (t.Facts.LifestoneRecallUnavailable, t.Facts.LifestoneTied, t.Facts.Recalls));
+        Assert.Contains(t.Log.Entries, e => e.Message.Contains("journey travel: recall-unavailable:components", StringComparison.Ordinal));
+        Assert.False(RecallReadiness.Of(t.R.H.State, t.Facts, t.Caster.Table).Castable); // the next way-home decision of the run reads it
+    }
+
+    [Fact]
+    public void A_refused_lifestone_tie_does_not_mark_the_recall_unavailable()
+    {
+        var t = new J1JourneyRig(J1JourneyRig.BeltCell) { LifestoneTied = false };
+        t.Context();
+        var leg = t.Travel!.GoTo(t.View, Home(), t.Now);
+        Assert.Equal(TravelStatus.Failed, t.RunLeg(leg));
+        Assert.False(t.Facts.LifestoneRecallUnavailable); // 0x049E is the tie's refusal: the bind answers it (F14), not the portals
+    }
+
     [Fact]
     public void A_character_with_no_recall_fails_travel_recall_no_caster()
     {

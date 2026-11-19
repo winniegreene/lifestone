@@ -50,7 +50,20 @@ public static class ClimberHealthRule
     public static HealthNeed? NeedAt(Ladder ladder, int level)
     {
         ArgumentNullException.ThrowIfNull(ladder);
-        if (level < 1 || level > ladder.TopLevel || ladder.RungFor(level) is not { Health: { } health } rung)
+        return level < 1 || level > ladder.TopLevel ? null : NeedFor(ladder, ladder.RungFor(level));
+    }
+
+    /// <summary>
+    /// M6 audit (the owner's decision of 2026-11-19): the need of the rung she hunts, <paramref name="rung"/>, or null when it has no <see cref="LadderRung.Health"/>. The level's rung and the hunted one differ under a hold: from
+    /// 65 the sprint holds the Holding, so she hunts the Quarters (cache/m6/14/live: "read_at=64 ... rung=quarters ... reason=approach-session:holding"), whose want is 204, while the level's rung, the Holding, has none on purpose.
+    /// </summary>
+    /// <param name="ladder">The ladder.</param>
+    /// <param name="rung">The rung.</param>
+    public static HealthNeed? NeedFor(Ladder ladder, LadderRung rung)
+    {
+        ArgumentNullException.ThrowIfNull(ladder);
+        ArgumentNullException.ThrowIfNull(rung);
+        if (rung.Health is not { } health)
         {
             return null;
         }

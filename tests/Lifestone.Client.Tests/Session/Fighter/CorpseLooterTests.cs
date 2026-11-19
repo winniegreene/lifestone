@@ -222,6 +222,40 @@ public sealed class CorpseLooterTests
     }
 
     [Fact]
+    public void ACEs_quest_refusal_that_names_no_item_ends_the_pick_up_at_once_not_at_its_timeout()
+    {
+        // M6 sprint (run 5, cache/m6/sprint/run5/step3-levelup.log 15:58:51-15:59:16 UTC): a second Female Tusker Tusk inside its 20 h gate; ACE's HandleSolveError (QuestManager.cs:558-578 @95ef426d) sends the
+        // two chat lines and a 0x00A0 for guid 0 with 0x043E YouHaveSolvedThisQuestTooRecently, which the pick-up did not own: it waited out its 25 s timeout, standing.
+        var r = new Rig();
+        r.Open([Rig.Thing(A)]);
+        var looter = r.Looter();
+        r.Drive(looter, 0.3);
+        Assert.Equal([A], r.SentGuids);
+        var asked = r.Now;
+
+        r.R.Server((p, s) => AceM3Writers.InventoryServerSaysFailed(p, s, 0, 0x043E));
+        var status = r.Drive(looter, 2.0);
+
+        Assert.NotEqual(LootStatus.Running, status);
+        Assert.True(r.Now - asked < 2.5, $"the pick-up ended {r.Now - asked:0.0} s after it was asked");
+        Assert.Equal(1, looter.Refused);
+        Assert.Equal(0, looter.TimedOut);
+    }
+
+    [Fact]
+    public void A_failure_naming_no_item_with_another_error_is_not_the_pick_ups()
+    {
+        var r = new Rig();
+        r.Open([Rig.Thing(A)]);
+        var looter = r.Looter();
+        r.Drive(looter, 0.3);
+
+        r.R.Server((p, s) => AceM3Writers.InventoryServerSaysFailed(p, s, 0, 0x0029));
+        Assert.Equal(LootStatus.Running, r.Drive(looter, 2.0)); // not a quest refusal: still waiting for its own answer
+        Assert.Equal(0, looter.Refused);
+    }
+
+    [Fact]
     public void A_burden_refusal_ends_the_loop_and_the_rest_is_not_sent()
     {
         var r = new Rig();
@@ -420,6 +454,51 @@ public sealed class CorpseLooterTests
         Assert.Equal(2, looter.Looted);
         Assert.Contains("stack_merges=1 merges_refused=0", looter.Summary, StringComparison.Ordinal);
         Assert.Contains(r.Log.Lines, l => l.Contains("loot: merged ", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void M6_sprint_with_the_main_pack_full_a_corpse_coin_stack_joins_the_held_stack_straight_from_the_corpse()
+    {
+        // Run 5 (2026-11-19, 16:57-17:52 UTC): "Unable to put Pyreal into container" eight times at main=0/102 while the held stack had room (16,839 of 25,000): a pick-up needs a slot (Player_Inventory.cs 1318-1322), a merge
+        // from the open corpse does not (HandleActionStackableMerge finds the source among LocationsICanMove, 2849ff): no pick-up is sent, the coins join the held stack, the move counts as looted.
+        var r = new Rig();
+        var pack = new List<ContentDesc> { new(HeldCoins, 0) };
+        for (uint i = 1; i < 102; i++)
+        {
+            pack.Add(new ContentDesc(0x80000700 + i, 0));
+        }
+
+        r.R.Describe([.. pack], []);
+        HeldStack(r, HeldCoins, Pyreal, 16839, 25000, describe: false);
+        Assert.Equal(0, Lifestone.Client.Session.Quartermaster.PackView.MainPackFree(r.R.H.State));
+        r.Open([CorpseStack(A, Pyreal, 200)]);
+        var looter = r.Looter();
+
+        r.Drive(looter, 0.3);
+        Assert.Equal((A, 200, HeldCoins.ToString("X8")), OnlyMerge(r));
+        Assert.Empty(r.SentGuids); // no pick-up: it would be refused for the slot
+        Assert.Contains(r.Log.Lines, l => l.Contains("m6-loot-merge-from-corpse", StringComparison.Ordinal));
+
+        r.R.Raw(AceM3Writers.InventoryRemoveObject(A)); // ACE's whole merge: the source's removal, then the target's new size (Player_Inventory.cs 3096, 3121-3123)
+        r.R.Raw(AceM3Writers.SetStackSize(++_seq, HeldCoins, 17039, 0));
+        Assert.Equal(LootStatus.Done, r.Drive(looter, Hold));
+        Assert.Equal(1, looter.Looted);
+        Assert.Equal(0, looter.Refused);
+        Assert.True(looter.WasMergedAway(A));
+    }
+
+    [Fact]
+    public void M6_sprint_with_a_free_slot_a_corpse_coin_stack_is_still_picked_up_then_merged()
+    {
+        // The merge from the corpse is the full pack's answer only: with a slot free the proven pick-up and merge stand.
+        var r = new Rig();
+        HeldStack(r, HeldCoins, Pyreal, 16839, 25000);
+        r.Open([CorpseStack(A, Pyreal, 200)]);
+        var looter = r.Looter();
+
+        r.Drive(looter, 0.3);
+        Assert.Equal([A], r.SentGuids);
+        Assert.Empty(r.R.H.Net.Of(FakeSendKind.StackableMerge));
     }
 
     [Fact]

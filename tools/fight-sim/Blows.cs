@@ -7,6 +7,7 @@ using System.Reflection;
 using ACE.Common;
 using ACE.Entity.Enum;
 using ACE.Entity.Enum.Properties;
+using ACE.Entity.Models;
 using ACE.Server.Entity;
 using ACE.Server.Factories;
 using ACE.Server.Physics.Animation;
@@ -297,11 +298,27 @@ internal static class Blows
         return new BlowReport(fightSeconds, fights, blows, notes);
     }
 
+    /// <summary>
+    /// Her enchantments back to <paramref name="before"/>: what a creature laid on her is taken off, and what it took off her is put back. A dispel (a creature's spell of SpellType.Dispel, cast through TryCastSpell whether or not
+    /// its debuffs stay) removes her buffs; before 2026-11-19 nothing put them back, so every fight after it in a sampling, and every creature after it in a rank, met her unbuffed (live: Tumerok North Vanguard Leader 9145
+    /// took Winnie's 35 enchantments to 6 and her health from 39 to 26 in a rank of levels 5 to 40). The entry is put back as ACE adds one (AddEnchantment under the object's lock).
+    /// </summary>
     private static void RemoveLaid(Player her, List<ACE.Entity.Models.PropertiesEnchantmentRegistry> before)
     {
         foreach (var added in (her.Biota.PropertiesEnchantmentRegistry?.ToList() ?? []).Where(e => !before.Contains(e)))
         {
             her.EnchantmentManager.Remove(added, false);
+        }
+
+        var now = her.Biota.PropertiesEnchantmentRegistry;
+        if (now is null)
+        {
+            return;
+        }
+
+        foreach (var taken in before.Where(e => !now.Contains(e)).ToList())
+        {
+            now.AddEnchantment(taken, her.BiotaDatabaseLock);
         }
     }
 

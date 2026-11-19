@@ -38,7 +38,9 @@ public sealed class DenRoomGraphTests(DatSetFixture fixture, ITestOutputHelper o
     {
         ["tusker-abode"] = "TODO(m6-abode-lower-level)",
         ["tusker-holding"] = "TODO(m6-abode-lower-level)",
+        ["holtburg-redoubt"] = "TODO(m6-redoubt-gallery-slot)", // M6 redoubt: 17 of the 18 slots stand in storey cells; the Drudge Skulker 0x7016301B's row names 0x01630178, a cell that holds the hall gallery's floor (a body there stands in 0x0163019A, which the tour crosses)
         ["crater-caves"] = "TODO(m6-crater-caves-lower)", // M6 8 B1: the room graph reaches 121 of the 493 cells: all 24 Nubilous Golems and the 4 Cursed Wisps; the 26 Magma Golems and 9 Embers stand past the floorless ramps
+        ["tusker-retreat"] = "TODO(m6-retreat-pockets)", // M6 retreat: 11 of the 71 slots (8 Female Tuskers on the z 6 ring round the shaft over 0x0126, a Male and two Females on z 0 ledges over the z -6 rooms) stand in pocket cells joined only to floorless cells: no walk reaches them at any lean
     };
 
     /// <summary>The keys of every dungeon profile (D46: a new dungeon's JSON file joins every per-ground theory here with no edit).</summary>
@@ -184,7 +186,7 @@ public sealed class DenRoomGraphTests(DatSetFixture fixture, ITestOutputHelper o
     private void StoreysDraftAndTour(string key, HuntingGround ground)
     {
         var (all, _) = GraphOf(ground);
-        var draft = GroundDraft.Cells(all, ground.Arrival.Cell, ground.Walk.DoorwayLean, ground.Jumps);
+        var draft = GroundDraft.Cells(all, ground.Arrival.Cell, ground.Walk.DoorwayLean, ground.Jumps, ground.Galleries); // M6 redoubt: a gallery's floorless cell is a storey cell
         output.WriteLine(GroundDraft.Summary(draft, new DraftWorld([], [], [], [], null, [])));
 
         // The storeys are the draft's, band for band.
@@ -192,7 +194,7 @@ public sealed class DenRoomGraphTests(DatSetFixture fixture, ITestOutputHelper o
         Assert.Equal(draft.Storeys.Select(s => s.Cells.Cells), ground.Storeys.Select(s => s.Cells.Cells));
 
         // Nothing the no-go set cuts off is left walkable (GroundDraft.CutOff names the cells for the no-go set).
-        var cutOff = GroundDraft.CutOff(all, ground.Arrival.Cell, ground.Walk.DoorwayLean, draft.Walkable, ground.IsNoGo, ground.Jumps);
+        var cutOff = GroundDraft.CutOff(all, ground.Arrival.Cell, ground.Walk.DoorwayLean, draft.Walkable, ground.IsNoGo, ground.Jumps, ground.Galleries);
         Assert.True(cutOff.Count == 0, $"{key}: the no-go set cuts off walkable cells, which are no-go too: {string.Join(", ", cutOff.Select(c => $"\"0x{c:X8}\""))}");
 
         // The loop never walks to an avoided creature: every slot of one stands in a no-go cell.

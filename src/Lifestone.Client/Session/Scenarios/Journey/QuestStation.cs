@@ -585,9 +585,16 @@ public sealed partial class QuestRun : QuestStepLeg, IStationSubFight
         }
 
         var how = stampHeld ? QuestTimers.HowServerStamp : _doneReply ? QuestTimers.HowReply : QuestTimers.HowItem;
-        var entry = Context.CompleteQuest(_quest, S.Clock.Time.GetUtcNow(), how); // M6 5 Q2: record, save through the host's store, log the line
+        var pickups = TrophyPickups.For(S.State);
+        var at = pickups.StartOf(_quest, S.Clock.Time.GetUtcNow(), out var timerFrom); // M6 audit: a tusk's timer runs from its pickup, which the server stamps (timer_from pickup)
+        var entry = Context.CompleteQuest(_quest, at, how); // M6 5 Q2: record, save through the host's store, log the line
+        if (TrophyPickups.PickupItem(_quest) is { Wcid: { } given })
+        {
+            pickups.Forget(given); // given away: the next one is a new pickup
+        }
+
         _timer = Context.QuestStore is null ? "memory" : "saved";
-        Log(string.Create(CultureInfo.InvariantCulture, $"done: recorded by {how}: completions {entry.Completions}, next due {(entry.NextDue is { } n ? n.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture) : "never (once)")}; timers {_timer}"));
+        Log(string.Create(CultureInfo.InvariantCulture, $"done: recorded by {how}: completions {entry.Completions}, next due {(entry.NextDue is { } n ? n.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture) : "never (once)")}; the timer from {timerFrom}; timers {_timer}"));
     }
 
     // ---------------------------------------------------------------------------------------------- the steps
@@ -1496,7 +1503,7 @@ public sealed partial class QuestRun : QuestStepLeg, IStationSubFight
         var input = new TownTripInput(
             PlaceKey(here.CellId >> 16) ?? PlaceKey(Context.Dungeon.Home.LifestoneCell >> 16),
             S.State.Self.Qualities.Level,
-            S.State.Self.Spellbook.Knows(Fighter.RecallHome.LifestoneRecallSpell),
+            RecallReadiness.Of(S.State, Context.Facts, Context.Spells).Castable,
             Context.Routes.StartLifestone.Cell >> 16 == Context.Dungeon.Home.LifestoneCell >> 16);
         var choice = TownNetworkTrip.Choose([candidate], input, Context.Routes, LeverDoors.Default);
         Log($"go: by the Town Network to {town}: {choice.Why}");
@@ -1558,7 +1565,7 @@ public sealed partial class QuestRun : QuestStepLeg, IStationSubFight
             RungWhere.AtGround,
             PlaceKey(landblock) ?? RungRoute.Hex(landblock),
             S.State.Self.Qualities.Level,
-            S.State.Self.Spellbook.Knows(Fighter.RecallHome.LifestoneRecallSpell),
+            RecallReadiness.Of(S.State, Context.Facts, Context.Spells).Castable,
             KnowsPortalRecall: false,
             KnowsPortalTie: false,
             PortalTie.Unknown,

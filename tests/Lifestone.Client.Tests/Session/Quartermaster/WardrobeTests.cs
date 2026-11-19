@@ -445,12 +445,12 @@ public sealed class WardrobeTests
     public void Q10c_the_sites_that_judged_armour_by_the_rule_of_before_the_pick_read_the_trips_terms_and_a_cantrip_piece_that_comes_off_names_its_reason()
     {
         // The state: a plain fight (no trip has published its wear pick) on a ground with the climber's default list (Major Focus is on it). She wears a cap of armour level 100 casting Major Focus; in her pack, a helm of
-        // armour level 400 casting Major Focus too.
+        // armour level 1000 casting Major Focus too (M6 redoubt: 400 cleared the swap margin against the rung's Mite Scion, hit 7; against the Redoubt's Drudge Prowler, hit 4, it reads 0.082 of the margin's 0.1).
         var rig = Session(MageTemplate.ClimberName);
         var spells = SpellsWithFocus();
         var ground = NoBlock();
         Piece(rig, "Focus Cap", 0x2, 0x1, 0x4000, 0x1, new() { [28] = 100 }, null, [MajorFocus]);
-        var helm = Piece(rig, "Focus Helm", 0x2, 0x1, 0x4000, 0, new() { [28] = 400 }, null, [MajorFocus]);
+        var helm = Piece(rig, "Focus Helm", 0x2, 0x1, 0x4000, 0, new() { [28] = 1000 }, null, [MajorFocus]);
         var worn = SelfEquipJudge.Worn(rig.State);
         var wardrobe = Wardrobe.For(rig.State);
 

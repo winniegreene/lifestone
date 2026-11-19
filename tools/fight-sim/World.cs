@@ -88,9 +88,13 @@ internal static class World
         return found;
     }
 
+    /// <summary>The ids of the spells <c>--with</c> names, for the fight with her heals (<see cref="HerFight.Of"/>), or null when the option is not given.</summary>
+    public static IReadOnlyCollection<uint>? TriedIds(string? names) => names is null ? null : [.. SpellsNamed(names).Select(s => s.Id)];
+
     /// <summary>The character to simulate: the one named, else the character of the shard that logged in last (the one being played) and is not deleted.</summary>
     /// <param name="wield">M6 16 E5e3: a caster she carries to put in her hands first (<see cref="Wield.Swap"/>: in memory only), or null; what was done is printed.</param>
-    public static Player RestoreHer(string? name, string? wield = null)
+    /// <param name="bars">Her maximum vitals as a stand-in (<c>--bars</c>, <see cref="SetBars"/>), set after the caster, or null; what was done is printed.</param>
+    public static Player RestoreHer(string? name, string? wield = null, string? bars = null)
     {
         if (name is null)
         {
@@ -105,6 +109,55 @@ internal static class World
             Console.WriteLine(Wield.Swap(her, wield));
         }
 
+        if (bars is not null)
+        {
+            Console.WriteLine(SetBars(her, bars));
+        }
+
         return her;
+    }
+
+    /// <summary>
+    /// Her maximum vitals set to <paramref name="bars"/> ("health=H,stamina=S,mana=M", any of the three), in memory only: each vital's ranks (CreatureVital.Ranks, the levels bought with experience) are raised or lowered
+    /// one at a time until ACE's own CreatureVital.MaxValue (StartingValue + Ranks + the attribute formula, then her enchantments' multipliers and additives) first reaches the figure, and the vital is filled. So every
+    /// cast, drain and heartbeat of the fight reads the new bar through ACE. A figure ACE cannot give exactly (a multiplier steps it past) or cannot go under (her attributes alone give more) is the nearest it gives,
+    /// and the line says so. Her attributes, skills and regeneration's other inputs stay the saved character's: a stand-in for a climber's bars, not for her whole sheet.
+    /// </summary>
+    public static string SetBars(Player her, string bars)
+    {
+        var done = new List<string>();
+        foreach (var part in bars.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var pair = part.Split('=', 2, StringSplitOptions.TrimEntries);
+            if (pair.Length != 2 || !uint.TryParse(pair[1], NumberStyles.None, CultureInfo.InvariantCulture, out var target) || target == 0)
+            {
+                throw new ArgumentException($"--bars: '{part}' is not name=number (health, stamina or mana)");
+            }
+
+            var vital = pair[0].ToLowerInvariant() switch
+            {
+                "health" => her.Health,
+                "stamina" => her.Stamina,
+                "mana" => her.Mana,
+                _ => throw new ArgumentException($"--bars: '{pair[0]}' is not health, stamina or mana"),
+            };
+            var (was, ranksWere) = (vital.MaxValue, vital.Ranks);
+            while (vital.MaxValue > target && vital.Ranks > 0)
+            {
+                vital.Ranks--;
+            }
+
+            const uint RanksBound = 10_000;
+            while (vital.MaxValue < target && vital.Ranks < RanksBound)
+            {
+                vital.Ranks++;
+            }
+
+            vital.Current = vital.MaxValue;
+            var exact = vital.MaxValue == target ? string.Empty : vital.MaxValue > target ? $" (ACE gives no {target}: the nearest at or over it)" : $" (not reached in {RanksBound} ranks)";
+            done.Add(string.Create(CultureInfo.InvariantCulture, $"{pair[0].ToLowerInvariant()} {was} -> {vital.MaxValue}{exact}, ranks {ranksWere} -> {vital.Ranks}"));
+        }
+
+        return "her bars as a stand-in (--bars, in memory only, her vital ranks): " + string.Join("; ", done);
     }
 }

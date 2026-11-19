@@ -240,6 +240,18 @@ internal sealed class ScriptedShop(VendorRig rig)
     /// <summary>The DropItem sends answered (M5 7 D99).</summary>
     public int Drops { get; private set; }
 
+    /// <summary>M6 sprint: when set, an Identify is answered (success, as ACE answers one of the player's own items, Player.cs Examine 302-345 @95ef426d), carrying IsSellable false for a class in <see cref="NotSellable"/>.</summary>
+    public bool AnswersIdentify { get; set; }
+
+    /// <summary>M6 sprint: the weenie classes whose IsSellable is false (PropertyBool 69, an AssessmentProperty: ACE.Entity/Enum/Properties/PropertyBool.cs 94-95 @95ef426d), as for Health Draught 2457.</summary>
+    public HashSet<uint> NotSellable { get; } = [];
+
+    /// <summary>M6 sprint: the guids an Identify was answered for, in order (with <see cref="AnswersIdentify"/>).</summary>
+    public List<uint> Identified { get; } = [];
+
+    /// <summary>M6 sprint: when set, answers a UseWithTarget (GameAction 0x0035) as the test's scripted ACE does: (item, target).</summary>
+    public Action<uint, uint>? OnUseWithTarget { get; set; }
+
     private const uint GroundStandIn = 0x7FFF0001;
 
     /// <summary>The sales refused whole because the payout's coin stacks did not fit the free slots (M5 7 G1).</summary>
@@ -358,6 +370,21 @@ internal sealed class ScriptedShop(VendorRig rig)
             {
                 Splits++;
                 Split(send.Guid, uint.Parse(send.Target!, System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture), (int)send.Amount);
+                continue;
+            }
+
+            if (send.Kind == FakeSendKind.UseWithTarget && OnUseWithTarget is { } craft)
+            {
+                craft(send.Guid, uint.Parse(send.Target!, System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture));
+                continue;
+            }
+
+            if (send.Kind == FakeSendKind.Identify && AnswersIdentify && send.Guid != 0)
+            {
+                Identified.Add(send.Guid);
+                var guid = send.Guid;
+                var bools = rig.State.Objects.TryGet(guid, out var looked) && NotSellable.Contains(looked.Weenie.WeenieClassId) ? new Dictionary<uint, bool> { [69] = false } : new Dictionary<uint, bool>();
+                rig.R.Server((p, q) => AceVendorWriters.IdentifyResponse(p, q, guid, new AceAppraisal { Success = true, Bools = bools }));
                 continue;
             }
 

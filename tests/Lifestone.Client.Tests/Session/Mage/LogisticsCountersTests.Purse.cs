@@ -110,7 +110,8 @@ public sealed partial class LogisticsCountersTests
         var list = ResupplyPlanner.BuyList(ground, counters, 9_907);
         var spent = list.Sum(b => (long)b.Count * ground.PriceOf(b.Line.Wcid)!.Value);
 
-        Assert.True(spent <= 9_907L * percent / 100, $"spent {spent}"); // r1h spent all of it
+        Assert.True(OutsideCasting(list, ground) <= 9_907L * percent / 100, $"spent {spent}"); // r1h spent all of it; M6 sprint: the casting components' top-up to their keeps comes from the rest of the purse
+        Assert.True(spent <= 9_907, $"spent {spent}");
         Assert.True(spent > 0);
         var iron = list.Single(b => b.Line.Wcid == IronScarab);
         var potion = list.SingleOrDefault(b => b.Line.Wcid == ManaPotion);
@@ -141,8 +142,8 @@ public sealed partial class LogisticsCountersTests
         Assert.True(Lifted(before, counters, ManaPotion) < LogisticsCounters.ClearOf(potion)); // before: the cheapest lift (the tapers) went first and the potions stay on their trip line
         Assert.True(Lifted(before, counters, PrismaticTaper) >= LogisticsCounters.ClearOf(taper));
         Assert.True(Lifted(after, counters, ManaPotion) >= LogisticsCounters.ClearOf(potion)); // after: the line the trip was called for is clear of it
-        Assert.True(Lifted(after, counters, PrismaticTaper) < LogisticsCounters.ClearOf(taper)); // and the tapers gave up the coin
-        Assert.True(after.Sum(b => (long)b.Count * ground.PriceOf(b.Line.Wcid)!.Value) <= coin * ground.Supplies.Purse.TripSpendPercent / 100); // inside the same trip share
+        Assert.True(OutsideCasting(after, ground) <= coin * ground.Supplies.Purse.TripSpendPercent / 100); // inside the same trip share (M6 sprint: the tapers, a casting component, are topped up after it from the rest of the purse)
+        Assert.True(after.Sum(b => (long)b.Count * ground.PriceOf(b.Line.Wcid)!.Value) <= coin);
     }
 
     [Fact]
@@ -188,7 +189,7 @@ public sealed partial class LogisticsCountersTests
             Assert.Contains(list, b => b.Line.Wcid == wcid);
         }
 
-        Assert.DoesNotContain(list, b => b.Line.Wcid == PrismaticTaper); // 47 is over its stop line: the top-up waits
+        Assert.InRange(Lifted(list, counters, PrismaticTaper), 47, ground.Supplies.Stock.Single(l => l.Wcid == PrismaticTaper).Keep); // 47 is over its stop line: the share does not top it up; M6 sprint: a casting component is topped up from what the purse has left, at most to its keep
         var spent = list.Sum(b => (long)b.Count * b.Vendor.Sells.First(w => w.Wcid == b.Line.Wcid).Price);
         Assert.True(spent <= 924, $"spent {spent}");
     }
@@ -213,7 +214,9 @@ public sealed partial class LogisticsCountersTests
         Assert.Contains(list, b => b.Line.Name == "Armor Self II");
         Assert.Empty(waiting);
         var spent = list.Sum(b => (long)b.Count * b.Vendor.Sells.First(w => w.Wcid == b.Line.Wcid).Price);
-        Assert.True(spent <= 700 * ground.Supplies.Purse.TripSpendPercent / 100, $"spent {spent}");
+        var outside = list.Where(b => ground.Supplies.Stock.FirstOrDefault(l => l.Wcid == b.Line.Wcid) is not { } l || !Casting(l)).Sum(b => (long)b.Count * b.Vendor.Sells.First(w => w.Wcid == b.Line.Wcid).Price);
+        Assert.True(outside <= 700 * ground.Supplies.Purse.TripSpendPercent / 100, $"spent {outside} outside the casting components"); // M6 sprint: the tapers' top-up is the last thing, from the rest of the purse
+        Assert.True(spent <= 700, $"spent {spent}");
     }
 
     [Fact]

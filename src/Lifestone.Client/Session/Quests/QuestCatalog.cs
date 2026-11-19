@@ -257,6 +257,7 @@ public static class QuestCatalog
 
             var done = Done(q.Object("done"));
             var timer = TimerSeconds(q.Take("timer_seconds"));
+            var timerFrom = TimerFrom(q.TakeOptional("timer_from")); // M6 audit: where the timer starts (the tusks: at the pickup)
             var sources = Sources(q.Take("sources"));
             var carry = Carry(q.TakeOptional("carry"));
             _ = q.TakeOptional("returns"); // M6 2 d: the pieces an NPC takes back, read as data by GearReturnTable (Mage/GearReturn.cs), not part of the quest's shape
@@ -270,7 +271,7 @@ public static class QuestCatalog
             return new Quest
             {
                 Key = key, Name = name, Giver = giver, Start = start, Steps = steps.AsReadOnly(), Done = done, TimerSeconds = timer, Sources = sources, Carry = carry,
-                Level = level, Experience = experience, Ladder = ladder,
+                Level = level, Experience = experience, Ladder = ladder, TimerFrom = timerFrom,
             };
         }
 
@@ -831,6 +832,22 @@ public static class QuestCatalog
             }
 
             return new QuestCarry(linePercent, reserveBurden, alwaysWcids);
+        }
+
+        /// <summary>M6 audit: the optional <c>timer_from</c>: <c>"turn-in"</c> (the default when absent) or <c>"pickup"</c>.</summary>
+        private QuestTimerFrom TimerFrom(JsonElement? e)
+        {
+            if (e is not { } element)
+            {
+                return QuestTimerFrom.TurnIn;
+            }
+
+            return element.ValueKind == JsonValueKind.String ? element.GetString() switch
+            {
+                "turn-in" => QuestTimerFrom.TurnIn,
+                "pickup" => QuestTimerFrom.Pickup,
+                _ => throw Fail("$.timer_from", "is not \"turn-in\" or \"pickup\""),
+            } : throw Fail("$.timer_from", "is not \"turn-in\" or \"pickup\"");
         }
 
         private int? TimerSeconds(JsonElement e)

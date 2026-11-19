@@ -172,7 +172,8 @@ public static class RetailUiSetup
 
     /// <summary>
     /// Whether the window layout files stay in memory (<c>--layout-store</c>, M5 6 fix, 6-R2). Auto: the checks and the review frames start from an empty store and share it across the run's logins (a place a
-    /// check moves is not carried into the next run, and a layout an earlier run saved is not read); live play and <c>--login-check=keep</c> (which proves the file round trip) use the user data.
+    /// check moves is not carried into the next run, and a layout an earlier run saved is not read); live play, <c>--login-check=keep</c> (which proves the file round trip) and <c>--login-check=climber-start</c> (which becomes the
+    /// level up job's play run, as the play run it replaces read the user data) use the user data.
     /// </summary>
     private static bool UseMemoryLayouts(RetailUiOptions options, GameServices services, bool framesRun) => options.LayoutStore switch
     {
@@ -180,7 +181,7 @@ public static class RetailUiSetup
         LayoutStoreKind.Disk => false,
         _ => framesRun
             || services.Options.Checks == GameCheckSuite.Play
-            || PlayOptions.Parse(OS.GetCmdlineUserArgs()).LoginCheck is not (LoginCheckKind.None or LoginCheckKind.Keep),
+            || PlayOptions.Parse(OS.GetCmdlineUserArgs()).LoginCheck is not (LoginCheckKind.None or LoginCheckKind.Keep or LoginCheckKind.ClimberStart),
     };
 
     /// <summary>Keeps the note's text and visibility to what the screen on show says is a placeholder (a stand-in, or a screen that is built in part).</summary>

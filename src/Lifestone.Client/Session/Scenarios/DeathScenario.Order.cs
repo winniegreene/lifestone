@@ -269,6 +269,7 @@ public sealed partial class DeathScenario
     /// </summary>
     private IStationRun? _botRun;
     private bool _botDone;
+    private int _botTry; // M6 audit (fix 1): the stop's tries before the death's rebuff
 
     /// <summary>
     /// M6 item 14 (the climb's third death, 2026-11-11 18:52 UTC): the stop at the buff bot before the death's rebuff. She respawns at the lifestone, ten metres from the bot; her own pass would cast her own levels and the
@@ -315,9 +316,16 @@ public sealed partial class DeathScenario
         {
             _log.Info(LogCategory, $"death: the buff bot's stop ended {status}: {_botRun.VerdictFields()}: her own pass for what the bot does not cover");
         }
+        else if (++_botTry < BuffBotRule.StopTries && _options.Journey is { } again)
+        {
+            // M6 audit (fix 1, the owner's decision of 2026-11-19): she asks the bot again before her own pass takes its place
+            _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"death: the buff bot's stop failed ({_botRun.VerdictFields()}): try {_botTry + 1} of {BuffBotRule.StopTries} now (m6-audit-bot-retry)"));
+            _botRun = new BuffBotStation().Start(again);
+            return true;
+        }
         else
         {
-            _log.Warn(LogCategory, $"death: the buff bot's stop failed ({_botRun.VerdictFields()}): the order goes on with her own whole pass (m6-buffbot-fallback)");
+            _log.Warn(LogCategory, $"death: the buff bot's stop failed ({_botRun.VerdictFields()}) after {BuffBotRule.StopTries} tries: the order goes on with her own whole pass (m6-buffbot-fallback)");
         }
 
         (_botRun, _botDone) = (null, true);

@@ -33,8 +33,8 @@ public sealed class SliceCheckAndSmokeTests
         Assert.Contains("--filter \"" + DefaultFilter + "\"", SliceCheck, StringComparison.Ordinal); // the help text at the top
         Assert.Contains("--filter \"" + DefaultFilter + "\"", Smoke, StringComparison.Ordinal);
 
-        // P1 fix (P-R6): the filter a developer or agent copies from the README, and the traits it leaves out, are the scripts' own.
-        var readme = File.ReadAllText(RepositoryFiles.PathOf("README.md")).Replace("\r\n", "\n");
+        // P1 fix (P-R6): the filter a developer or agent copies from TECHNICAL.md (the technical guide beside the README), and the traits it leaves out, are the scripts' own.
+        var readme = File.ReadAllText(RepositoryFiles.PathOf("TECHNICAL.md")).Replace("\r\n", "\n");
         Assert.Contains(DefaultFilter, readme, StringComparison.Ordinal);
         Assert.Contains("[Trait(\"Tier\",\"Timing\")]", readme, StringComparison.Ordinal);
         Assert.Contains("[Trait(\"Status\",\"KnownFailure\")]", readme, StringComparison.Ordinal);

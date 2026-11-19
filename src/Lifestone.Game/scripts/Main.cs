@@ -227,7 +227,7 @@ public partial class Main : Node3D
         Diagnostics.VideoOptions.ApplyVideoChat(); // --video-chat, for videos
         if (Diagnostics.VideoTimer.Requested() is { } timerLevel)
         {
-            Diagnostics.VideoTimer.Attach(this, timerLevel); // --video-timer: the clock since her creation, to the level
+            Diagnostics.VideoTimer.Attach(this, timerLevel, options.Play.LoginCheck == LoginCheckKind.ClimberStart); // --video-timer: the clock since her creation, to the level (0:00:00 on the screens when this run creates her)
         }
 
         if (Diagnostics.VideoSyncMarker.Requested())

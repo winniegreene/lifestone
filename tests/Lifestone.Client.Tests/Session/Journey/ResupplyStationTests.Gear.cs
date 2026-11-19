@@ -166,6 +166,34 @@ public sealed partial class ResupplyStationTests
     }
 
     [Fact]
+    public void M6_sprint_the_oil_she_carries_makes_her_Training_Wand_an_Academy_Wand_before_the_caster_pick()
+    {
+        // The Oil of Rendering (12711) on the Training Wand (12748) makes the Academy Wand (12759): ace_world recipe 2470 (cook_book source 12711, target 12748; no skill, no difficulty; source and target destroyed). ACE's answer:
+        // the oil and the wand leave the pack (0x0024 each), the Academy Wand arrives, and the UseDone ends the use.
+        var g = new GearHome(emptyStones: 0);
+        var oil = g.Home.Own("Oil of Rendering", ResupplyRun.OilOfRenderingWcid, 0x80, 0);
+        var training = g.Home.Own("Training Wand", ResupplyRun.TrainingWandWcid, 0x8000, 25);
+        var used = new List<(uint Item, uint Target)>();
+        g.Home.Shops.OnUseWithTarget = (item, target) =>
+        {
+            used.Add((item, target));
+            g.Home.Vendor.Remove(item);
+            g.Home.Vendor.Remove(target);
+            g.Home.Own("Academy Wand", ResupplyRun.AcademyWandWcid, 0x8000, 200);
+            g.Home.Vendor.UseDone();
+        };
+        var run = g.Home.Start(new ResupplyOptions(true, () => [], Gear: true));
+
+        Assert.Equal(ScenarioStatus.Succeeded, g.Run(run));
+        Assert.Equal([(oil, training)], used); // once, the oil on the wand
+        Assert.False(g.Inventory.Contains(training));
+        Assert.Contains(g.Inventory.Pack, e => g.Home.Vendor.State.Objects.TryGet(e.Guid, out var o) && o.Weenie.WeenieClassId == ResupplyRun.AcademyWandWcid);
+        var order = g.Home.Lines.ToList();
+        var after = order.FindIndex(l => l.Contains("gear: academy oil: check after: the Academy Wand", StringComparison.Ordinal));
+        Assert.InRange(after, 0, order.FindIndex(l => l.Contains("gear: caster pick:", StringComparison.Ordinal)) - 1); // before the pick, which judges the new wand with the rest
+    }
+
+    [Fact]
     public void M5_7_D139_d_k_m_the_empty_stones_beyond_the_keep_are_sold_the_kit_pack_gets_room_and_the_sceptre_is_wielded_before_the_sort()
     {
         var g = new GearHome();

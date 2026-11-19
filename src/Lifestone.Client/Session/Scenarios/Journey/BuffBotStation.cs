@@ -44,6 +44,13 @@ public static class BuffBotRule
     /// </summary>
     public const double TripUrgentUnderSeconds = 240;
 
+    /// <summary>
+    /// M6 audit (fix 1, the owner's decision of 2026-11-19: if the bot fails she retries): the tries a stop at the bot gets before her own pass takes its place, at home, on a trip's way back and before a death's rebuff.
+    /// Before, one failed stop left her on her own lines until her next time home, and from the Lodge to level 31 every gate reads the bot's creature lines (her Creature Enchantment comes at 32 with the bot on), so the way out
+    /// read every gate shut and sent her to the outskirts (the same at 79 on 2026-11-17 04:55:43 UTC, ladder52: 3 kills in 93 minutes). Three: a policy figure, the lead's, for the owner to read.
+    /// </summary>
+    public const int StopTries = 3;
+
     /// <summary>The lines of <paramref name="profile"/> as the registry holds them at <paramref name="now"/>.</summary>
     /// <param name="profile">The profile.</param>
     /// <param name="qualities">The player's qualities.</param>
@@ -226,13 +233,20 @@ public static class BuffBotRule
 /// The verdict: <c>bot= word= lines= landed= told= recoveries= s= min_left_s= fee= credits= gave= ok=</c>.
 /// </summary>
 /// <param name="word">The profile's word (null or blank: the key of the run's profile, <see cref="JourneyFacts.BuffBotProfile"/>, which is <c>all</c> unless the option names another; a profile by ground is <c>TODO(m6-buffbot-profiles)</c>).</param>
-public sealed class BuffBotStation(string? word = null) : IStation
+/// <param name="whenBotOn">True: the stop applies only while the run's bot is on (<see cref="WhenBotOn"/>), else it steps aside by name.</param>
+public sealed class BuffBotStation(string? word = null, bool whenBotOn = false) : IStation
 {
     /// <summary>The station's name.</summary>
     public const string StationName = "buff-bot";
 
     /// <summary>The spec argument naming the word.</summary>
     public const string WordArgument = "word";
+
+    /// <summary>M6 sprint (owner ruling 2026-11-19: the bot first, right after the Academy): the spec argument that makes the stop apply only while the run's bot is on (<see cref="JourneyFacts.BuffBotOn"/>).</summary>
+    public const string WhenArgument = "when";
+
+    /// <summary>The <see cref="WhenArgument"/> value: the stop applies only while the bot is on.</summary>
+    public const string WhenBotOn = "bot-on";
 
     /// <summary>Seconds for the bot to be in view (the mod looks every two seconds, and the object's description follows).</summary>
     public const double FindSeconds = 15;
@@ -271,7 +285,19 @@ public sealed class BuffBotStation(string? word = null) : IStation
     public IStationRun Start(JourneyContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
-        return new Run(context, WordFor(context.Facts));
+        return whenBotOn && context.Facts.BuffBotOn?.Invoke() != true ? new OffRun(context) : new Run(context, WordFor(context.Facts));
+    }
+
+    /// <summary>The stop of a start-up whose run has the bot off (<see cref="WhenBotOn"/>): nothing is walked or told; the line says why.</summary>
+    private sealed class OffRun(JourneyContext context) : TravelLeg(StationName, context)
+    {
+        public override string VerdictFields() => "bot=off ok=yes " + base.VerdictFields();
+
+        protected override IEnumerable<ActionHandle?> Body()
+        {
+            Log("bot first: the buff bot is off for this run (--autopilot-buff-bot): no stop (m6-bot-first)");
+            yield break;
+        }
     }
 
     /// <remarks>

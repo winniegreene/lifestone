@@ -1467,6 +1467,33 @@ public sealed partial class RungChangeTests
         Assert.Contains(t.Events, e => e == "cast:" + recall);
     }
 
+    /// <summary>
+    /// M6 audit (finding 8, the owner's decision of 2026-11-19): the way out's reserve pays for the heal she would cast, not the dearest Heal Self in the book. Live 2026-11-19 00:58:08 and 03:45:13 UTC
+    /// (run 2 and run 4, level 10): "reserve line=110 (Lifestone Recall 50 + Heal Self 60)", Heal Self V at a cast chance of 0.05, and the errand's skirmish refused bolts at 119 and 123 of 168 mana.
+    /// Here the book holds Heal Self III (cast at any skill: power 1) and Heal Self VI (power 1,000, never cast): the line is the recall and III, 80, not 120.
+    /// </summary>
+    [Fact]
+    public void The_way_outs_reserve_pays_for_the_heal_she_casts_not_the_dearest_in_the_book()
+    {
+        var (t, ground) = RetreatRig(recall: true, line: 0);
+        var recall = Lifestone.Client.Session.Fighter.RecallHome.LifestoneRecallSpell;
+        t.Caster.Table[recall] = WorldActionRig.Spell(recall, DatReaderWriter.Enums.SpellType.Enchantment) with { Name = "Lifestone Recall", BaseMana = 50 };
+        t.Caster.Table[1158] = WorldActionRig.Spell(1158, DatReaderWriter.Enums.SpellType.Boost) with { Name = "Heal Self III", BaseMana = 30, School = DatReaderWriter.Enums.MagicSchool.LifeMagic };
+        t.Caster.Table[1161] = WorldActionRig.Spell(1161, DatReaderWriter.Enums.SpellType.Boost) with { Name = "Heal Self VI", BaseMana = 70, Power = 1000, School = DatReaderWriter.Enums.MagicSchool.LifeMagic };
+        t.R.Server((p, seq) => AceM3Writers.MagicUpdateSpell(p, seq, 1158));
+        t.R.Server((p, seq) => AceM3Writers.MagicUpdateSpell(p, seq, 1161));
+        t.Caster.ManaRegenPerSecond = 0;
+        FirstRunAttacked(t, () =>
+        {
+            t.Attacker(0x80001944, "Tusker Slave", 3f);
+            t.Caster.SetVitals(70, 275);
+        });
+        var (run, status) = t.RunStation(new RungChangeStation(), t.Context(ground));
+        Assert.Equal(ScenarioStatus.Failed, status);
+        Assert.Contains(" fail=retreat:run:recall ", run.VerdictFields(), StringComparison.Ordinal);
+        Assert.Contains(t.Lines("retreat due on the walk: why=mana-line:"), l => l.Contains("reserve line=80 (Lifestone Recall 50 + Heal Self 30)", StringComparison.Ordinal));
+    }
+
     // ------------------------------------------------------------------------------------------------ M6 6 E: the run leg's retreat
 
     /// <summary>
@@ -2128,6 +2155,57 @@ public sealed partial class RungChangeTests
         Assert.Single(t.Travel.Requests, r => r.Destination.Name == "the leg's start");
         Assert.Equal(start()!.Value.At, t.R.H.State.Self.Position!.Value.Origin);
         Assert.Equal(refusal == 0x049Eu ? false : null, context.Facts.LifestoneTied);
+        Assert.Equal(refusal == 0x0400u, context.Facts.LifestoneRecallUnavailable); // M6, the recall's components: the component refusal is the run's fact (M6 7 AV), so no later way home casts it again
+    }
+
+    /// <summary>M6, the recall's components: a recall ACE refused for a component earlier this run (M6 7 AV's fact) is not cast again under attack: the walk back, the reason on the check-before line.</summary>
+    [Fact]
+    public void A_recall_refused_for_a_component_earlier_this_run_walks_back_without_a_cast()
+    {
+        var (t, ground) = RetreatRig(recall: true, line: 40);
+        HealthRetreat(t);
+        var context = t.Context(ground);
+        context.Facts.LifestoneRecallUnavailable = true;
+        var (run, status) = t.RunStation(new RungChangeStation(), context);
+        Assert.Equal(ScenarioStatus.Failed, status);
+        Assert.Contains(" fail=retreat:run:walked-back ", run.VerdictFields(), StringComparison.Ordinal);
+        Assert.Contains(t.Lines("retreat on run: check before: why=health"), l => l.Contains("ACE refused it for a component earlier this run (recall-unavailable:components)", StringComparison.Ordinal) && l.Contains("-> way=walk-back", StringComparison.Ordinal));
+        Assert.DoesNotContain(t.Events, e => e == "cast:" + Lifestone.Client.Session.Fighter.RecallHome.LifestoneRecallSpell);
+    }
+
+    /// <summary>
+    /// M6, the recall's components (live 2026-11-18 20:29:54 UTC: the climber's pack holds no Item Enchantment focus, so the foci rule judged nothing and the cast was refused 0x0400): with the run's account known
+    /// (<see cref="JourneyFacts.FormulaAccount"/>) a pack without the recall's school's focus is judged on the account's full formula; short of it, the retreat is the walk back and no recall is cast. Without the account the same
+    /// pack is not judged, as before.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Without_the_focus_the_retreat_judges_the_recall_on_the_accounts_formula_when_the_run_knows_the_account(bool accountKnown)
+    {
+        var (t, ground) = RetreatRig(recall: true, line: 40);
+        var spell = Lifestone.Client.Session.Fighter.RecallHome.LifestoneRecallSpell;
+        t.Caster.Table[spell] = WorldActionRig.Spell(spell, DatReaderWriter.Enums.SpellType.Enchantment) with { Name = "Lifestone Recall", School = DatReaderWriter.Enums.MagicSchool.ItemEnchantment, BaseMana = 1, Formula = [6, 63, 7, 63, 25, 37, 63, 49], FormulaVersion = 1 };
+        HealthRetreat(t);
+        var context = t.Context(ground);
+        context.Facts.FormulaAccount = accountKnown ? "formula-test-account" : null;
+        var (run, status) = t.RunStation(new RungChangeStation(), context);
+        Assert.Equal(ScenarioStatus.Failed, status);
+        var check = Assert.Single(t.Lines("retreat on run: check before: why=health"));
+        if (accountKnown)
+        {
+            Assert.Contains(" fail=retreat:run:walked-back ", run.VerdictFields(), StringComparison.Ordinal);
+            Assert.Contains("; the pack is short for it: ", check, StringComparison.Ordinal);
+            Assert.Contains("-> way=walk-back", check, StringComparison.Ordinal);
+            Assert.DoesNotContain("formula-test-account", check, StringComparison.Ordinal); // hashed, never logged
+            Assert.DoesNotContain(t.Events, e => e == "cast:" + spell);
+        }
+        else
+        {
+            Assert.Contains(" fail=retreat:run:recall ", run.VerdictFields(), StringComparison.Ordinal);
+            Assert.Contains("components=not judged (the pack or its focus is unread)", check, StringComparison.Ordinal);
+            Assert.Contains("-> way=recall", check, StringComparison.Ordinal);
+        }
     }
 
     // ------------------------------------------------------------------------------------------------ M6 6 R1F: the fight-back's components and combat mode (live round 1)

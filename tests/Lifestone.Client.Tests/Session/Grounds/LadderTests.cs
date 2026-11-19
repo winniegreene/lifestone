@@ -144,7 +144,7 @@ public sealed class LadderTests
             .Concat(ladder.Rungs.SelectMany(r => r.Alternates).Where(a => !a.Pending).Select(a => a.GroundKey))
             .Distinct(StringComparer.Ordinal)
             .ToArray();
-        Assert.Equal(new[] { "holtburg-outskirts", "tusker-burrow", "tusker-lodge", "tusker-cave", "tusker-abode", "tusker-quarters", "tusker-holding", "tusker-cavern", "tusker-habitat", "tusker-temple-fort-tethana", "tusker-barracks", "tusker-armory", "black-spawn-den-aluvian" }, keys); // M6 3 p2 and p3: every rung and the Cave, Abode and Quarters rungs' alternates are live (the rungs' alternates follow the rungs in the list); M6 14 armory: the Holding rung's first alternate
+        Assert.Equal(new[] { "holtburg-redoubt", "tusker-retreat", "tusker-lodge", "tusker-cave", "tusker-abode", "tusker-quarters", "tusker-holding", "holtburg-outskirts", "tusker-burrow", "tusker-cavern", "tusker-habitat", "tusker-temple-fort-tethana", "tusker-barracks", "tusker-armory", "black-spawn-den-aluvian" }, keys); // M6 3 p2 and p3: every rung and the Cave, Abode and Quarters rungs' alternates are live (the rungs' alternates follow the rungs in the list); M6 14 armory: the Holding rung's first alternate; M6 redoubt: the rung outskirts' own ground is the Redoubt and its alternate the outdoor ground, its fallback
 
         // HuntingGroundDatTests iterates every dungeon of the catalog and the named outdoor keys (the belt, the forest and, since M6 item 0, the outskirts); each ground the ladder resolves is one of them (DoD 1: the dat checks over every rung).
         var outdoor = ((IEnumerable<object[]>)HuntingGroundDatTests.OutdoorKeys()).Select(row => (string)row[0]).ToHashSet(StringComparer.Ordinal);
@@ -286,7 +286,7 @@ public sealed class LadderTests
 
         // A resolver with no profiles at all: the two resolving ground rungs and alternates fail, so the check is the resolver's, not a constant list.
         var none = Copy();
-        Assert.Equal("$.rungs[1].ground", Assert.Throws<LadderException>(() => LadderLoader.Parse(File, none.ToJsonString(), _ => null)).JsonPath);
+        Assert.Equal("$.rungs[1].alternates[0].ground", Assert.Throws<LadderException>(() => LadderLoader.Parse(File, none.ToJsonString(), _ => null)).JsonPath); // M6 redoubt: the first name the loader meets is the rung outskirts' alternate, its outdoor ground (a rung's alternates are read before its own ground is resolved)
     }
 
     [Fact]

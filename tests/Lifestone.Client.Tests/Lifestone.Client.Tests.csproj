@@ -38,6 +38,12 @@
       BestiaryWorld.cs, its reads through ACE's models, is not compiled here.
     -->
     <Compile Include="..\..\tools\fight-sim\BestiaryModel.cs;..\..\tools\fight-sim\BestiaryTables.cs;..\..\tools\fight-sim\BestiaryRows.cs;..\..\tools\fight-sim\BestiaryWriter.cs;..\..\tools\fight-sim\BestiaryCheck.cs" LinkBase="Tools\FightSim" />
+    <!--
+      The simulator's in-fight policy (docs/fight-sim.md, "With her heals"): the decision is plain C# with no ACE type that calls the
+      client's own rules (FightEmergency, HealPick, VitalsPolicy, TargetSwitch), compiled here too so InFightRulesTests proves it.
+      InFight.cs, which plays each cast through ACE, is not compiled here.
+    -->
+    <Compile Include="..\..\tools\fight-sim\InFightRules.cs" LinkBase="Tools\FightSim" />
   </ItemGroup>
 
 </Project>

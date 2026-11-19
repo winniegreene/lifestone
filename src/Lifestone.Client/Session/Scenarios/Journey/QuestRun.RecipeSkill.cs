@@ -77,6 +77,10 @@ public sealed partial class QuestRun
                         break;
                     }
 
+                case RecipeSkillMoveKind.Roll when move.Chance < RecipeChance.RollFloor:
+                    // M6 audit (fix 10, the owner's decision of 2026-11-19): no roll under the floor: nothing is used, the errand stays callable (AutopilotScenario.RecipeRollHeld) and waits for the skill
+                    Stop($"{word}:roll-held", string.Create(CultureInfo.InvariantCulture, $"{name}: {move.Why}: the chance {move.Chance:0.000} is under the roll's floor {RecipeChance.RollFloor:0.00}: no roll (m6-audit-roll-floor)"));
+                    yield break;
                 default:
                     Log(string.Create(CultureInfo.InvariantCulture, $"{word}: check before the roll: {name}: {move.Why} (ACE RecipeManager.GetRecipeChance); raised {raises} rank(s) for {spent:N0} experience"));
                     yield break;

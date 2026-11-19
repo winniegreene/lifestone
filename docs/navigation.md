@@ -198,7 +198,7 @@ Retail takes game time from the server, so a stock client cannot set it.
 
 **F1**, or "About [F1]" next to "Teleport [T]", opens the About panel: Lifestone's Appropriate Legal Notices (GNU AGPL-3.0 §0 and §5(d)): a copyright line, the licence grant, that there is no warranty, where the licence text and the source are ("see LICENSE and the project repository"), the works Lifestone builds on (ACEmulator and ACE-World-16PY-Patches, AGPL-3.0; OpenAC, Chorizite DatReaderWriter, WorldBuilder and Godot, MIT; ACViewer, GPL-3.0) and that Asheron's Call and its data belong to their owners and users supply their own client files. F1, Esc or the x closes it.
 
-The text lives in one place, `src/Lifestone.Client/LegalNotices.cs`; `LegalNoticesTests` checks that the README's licence table lists the same works with the same licences. The panel appears whenever the tool panels do (interactive runs, `--ui=on`), and in the spell viewer (F1; the button beside its spell list); captures hide it with the other HUD layers. TODO(lead): the copyright holder's name and the choice between AGPL-3.0-only and -or-later are the owner's (the notice names the Lifestone contributors and the version LICENSE carries).
+The text lives in one place, `src/Lifestone.Client/LegalNotices.cs`; `LegalNoticesTests` checks that TECHNICAL.md's licence table lists the same works with the same licences. The panel appears whenever the tool panels do (interactive runs, `--ui=on`), and in the spell viewer (F1; the button beside its spell list); captures hide it with the other HUD layers. TODO(lead): the copyright holder's name and the choice between AGPL-3.0-only and -or-later are the owner's (the notice names the Lifestone contributors and the version LICENSE carries).
 
 ## 6. Tests
 
@@ -212,5 +212,5 @@ The text lives in one place, `src/Lifestone.Client/LegalNotices.cs`; `LegalNotic
 - **Position readout:** outdoor cells with map coordinates; dungeon and building cells in their own landblock frame without coordinates.
 - **Camera placement:** overview geometry and clearance, standing, spots without height.
 - **Golden viewpoints:** ids, targets resolving (also through the panel's catalogue), every view's date having the wanted retail day group (dats), compass words in titles ("west of Holtburg") matching the bearing on the map, poses, the indoor views (a building interior and two or more dungeons at the curated floor points), and the `@teleloc` format outdoors and indoors.
-- **Legal notices:** the AGPL's required parts, every attribution with its licence, the README table in step, LICENSE being the AGPL v3.
+- **Legal notices:** the AGPL's required parts, every attribution with its licence, TECHNICAL.md's table in step, LICENSE being the AGPL v3.
 - **The extract:** embedded, complete, grouped aliases, loud failures on bad JSON.

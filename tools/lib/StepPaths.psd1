@@ -35,7 +35,7 @@
 
     # Paths no Godot step can notice (documents, tests, the server, tooling that is not a step).
     NoGodot = @(
-        'docs/', 'tests/', 'server/', 'README.md', 'CLAUDE.md', 'LICENSE', '.github/', '.gitignore', '.gitattributes',
+        'docs/', 'tests/', 'server/', 'README.md', 'TECHNICAL.md', 'CLAUDE.md', 'LICENSE', '.github/', '.gitignore', '.gitattributes',
         'src/Lifestone.Headless/', 'src/Lifestone.Client/LegalNotices.cs',
         'src/Lifestone.Game/scripts/Main.cs.uid',
         'tools/slice-check.ps1', 'tools/commit.ps1', 'tools/live-gate.ps1', 'tools/lib/GateAreas.psd1', 'tools/hero-video.ps1', 'tools/installer/', 'tools/protocol/', 'tools/research/', 'tools/data/',

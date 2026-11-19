@@ -36,9 +36,9 @@ public sealed class TrophyJobTests
         var choice = RungOwner.Decide(L, Ask(level, Lodge, due: true));
 
         Assert.Equal(LadderStepKind.Moved, choice.Decision.Kind);
-        Assert.Equal("rung-moved:burrow", choice.Decision.Stop);
+        Assert.Equal("rung-moved:burrow@tusker-burrow", choice.Decision.Stop); // M6 retreat: the burrow rung hunts the Retreat; the tusk's carriers stand in its alternate, the Burrow, which the stop names after the rung
         Assert.Equal("job:tusk-female", choice.Reason);
-        Assert.Equal("burrow", choice.Decision.Rung?.Key); // a move builds no ground: the host builds it from the stop's name
+        Assert.Equal(("burrow", Burrow), (choice.Decision.Rung?.Key, choice.Decision.Rung?.GroundKey)); // a move builds no ground: the host builds it from the stop's name
         Assert.True(choice.Opened); // a run's first check that reads this is a move-on, not a mismatch
     }
 
@@ -48,7 +48,8 @@ public sealed class TrophyJobTests
         var choice = RungOwner.Decide(L, Ask(18, Burrow, due: true));
 
         Assert.Equal(LadderStepKind.Hunt, choice.Decision.Kind);
-        Assert.Equal("burrow", choice.Decision.Rung?.Key);
+        Assert.Equal(("burrow", Burrow), (choice.Decision.Rung?.Key, choice.Decision.Rung?.GroundKey)); // M6 retreat: the rung played on its alternate
+        Assert.Equal(Burrow, choice.Ground?.Key);
         Assert.Equal(14, choice.HeldLevel); // M6 14 (D135): the Burrow's band ends at 14
         Assert.Null(RungOwner.MoveOnDue(L, choice.Decision.Rung!, choice, Burrow, null));
     }
@@ -87,11 +88,19 @@ public sealed class TrophyJobTests
     [Fact]
     public void The_stop_the_job_makes_restarts_her_on_the_Burrow_past_its_band()
     {
-        var named = RungOwner.NamedRung(L, "rung-moved:burrow");
+        const string stop = "rung-moved:burrow@tusker-burrow"; // M6 retreat: the job's stop names its ground after the rung (the rung's own is the Retreat)
+        var named = RungOwner.NamedRung(L, stop);
+        Assert.Equal(("burrow", Burrow), (named, RungOwner.NamedGround(L, stop)));
 
-        var host = RungOwner.Decide(L, new RungAsk(18, 0xA9B40019, Trained(), (_, _) => true, null, named));
+        var host = RungOwner.Decide(L, new RungAsk(18, 0xA9B40019, Trained(), (_, _) => true, null, named) { NamedGround = RungOwner.NamedGround(L, stop) });
 
         Assert.Equal(Burrow, host.Ground?.Key);
+
+        // a stop with no ground, or one naming no live alternate of the rung, is the rung's own ground (the Retreat), as every stop before M6 retreat
+        Assert.Null(RungOwner.NamedGround(L, "rung-moved:burrow"));
+        Assert.Null(RungOwner.NamedGround(L, "rung-moved:burrow@tusker-lodge"));
+        Assert.Equal("burrow", RungOwner.NamedRung(L, "rung-moved:burrow@tusker-lodge"));
+        Assert.Equal("tusker-retreat", RungOwner.Decide(L, new RungAsk(18, 0xA9B40019, Trained(), (_, _) => true, null, named)).Ground?.Key);
     }
 
     [Fact]

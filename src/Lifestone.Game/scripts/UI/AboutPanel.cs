@@ -7,7 +7,7 @@ namespace Lifestone.Game.UI;
 /// The About panel (F1, or the "About [F1]" button): Lifestone's Appropriate Legal Notices (GNU AGPL-3.0 §5(d)): the
 /// copyright and licence notice, that there is no warranty, where the licence and the source are, the works Lifestone
 /// builds on and the note on Asheron's Call's own data. The text is <see cref="LegalNotices"/> (Lifestone.Client), the
-/// one place it lives, so the panel and the README agree.
+/// one place it lives, so the panel and TECHNICAL.md agree.
 /// </summary>
 /// <remarks>F1 or the button opens and closes it; Esc and the close button close it. It sits on its own canvas layer
 /// above the other panels.</remarks>

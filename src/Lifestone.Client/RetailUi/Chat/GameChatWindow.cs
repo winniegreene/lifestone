@@ -139,10 +139,19 @@ public sealed class GameChatWindow : IUiNoticeSink, IUiElementListener, IDisposa
         Append(textType, () => Log.AppendStringInfoWithFont(notice, 0, textType));
     }
 
+    /// <summary>
+    /// M6 sprint (owner ruling 2026-11-19: the sprint's video shows nothing a retail player never saw; the on-screen try of 20:17 UTC showed the start-up's quest reads, "Lifestone: asking the server to has quest ..."): true under
+    /// <c>--clean-hud</c>, where a line of Lifestone's own (<see cref="LifestonePrefix"/>) is kept out of the chat window. The lines still reach the log.
+    /// </summary>
+    public static bool HideLifestoneLines { get; set; }
+
+    /// <summary>The prefix of every chat line Lifestone writes itself (the tools, the autopilot's notices, the quest reads).</summary>
+    public const string LifestonePrefix = "Lifestone: ";
+
     /// <summary>Shows <paramref name="text"/> as a line of <paramref name="textType"/> if the mask has it; the text is not parsed (a player's brackets stay). True when shown.</summary>
     public bool DisplayText(int textType, string text)
     {
-        if (Log is null || !ChatTextTypes.IsActive(TextTypeMask, textType))
+        if (Log is null || !ChatTextTypes.IsActive(TextTypeMask, textType) || (HideLifestoneLines && text.StartsWith(LifestonePrefix, StringComparison.Ordinal)))
         {
             return false;
         }

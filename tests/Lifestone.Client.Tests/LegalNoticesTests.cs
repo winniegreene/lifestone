@@ -1,7 +1,7 @@
 namespace Lifestone.Client.Tests;
 
 /// <summary>
-/// The Appropriate Legal Notices (AGPL-3.0 §5(d)) the About panel shows: complete, and the README's licence section in
+/// The Appropriate Legal Notices (AGPL-3.0 §5(d)) the About panel shows: complete, and TECHNICAL.md's licence section in
 /// step with them (one source of truth: <see cref="LegalNotices"/>).
 /// </summary>
 public sealed class LegalNoticesTests
@@ -38,11 +38,11 @@ public sealed class LegalNoticesTests
     }
 
     [Fact]
-    public void The_readme_licence_section_lists_the_same_attributions()
+    public void The_technical_guide_licence_section_lists_the_same_attributions()
     {
-        var readme = File.ReadAllText(RepositoryFiles.PathOf("README.md"));
+        var readme = File.ReadAllText(RepositoryFiles.PathOf("TECHNICAL.md"));
         var start = readme.IndexOf("## License", StringComparison.Ordinal);
-        Assert.True(start >= 0, "README has no '## License' section");
+        Assert.True(start >= 0, "TECHNICAL.md has no '## License' section");
         var section = readme[start..];
         foreach (var a in LegalNotices.Attributions)
         {

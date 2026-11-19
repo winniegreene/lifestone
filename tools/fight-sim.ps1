@@ -54,8 +54,12 @@ $project = Join-Path $PSScriptRoot 'fight-sim\Lifestone.FightSim.csproj'
 $bin = Join-Path $checkout 'cache\fight-sim\bin'
 $tool = Join-Path $bin 'Lifestone.FightSim.dll'
 
-$newestSource = Get-ChildItem (Join-Path $PSScriptRoot 'fight-sim') -File | Where-Object { $_.Extension -in '.cs', '.csproj' } |
-    Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+# The tool's own sources, and the client's it calls (the in-fight policy plays Lifestone.Client's own rules: InFightRules.cs).
+$sources = @(Get-ChildItem (Join-Path $PSScriptRoot 'fight-sim') -File | Where-Object { $_.Extension -in '.cs', '.csproj' })
+foreach ($referenced in 'Lifestone.Client', 'Lifestone.Data', 'Lifestone.Net') {
+    $sources += Get-ChildItem (Join-Path $checkout "src\$referenced") -Recurse -File | Where-Object { $_.Extension -in '.cs', '.csproj', '.json' -and $_.FullName -notmatch '\\(bin|obj)\\' }
+}
+$newestSource = $sources | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
 if ($Rebuild -or -not (Test-Path $tool) -or (Get-Item $tool).LastWriteTimeUtc -lt $newestSource.LastWriteTimeUtc) {
     $log = Join-Path $checkout 'cache\fight-sim\build.log'
     New-Item -ItemType Directory -Force (Split-Path -Parent $log) | Out-Null

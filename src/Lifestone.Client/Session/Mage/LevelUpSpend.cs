@@ -43,10 +43,12 @@ public sealed class LevelUpSpend
     /// <param name="casterFacts">M6 14 (<c>m6-caster-spend</c>): the casters she holds short of a wield requirement and her rate (<see cref="XpSpendRule"/>'s <c>casterFacts</c>), or null for none read.</param>
     /// <param name="loreFacts">M6 14 (<c>m6-lore-spend</c>): the pieces she holds that wait on her Arcane Lore (<see cref="XpSpendRule"/>'s <c>loreFacts</c>), or null for none read.</param>
     /// <param name="sellLootBurden">M6 14 hour load: the burden of the sell loot she carries, which the Strength floor leaves out (<see cref="XpSpendRule"/>'s <c>sellLootBurden</c>), or null for the measured burden whole.</param>
-    public LevelUpSpend(XpTableData table, IReadOnlyList<CreditLine>? order, int? burdenTripPercent, ILogSink? log = null, Func<bool>? standingBot = null, Func<CasterSpendFacts?>? casterFacts = null, Func<LoreSpendFacts?>? loreFacts = null, Func<GameState, long>? sellLootBurden = null)
+    /// <param name="recipeFacts">M6 audit (fix 10): the roll a ladder errand of her band makes (<see cref="XpSpendRule"/>'s <c>recipeFacts</c>), or null.</param>
+    /// <param name="huntedRung">M6 audit: the rung she hunts (<see cref="XpSpendRule"/>'s <c>huntedRung</c>), or null.</param>
+    public LevelUpSpend(XpTableData table, IReadOnlyList<CreditLine>? order, int? burdenTripPercent, ILogSink? log = null, Func<bool>? standingBot = null, Func<CasterSpendFacts?>? casterFacts = null, Func<LoreSpendFacts?>? loreFacts = null, Func<GameState, long>? sellLootBurden = null, Func<RecipeSpendFacts?>? recipeFacts = null, Func<Grounds.LadderRung?>? huntedRung = null)
     {
         ArgumentNullException.ThrowIfNull(table);
-        _rule = new XpSpendRule(table, log, followLevel: true, burdenTripPercent: burdenTripPercent, standingBot: standingBot, casterFacts: casterFacts, loreFacts: loreFacts, sellLootBurden: sellLootBurden);
+        _rule = new XpSpendRule(table, log, followLevel: true, burdenTripPercent: burdenTripPercent, standingBot: standingBot, casterFacts: casterFacts, loreFacts: loreFacts, sellLootBurden: sellLootBurden, recipeFacts: recipeFacts, huntedRung: huntedRung);
         _order = order;
         _log = log;
         _train = new SkillTrainStep(log);

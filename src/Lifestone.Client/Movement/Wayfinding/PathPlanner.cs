@@ -485,14 +485,12 @@ public sealed class PathPlanner
             float r2 = s.Radius * s.Radius;
             if (_scarStart[k])
             {
-                float dt = Vector2.DistanceSquared(ct, s.Centre);
-                if (dt > r2)
-                {
-                    continue;
-                }
-
+                // M6 sprint (live 2026-11-19 01:51-01:52 UTC, run 3, and 00:05-00:07 UTC, run 2: 93 s against the Scrivener of Item Magic outside Holtburg's scriveners, replayed by ScrivenerDoorStallDatTests): a step
+                // out of the scar the start stands in was judged by its end alone, and one that ended outside was never judged at all, so a straight line from inside the scar out through the body on its far side passed
+                // (the replan from the stall ran due south through her to the door). A step that leaves from inside may never come nearer the scar's centre than where it leaves; one from outside is blocked as by any scar.
                 float df = Vector2.DistanceSquared(cf, s.Centre);
-                if (df <= r2 && dt >= df - 1e-4f)
+                float near = SegmentDistance2(s.Centre, cf, ct);
+                if (df <= r2 ? near >= df - 1e-4f : near > r2)
                 {
                     continue;
                 }
@@ -573,13 +571,36 @@ public sealed class PathPlanner
 
     // ---- goals ----
 
-    /// <summary>The open node within <see cref="StartSnapNodes"/> of a blocked start nearest the start point; the start point becomes its centre.</summary>
+    /// <summary>
+    /// M6 sprint (live 2026-11-19 01:51-01:52 UTC, run 3, replayed by ScrivenerDoorStallDatTests): whether a snapped start at <paramref name="node"/> stands deeper in a scar than the body at <paramref name="body"/>: inside a scar
+    /// the body is not in, or nearer the centre of one it is in. The body stood against the Scrivener of Item Magic, 0.96 m from her centre, its own node on a wall's stamp; the snap took the open node 0.74 m from her, and the
+    /// plan's first leg ran into her.
+    /// </summary>
+    private bool SnapDeeperInScar(Vector2 node, Vector2 body)
+    {
+        for (int k = 0; k < _scarCount; k++)
+        {
+            var s = _scars[k];
+            float r2 = s.Radius * s.Radius;
+            float dn = Vector2.DistanceSquared(node, s.Centre);
+            if (dn <= r2 && (!_scarStart[k] || dn < Vector2.DistanceSquared(body, s.Centre)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>The open node within <see cref="StartSnapNodes"/> of a blocked start nearest the start point, preferring one no scar holds deeper than the body (<see cref="SnapDeeperInScar"/>); the start point becomes its centre.</summary>
     private bool TrySnapStart(ref int start, ref Vector2 startG)
     {
         int gx = _map.NodeGx(start);
         int gy = _map.NodeGy(start);
         float best = float.MaxValue;
         int found = -1;
+        float bestClear = float.MaxValue;
+        int foundClear = -1;
         for (int dy = -StartSnapNodes; dy <= StartSnapNodes; dy++)
         {
             for (int dx = -StartSnapNodes; dx <= StartSnapNodes; dx++)
@@ -595,7 +616,18 @@ public sealed class PathPlanner
                     best = d2;
                     found = node;
                 }
+
+                if (d2 < bestClear && !SnapDeeperInScar(_map.NodeCentre(node), startG))
+                {
+                    bestClear = d2;
+                    foundClear = node;
+                }
             }
+        }
+
+        if (foundClear >= 0)
+        {
+            found = foundClear; // M6 sprint: the nearest open node no scar holds deeper than the body does (SnapDeeperInScar); else the nearest open node, as before
         }
 
         if (found < 0)

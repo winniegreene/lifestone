@@ -260,7 +260,20 @@ public sealed partial class PlayerMovementController : IPlayerMovementIntents, I
     /// </summary>
     public const double ServerMoveToLimitSeconds = 15.0;
 
+    /// <summary>
+    /// M6 sprint (run 5, cache/m6/sprint/run5/step3-levelup.log 14:51:06-14:51:21 UTC: a Use of a corpse 23.1 m away let ACE walk her straight at a wall; she made 8.99 m and then
+    /// pressed into the wall until the 15 s rule, and every sprint run held 1 or 2 such walks, 15 s each): a server MoveTo (to an object or a position, once initialized and in contact) that
+    /// has not closed its distance by <see cref="ServerMoveToProgressMetres"/> for this long is cancelled as a key would end it. Lifestone's own, not retail (retail's <c>MoveToManager</c>
+    /// only counts <c>fail_progress_count</c>): longer than a half turn in place before the walk starts, so a MoveTo that turns first is never cut.
+    /// </summary>
+    public const double ServerMoveToNoProgressSeconds = 3.0;
+
+    /// <summary>The distance a server MoveTo must close to count as progress (<see cref="ServerMoveToNoProgressSeconds"/>; Lifestone's own).</summary>
+    public const float ServerMoveToProgressMetres = 0.5f;
+
     private double _serverMoveToSince = double.NaN;
+    private float _serverMoveToBest = float.NaN;
+    private double _serverMoveToProgressAt = double.NaN;
     private int _serverMoveToCancels = -1;
     private CellFrame _serverMoveToFrom;
 
@@ -279,6 +292,8 @@ public sealed partial class PlayerMovementController : IPlayerMovementIntents, I
         _serverMoveToSince = _now;
         _serverMoveToCancels = -1; // noted on the first step it is under way: the unpack cancels the MoveTo it replaces (0x36) after this call
         _serverMoveToFrom = _player.Position;
+        _serverMoveToBest = float.NaN;
+        _serverMoveToProgressAt = _now;
         LastServerMoveToEnd = null;
     }
 
@@ -312,7 +327,8 @@ public sealed partial class PlayerMovementController : IPlayerMovementIntents, I
         }
 
         var held = _now - _serverMoveToSince;
-        if (held < ServerMoveToLimitSeconds)
+        var noProgress = NoServerMoveToProgress(moveTo);
+        if (held < ServerMoveToLimitSeconds && !noProgress)
         {
             return;
         }
@@ -320,7 +336,9 @@ public sealed partial class PlayerMovementController : IPlayerMovementIntents, I
         var moved = _serverMoveToFrom.CellId == 0 ? float.NaN : PositionFrames.Distance(_serverMoveToFrom, _player.Position);
         _log.Warn(
             "movement",
-            "TODO(m5-moveto-stuck): the server's MoveTo held the player past ACE's MoveTo timeout without ending (retail's MoveToManager counts no-progress checks and never ends on them); cancelled as a key would end it (0x36 ActionCancelled)",
+            noProgress
+                ? string.Create(CultureInfo.InvariantCulture, $"the server's MoveTo closed less than {ServerMoveToProgressMetres:0.0} m on its target in {ServerMoveToNoProgressSeconds:0.0} s (a wall or a body in the way): cancelled as a key would end it (0x36 ActionCancelled), and a MoveToState sent so ACE's walk-to-use chain stops too (m6-moveto-no-progress)")
+                : "TODO(m5-moveto-stuck): the server's MoveTo held the player past ACE's MoveTo timeout without ending (retail's MoveToManager counts no-progress checks and never ends on them); cancelled as a key would end it (0x36 ActionCancelled)",
             new LogField("held_s", held.ToString("F1", CultureInfo.InvariantCulture)),
             new LogField("moved_m", moved.ToString("F2", CultureInfo.InvariantCulture)),
             new LogField("type", moveTo?.MovementType.ToString() ?? "none"),
@@ -337,8 +355,38 @@ public sealed partial class PlayerMovementController : IPlayerMovementIntents, I
             new LogField("at", $"0x{_player.Position.CellId:X8} {_player.Position.Frame.Origin}"));
         ServerMoveToStuckEnds++;
         _player.CancelMoveTo();
+        SendMovementEvent(); // M6 sprint: as a key press would: ACE's GameActionMoveToState stops the walk-to-use chain (StopExistingMoveToChains), so the Use ends now, not at its own timeout
         LastServerMoveToEnd = "stuck";
         _serverMoveToSince = double.NaN;
+    }
+
+    /// <summary>
+    /// M6 sprint: true when the watched server MoveTo walks (to an object or a position, initialized, the body in contact) and has not closed its distance by <see cref="ServerMoveToProgressMetres"/>
+    /// for <see cref="ServerMoveToNoProgressSeconds"/>. A turn, a MoveTo not yet initialized (its target has not reported) or a body in the air is not judged, and restarts the clock.
+    /// </summary>
+    private bool NoServerMoveToProgress(MoveToManager? moveTo)
+    {
+        if (moveTo is not { Initialized: true } || moveTo.MovementType is not (WireMovementType.MoveToObject or WireMovementType.MoveToPosition) || !_player.HasContact)
+        {
+            _serverMoveToProgressAt = _now;
+            return false;
+        }
+
+        var distance = moveTo.GetCurrentDistance();
+        if (!float.IsFinite(distance))
+        {
+            _serverMoveToProgressAt = _now;
+            return false;
+        }
+
+        if (float.IsNaN(_serverMoveToBest) || distance <= _serverMoveToBest - ServerMoveToProgressMetres)
+        {
+            _serverMoveToBest = distance;
+            _serverMoveToProgressAt = _now;
+            return false;
+        }
+
+        return _now - _serverMoveToProgressAt >= ServerMoveToNoProgressSeconds;
     }
 
     /// <summary>

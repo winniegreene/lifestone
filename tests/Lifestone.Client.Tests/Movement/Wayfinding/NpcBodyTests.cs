@@ -252,6 +252,43 @@ public sealed class NpcBodyTests
     }
 
     [Fact]
+    public void An_npc_who_comes_into_sight_on_the_route_ahead_is_planned_round_before_the_body_meets_him()
+    {
+        // M6 sprint (run 5, cache/m6/sprint/run5/step3-levelup.log 14:24:58 to 14:26:09 UTC): the walk to the Apprentice Scrivener of Life Magic was planned 265 m from the Scrivener of Item Magic, out of sight, so
+        // not round him; the walk ran into him outside the door and replanned only after four rungs. Here the feed shows a body only within 25 m of the walker, as the object table does at its reach.
+        var rig = new BodyRig(40, 96.5f) { SightMetres = 25f };
+        var npc = Body(Scrivener, 95, 96.5f, HumanRadius);
+        rig.Bodies.Add(npc);
+        rig.Runner.Start(NavGoal.ToPoint(NavPoint.At(rig.Block, 130, 96.5f)), rig.Body.Now);
+        rig.Frame();
+        Assert.Empty(rig.Runner.Npcs.Stamped); // 55 m off at the plan: the plan goes straight through his spot
+        Assert.Equal(2, rig.Runner.Path!.Waypoints.Count);
+
+        var nearest = float.MaxValue;
+        while (!rig.Runner.IsDone && rig.Body.Now < 60)
+        {
+            rig.Frame();
+            nearest = Math.Min(nearest, Vector2.Distance(NavMap.FromCellFrame(rig.Body.Position).Global, npc.Centre));
+        }
+
+        Assert.Equal(NavRunState.Arrived, rig.Runner.State);
+        Assert.Equal(1, rig.Runner.NpcReplans); // m6-npc-ahead: once, when he came into sight on the route ahead
+        Assert.Equal(0, rig.Runner.NpcLaneWaits);
+        Assert.True(nearest >= 2 * NavCreatures.PlayerRadiusMetres, $"the body came {nearest:F2} m from his centre (two body radii: touching)");
+    }
+
+    [Fact]
+    public void An_npc_who_comes_into_sight_off_the_route_is_no_replan()
+    {
+        var rig = new BodyRig(40, 96.5f) { SightMetres = 25f, Bodies = { Body(Scrivener, 95, 110f, HumanRadius) } }; // 13.5 m beside the way
+        rig.Runner.Start(NavGoal.ToPoint(NavPoint.At(rig.Block, 130, 96.5f)), rig.Body.Now);
+        rig.RunFor(60.0);
+
+        Assert.Equal(NavRunState.Arrived, rig.Runner.State);
+        Assert.Equal(0, rig.Runner.NpcReplans);
+    }
+
+    [Fact]
     public void A_runner_without_a_body_feed_plans_as_before_through_the_npc()
     {
         var rig = new BodyRig(60, 96.5f, feed: false) { Bodies = { Body(Scrivener, 95, 96.5f, HumanRadius) } };
@@ -313,12 +350,16 @@ public sealed class NpcBodyTests
 
         public List<NavBody> Bodies { get; } = [];
 
+        /// <summary>M6 sprint: the feed shows a body only within this of the walker (the object table's reach); unlimited by default.</summary>
+        public float SightMetres { get; init; } = float.MaxValue;
+
         public void Fill(Vector2 from, float maxMetres, List<NavBody> into)
         {
             into.Clear();
+            var me = NavMap.FromCellFrame(Body.Position).Global;
             foreach (var b in Bodies)
             {
-                if (Vector2.Distance(b.Centre, from) <= maxMetres)
+                if (Vector2.Distance(b.Centre, from) <= maxMetres && Vector2.Distance(b.Centre, me) <= SightMetres)
                 {
                     into.Add(b);
                 }

@@ -93,6 +93,8 @@ public sealed class GroundTour : IGroundTour
     private double _holdSince = double.NaN;
     private double _holdTotal;
     private double _loopHoldUntil = double.NaN;
+    private readonly HashSet<uint> _prefer = []; // M6 audit: the wanted trophy's carriers (Prefer)
+    private string _preferWhy = string.Empty;
 
     /// <summary>A tour of <paramref name="ground"/>.</summary>
     /// <param name="ground">The ground (a dungeon with storeys; its slots may be none, then the tour holds).</param>
@@ -569,6 +571,11 @@ public sealed class GroundTour : IGroundTour
             return Hold(from, LoopNote(now));
         }
 
+        if (_prefer.Count > 0 && Carrier(from, now) is { } carrier)
+        {
+            return carrier; // M6 audit: the wanted trophy's carrier before any other target or slot (Prefer)
+        }
+
         var leaveForMin = VisitedForMin < StoreysMin && _killsHere >= 1 && NextStorey(here, _dir, from, now, out _) >= 0;
         if (SeenTarget(from, now, leaveForMin ? here : -1) is { } seen)
         {
@@ -696,6 +703,77 @@ public sealed class GroundTour : IGroundTour
 
         _note = $"the timed return {Returns}: " + DueNote(first, now);
         return Offerable(cell, from, now, looked: false) ? cell : NearestStanding(from, _arrival, now) ?? NearestAny(from, _arrival, now);
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Live (cache/m6/14/live/ladder31, 2026-11-15 19:55 to 22:10 UTC, the Tusker Guard kill task on the Tusker Barracks): the fight wanted the Guard Tusk (22425) three times and never held it; the 333 Guard corpses of those two hours
+    /// all lay outside the five cells of its carrier's slots (22593 in 0x5A480101, 0x0108, 0x011D, 0x0132 and 0x0139, the profile's respawn slots, the far end from the arrival), because the nearest target or slot always came first
+    /// and the 49 others of the same name (1629) stand between.
+    /// </remarks>
+    public void Prefer(IReadOnlyCollection<uint> wcids, string why)
+    {
+        ArgumentNullException.ThrowIfNull(wcids);
+        _prefer.Clear();
+        _prefer.UnionWith(wcids);
+        _preferWhy = why ?? string.Empty;
+    }
+
+    /// <summary>
+    /// M6 audit: the wanted trophy's carrier (<see cref="Prefer"/>): the nearest living one the object table holds on an offerable cell, else the nearest standing hunted slot of one whose cell is offerable; null when none (the
+    /// tour goes on by its own order). A slot kept out (<see cref="KeepOut"/>) is not hunted, so it is never offered here either.
+    /// </summary>
+    private uint? Carrier(uint from, double now)
+    {
+        var c = CultureInfo.InvariantCulture;
+        if (_objects is not null)
+        {
+            WorldObject? best = null;
+            var bestCell = 0u;
+            var bestMetres = double.PositiveInfinity;
+            foreach (var o in _objects.All)
+            {
+                if (o.Position is not { } at || !_prefer.Contains(o.Weenie.WeenieClassId) || !_ground.IsTarget(o.Weenie.WeenieClassId, at.CellId) || _keepOut.Contains(at.CellId) || o.Health is <= 0f
+                    || o.Motion is { Forward: WorldObjectTable.DeadMotionLowWord } || (_avoidedAt.TryGetValue(o.Guid, out var avoided) && now - avoided < FailedCellRestSeconds) || !Offerable(at.CellId, from, now))
+                {
+                    continue;
+                }
+
+                var metres = _metres(from, at.CellId);
+                if (double.IsFinite(metres) && metres < bestMetres)
+                {
+                    (best, bestCell, bestMetres) = (o, at.CellId, metres);
+                }
+            }
+
+            if (best is not null)
+            {
+                _purposeGuid = best.Guid;
+                return Offer(bestCell, TourPurpose.Seen, string.Create(c, $"the wanted trophy's carrier: a living {best.Name} ({best.Weenie.WeenieClassId}) 0x{best.Guid:X8} in 0x{bestCell:X8}, {bestMetres:0} m on the room graph ({_preferWhy}; m6-audit-tusk-carriers)"));
+            }
+        }
+
+        uint? slotCell = null;
+        var slotWcid = 0u;
+        var slotMetres = double.PositiveInfinity;
+        for (var i = 0; i < Schedule.Count; i++)
+        {
+            var slot = Schedule.Slot(i);
+            if (!Schedule.IsHunted(i) || !Schedule.IsStanding(i) || !_prefer.Contains(slot.Wcid) || !Offerable(slot.Cell, from, now))
+            {
+                continue;
+            }
+
+            var metres = _metres(from, slot.Cell);
+            if (double.IsFinite(metres) && metres < slotMetres)
+            {
+                (slotCell, slotWcid, slotMetres) = (slot.Cell, slot.Wcid, metres);
+            }
+        }
+
+        return slotCell is { } cell
+            ? Offer(cell, TourPurpose.Presumed, string.Create(c, $"the wanted trophy's carrier: a standing slot of {slotWcid} in 0x{cell:X8}, {slotMetres:0} m on the room graph ({_preferWhy}; m6-audit-tusk-carriers)"))
+            : null;
     }
 
     /// <summary>F5: the nearest living target the object table holds (<see cref="Look"/>'s table), on a walkable cell of the ground that is offerable, off storey <paramref name="notOn"/> when it is not -1; null for none.</summary>

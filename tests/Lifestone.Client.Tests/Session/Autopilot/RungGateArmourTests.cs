@@ -88,10 +88,14 @@ public sealed class RungGateArmourTests
         Assert.EndsWith("level=79 read_at=9 cell=0xA9B30006 run_ground=tusker-holding leaving=yes buffs=live named=none -> rung=outskirts ground=none reason=gate-held:holding", choice.Line("the way out", ask), StringComparison.Ordinal);
 
         // and the outskirts are far below 79: a warning, by name (report-only)
-        Assert.StartsWith("ladder: rung: far below her level: rung outskirts (Holtburg's outskirts, levels 5-9) at level 79: its band's top 9 is under half her level; chosen by reason=gate-held:holding", choice.FarBelow, StringComparison.Ordinal);
+        Assert.StartsWith("ladder: rung: far below her level: rung outskirts (Holtburg's outskirts and the Redoubt, levels 5-9) at level 79: its band's top 9 is under half her level; chosen by reason=gate-held:holding", choice.FarBelow, StringComparison.Ordinal);
         var logged = new List<(LogSeverity, string)>();
         RungOwner.WarnLoud(choice, new Sink(logged), "autopilot");
-        Assert.Equal((LogSeverity.Warning, choice.FarBelow), Assert.Single(logged));
+        // M6 redoubt: and at 79 the Redoubt's portal (levels 1 to 20) does not admit her, so the rung's outdoor ground stands in its place, by name: the second loud line
+        Assert.Equal(2, logged.Count);
+        Assert.Equal((LogSeverity.Warning, choice.FarBelow), logged[0]);
+        Assert.Equal(("holtburg-outskirts", "gate:entry:holtburg-redoubt:79>20"), (choice.Alternate, choice.EntryRefused));
+        Assert.StartsWith("ladder: rung: entry refused: gate:entry:holtburg-redoubt:79>20: the rung outskirts's own ground is entered by a portal that does not admit her, so she hunts its outdoor ground holtburg-outskirts in its place (reason=gate-held:holding", logged[1].Item2, StringComparison.Ordinal);
     }
 
     [Fact]

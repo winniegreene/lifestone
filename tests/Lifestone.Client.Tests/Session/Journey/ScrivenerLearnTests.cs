@@ -191,18 +191,20 @@ public sealed partial class ResupplyStationTests
 
     /// <summary>M6 7 AC: the outskirts now hold levels 10 to 14 (the Burrow rung is dropped): the plan there is Armor Self only, no protection line (TODO(m6-outskirts-damage-types)); the Lodge's Male Tuskers name bludgeon, so its plan holds the bludgeon line. 0 deaths on the outskirts at levels 5 to 9 is why Armor alone stands.</summary>
     [Fact]
-    public void M6_7_AC_the_outskirts_rung_at_level_12_plans_Armor_only_and_the_Lodge_adds_the_bludgeon_protection()
+    public void M6_7_AC_the_outskirts_rung_at_level_12_plans_Armor_and_since_the_Redoubt_the_bludgeon_protection_as_the_Lodge_does()
     {
         var ladder = Lifestone.Client.Session.Grounds.LadderLoader.WarMage;
         var outskirts = ScrivenerLearnPlan.RungOf(ladder, "holtburg-outskirts", 12)!;
         Assert.Equal("outskirts", outskirts.Key);
-        Assert.Empty(ScrivenerLearnPlan.IncomingElements(Lifestone.Client.Session.Grounds.GroundCatalog.Get("holtburg-outskirts")));
-        Assert.DoesNotContain(ScrivenerLearnPlan.LinesFor(outskirts, ScrivenerCatalog.Default), l => l.Kind == ScrivenerLineKind.Protection);
+        Assert.Empty(ScrivenerLearnPlan.IncomingElements(Lifestone.Client.Session.Grounds.GroundCatalog.Get("holtburg-outskirts"))); // the outdoor profile names no creature's damage type: until 2026-11-18 the rung planned Armor only
+        // M6 redoubt (the owner's decision of 2026-11-18): the rung hunts the Holtburg Redoubt, whose drudges bludgeon (the profile's targets' damage types 0x0004), so the rung plans the one protection, as the Lodge does
+        Assert.Equal(["bludgeon"], ScrivenerLearnPlan.IncomingElements(Lifestone.Client.Session.Grounds.GroundCatalog.Get("holtburg-redoubt")));
+        Assert.Equal(["bludgeon"], ScrivenerLearnPlan.LinesFor(outskirts, ScrivenerCatalog.Default).Where(l => l.Kind == ScrivenerLineKind.Protection).Select(l => l.Element));
         Assert.Contains(ScrivenerLearnPlan.LinesFor(outskirts, ScrivenerCatalog.Default), l => l.Kind == ScrivenerLineKind.Armor);
 
         var lodge = ScrivenerLearnPlan.RungOf(ladder, "tusker-lodge", 15)!;
         Assert.Contains(ScrivenerLearnPlan.LinesFor(lodge, ScrivenerCatalog.Default), l => l.Kind == ScrivenerLineKind.Protection && l.Element == "bludgeon");
-        Assert.Equal("burrow", ScrivenerLearnPlan.RungOf(ladder, "tusker-burrow", 16)!.Key); // M6 7 AR: the Burrow is a rung again
+        Assert.Equal("burrow", ScrivenerLearnPlan.RungOf(ladder, "tusker-retreat", 16)!.Key); // M6 7 AR: the Burrow is a rung again; M6 retreat: the rung plays the Tusker Retreat
     }
 
     [Fact]

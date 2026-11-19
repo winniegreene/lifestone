@@ -114,6 +114,8 @@ public sealed class KillTaskLadderTests(ITestOutputHelper output)
         Assert.True(c.FightsOn(Barracks));
         var fight = c.World.Factory.Made.Last(s => s.Kind == StationKinds.DenFight);
         Assert.Equal(wanted, fight.Arguments.TryGetValue(JourneyStations.WantArgument, out var want) && want == "22425"); // the Guard Tusk 22425, carried by the Tusker Guard 22593: kept aside for Brighteyes
+        // M6 audit (the owner's decision of 2026-11-19: every tusk when it is due): the carrier goes with the want, so the tour goes to the five 22593 slots, not the 49 of 1629
+        Assert.Equal(wanted ? "22593:22425:1:Tusker Guard Tusk" : null, fight.Arguments.GetValueOrDefault(JourneyStations.CarriersArgument));
         if (wanted)
         {
             Assert.Contains(c.Lines, l => l.StartsWith("ladder: the fight's want: 22425 (", StringComparison.Ordinal) && l.Contains("the due trophy quests of tusker-barracks", StringComparison.Ordinal));

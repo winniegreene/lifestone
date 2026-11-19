@@ -1,6 +1,7 @@
 using System.Globalization;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Quests;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Session.Scenarios.Journey;
@@ -66,8 +67,11 @@ public sealed partial class AutopilotScenario
         {
             foreach (var task in _options.KillTasks)
             {
+                var before = task.Phase;
                 if (task.Read(line, _log))
                 {
+                    _killTaskTries.Remove(task.Key); // M6 audit (fix 3): the tries count errands started without a read; a read starts the count again, so a second round is not refused by the first's two
+                    task.NoteRound(before, session.Clock.Time.GetUtcNow(), session.State.Self.Qualities.Int64s.TryGetValue(PlayerQualities.TotalExperienceProperty, out var total) ? total : 0);
                     KillTaskMoved(session, task);
                     break;
                 }
@@ -79,6 +83,14 @@ public sealed partial class AutopilotScenario
 
     private void KillTaskMoved(IGameSessionView session, LadderKillTask task)
     {
+        if (task.Phase == KillTaskPhase.TurnedIn && _context.QuestTimersInUse.IsDue(task.Quest, session.Clock.Time.GetUtcNow()))
+        {
+            // M6 audit (fix 3): the giver's turn-in starts the quest's timer on the server; the client's timers record it from the read (the station's done check records it too, when it ran), so the next arm waits its 20 h
+            var done = _context.CompleteQuest(task.Quest, session.Clock.Time.GetUtcNow(), QuestTimers.HowReply);
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"{LadderKillTask.LinePrefix}{task.State}: turned in: the quest's timer recorded from the giver's reply ({done.Completions} completion(s)); the next round is due in {task.Quest.TimerSeconds ?? 0} s"));
+            return;
+        }
+
         if (task.Phase != KillTaskPhase.OnTimer)
         {
             return;
@@ -200,6 +212,29 @@ public sealed partial class AutopilotScenario
                 if (_killTaskNoted.Add(task.Key + ":band"))
                 {
                     _log.Info(LogCategory, $"{LadderKillTask.LinePrefix}{task.State}: level {session.State.Self.Qualities.Level} is out of the quest's band {band}: no errand");
+                }
+
+                continue;
+            }
+
+            if (steps == task.ArmSteps && RungOwner.KillTaskRefusal(_ladder ??= LadderLoader.WarMage, task.Ground, session.State.Self.Qualities.Level, out _) is { } notYet)
+            {
+                // M6 sprint (live 2026-11-18 20:07 UTC: a level 6 climber went to Lin through the Town Network to arm the Tusker Guard task, whose ground she could not enter for decades of levels): the arm waits until the
+                // task's own ground would let her in, by the rule its hunt reads (RungOwner.KillTaskRefusal: the ladder, the profile, the entry portal's level range, the fight's ground rule)
+                if (_killTaskNoted.Add(task.Key + ":arm-waits:" + session.State.Self.Qualities.Level.ToString(CultureInfo.InvariantCulture)))
+                {
+                    _log.Info(LogCategory, $"{LadderKillTask.LinePrefix}{task.State}: the arm waits until she can enter {task.Ground} ({notYet})");
+                }
+
+                continue;
+            }
+
+            if (steps == task.ArmSteps && task.LastRoundXpPerHour is { } roundRate && RungXpPerHour() is { } rungRate && roundRate < rungRate)
+            {
+                // M6 audit (fix 3, the owner's decision of 2026-11-19): a later round goes while it remains a boost to her experience an hour: its last round, the reward in, against this run's rate on the rung's own ground
+                if (_killTaskNoted.Add(task.Key + ":slower:" + _context.QuestTimersInUse.NextDue(task.Quest)?.ToString("O", CultureInfo.InvariantCulture)))
+                {
+                    _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"{LadderKillTask.LinePrefix}{task.State}: the next round is skipped: the last paid {roundRate:0} an hour over {task.LastRoundTime?.TotalHours:0.0} h (the reward in), under the {rungRate:0} an hour of this run on {_ground.Key} (m6-audit-kill-task-rate)"));
                 }
 
                 continue;

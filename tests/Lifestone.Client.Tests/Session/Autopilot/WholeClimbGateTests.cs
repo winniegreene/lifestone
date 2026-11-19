@@ -17,8 +17,12 @@ namespace Lifestone.Client.Tests.Session.Autopilot;
 /// </summary>
 public sealed class WholeClimbGateTests(ITestOutputHelper output)
 {
+    /// <summary>The rung outskirts' own ground since the owner's decision of 2026-11-18 (M6 redoubt): the Holtburg Redoubt, whose portal admits levels 1 to 20.</summary>
+    private const string Redoubt = "holtburg-redoubt";
+
+    /// <summary>The rung outskirts' outdoor ground (<see cref="RungFallback"/>): where a climber the Redoubt's portal does not admit hunts for that rung (21 and 22 here, held down by shut gates).</summary>
     private const string Outskirts = "holtburg-outskirts";
-    private const string Burrow = "tusker-burrow";
+    private const string Burrow = "tusker-retreat"; // M6 retreat (the owner, 2026-11-19): the burrow rung's ground is the Tusker Retreat (the Burrow its alternate)
     private const string Lodge = "tusker-lodge";
     private const string Cave = "tusker-cave";
     private const uint Town = 0xA9B40019;
@@ -140,11 +144,20 @@ public sealed class WholeClimbGateTests(ITestOutputHelper output)
                 return Lodge; // D135: the Lodge from 15, by the hub
             }
 
-            return Level >= 10 && (standsOn == Burrow || Open("burrow")) ? Burrow : Outskirts; // D135: the Burrow from 10, by the Refuge
+            return Level >= 10 && (standsOn == Burrow || Open("burrow")) ? Burrow : Low; // D135: the Burrow from 10, by the Refuge
         }
+
+        /// <summary>
+        /// M6 redoubt: the ground of the rung outskirts for her level, worked out here without the code under test: the Redoubt while its portal admits her (the profile's entry: levels 1 to 20), else the rung's outdoor ground
+        /// (the levels 21 and 22 of this table, when shut gates hold her down to the rung).
+        /// </summary>
+        public string Low => GroundCatalog.Get(Redoubt).Entry!.Admits(Level) ? Redoubt : Outskirts;
     }
 
     private static uint CellOf(string ground) => (uint)GroundCatalog.Get(ground).Landblocks[0] << 16 | 0x0100;
+
+    /// <summary>The rung that names a ground as its own or as its outdoor fallback (M6 redoubt: the rung outskirts names the Redoubt and the outdoor ground).</summary>
+    private static LadderRung RungNaming(string ground) => L.Rungs.Single(r => r.GroundKey == ground || RungFallback.Names(r, ground));
 
     /// <summary>
     /// Follows her from a built run to where she hunts, as the dial does: a run's first check, then the way out unless she stands on it; a stop's named rung builds the next run. Each step's choice is judged: the ground it leaves her on is never
@@ -198,7 +211,7 @@ public sealed class WholeClimbGateTests(ITestOutputHelper output)
     {
         var ground = AutopilotHostLogic.StartGround(view, out var why);
         Assert.True(ground is not null, $"no run at the start (level {s.Level}, {s.Gate}, {s.State}): {why}");
-        var gated = L.Rungs.Single(r => r.GroundKey == ground.Key);
+        var gated = RungNaming(ground.Key);
         Assert.True(L.GateOf(gated.Key) is null || ground.Key == standsOn, $"a start read the {gated.Key} gate open with no buff known (level {s.Level}, {s.Gate}, {s.State}): {why}");
         return ground.Key;
     }
@@ -208,7 +221,7 @@ public sealed class WholeClimbGateTests(ITestOutputHelper output)
     public void A_start_in_town_climbs_only_through_open_gates(int level, Gates gates, Buffs buffs)
     {
         var s = new Script(output, level, gates, buffs);
-        var view = s.Stand(Outskirts, Town);
+        var view = s.Stand(s.Low, Town);
 
         Assert.Equal(s.Expected(null), Follow(s, view, Started(s, view, null), null));
     }
@@ -217,9 +230,9 @@ public sealed class WholeClimbGateTests(ITestOutputHelper output)
     [MemberData(nameof(Climb))]
     public void A_start_or_a_checkpoint_resume_on_the_ground_climbs_only_through_open_gates(int level, Gates gates, Buffs buffs)
     {
-        // A checkpoint holds no rung (AutopilotCheckpoint): a resume is a start where she stands. The town stands in the outskirts' landblocks, so a resume on the outskirts reads the same.
+        // A checkpoint holds no rung (AutopilotCheckpoint): a resume is a start where she stands: on the ground of the rung outskirts for her level (the Redoubt to 20, the outdoor ground past its portal's limit).
         var s = new Script(output, level, gates, buffs);
-        var view = s.Stand(Outskirts, CellOf(Outskirts));
+        var view = s.Stand(s.Low, CellOf(s.Low));
 
         Assert.Equal(s.Expected(null), Follow(s, view, Started(s, view, null), null));
     }
@@ -240,12 +253,12 @@ public sealed class WholeClimbGateTests(ITestOutputHelper output)
     public void A_restart_after_a_stop_that_names_no_rung_reads_as_a_start(int level, Gates gates, Buffs buffs)
     {
         var s = new Script(output, level, gates, buffs);
-        var view = s.Stand(Outskirts, Town);
+        var view = s.Stand(s.Low, Town);
         foreach (var stop in new[] { "level", "watchdog:travel", "rung-moved:no-such-rung", null })
         {
             var ground = AutopilotHostLogic.MoveOnGround(view, stop, out var why);
             Assert.True(ground is not null, why);
-            Assert.True(L.GateOf(L.Rungs.Single(r => r.GroundKey == ground.Key).Key) is null, $"{stop}: a stop with no rung opened a gate at level {level}: {why}");
+            Assert.True(L.GateOf(RungNaming(ground.Key).Key) is null, $"{stop}: a stop with no rung opened a gate at level {level}: {why}");
             Assert.Equal(s.Expected(null), Follow(s, view, ground.Key, null));
         }
     }
@@ -255,14 +268,14 @@ public sealed class WholeClimbGateTests(ITestOutputHelper output)
     public void The_move_on_in_a_fight_goes_only_where_the_gates_let_her(int level, Gates gates, Buffs buffs)
     {
         var s = new Script(output, level, gates, buffs);
-        var view = s.Stand(Outskirts, CellOf(Outskirts));
-        var run = s.Run(Outskirts);
-        var rung = L.Rungs.Single(r => r.GroundKey == Outskirts);
-        var due = RungOwner.MoveOnDue(L, rung, run.AskRung(view, L, level, "the fight's read"), Outskirts, static _ => true);
+        var view = s.Stand(s.Low, CellOf(s.Low));
+        var run = s.Run(s.Low);
+        var rung = L.Rungs.Single(r => r.Key == "outskirts");
+        var due = RungOwner.MoveOnDue(L, rung, run.AskRung(view, L, level, "the fight's read"), s.Low, static _ => true);
 
         if (due is null)
         {
-            Assert.Equal(Outskirts, s.Expected(null));
+            Assert.Equal(s.Low, s.Expected(null));
             return;
         }
 
@@ -274,17 +287,18 @@ public sealed class WholeClimbGateTests(ITestOutputHelper output)
     public void A_death_at_each_rung_sends_her_back_only_through_the_gates(int level, Gates gates, Buffs buffs)
     {
         // She stands in town after the death, on a run still built on the rung she died on.
-        foreach (var ground in new[] { Outskirts, Burrow, Lodge })
+        foreach (var rungGround in new[] { "outskirts", Burrow, Lodge })
         {
             var s = new Script(output, level, gates, buffs);
+            var ground = rungGround == "outskirts" ? s.Low : rungGround;
             var view = s.Stand(ground, Town);
             var expected = s.Expected(null);
-            var ended = Follow(s, view, ground, ground == Outskirts ? Outskirts : null, running: true);
+            var ended = Follow(s, view, ground, ground == s.Low ? s.Low : null, running: true);
 
-            if (ground == Outskirts)
+            if (ground == s.Low)
             {
-                // The town stands in the outskirts: the run hunts on from there, and the fight's read moves her up
-                Assert.Contains(ended, new[] { Outskirts, expected });
+                // On the rung outskirts' ground for her level the run hunts on, and the fight's read moves her up
+                Assert.Contains(ended, new[] { s.Low, expected });
             }
             else
             {
@@ -322,7 +336,7 @@ public sealed class WholeClimbGateTests(ITestOutputHelper output)
     [Fact]
     public void Over_the_scripted_ACE_a_restart_with_the_buffs_still_up_moves_on_and_is_no_mismatch()
     {
-        var w = new ApWorld(Outskirts, output, atHome: false);
+        var w = new ApWorld(Redoubt, output, atHome: false);
         GatesOpenAt17(w);
         var run = LevelUp(w, new RungBuffRead(_ => 8, _ => 4));
 

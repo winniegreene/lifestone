@@ -143,6 +143,14 @@ public sealed class TrophyQuestTests(ITestOutputHelper output)
         // Q6a's files (D57): one tusk a profiled island ground; the rule reads them by their hunt-until ground, never by a constant (D26).
         foreach (var rung in LadderLoader.WarMage.Rungs.Where(r => r.GroundKey is { } g && g.StartsWith("tusker-", StringComparison.Ordinal) && !g.StartsWith("tusker-temple", StringComparison.Ordinal)))
         {
+            if (rung.GroundKey == "tusker-retreat")
+            {
+                // M6 retreat: the Tusker Retreat holds no tusk carrier (tusker-retreat.json sources.targets); its rung's tusk is its alternate's, the Burrow's
+                Assert.Empty(AutopilotQuestRule.Trophies(rung.GroundKey, QuestCatalog.All));
+                Assert.Single(AutopilotQuestRule.Trophies(Assert.Single(rung.Alternates).GroundKey, QuestCatalog.All));
+                continue;
+            }
+
             Assert.Single(AutopilotQuestRule.Trophies(rung.GroundKey, QuestCatalog.All));
         }
 
@@ -159,7 +167,8 @@ public sealed class TrophyQuestTests(ITestOutputHelper output)
     [Fact]
     public void M6_7_AR_the_Burrow_and_the_Lodge_are_the_ladders_tusk_grounds()
     {
-        var rungGrounds = LadderLoader.WarMage.Rungs.Select(r => r.GroundKey).ToList();
+        // M6 retreat (the owner, 2026-11-19): the 10-14 rung hunts the Tusker Retreat and the Burrow is its live alternate, the ground of the Female Tusk's trophy job (RungOwner's job reads a rung's alternates)
+        var rungGrounds = LadderLoader.WarMage.Rungs.Select(r => r.GroundKey).Concat(LadderLoader.WarMage.Rungs.SelectMany(r => r.Alternates.Where(a => !a.Pending).Select(a => (string?)a.GroundKey))).ToList();
         Assert.Contains(Burrow, rungGrounds);
         Assert.Contains(rungGrounds.Where(g => g is not null).SelectMany(g => AutopilotQuestRule.Trophies(g, QuestCatalog.All)), t => t.Quest.Key == "tusk-female");
 

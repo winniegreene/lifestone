@@ -20,7 +20,7 @@ namespace Lifestone.Client.Tests.Session.Mage;
 public sealed class BotBuildTests(DatSetFixture fixture, ITestOutputHelper output) : IClassFixture<DatSetFixture>
 {
     private const uint Life = MageTemplate.LifeMagic, Creature = MageTemplate.CreatureEnchantment, Item = MageTemplate.ItemEnchantment, Conversion = MageTemplate.ManaConversion, Alchemy = MageTemplate.Alchemy;
-    private const string Burrow = "tusker-burrow";
+    private const string Burrow = "tusker-retreat"; // M6 retreat (the owner, 2026-11-19): the burrow rung plays the Tusker Retreat, with the Burrow's lines and shops (its targets deal bludgeon too)
     private const string Outskirts = "holtburg-outskirts";
 
     private static readonly Dictionary<uint, int> TrainedCost = new()

@@ -140,6 +140,19 @@ public static class AutomatedAccountRule
             return TryCharacters(account, ThrowawayCharacter, ThrowawayCharacter, out refusal);
         }
 
+        if (kind == Lifestone.Client.Play.LoginCheckKind.ClimberStart)
+        {
+            // M6 onscreen start: the climber start deletes and re-creates the account's own climber (the climbers' journey plans name both: Winnie on test, Qwinnie on qwinnie), and nobody else, on no other account.
+            var climber = Lifestone.Client.Session.Scenarios.Journey.JourneyPlans.Climbers.FirstOrDefault(p => string.Equals(p.Account, string.IsNullOrWhiteSpace(account) ? TestAccounts.Test : account, StringComparison.Ordinal));
+            if (climber is null)
+            {
+                refusal = "the climber start re-creates a climber, who lives on the main test account or on the model's own account only: give one of them";
+                return false;
+            }
+
+            return TryCharacters(account, climber.Character, climber.Character, out refusal);
+        }
+
         var creates = kind is Lifestone.Client.Play.LoginCheckKind.Enter or Lifestone.Client.Play.LoginCheckKind.AcademyExit or Lifestone.Client.Play.LoginCheckKind.HoltburgLaps
             or Lifestone.Client.Play.LoginCheckKind.All;
         return TryCharacters(account, creates ? LoginCheckCharacter : null, creates ? LoginCheckCharacter : null, out refusal);

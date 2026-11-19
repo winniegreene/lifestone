@@ -1,7 +1,7 @@
 # Development
 
 How to build, test and check Lifestone, and the options the test loops and the autopilot take. The
-[README](../README.md) has the short version; this is the whole of it. Every command runs from the repository root in
+[technical guide](../TECHNICAL.md) has the short version; this is the whole of it. Every command runs from the repository root in
 PowerShell 7 unless it says otherwise.
 
 ## Build and test
@@ -204,7 +204,7 @@ The loopback tests and the live legs of `tools\smoke.ps1` play on the local back
 | `--log-max-mb=N` | Caps `lifestone.log` at N MiB (default 256; 0 = no cap): the file is renamed to `lifestone.1.log` and a new one begins, so the logs on disk stay under 2N MiB. [docs/session.md](session.md) section 44 |
 | `--soak-frame-s=S`, `--soak-frame-dir=DIR` | Saves a screenshot every S seconds in play mode (0 = none; 60 to 86400) into DIR (default `cache/soak/frames`). Section 44 |
 | `--load-radius=N` | Landblock rings to stream around you (default 8, as retail) |
-| `--retail-normals`, `--retail-sky-anchor` | Restore retail's rendering quirks (see [Principles](../README.md#principles)) |
+| `--retail-normals`, `--retail-sky-anchor` | Restore retail's rendering quirks (see [Principles](../TECHNICAL.md#principles)) |
 | `--retail-picking` | Retail's picking rules in play mode: a part's first hit polygon and per-part hit times, where a click can pick a different object than the nearest ([avatars.md](avatars.md) section 18) |
 | `--dat-dir=DIR` | Read the dats from another folder |
 | `--fov=DEG` | The world camera's vertical field of view, 1 to 179. In play mode the default is retail's (73 degrees at 800x600) and is recomputed when the window changes size; a `--fov` you give is kept |

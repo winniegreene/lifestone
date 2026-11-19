@@ -21,7 +21,7 @@ namespace Lifestone.Client.Tests.Session.Autopilot;
 public sealed class AutopilotStartRungTests(ITestOutputHelper output)
 {
     private const string Outskirts = "holtburg-outskirts";
-    private const string Burrow = "tusker-burrow";
+    private const string Burrow = "tusker-retreat"; // M6 retreat (the owner, 2026-11-19): the burrow rung's ground is the Tusker Retreat (the Burrow its alternate)
     private const string Cave = "tusker-cave";
 
     private static AutopilotOptions LevelUp => new() { Job = AutopilotJob.LevelUp, LadderQuests = false };
@@ -129,9 +129,9 @@ public sealed class AutopilotStartRungTests(ITestOutputHelper output)
 
         // a level whose band has no gate asks none: nothing is read and nothing is said (M6 14, D135: the outskirts to 9)
         var low = Climber(level: 9);
-        Assert.Equal(Outskirts, Start(low, LevelUp));
+        Assert.Equal("holtburg-redoubt", Start(low, LevelUp)); // M6 redoubt: the rung outskirts' own ground while its portal admits her (to 20); the level 23 climber above is held on the rung's outdoor ground
         Assert.DoesNotContain(low.Lines, l => l.StartsWith("ladder: start: ", StringComparison.Ordinal));
-        Assert.Single(low.Lines, l => l.StartsWith("ladder: rung: asked by start: level=9 read_at=9", StringComparison.Ordinal) && l.EndsWith(" buffs=unknown named=none -> rung=outskirts ground=holtburg-outskirts reason=band", StringComparison.Ordinal));
+        Assert.Single(low.Lines, l => l.StartsWith("ladder: rung: asked by start: level=9 read_at=9", StringComparison.Ordinal) && l.EndsWith(" buffs=unknown named=none -> rung=outskirts ground=holtburg-redoubt reason=band", StringComparison.Ordinal));
     }
 
     [Theory]
@@ -164,8 +164,8 @@ public sealed class AutopilotStartRungTests(ITestOutputHelper output)
 
         Assert.Single(w.Lines, l => l.StartsWith("ladder: start: the gates are read with what stands on her now", StringComparison.Ordinal) && l.Contains("not standing: Strength Self (spell 2086: 20 s left, under 30)", StringComparison.Ordinal));
         Assert.Single(w.Lines, l => l.StartsWith("ladder: gate cave: level 23: as the start reads it: ", StringComparison.Ordinal) && l.Contains("Strength Self up: NOT MET (" + RungGateRule.UnreadAtStart + ")", StringComparison.Ordinal));
-        Assert.Single(w.Lines, l => l.StartsWith("ladder: rung: asked by start: level=23 read_at=14", StringComparison.Ordinal) && l.EndsWith("-> rung=burrow ground=tusker-burrow reason=gate-held:cave", StringComparison.Ordinal));
-        Assert.Single(w.Lines, l => l.StartsWith("ladder: start: rung burrow (tusker-burrow) is the start's pick", StringComparison.Ordinal));
+        Assert.Single(w.Lines, l => l.StartsWith("ladder: rung: asked by start: level=23 read_at=14", StringComparison.Ordinal) && l.EndsWith("-> rung=burrow ground=tusker-retreat reason=gate-held:cave", StringComparison.Ordinal));
+        Assert.Single(w.Lines, l => l.StartsWith("ladder: start: rung burrow (tusker-retreat) is the start's pick", StringComparison.Ordinal));
     }
 
     [Fact]

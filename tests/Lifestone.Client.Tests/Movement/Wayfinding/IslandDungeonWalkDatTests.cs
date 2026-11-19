@@ -31,7 +31,7 @@ namespace Lifestone.Client.Tests.Movement.Wayfinding;
 /// </summary>
 /// <remarks>
 /// The arrivals are the entry portals' Destination (the pinned world SQL v0.9.296, weenie_properties_position position_Type 2 of 22663 Burrow, 22665 Cave,
-/// 22688 Lodge, 22654 Abode, 22692 Quarters, 22680 Holding); the far slots are generator slots (landblock_instance rows with is_Link_Child of the landblock),
+/// 22688 Lodge, 22654 Abode, 22692 Quarters, 22680 Holding, 22694 Retreat); the far slots are generator slots (landblock_instance rows with is_Link_Child of the landblock),
 /// the slot whose planned walk from the arrival is the longest.
 /// </remarks>
 [Trait("Tier", "Exhaustive")]
@@ -65,6 +65,9 @@ public sealed class IslandDungeonWalkDatTests(DatSetFixture fixture, ITestOutput
         ["quarters"] = new("Tusker Quarters", 0x5B4A, 0x5B4A0210, new(148.551f, -1.84039f, 0.005f), 0x5B4A010E, 196, 196, 4),
         ["holding"] = new("The Holding", 0x5B48, 0x5B480384, new(325.98f, -99.5934f, 0.005f), 0x5B4802B9, 560, 166, 305),
         ["armory"] = new("Tusker Armory", 0x5948, 0x594801AB, new(40f, -170f, 0.005f), 0x59480128, 290, 290, 290), // M6 14 armory: the far slot a tusk carrier's beside the exit, five storeys down
+        // M6 retreat: 22694's Destination; the far slot is the Male Tusker in 0x01E9 (212 m by the room graph's room middles, the south-east corner of z 12). Its 11 other floored cells are pockets no walk reaches at any lean
+        // (the z 6 ring round the shaft over 0x0126 and three z 0 ledges over the z -6 rooms: tusker-retreat.json sources.walk).
+        ["retreat"] = new("Tusker Retreat", 0x5C49, 0x5C490138, new(89.8429f, -116.371f, 0.005f), 0x5C4901E9, 180, 169, 169),
     };
 
     /// <summary>The other rooms whose floor crossings are confirmed too: the Black Spawn Den's plazas (leaning doorways) and the Training Academy's hive (from its deepest room).</summary>
@@ -163,7 +166,7 @@ public sealed class IslandDungeonWalkDatTests(DatSetFixture fixture, ITestOutput
         output.WriteLine($"{key}: {confirmed} floor crossings confirmed, {failures.Count} refused");
         failures.ForEach(output.WriteLine);
         Assert.Empty(failures);
-        Assert.True(confirmed > 0 || key is "abode" or "holding" or "armory", key + ": no floor crossing on the walk"); // the Abode's layout joins by upright doorways only, and so does the Armory's (M6 14 armory: its five storeys by ramps of upright doorways)
+        Assert.True(confirmed > 0 || key is "abode" or "holding" or "armory" or "retreat", key + ": no floor crossing on the walk"); // the Abode's layout joins by upright doorways only, and so does the Armory's (M6 14 armory: its five storeys by ramps of upright doorways) and the Retreat's (M6 retreat: 0 crossings, 0 refused)
     }
 
     [RequiresDatsTheory]
@@ -417,6 +420,33 @@ public sealed class IslandDungeonWalkDatTests(DatSetFixture fixture, ITestOutput
         RunToExit(new JourneyLegPlanner(fixture.Dats, ground: ground), ground, new CellFrame(0x57480210, new AcFrame(new Vector3(148.38f, -2.03f, 0.01f), Quaternion.Identity)), ground.Exit!.Origin!.Value);
     }
 
+    /// <summary>
+    /// M6 redoubt, the live start (2026-11-18 22:20:55 UTC, the first way home from the Holtburg Redoubt): where the fight left the body, the bottom room 0x01630101 at (23.90, -80.07, -23.99), to the exit portal by the arrival, up the
+    /// storeys and over the entrance hall's walkway (the profile's galleries): the plan and a body confirmed by the physics.
+    /// </summary>
+    [RequiresDatsFact]
+    public void A_body_runs_from_the_Redoubt_s_bottom_room_to_its_exit_portal()
+    {
+        var ground = GroundCatalog.Get("holtburg-redoubt");
+        RunToExit(new JourneyLegPlanner(fixture.Dats, ground: ground), ground, new CellFrame(0x01630101, new AcFrame(new Vector3(23.90f, -80.07f, -23.99f), Quaternion.Identity)), ground.Exit!.Origin!.Value);
+    }
+
+    /// <summary>
+    /// M6 redoubt (the same live line: <c>no path: portal-keep-off:Holtburg_Redoubt_exit: the goal stands 0.00 m from the walk's own portal, inside its touch and her stop (2.84 m)</c>): a walk whose goal is the portal itself keeps off the
+    /// other portals only; a front beside a portal keeps off its own portal too.
+    /// </summary>
+    [Fact]
+    public void The_walk_to_a_portal_walked_to_itself_does_not_keep_off_that_portal()
+    {
+        var ground = GroundCatalog.Get("holtburg-redoubt");
+        var exit = new RungPortal("exit:holtburg-redoubt", "Holtburg Redoubt exit", ground.Exit!.Wcid, 0, ground.Exit.Cell, ground.Exit.Origin!.Value, ground.Exit.Destination >> 16, null, null, ground.Landblocks);
+        var (others, own) = (exit.KeepOffTheOthers(), exit.KeepOffForFront());
+        Assert.NotNull(own.Own);
+        Assert.Null(others.Own);
+        Assert.Same(others, TravelLeg.FrontWalkKeep(TravelLeg.FrontBasisPortal, others, own));
+        Assert.Same(own, TravelLeg.FrontWalkKeep(TravelLeg.FrontBasisFacing, others, own));
+        Assert.Same(own, TravelLeg.FrontWalkKeep(TravelLeg.FrontBasisApproach, others, own));
+    }
     /// <summary>M6 7 U: the hop's first point for an indoor portal with no facing is the portal itself (the old approach point stood off the alcove's floor); a portal with a facing keeps it.</summary>
     [Fact]
     public void An_indoor_portal_with_no_facing_is_walked_to_itself_and_a_facing_keeps_the_front()

@@ -431,18 +431,25 @@ public static class EverySpellPlan
     /// <param name="house">Her house's status.</param>
     /// <param name="planned">The trip's planned needs, in pyreals.</param>
     /// <param name="plannedWhy">What they are.</param>
-    public static EverySpellReserve ReserveOf(HuntingGround ground, int level, bool botOn, bool villaOn, HouseOwnership house, long planned, string plannedWhy)
+    /// <param name="drinksDitched">M6 audit (fix 6): true while the stamina dance replaced the drinks (<see cref="PackRoomMemory.DrinksDitched"/>): the drink lines are left out.</param>
+    public static EverySpellReserve ReserveOf(HuntingGround ground, int level, bool botOn, bool villaOn, HouseOwnership house, long planned, string plannedWhy, bool drinksDitched = false)
     {
         ArgumentNullException.ThrowIfNull(ground);
         var c = CultureInfo.InvariantCulture;
         long home = 0, town = 0, fee = 0;
-        int homeLines = 0, townLines = 0;
+        int homeLines = 0, townLines = 0, ditched = 0;
         string feeLine = "no fee line";
         foreach (var line in ground.Supplies.Stock)
         {
             if (ground.PriceOf(line.Wcid) is not { } price || price <= 0)
             {
                 continue; // carried: no home vendor sells it, no coin buys it
+            }
+
+            if (drinksDitched && PackBudgetRule.DrinkBurdens.ContainsKey(line.Wcid))
+            {
+                ditched++; // M6 audit (fix 6, the owner's decision of 2026-11-19): the stamina dance replaced the drinks: no coin is held back for a line no trip buys (LogisticsCounters.IsSuspended)
+                continue;
             }
 
             if (line.Wcid == BuffBotWire.FeeWcid)
@@ -458,6 +465,12 @@ public static class EverySpellPlan
 
         foreach (var line in ground.TownStock)
         {
+            if (drinksDitched && PackBudgetRule.DrinkBurdens.ContainsKey(line.Wcid))
+            {
+                ditched++;
+                continue;
+            }
+
             if (line.Wcid == BuffBotWire.FeeWcid)
             {
                 fee = Math.Max(fee, (long)line.Price * line.Keep);
@@ -474,7 +487,7 @@ public static class EverySpellPlan
         var botWhy = paysFee ? string.Create(c, $"the buff bot's fee {bot} ({feeLine}, from level {BuffBotWire.FeeLevel})") : botOn ? string.Create(c, $"the buff bot's fee 0 (level {level} is under its level {BuffBotWire.FeeLevel})") : "the buff bot's fee 0 (the bot does not apply)";
         var villa = !villaOn ? 0 : house == HouseOwnership.Owned ? VillaFacts.RentPyreals : VillaFacts.PricePyreals + VillaFacts.RentPyreals;
         var villaWhy = !villaOn ? "the villa 0 (its track is off)" : house == HouseOwnership.Owned ? string.Create(c, $"the villa {villa} (owned: the next rent)") : string.Create(c, $"the villa {villa} (the price {VillaFacts.PricePyreals} and the first rent {VillaFacts.RentPyreals}; house {house})");
-        var why = string.Create(c, $"supplies {home + town} ({homeLines} home stock line(s) {home}, {townLines} town stock line(s) {town}, each at its keep and price), {botWhy}, {villaWhy}, the trip's planned needs {planned} ({plannedWhy})");
+        var why = string.Create(c, $"supplies {home + town} ({homeLines} home stock line(s) {home}, {townLines} town stock line(s) {town}, each at its keep and price{(ditched > 0 ? string.Create(c, $"; {ditched} drink line(s) left out: the stamina dance replaced them") : string.Empty)}), {botWhy}, {villaWhy}, the trip's planned needs {planned} ({plannedWhy})");
         return new EverySpellReserve(home + town, bot, villa, planned, why);
     }
 
@@ -603,7 +616,7 @@ public static class EverySpellPlan
     {
         var c = CultureInfo.InvariantCulture;
         EverySpellPick Say(EverySpellVerdict verdict, string why, ScrivenerStockSpell? spell = null) => new(line, tier, spell, verdict, false, 0, spell?.Sellers.Select(s => s.VendorWcid).ToList() ?? [], 0, why);
-        if (input.PlanLines.TryGetValue(line, out var plan) && plan.Kind is not (LearnNeedKind.BotCovers or LearnNeedKind.NoGain) && !(plan.Kind == LearnNeedKind.Known && plan.LineKind is not (ScrivenerLineKind.Dance or ScrivenerLineKind.Revitalize)))
+        if (input.PlanLines.TryGetValue(line, out var plan) && plan.Kind is not (LearnNeedKind.BotCovers or LearnNeedKind.NoGain) && !(plan.Kind == LearnNeedKind.Known && plan.LineKind is not (ScrivenerLineKind.Dance or ScrivenerLineKind.Revitalize or ScrivenerLineKind.Sustain))) // M6 audit (finding 7, the owner 2026-11-19): a known sustain line keeps the plan's level (0.95), never the buff bar's 0.75: the fight casts a heal only at 0.95 (VitalsMeans.Pick)
         {
             return Say(EverySpellVerdict.PlanLine, string.Create(c, $"the spell plan's line ({ResupplyRun.LearnNeedToken(plan.Kind)}, target {ScrivenerLearnPlan.Numeral(plan.Target)}): its rule decides"));
         }

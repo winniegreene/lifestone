@@ -65,6 +65,17 @@ kind 19262 health 47 from the world database's creature table defence 44 drain 1
 kind 19263 health 15 from the world database's creature table defence 12 drain 1 xp 1000 awareness 18 pinned False run none scale none
 kind 24937 health 3 from the world database's creature table defence 5 drain 1 xp 800 awareness 18 pinned False run none scale none
 kind 26686 health 8 from the world database's creature table defence 12 drain 1 xp 35 awareness 18 pinned False run none scale none
+[holtburg-redoubt]
+target 7 Drudge Skulker level 8 role Target health 42 defence 9 xp none drain 1
+target 192 Drudge Prowler level 8 role Target health 36 defence 12 xp none drain 1
+target 193 Drudge Slinker level 8 role Target health 40 defence 13 xp none drain 1
+target 940 Drudge Sneaker level 8 role Target health 47 defence 15 xp none drain 1
+target 1468 Drudge Slinker level 8 role Target health 38 defence 13 xp none drain 1
+kind 7 health 42 from the world database's creature table defence 9 drain 1 xp 1000 awareness 10 pinned True run none scale none
+kind 192 health 36 from the world database's creature table defence 12 drain 1 xp 1000 awareness 12 pinned True run none scale none
+kind 193 health 40 from the world database's creature table defence 13 drain 1 xp 1000 awareness 10 pinned True run none scale none
+kind 940 health 47 from the world database's creature table defence 15 drain 1 xp 1000 awareness 10 pinned True run none scale none
+kind 1468 health 38 from the world database's creature table defence 13 drain 1 xp 1000 awareness 18 pinned False run none scale none
 [low-b-belt]
 outdoor 182 Auroch Yearling level 4 health 0 drain 1
 outdoor 26684 Blood Shrethlet level 7 health 0 drain 1
@@ -306,6 +317,15 @@ target 1628 Tusker Slave level 80 role Target health 400 defence 219 xp 30000 dr
 target 22605 Tusker Slave level 80 role Target health 400 defence 219 xp 30000 drain 1
 kind 1628 health 400 from the world database's creature table defence 219 drain 1 xp 30000 awareness 18 pinned False run none scale none
 kind 22605 health 400 from the world database's creature table defence 219 drain 1 xp 30000 awareness 18 pinned False run none scale none
+[tusker-retreat]
+target 11 Male Tusker level 20 role Target health 100 defence 63 xp none drain 1
+target 236 Female Tusker level 15 role Target health 95 defence 54 xp none drain 1
+target 22509 Tusker Kin level 15 role Target health 50 defence 48 xp none drain 1
+target 22510 Tusker Kin level 20 role Target health 50 defence 62 xp none drain 1
+kind 11 health 100 from the world database's creature table defence 63 drain 1 xp 3500 awareness 18 pinned False run none scale none
+kind 236 health 95 from the world database's creature table defence 54 drain 1 xp 2000 awareness 18 pinned False run none scale none
+kind 22509 health 50 from the world database's creature table defence 48 drain 1 xp 2000 awareness 18 pinned False run none scale none
+kind 22510 health 50 from the world database's creature table defence 62 drain 1 xp 3500 awareness 18 pinned False run none scale none
 [tusker-temple-20-40]
 target 235 Goldenback Tusker level 30 role Target health 130 defence 103 xp none drain 1
 target 1627 Tusker Crimsonback level 30 role Target health 110 defence 94 xp none drain 1

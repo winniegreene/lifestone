@@ -303,14 +303,18 @@ public sealed partial class FightScenario
 
         var healthGuid = 0u;
         var fullestHealth = 0.0;
+        var healthDefence = -1; // M6 heal spend: the source's Magic Defense, for the drain's landing chance (-1: not read)
         if (engaged && _drain.Count > 0)
         {
             healthGuid = FullestDrainTarget(session, in here, q, _target);
-            if (healthGuid != 0 && session.State.Objects.TryGet(healthGuid, out var source) && TargetStatsOf(source.Weenie.WeenieClassId).MaxHealth is var max && max > 0)
+            if (healthGuid != 0 && session.State.Objects.TryGet(healthGuid, out var source) && TargetStatsOf(source.Weenie.WeenieClassId) is var (max, sourceDefence) && max > 0)
             {
                 fullestHealth = ReadHealth(session.State.Objects, healthGuid, clock, out var f, out _, out _, Threat.HealthReader.FightPolicy) ? f * max : max; // a source never told is taken whole (FightScenario.Drain.cs's rule)
+                healthDefence = sourceDefence;
             }
         }
+
+        var lifeNow = GearCasts.TryCurrentSkill(q, MageTemplate.LifeMagic, out var lifeCurrent, out _) ? lifeCurrent : 0u; // M6 heal spend: the fills' landing chances (VitalsPolicy prices a level at its expected give and cost)
 
         var staminaGuid = 0u;
         var fullestStamina = 0u;
@@ -331,7 +335,8 @@ public sealed partial class FightScenario
             if (drainRow is { } spell && q.TryGetSkill(MageTemplate.LifeMagic, out var lifeSkill))
             {
                 staminaGuid = FullestStamina(session, in here, CastRange(_spells[spell.Id], lifeSkill.Init + lifeSkill.Ranks), clock, out fullestStamina);
-                _policyStaminaDrains[0] = new FillLevel(index, spell.Level, spell.BaseMana, spell.Power, rules.OtherSeconds(spell.Level), new TransferRow(spell.Id, BuffStatMods.Stamina, BuffStatMods.Stamina, (float)spell.Proportion, (float)spell.LossPercent, spell.TransferCap));
+                var staminaDefence = staminaGuid != 0 && session.State.Objects.TryGet(staminaGuid, out var staminaSource) ? TargetStatsOf(staminaSource.Weenie.WeenieClassId).Defence : -1;
+                _policyStaminaDrains[0] = new FillLevel(index, spell.Level, spell.BaseMana, spell.Power, rules.OtherSeconds(spell.Level), new TransferRow(spell.Id, BuffStatMods.Stamina, BuffStatMods.Stamina, (float)spell.Proportion, (float)spell.LossPercent, spell.TransferCap), CastChanceOf(lifeNow, spell.Power), LandsOn(lifeNow, staminaDefence));
                 staminaCount = 1;
             }
         }
@@ -349,7 +354,7 @@ public sealed partial class FightScenario
                 }
 
                 var number = PressLevelNumber(level.SpellId);
-                _policyPresses[presses++] = new FillLevel(i, number, level.BaseMana, level.Power, rules.SelfSeconds(number), level.Row);
+                _policyPresses[presses++] = new FillLevel(i, number, level.BaseMana, level.Power, rules.SelfSeconds(number), level.Row, CastChanceOf(lifeNow, level.Power));
             }
         }
 
@@ -363,7 +368,7 @@ public sealed partial class FightScenario
             }
 
             var number = DrainLevelNumber(levels[i].Info.Id);
-            _policyHealthDrains[healthDrains++] = new FillLevel(i, number, levels[i].Info.BaseMana, levels[i].Info.Power, rules.OtherSeconds(number), levels[i].Row);
+            _policyHealthDrains[healthDrains++] = new FillLevel(i, number, levels[i].Info.BaseMana, levels[i].Info.Power, rules.OtherSeconds(number), levels[i].Row, CastChanceOf(lifeNow, levels[i].Info.Power), LandsOn(lifeNow, healthDefence));
         }
 
         // M6 14 upkeep mana: in the fight, with the way out armed (its guard is what a recast under fire must pass), the kept lines and their numbers; and the mana drink she would drink (the biggest held that fits whole).
@@ -410,11 +415,21 @@ public sealed partial class FightScenario
             Upkeep = _policyUpkeep.AsMemory(0, upkeep),
             UpkeepReserve = _wayOut is { } wayOut ? wayOut.Line : 0,
             ManaDrinkGive = drinkGive,
+            Attackers = engaged ? AttackersNow : 0, // M6 heal spend: the attackers on her (self-defence's list: heard swinging, alive), for the health top-up's wait (VitalsPolicy.HealthTopUpWaits)
         };
         reads = new PolicyReads(healthGuid, staminaGuid, line, index, drainRow);
         why = string.Empty;
         return true;
     }
+
+    /// <summary>M6 heal spend: a fill's cast chance (<see cref="FillLevel.Chance"/>): her live Life Magic against its power (<see cref="GearCasts.Chance"/>, the bolt's own read); 1 when her Life Magic is not read.</summary>
+    private static double CastChanceOf(uint life, uint power) => life == 0 ? 1 : GearCasts.Chance(life, power);
+
+    /// <summary>
+    /// M6 heal spend: the share of a drain's casts that land past the source's resist (<see cref="FillLevel.Lands"/>): its Magic Defense against her live Life Magic (<see cref="ManaConversionModel.SkillChance(uint, uint, float)"/>, as the
+    /// bolt's land is read; WorldObject_Magic.cs:104-113); 1 when either is not read.
+    /// </summary>
+    private static double LandsOn(uint life, int defence) => life == 0 || defence <= 0 ? 1 : ManaConversionModel.SkillChance(life, (uint)defence);
 
     /// <summary>Her regeneration enchantments' multipliers (<see cref="VitalsPolicy.RegenMultipliers"/>, shared with the journey's recharge since M6 14's entry recharge).</summary>
     private static (double Health, double Stamina, double Mana) RegenMultipliers(PlayerQualities q) => VitalsPolicy.RegenMultipliers(q);

@@ -214,6 +214,43 @@ public sealed partial class AutopilotScenario
     /// <summary>The <c>reason=</c> of a decision that took a rung's alternate because the rung's own ground is held by its approach (M6 14 armory; <see cref="DecideAlternate"/>).</summary>
     public const string AlternateReason = "alternate";
 
+    /// <summary>
+    /// M6 redoubt: the decision for <paramref name="rung"/> on its outdoor fallback ground (<paramref name="rung"/> carries the fallback's ground, <see cref="RungFallback"/>), taken because the rung's own ground's entry portal does not admit
+    /// <paramref name="liveLevel"/> (<paramref name="refusal"/>, the gate's own name), on the run's ground <paramref name="groundKey"/>: the same loud stops as <see cref="DecideRung"/>, then the move or the hunt; the reason is
+    /// <see cref="EntryFallbackReason"/>. The band, the gate, the bolt plan and the target margin are the rung's own.
+    /// </summary>
+    /// <param name="rung">The rung with the fallback's ground.</param>
+    /// <param name="level">The level the ladder read the rung at (a held level under a shut gate).</param>
+    /// <param name="liveLevel">Her live level, the one the portal reads.</param>
+    /// <param name="groundKey">The run's ground.</param>
+    /// <param name="refusal">The entry's refusal by name (<c>gate:entry:&lt;ground&gt;:&lt;level&gt;&gt;&lt;max&gt;</c>).</param>
+    internal static LadderDecision DecideEntryFallback(LadderRung rung, int level, int liveLevel, string groundKey, string refusal)
+    {
+        ArgumentNullException.ThrowIfNull(rung);
+        var band = string.Create(CultureInfo.InvariantCulture, $"rung {rung.Key} ({rung.Name}, levels {rung.Band.From}-{rung.Band.To}) for level {level}, on its outdoor ground {rung.GroundKey} (its own ground's portal does not admit level {liveLevel}: {refusal})");
+        return DecideOn(rung, level, groundKey, null, EntryFallbackReason, band);
+    }
+
+    /// <summary>The <c>reason=</c> of a decision that took a rung's outdoor fallback ground because the own ground's entry portal does not admit her level (M6 redoubt; <see cref="DecideEntryFallback"/>).</summary>
+    public const string EntryFallbackReason = "entry-fallback";
+
+    /// <summary>
+    /// M6 retreat (the owner, 2026-11-19: the 10-14 rung hunts the Tusker Retreat, the Burrow its alternate): the decision for <paramref name="rung"/> played on one of its live alternates (<paramref name="rung"/> carries the
+    /// alternate's ground and landblock) for a trophy job whose pull that ground holds (<see cref="RungOwner"/>), on the run's ground <paramref name="groundKey"/>: the same loud stops as <see cref="DecideRung"/>, then the hunt, or the
+    /// move, whose stop names the ground after the rung (<c>rung-moved:&lt;rung&gt;@&lt;ground&gt;</c>, <see cref="RungOwner.NamedGround"/>) so the host's restart, which has no quest timers, builds that ground. The band, the gate, the
+    /// bolt plan and the target margin are the rung's own.
+    /// </summary>
+    /// <param name="rung">The rung with the alternate's ground.</param>
+    /// <param name="level">The level the gates hold her at.</param>
+    /// <param name="groundKey">The run's ground.</param>
+    internal static LadderDecision DecideOnGround(LadderRung rung, int level, string groundKey)
+    {
+        ArgumentNullException.ThrowIfNull(rung);
+        var band = string.Create(CultureInfo.InvariantCulture, $"rung {rung.Key} ({rung.Name}, levels {rung.Band.From}-{rung.Band.To}) for level {level}, on its alternate {rung.GroundKey} (the ground of its trophy job's pull)");
+        var decision = DecideOn(rung, level, groundKey, null, null, band);
+        return decision.Kind == LadderStepKind.Moved ? decision with { Stop = decision.Stop + RungOwner.GroundMark + rung.GroundKey } : decision;
+    }
+
     private static LadderDecision DecideOn(LadderRung rung, int level, string groundKey, Func<string, string?>? groundError, string? reason, string band)
     {
         if (rung.Pending || rung.GroundKey is null)
@@ -230,6 +267,15 @@ public sealed partial class AutopilotScenario
         {
             // M6 3 F1 (3-R3): a dungeon whose walk reaches no target slot would hold at its arrival until the run's time limit; the rung stops by name instead (the same refusal as the fight's ground rule).
             return new(LadderStepKind.Unfightable, rung, level, "rung-unfightable:" + rung.Key, false, $"{band}: its ground {rung.GroundKey} hunts 0 of {dungeon.Respawn.Slots.Count} respawn slot(s) (the walk reaches no target slot; see the profile's walk TODOs)", reason);
+        }
+
+        if (!string.Equals(rung.GroundKey, groundKey, StringComparison.Ordinal) && RungFallback.Of(rung) is { } fallback && string.Equals(fallback.GroundKey, groundKey, StringComparison.Ordinal))
+        {
+            // M6 redoubt: a run that stands on the rung's outdoor fallback ground (a climber its own ground's portal refused, a run named by hand) is a run of this rung and hunts on: the ladder sends a new run to the rung's own
+            // ground and never pulls one off the outdoor ground. The decision's rung carries the run's ground, as an alternate's does.
+            var own = rung.GroundKey;
+            rung = rung with { GroundKey = fallback.GroundKey, Landblock = fallback.Landblock };
+            return new(LadderStepKind.Hunt, rung, level, null, true, $"{band} on {groundKey}, the rung's outdoor ground (a run that stands on it hunts on; a new run takes {own})", reason);
         }
 
         if (!string.Equals(rung.GroundKey, groundKey, StringComparison.Ordinal))
@@ -386,6 +432,11 @@ public sealed partial class AutopilotScenario
         if (LadderQuestsPending(session, ladder, level))
         {
             return ScenarioStatus.Running; // M6 0 F4: the quest rung's `quest has` reads are in flight; the cycle's check is made when they are in
+        }
+
+        if (LadderErrandAtCycle(level) is { } errand)
+        {
+            return errand; // M6 sprint (m6-errand-at-cycle): a ladder errand due in her band is called at the cycle's check too, not only on a way home
         }
 
         if (GateRecastFirst(session, ladder, level) is { } recast)
@@ -649,6 +700,11 @@ public sealed partial class AutopilotScenario
 
         int? level = _session is { } s && s.State.Self.Qualities.TryGetInt(PlayerQualities.LevelProperty, out var l) ? l : null;
         uint? health = _session is { } h && h.State.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxHealth, out _, out var max) && max > 0 ? max : null; // M6 7 R: report-only (D27)
+        if (at == "cycle" && tally.Seconds > 0 && _rung is { } own && (string.Equals(_ground.Key, own.GroundKey, StringComparison.Ordinal) || own.Alternates.Any(a => string.Equals(a.GroundKey, _ground.Key, StringComparison.Ordinal))) && _trialCycle is null && !_options.KillTasks.Any(t => string.Equals(t.Ground, _ground.Key, StringComparison.Ordinal)))
+        {
+            (_rungXp, _rungSeconds) = (_rungXp + tally.Xp, _rungSeconds + tally.Seconds); // M6 audit (fix 3): the rate a later kill-task round is weighed against
+        }
+
         if (at == "cycle")
         {
             Emit(new LadderLine(at, _cycle, level, _rung?.Key, _ground.Key, tally, _walkCycleSeconds, _rung?.MoveOn, CastsAKill(_castsCycle, _castsCycleKills), _ladderReason, LadderQuestsDone(), LevelUpSpend.TrainedField(_ladderTrainedCycle), _turnInsCycle, health, _errandsCycle, _survivalHoldsCycle, _survivalLeavesCycle, _lifestoneRecallsCycle, _options.BuffBot, _trialCycle).Text());
@@ -666,6 +722,12 @@ public sealed partial class AutopilotScenario
 
         Emit(new LadderLine(at, _cycles, level, _rung?.Key, _ground.Key, tally, WalkSeconds, _rung?.MoveOn, CastsAKill(_castsTotal, _castsTotalKills), _ladderReason, LadderQuestsDone(), LevelUpSpend.TrainedField(_ladderTrainedRun), _turnInsRun, health, _errandsRun, _survivalHoldsRun, _survivalLeavesRun, _lifestoneRecallsRun, _options.BuffBot, _trialRun ?? _trialCycle).Text());
     }
+
+    private double _rungXp;
+    private double _rungSeconds;
+
+    /// <summary>M6 audit (fix 3): this run's experience an hour over its cycles on the rung's own ground (or its alternate; never the kill task's ground or a trial's), or null before one such cycle closed.</summary>
+    private double? RungXpPerHour() => _rungSeconds > 0 ? _rungXp * 3600.0 / _rungSeconds : null;
 
     /// <summary>The ladder's quests (the keys of its quest rungs) the job knows to be done (<see cref="LadderQuestDone"/>), for the <c>[ladder]</c> line's <c>quests_done=</c> (M6 0 F5, 0-R6).</summary>
     private int LadderQuestsDone() => (_ladder ??= LadderLoader.WarMage).Rungs.Where(r => r.Kind == LadderRungKind.Quest).SelectMany(r => r.QuestKeys).Distinct(StringComparer.Ordinal).Count(LadderQuestDone);
@@ -778,7 +840,7 @@ public sealed partial class AutopilotScenario
 
         _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"ladder: level-up spend: level {level} ({why}): train, then spend, before the rung is decided; Strength floor line: the ground's burden_trip_percent {_ground.Supplies.BurdenTripPercent}"));
         var ground = _ground;
-        var started = new LevelUpSpend(table, _ladderCreditOrder, _ground.Supplies.BurdenTripPercent, _log, BuffBotApplies, LadderCasterFacts, LadderLoreFacts, s => CantripRoom.SellLootBurden(s, ground, _context.Character, _context.Spells)); // M6 14 hour load: the Strength floor leaves out the sell loot she carries // M6 item 14: the Strength floor counts the worn armour's own line and the bot's (StandingStrength); M6 14 (m6-caster-spend): a held caster's points first; M6 14 (m6-lore-spend): her Arcane Lore toward a held piece's ItemDifficulty
+        var started = new LevelUpSpend(table, _ladderCreditOrder, _ground.Supplies.BurdenTripPercent, _log, BuffBotApplies, LadderCasterFacts, LadderLoreFacts, s => CantripRoom.SellLootBurden(s, ground, _context.Character, _context.Spells), LadderRecipeFacts, () => _rung); // M6 audit: the health floor reads the rung she hunts // M6 14 hour load: the Strength floor leaves out the sell loot she carries // M6 item 14: the Strength floor counts the worn armour's own line and the bot's (StandingStrength); M6 14 (m6-caster-spend): a held caster's points first; M6 14 (m6-lore-spend): her Arcane Lore toward a held piece's ItemDifficulty
         started.Begin(session);
         _ladderSpend = started;
         return true;
@@ -1375,6 +1437,29 @@ public sealed partial class AutopilotScenario
         return BeginRun(AutopilotState.Travel, HomeSpec(), "the pass runs at home: " + reason);
     }
 
+    /// <summary>
+    /// M6 audit (finding 9, <c>JourneyFacts.PassAtHomeDue</c>): read at the logistics trip's end at home: the lines the pass would cast (as <see cref="PassHomeFirst"/> counts them) over the ladder's
+    /// <c>pass_home_over_lines</c> name the reason the pass runs at home before the way back; null when the pass is short enough for the ground (<see cref="PassPlaceRule.Decide"/>: a short pass stays).
+    /// </summary>
+    private string? PassAtHomeDue(IGameSessionView session)
+    {
+        if (_rung is null)
+        {
+            return null;
+        }
+
+        _buffOptions ??= _options.Buff ?? new BuffOptions();
+        BuffReads(session);
+        var now = session.Clock.Now;
+        _buffCycle.ReadLines(now, _passLines);
+        var ledger = ArmourBuffLedger.For(session.State);
+        var lines = _passLines.Count(l => !l.Active && !(now < ledger.PassLeftUntil && ledger.PassLeft.Contains(l.Line.Name))); // the same count as PassHomeFirst's
+        var overLines = (_ladder ??= LadderLoader.WarMage).Vitals.PassHomeOverLines;
+        var why = string.Create(CultureInfo.InvariantCulture, $"{lines} line(s) to cast, the line for a walk is over {overLines}");
+        _log.Info(LogCategory, "ladder: pass: at the trip's end at home: " + why + (lines > overLines ? ": the pass runs here" : ": the way back goes on"));
+        return lines > overLines ? why : null;
+    }
+
     /// <summary>M6 7 AK, AO: whether the book holds a line of the climber's buff profile at a level or any higher one (<see cref="RungGateRule.BookKnows"/>).</summary>
     /// <param name="session">The session view.</param>
     internal static Func<string, int, bool> GateKnows(IGameSessionView session) => RungGateRule.BookKnows(BuffProfiles.Climber, session.State.Self.Spellbook.Knows);
@@ -1578,6 +1663,13 @@ public sealed partial class AutopilotScenario
             var text = string.Join(",", want.Select(w => w.ToString(CultureInfo.InvariantCulture)));
             args[JourneyStations.WantArgument] = text;
             _log.Info(LogCategory, $"ladder: the fight's want: {text} ({JourneyStations.WantArgument}={text}: the due trophy quests of {_rung?.GroundKey}, D58)");
+            if (AutopilotQuestRule.Carriers(_rung?.GroundKey, TrophyQuests ?? QuestCatalog.All, want) is { Count: > 0 } carriers)
+            {
+                // M6 audit (the owner's decision of 2026-11-19: every tusk when it is due): the quest files' carriers, so a carrier's corpse is walked to and the tour goes to its spawn slots first (FightScenario.TrophyCarriers.cs)
+                var carriersText = WantCarrier.Format(carriers);
+                args[JourneyStations.CarriersArgument] = carriersText;
+                _log.Info(LogCategory, $"ladder: the fight's carriers: {carriersText} ({JourneyStations.CarriersArgument}=: the tusk's own creature, m6-audit-tusk-carriers)");
+            }
         }
 
         if (_ladderBolt > 0)
@@ -1755,18 +1847,24 @@ public sealed partial class AutopilotScenario
             s.Clock.Time.GetUtcNow(),
             w => GearInventory.CountOf(state, _trophyScratch, w),
             state.Self.Qualities.Level,
-            state.Self.Spellbook.Knows(Fighter.RecallHome.LifestoneRecallSpell),
+            RecallReadiness.Of(state, _context.Facts, _context.Spells).Castable, // M6, the recall's components: known, not refused this run and the pack not short for one cast
             state.Self.Position?.CellId,
             _context.Grounds,
             _context.Routes);
     }
+
+    private readonly HashSet<string> _tuskWaitLogged = new(StringComparer.Ordinal); // M6 audit: a held tusk's wait for the next town run, named once a run
 
     /// <summary>
     /// The errand's call at a way home (the fight's trip, the way home from elsewhere, the recall before an ok stop). First the trophies (D58): each trophy quest of the rung's ground decided by <see cref="AutopilotQuestRule"/> on one line. Then, when no trophy runs, the
     /// ladder errands (M6 8 F, D118; <see cref="LadderErrandCall"/>), each decided on one line. The first that runs starts the quest station in the Trip state. Never a loop: once a trip (a cut errand is called again only after the next logistics trip or death ends), and a
     /// quest that failed is not called again this run (logged by its stop's name). Null: nothing to run, so the caller goes on; a run with no ground rung has no input and asks nothing.
     /// </summary>
-    private ScenarioStatus? QuestErrand(QuestThen then, bool forced, string why)
+    /// <remarks>
+    /// M6 audit (the owner's decision of 2026-11-19: tusks only on town runs, never a trip of their own): <paramref name="trophies"/> false (the call after a trip that ended back on her ground, <see cref="ErrandAfterTrip"/>) leaves the
+    /// trophies out: a held due tusk waits, named once, for the next way home (the hourly trip, a rung change's stop, the way home from elsewhere), where its turn-in is a detour on a trip she makes anyway.
+    /// </remarks>
+    private ScenarioStatus? QuestErrand(QuestThen then, bool forced, string why, bool trophies = true)
     {
         if (_questTripTried || _questTripActive || TrophyInput() is not { } input)
         {
@@ -1774,6 +1872,19 @@ public sealed partial class AutopilotScenario
         }
 
         var calls = AutopilotQuestRule.Calls(input);
+        if (!trophies)
+        {
+            foreach (var waits in calls.Where(c => c.Runs && _options.Quests.Allows(c.Quest.Key)))
+            {
+                if (_tuskWaitLogged.Add(waits.Quest.Key))
+                {
+                    _log.Info(LogCategory, $"autopilot quest: key={waits.Quest.Key}: its trophy is held and due, and it waits for the next town run ({why}: no trip of its own from the ground; m6-audit-tusk-town-run); logged once a run");
+                }
+            }
+
+            calls = [];
+        }
+
         if (!_options.LadderQuests)
         {
             // M6 item 14 S3: the sprint runs no errand: every one that would run now is named once and the caller's way goes on.
@@ -1863,7 +1974,31 @@ public sealed partial class AutopilotScenario
 
         _errandAfterTrip = false;
         var burden = BurdenForTest ?? (TryLoadShares(out _, out var live) ? live : (double?)null);
-        return QuestErrand(QuestThen.Home, forced: false, string.Create(CultureInfo.InvariantCulture, $"after the sale trip (check after: burden {(burden is { } b ? b.ToString("0", CultureInfo.InvariantCulture) + "%" : "unread")})"));
+        return QuestErrand(QuestThen.Home, forced: false, string.Create(CultureInfo.InvariantCulture, $"after the sale trip (check after: burden {(burden is { } b ? b.ToString("0", CultureInfo.InvariantCulture) + "%" : "unread")})"), trophies: false); // M6 audit: the trip ended on her ground: a held tusk waits for the next town run
+    }
+
+    private int _errandCycleAsked = -1;
+    private readonly HashSet<string> _errandAtCycleCalled = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// M6 sprint (run 5, 2026-11-19 14:23 to 15:09 UTC): a ladder errand was called only on a way home, and with the trips an hour apart she made none from level 6 to 10, so Worcer's Missing Heirlooms (band from 5 before 10, 36,000
+    /// experience; its eight heirlooms lie in the Holtburg Redoubt she hunted those levels) passed undone; the run's first check at level 6 never asked. The cycle's check asks the ladder errands too, once a cycle: only the ladder
+    /// errands (a held tusk still waits for a town run, the owner's rule of 2026-11-19; the kill task's talk stays on the way home). Null: none is due, or one was asked this cycle, or the quests are off.
+    /// </summary>
+    private ScenarioStatus? LadderErrandAtCycle(int level)
+    {
+        if (_errandCycleAsked == _cycle || !_options.LadderQuests || _questTripTried || _questTripActive || TrophyInput() is not { } input)
+        {
+            return null;
+        }
+
+        _errandCycleAsked = _cycle;
+        if (LadderErrandCalled(input) is not { } errand || _errandAtCycleCalled.Contains(errand.Quest.Key))
+        {
+            return null; // only an errand never started this run (by any call): a cut or failed one is called again only on a way home, by the rules there (never a loop)
+        }
+
+        return StartErrand(QuestThen.Home, forced: false, errand.Quest.Key, errand.From!, ladder: true, string.Create(CultureInfo.InvariantCulture, $"the cycle's check at level {level}: the ladder errand {errand.Quest.Key} is due ({errand.Quest.Ladder}): the quest station from={errand.From} first (D118; m6-errand-at-cycle)"));
     }
 
     /// <summary>The ladder errands decided, one line each, a band passed with its quest undone named once a session (<c>TODO(m6-ladder-errand-missed)</c>: never run, the band is what guards a level-capped portal); the first that runs, or null.</summary>
@@ -1908,6 +2043,11 @@ public sealed partial class AutopilotScenario
             return null; // M6 8 K: start ready: no enchantment stands: the caller's way goes on, the run's own pass buffs her, and the next way home asks again
         }
 
+        if (ladder && ErrandWaitsForRoll(key))
+        {
+            return null; // M6 audit (fix 10): the roll's chance is under its floor: the caller's way goes on, and the next way home asks again
+        }
+
         if (ladder && ErrandWaitsForLearn(key, then == QuestThen.Trip))
         {
             return null; // M6 14 the element line: the job's bolt line first (one trip's learn), then the errand
@@ -1916,6 +2056,11 @@ public sealed partial class AutopilotScenario
         if (ErrandSellsFirst(then, forced, key, from, ladder, why, steps, out var sale))
         {
             return sale; // M6 14 sell first (the owner, 2026-11-17): the sale trip before an errand from home whose steps gain items, when her pack has no room for them (AutopilotScenario.ErrandRoom.cs)
+        }
+
+        if (ladder)
+        {
+            _errandAtCycleCalled.Add(key); // M6 sprint (m6-errand-at-cycle): an errand started once, by any call, is never the cycle's check's again this run
         }
 
         _questTripTried = true;
@@ -1979,7 +2124,7 @@ public sealed partial class AutopilotScenario
 
         var missing = errand && ok && !done; // a station that ended well with the quest not done: no timer was saved, so calling it again would repeat the same walk
         var stop = "failed:quest:" + key + ":" + JourneyVerdict.Token(missing ? "not-done" : Token(fields, "fail") is { } fail && fail != "none" ? fail : why ?? "failed");
-        var lostRoll = errand && !ok && RecipeRollLost(Token(fields, "fail"));
+        var lostRoll = errand && !ok && (RecipeRollLost(Token(fields, "fail")) || RecipeRollHeld(Token(fields, "fail"))); // M6 audit (fix 10): a roll held under its floor keeps the errand callable too
         var huntGained = errand && !ok && !lostRoll && HuntHeld(key) is var heldNow && heldNow > _errandHuntHeld;
         var walkAgain = errand && !ok && !lostRoll && !huntGained && ErrandWalkFailed(Token(fields, "fail")) && ErrandWalkTry(key);
         if ((!ok || missing) && !lostRoll && !huntGained && !walkAgain)

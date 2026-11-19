@@ -65,6 +65,46 @@ internal static class StackMerge
     }
 
     /// <summary>
+    /// M6 sprint (run 5): the held stack a stack still in the open container joins whole, when the pack it would land in has no free slot (a pick-up there is refused, "Unable to put X into container", <c>Player_Inventory.cs</c>
+    /// 1318-1322 @95ef426d): the fullest held, unequipped stack of its weenie class whose room takes all of it. False when the item does not stack, its size is unknown, or no held stack has the room.
+    /// </summary>
+    /// <param name="state">The read model.</param>
+    /// <param name="item">The stack in the open container.</param>
+    /// <param name="scratch">A list to collect the held guids into (cleared first).</param>
+    /// <param name="target">The held stack it joins.</param>
+    /// <param name="size">The item's stack size (the amount the merge sends).</param>
+    /// <param name="room">The target's room now.</param>
+    internal static bool TryPlanWhole(GameState state, WorldObject item, List<uint> scratch, out uint target, out int size, out int room)
+    {
+        target = 0;
+        room = 0;
+        size = GearInventory.StackOf(state, item);
+        if (item.Weenie.MaxStackSize is not > 1 || size <= 0)
+        {
+            return false;
+        }
+
+        var best = -1;
+        GearInventory.Collect(state, scratch);
+        foreach (var other in scratch)
+        {
+            if (other == item.Guid || !state.Objects.TryGet(other, out var candidate) || candidate.Weenie.WeenieClassId != item.Weenie.WeenieClassId || state.Self.Inventory.Find(other).Kind == InventoryPlaceKind.Equipped)
+            {
+                continue;
+            }
+
+            var max = candidate.Weenie.MaxStackSize ?? item.Weenie.MaxStackSize ?? 0;
+            var have = GearInventory.StackOf(state, candidate);
+            if (max - have >= size && have > best)
+            {
+                (target, best, room) = (other, have, (int)max - have);
+            }
+        }
+
+        return target != 0;
+    }
+
+    /// <summary>
     /// The next merge among the held, unequipped stacks of weenie class <paramref name="wcid"/>: only partial stacks take part (more than 0, under the MaxStackSize), the smallest is the source and the largest other partial the target
     /// (ties by guid), so coin never leaves a full stack. Every merge either empties the source or fills the target, so each one leaves one partial fewer and the merges end when at most one partial is left: no ping-pong
     /// (M5 7 D136 follow-up, soak round 13: the old plan took a full 25,000 stack as a source into a partial one and back, 36 merges in one trip). <paramref name="skip"/> holds the sources whose merge was refused; they are not tried

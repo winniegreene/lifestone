@@ -8,7 +8,7 @@ namespace Lifestone.Client.Tests.Repository;
 /// <summary>
 /// M4 1.1 s3, the testing loop's remainder (m4-plan.md section 4.1 row s3): smoke's summary.json, the locked restore, the test-count baseline file read by
 /// slice-check, the live legs' frame fields and contended rule, the parallel runs' own user-data slots, and the Timing and KnownFailure traits in both
-/// filters. Text tests over tools/*.ps1, README.md and tests/Shared (plus the pure functions run in PowerShell); no Godot, no backend, no dats.
+/// filters. Text tests over tools/*.ps1, TECHNICAL.md and tests/Shared (plus the pure functions run in PowerShell); no Godot, no backend, no dats.
 /// </summary>
 public sealed class ScriptLoopRemainderTests
 {

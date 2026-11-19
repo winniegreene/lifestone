@@ -436,11 +436,18 @@ public static class JourneyPlans
         0,
         [
             new("academy", StationKinds.Academy, null, AcademySkipSeconds, new Dictionary<string, string>(StringComparer.Ordinal) { [QuestArgument] = AcademyStation.SkipKey }),
+            new(BuffBotStation.StationName, StationKinds.BuffBot, null, BotFirstSeconds, new Dictionary<string, string>(StringComparer.Ordinal) { [BuffBotStation.WhenArgument] = BuffBotStation.WhenBotOn }), // M6 sprint (owner ruling 2026-11-19): the bot first, as she arrives beside it from the Academy
             new("pathwarden", StationKinds.Pathwarden, null, PathwardenSeconds),
         ])
     {
         CheatFree = true,
     };
+
+    /// <summary>
+    /// The start-up's stop at the buff bot (Lifestone's own budget): run 5's first round took 84 s with a 43 s walk (2026-11-19 14:27:28 to 14:28:52 UTC, step3-levelup.log); from the Academy's exit she arrives at the Holtburg
+    /// lifestone, in the bot's own cell (0xA9B40019).
+    /// </summary>
+    public const double BotFirstSeconds = 300;
 
     /// <summary>The skip's expected seconds (Lifestone's own, M6 0 F7): five walks between the start rooms of about 10 s each, the greeter's give, the three pick-ups and wears, Jonathan's talk and give with their settles about 60 s, the server's teleport, and the margin.</summary>
     public const double AcademySkipSeconds = 150;

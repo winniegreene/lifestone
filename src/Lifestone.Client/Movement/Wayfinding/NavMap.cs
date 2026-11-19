@@ -434,7 +434,23 @@ public sealed class NavMap
     {
         for (int k = 0; k < scarCount; k++)
         {
-            if (!scarIgnored[k] && SegmentDistance2(scars[k].Centre, a, b) <= scars[k].Radius * scars[k].Radius)
+            float r2 = scars[k].Radius * scars[k].Radius;
+            float near = SegmentDistance2(scars[k].Centre, a, b);
+            if (!scarIgnored[k])
+            {
+                if (near <= r2)
+                {
+                    return false;
+                }
+
+                continue;
+            }
+
+            // M6 sprint (live 2026-11-19 01:51-01:52 UTC, run 3: 93 s against the Scrivener of Item Magic, replayed by ScrivenerDoorStallDatTests): the scar the start stands in was skipped whole, so a pulled line from inside it ran
+            // out through the body on its far side (the replan from the stall, due south through her to the door's lane). A line that leaves from inside it may never come nearer its centre than where it leaves; one from
+            // outside it is judged as by any scar.
+            float df = Vector2.DistanceSquared(a, scars[k].Centre);
+            if (df <= r2 ? near < df - 1e-4f : near <= r2)
             {
                 return false;
             }

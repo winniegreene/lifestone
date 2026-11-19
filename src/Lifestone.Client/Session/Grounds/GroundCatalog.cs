@@ -551,6 +551,38 @@ public static class GroundCatalog
             var exit = top.Has("exit") ? Exit(top.Object("exit")!, kind) : null; // M6 3 a1: the exit's kind (optional)
             var jumps = top.Has("jumps") ? top.List("jumps", Jump) : []; // M6 14 pits: the pits a running jump crosses (optional)
             var plates = top.Has("plates") ? Plates(top.Object("plates")!) : null; // M6 14 holding plates: the pressure plates the walks keep off (optional)
+            GroundGalleries? galleries = null;
+            if (top.Has("galleries"))
+            {
+                // M6 redoubt: the floorless cells a body stands in and the cells that hold their floors (optional)
+                var gallerySection = top.Object("galleries")!;
+                var galleryCells = Cells(gallerySection.Take("cells"), "$.galleries.cells");
+                var galleryFloors = Cells(gallerySection.Take("floors"), "$.galleries.floors");
+                if (galleryCells.Count == 0 || galleryFloors.Count == 0)
+                {
+                    throw Fail("$.galleries", "names no cell or no floor (a gallery is a floorless cell and the cells that hold its floor)");
+                }
+
+                foreach (var cell in galleryCells.Cells)
+                {
+                    if (!storeys.Any(s => s.Cells.Contains(cell)))
+                    {
+                        throw Fail("$.galleries.cells", $"0x{cell:X8} is on no storey (a body stands in a gallery's cell)");
+                    }
+                }
+
+                foreach (var cell in galleryFloors.Cells)
+                {
+                    if (storeys.Any(s => s.Cells.Contains(cell)))
+                    {
+                        throw Fail("$.galleries.floors", $"0x{cell:X8} is on a storey (a cell that holds a gallery's floor is no body's cell)");
+                    }
+                }
+
+                galleries = new GroundGalleries(galleryCells, galleryFloors, gallerySection.Text("source"));
+                gallerySection.End();
+            }
+
 
             var homeSection = top.Object("home")!;
             var home = new GroundHome(homeSection.Text("town"), homeSection.Hex("lifestone_cell"), homeSection.Point("lifestone_point"));
@@ -1150,6 +1182,7 @@ public static class GroundCatalog
                 Entry = entry,
                 Exit = exit,
                 Jumps = jumps,
+                Galleries = galleries,
                 Plates = plates,
                 Scriveners = [.. ScrivenerCatalog.Default.VendorsIn(home.Town).Where(c => !vendors.Any(v => v.Wcid == c.Wcid))], // M6 1 c (D40): the home town's catalog scriveners join the vendor view (additive; a profile's own wins)
             };
@@ -1361,9 +1394,10 @@ public static class GroundCatalog
                     // M5 7 G1: a purse note may be sold too, the sell trip buys it; M5 7 P7j: a learn line's scroll; M6 2 b: a gear floor ware (a caster, a robe, a Mana Charge: Mage.GearFloor; M6 7 AH: hand armour, GearFloor.IsGauntletWare) or one of ACE's trade notes (Scenarios.Journey.PurseNotes)
                     if (supplies.StockOf(ware.Wcid) is null && supplies.KitOf(ware.Wcid) is null && !supplies.Purse.Notes.Any(n => n.Wcid == ware.Wcid) && !learn.Any(l => l.ScrollWcid == ware.Wcid)
                         && !Lifestone.Client.Session.Mage.GearFloor.IsFloorWare(ware.Wcid) && !Lifestone.Client.Session.Mage.GearFloor.IsGauntletWare(ware.Wcid) && !Lifestone.Client.Session.Scenarios.Journey.PurseNotes.All.Any(n => n.Wcid == ware.Wcid)
-                        && ware.Wcid != Lifestone.Client.Session.Fighter.FighterKit.SidePackWcid /* M6 8 D: the side pack a short layout buys (ResupplyPlanner.PackBuy), no stock or kit line of the ground */)
+                        && ware.Wcid != Lifestone.Client.Session.Fighter.FighterKit.SidePackWcid /* M6 8 D: the side pack a short layout buys (ResupplyPlanner.PackBuy), no stock or kit line of the ground */
+                        && !Lifestone.Data.Magic.ComponentWeenies.TryGetByWcid(ware.Wcid, out _) /* M6 sprint (2026-11-18): a spell component: the learn step's shopping list buys it by the vendor's row (ResupplyStation.ScrollKit), with or without a stock line */)
                     {
-                        throw Fail($"$.vendors[{i}].sells[{j}]", $"wcid {ware.Wcid} ({ware.Name}) is not a line of $.supplies.stock, $.supplies.kit, a note of $.supplies.purse or a scroll of $.learn, nor a gear floor ware or a trade note (a vendor lists only the wares the supplies need)");
+                        throw Fail($"$.vendors[{i}].sells[{j}]", $"wcid {ware.Wcid} ({ware.Name}) is not a line of $.supplies.stock, $.supplies.kit, a note of $.supplies.purse or a scroll of $.learn, nor a gear floor ware, a trade note or a spell component (a vendor lists only the wares the supplies need)");
                     }
                 }
             }

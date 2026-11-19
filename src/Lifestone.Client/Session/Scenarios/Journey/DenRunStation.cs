@@ -170,6 +170,12 @@ public sealed class DenRunStation : IStation
                 Fail(refused, string.Create(CultureInfo.InvariantCulture, $"level {_level} (at least {MinLevel}); the book: Primary Portal Tie {tieRecord.TieSpell} {Yes(book.Knows(tieRecord.TieSpell))}, Primary Portal Recall {tieRecord.RecallSpell} {Yes(book.Knows(tieRecord.RecallSpell))}, Lifestone Recall {RecallHome.LifestoneRecallSpell} {Yes(book.Knows(RecallHome.LifestoneRecallSpell))}"));
             }
 
+            // M6, the recall's components: the run's way home is Lifestone Recall, cast in the den; one the pack is short for, or ACE refused earlier this run, refuses the run before it begins (RecallReadiness).
+            if (RecallReadiness.Of(S.State, Context.Facts, Context.Spells) is { Castable: false, WhyNot: { } notCastable })
+            {
+                Fail(RefusedPrefix + "lifestone-recall:not-castable", notCastable);
+            }
+
             // The skill each cast of this run needs against hers (check before; the portal recall is cast on a later day, on the skill she has then).
             foreach (var (spell, word) in new[] { (tieRecord.TieSpell, "primary-portal-tie"), (RecallHome.LifestoneRecallSpell, "lifestone-recall") })
             {

@@ -323,6 +323,7 @@ public sealed partial class JourneyLegRunner : Node
         // M6 5 Q2: the quest timers' file, user://quests/<character>.json (QuestTimers.FileName), shared by the Godot journeys and the autopilot (AutopilotHost builds its legs here); IsolateUserData isolates it.
         var questStore = new UserDataCheckpointStore(ProjectSettings.GlobalizePath("user://" + Lifestone.Client.Session.Quests.QuestTimers.FileName(plan.Character)));
         var context = JourneyScenario.NewContext(plan, log, spells, keeper, dats, runners, observer, windowFrames: windows, dungeon: ground, questStore: questStore);
+        JourneyBotFacts.Apply(context.Facts, plan, arguments); // M6 onscreen start: the Pathwarden station's stop at the buff bot reads the autopilot's option here too, as in the headless journey (the autopilot's scenario sets both again from its options)
         return (factory, context, runners);
     }
 

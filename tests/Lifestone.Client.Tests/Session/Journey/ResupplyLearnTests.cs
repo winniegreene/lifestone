@@ -71,6 +71,22 @@ public sealed partial class ResupplyStationTests
     }
 
     [Fact]
+    public void M6_sprint_a_spell_learned_on_a_trip_goes_on_her_spell_bar_at_once()
+    {
+        // Run 5 (2026-11-19 18:22:32 UTC): Impenetrability V and Bludgeon Bane V, learned on the trip, stood on no bar; the cycle's gate recast refused them ("on none of her spell bars") and the gates fell to the level 5-9 rung.
+        // Owner ruling 2026-11-19: a spell she learns goes on her bar, as a player puts it there.
+        var home = new Home(Den, 2_000_000, description: LearnMage(itemRanks: 200));
+        var server = ScrollServer(home, teach: true, []);
+        var run = home.Start(new ResupplyOptions(Memory: new SaleMemory()));
+
+        Assert.Equal(ScenarioStatus.Succeeded, home.Stations.Run(run, 600, pump: server));
+        Assert.Equal(1, run.Learned);
+        Assert.Contains(home.Vendor.H.Net.Of(FakeSendKind.AddSpellFavorite), s => s.Guid == SpiritDrinkerIV);
+        Assert.True(home.Logged("on its learning (m6-learn-to-bar)"));
+        Assert.Contains(home.Vendor.State.Self.Spellbook.SpellBars, bar => !bar.IsDefault && bar.Contains(SpiritDrinkerIV));
+    }
+
+    [Fact]
     public void The_scroll_the_spellbook_lacks_is_bought_at_the_scrivener_read_and_learned_and_never_bought_again()
     {
         var home = new Home(Den, 2_000_000, description: LearnMage(itemRanks: 200)); // Item Enchantment 250: IV's power 150 needs 100

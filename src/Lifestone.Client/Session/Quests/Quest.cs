@@ -336,7 +336,14 @@ public sealed record Quest
     /// <summary>The repeat timer in seconds (a 20-hour quest is 72000), or null when the quest is done once per character.</summary>
     public required int? TimerSeconds { get; init; }
 
-    /// <summary>Where the values come from; the facts not established are named <c>TODO(name): ...</c> entries (<see cref="Todos"/>).</summary>
+    /// <summary>
+    /// M6 audit (the owner's decision of 2026-11-19: every tusk when it is due): where <see cref="TimerSeconds"/> starts (the file's optional <c>timer_from</c>): <see cref="QuestTimerFrom.TurnIn"/>, the default, or
+    /// <see cref="QuestTimerFrom.Pickup"/> when the server stamps the quest as the hunt-until step's item is picked up (the tusks' own Quest strings, ACE <c>EmoteManager.OnQuest</c>): the timer then runs from the moment the item was
+    /// first seen in the pack (<see cref="TrophyPickups"/>), never earlier than the pickup, so never early.
+    /// </summary>
+    public QuestTimerFrom TimerFrom { get; init; } = QuestTimerFrom.TurnIn;
+
+    /// <summary>Where the values come from;the facts not established are named <c>TODO(name): ...</c> entries (<see cref="Todos"/>).</summary>
     public required IReadOnlyList<string> Sources { get; init; }
 
     /// <summary>M6 0 F8: the burden gate of the quest's pick-ups, or null for none (the file's optional <c>carry</c> object).</summary>
@@ -483,4 +490,14 @@ public sealed record QuestKillRate(uint Wcid, int Kills, double Minutes, string 
 {
     /// <summary>The kills a minute.</summary>
     public double PerMinute => Kills / Minutes;
+}
+
+/// <summary>M6 audit: where a quest's repeat timer starts (<see cref="Quest.TimerFrom"/>; the file's <c>timer_from</c>).</summary>
+public enum QuestTimerFrom
+{
+    /// <summary>At the turn-in, the default: the station records the completion when it reads the done evidence.</summary>
+    TurnIn,
+
+    /// <summary>At the pickup of the hunt-until step's item, whose own Quest string the server stamps then (the file's <c>"pickup"</c>).</summary>
+    Pickup,
 }

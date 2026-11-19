@@ -132,8 +132,12 @@ public sealed class XpSpendRule
     /// M6 14 hour load (<c>m6-hour-load</c>): the burden of the sell loot she carries (<see cref="CantripRoom.SellLootBurden"/>), which the Strength floor leaves out of the burden it carries: the trip sells it, and on a comfortable ground the hour's
     /// line carries it to 150% of the capacity by design (the trip's spend runs before the sale; live ladder37 03:17:02 UTC read 18,279 there). Null (the default): the measured burden whole, as before.
     /// </param>
-    public XpSpendRule(XpTableData table, ILogSink? log = null, int maxRaises = MaxRaisesPerCall, double maxSeconds = MaxSecondsPerCall, bool followLevel = false, int? burdenTripPercent = null, Grounds.Ladder? healthLadder = null, Func<bool>? standingBot = null, Func<CasterSpendFacts?>? casterFacts = null, Func<LoreSpendFacts?>? loreFacts = null, Func<GameState, long>? sellLootBurden = null)
+    /// <param name="recipeFacts">M6 audit (fix 10): the roll a ladder errand of her band makes (<see cref="RecipeSpendFacts"/>), read at each call: its skill is raised toward <see cref="Quests.RecipeChance.RollFloor"/> before the shares (<see cref="RecipeSpend"/>). Null (the default): none.</param>
+    /// <param name="huntedRung">M6 audit: the rung she hunts (the autopilot's decision), or null: the health floor reads its want when it has one (a held rung's below it), else the level's rung's (<see cref="ClimberHealthRule.NeedFor"/>).</param>
+    public XpSpendRule(XpTableData table, ILogSink? log = null, int maxRaises = MaxRaisesPerCall, double maxSeconds = MaxSecondsPerCall, bool followLevel = false, int? burdenTripPercent = null, Grounds.Ladder? healthLadder = null, Func<bool>? standingBot = null, Func<CasterSpendFacts?>? casterFacts = null, Func<LoreSpendFacts?>? loreFacts = null, Func<GameState, long>? sellLootBurden = null, Func<RecipeSpendFacts?>? recipeFacts = null, Func<Grounds.LadderRung?>? huntedRung = null)
     {
+        _recipeFacts = recipeFacts;
+        _huntedRung = huntedRung;
         _sellLootBurden = sellLootBurden;
         _loreFacts = loreFacts;
         _casterFacts = casterFacts;
@@ -149,6 +153,9 @@ public sealed class XpSpendRule
         MaxRaises = maxRaises;
         MaxSeconds = maxSeconds;
     }
+
+    private readonly Func<RecipeSpendFacts?>? _recipeFacts;
+    private readonly Func<Grounds.LadderRung?>? _huntedRung;
 
     /// <summary>The raises one call may send.</summary>
     public int MaxRaises { get; }
@@ -338,7 +345,9 @@ public sealed class XpSpendRule
         }
 
         var ladder = _ladder;
-        if (ladder is null || ClimberHealthRule.NeedAt(ladder, q.Level) is not { } need)
+        var hunted = _huntedRung?.Invoke();
+        var need = ladder is null ? null : hunted?.Health is not null ? ClimberHealthRule.NeedFor(ladder, hunted) : ClimberHealthRule.NeedAt(ladder, q.Level); // M6 audit: the rung she hunts when it has a want (a held rung's below it), else the level's
+        if (ladder is null || need is null)
         {
             return null;
         }
@@ -431,6 +440,17 @@ public sealed class XpSpendRule
             if (decision.Pushes.Count > 0)
             {
                 plan = Compute([.. decision.Pushes, .. pushes]);
+            }
+        }
+
+        if (_ladder is not null && _recipeFacts?.Invoke() is { } recipe)
+        {
+            // M6 audit (fix 10, the owner's decision of 2026-11-19): a ladder errand's roll toward its 0.80 floor, after the floors, the lore and the caster, before every share, in the caster rule's reach
+            var push = RecipeSpend.Push(_table, q, recipe, q.AvailableExperience, FloorsOwed(q, plan) + (LoreDecision?.Cost ?? 0) + (CasterDecision?.Cost ?? 0), out var rollLine);
+            _log?.Info(LogCategory, "xp: roll: " + rollLine);
+            if (push is not null)
+            {
+                plan = Compute([push, .. CasterDecision?.Pushes ?? [], .. pushes]);
             }
         }
 

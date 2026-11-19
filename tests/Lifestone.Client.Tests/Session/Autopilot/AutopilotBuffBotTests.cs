@@ -7,6 +7,7 @@ using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
 using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Mage;
+using Lifestone.Client.Session.Quests;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Session.Scenarios.Journey;
 using Lifestone.Data.Magic;
@@ -195,8 +196,9 @@ public sealed class AutopilotBuffBotTests(ITestOutputHelper output)
 
         Assert.Equal(ScenarioStatus.Running, ToTheFight(w, run)); // the run goes on: her pass, the way out, the fight
 
-        Assert.Equal(["buff-bot", "buff"], home.Order);
-        Assert.Equal((0, 1), (run.BuffBotStops, run.BuffBotFailures));
+        Assert.Equal(["buff-bot", "buff-bot", "buff-bot", "buff"], home.Order); // M6 audit (fix 1, the owner's decision of 2026-11-19): the stop is asked again, three tries, before her own pass
+        Assert.Equal((0, BuffBotRule.StopTries), (run.BuffBotStops, run.BuffBotFailures));
+        Assert.Equal(BuffBotRule.StopTries - 1, w.Trip.Vendor.H.Log.Entries.Count(e => e.Severity == LogSeverity.Warning && e.Message.Contains("m6-audit-bot-retry", StringComparison.Ordinal)));
         Assert.Null(run.StopName);
         Assert.Equal(AutopilotState.Fight, run.State);
         var warn = Assert.Single(w.Trip.Vendor.H.Log.Entries, e => e.Message.Contains("m6-buffbot-fallback", StringComparison.Ordinal));
@@ -258,7 +260,7 @@ public sealed class AutopilotBuffBotTests(ITestOutputHelper output)
         Assert.Equal(2, lines.Length);
         Assert.Contains("bot cover: on: ", lines[0], StringComparison.Ordinal);
         Assert.Contains("bot cover: off: the bot has not answered this run (1 stop(s) failed, none landed): her own scrolls are bought and her own whole pass is planned", lines[1], StringComparison.Ordinal);
-        Assert.Equal((0, 1), (run.BuffBotStops, run.BuffBotFailures));
+        Assert.Equal((0, BuffBotRule.StopTries), (run.BuffBotStops, run.BuffBotFailures)); // M6 audit (fix 1): three tries before her own pass
 
         var off = AtHome(output);
         _ = new Home(off);
@@ -353,7 +355,9 @@ public sealed class AutopilotBuffBotTests(ITestOutputHelper output)
     {
         // Live 2026-11-11 18:42 UTC, the Cave: no supply trip came for an hour, the bot's lines lapsed in the field, and she died on her own level IV ten minutes later.
         var w = AtHome(output);
-        w.Level(9); // under the ladder's first quest errand (level 10): the trip asked is the bot's alone
+        w.Level(9);
+        w.Quests = new QuestTimers("Bot"); // M6 audit (the owner's decision of 2026-11-19): the heirloom errand's band is the Redoubt rung's 5 to 9 now; recorded done, so the trip asked is the bot's alone
+        w.Quests.Complete(QuestCatalog.Get("worcer-heirlooms"), DateTimeOffset.UnixEpoch, QuestTimers.HowReply);
         var home = new Home(w) { BotSeconds = 600 }; // the scripted bot's lines: fresh in the first fight's first read (it arms the rule), under the trip's line (420 s) three minutes on
         var run = w.Autopilot(LevelUp);
         Assert.Equal(ScenarioStatus.Running, ToTheFight(w, run));

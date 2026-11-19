@@ -10,6 +10,12 @@ public static class RecipeChance
     /// <summary>ACE's factor of a non-magic skill check (<c>SkillCheck.GetSkillChance</c>'s default).</summary>
     public const double Factor = 0.03;
 
+    /// <summary>
+    /// M6 audit (fix 10, the owner's decision of 2026-11-19: the Atlan wand's roll is a dice roll; the errand starts only once she could reasonably get the skill to at least an 80% chance): the least chance a ladder errand's roll
+    /// goes at. The errand waits for it (<c>AutopilotScenario.ErrandWaitsForRoll</c>), the level-up spend buys toward it (<see cref="Mage.RecipeSpend"/>), and the quest station holds a roll under it, by name, instead of rolling.
+    /// </summary>
+    public const double RollFloor = 0.80;
+
     /// <summary>ACE's chance that <paramref name="skill"/> beats <paramref name="difficulty"/>.</summary>
     /// <param name="skill">The player's current skill (with the augmentation; the climber has none).</param>
     /// <param name="difficulty">The recipe's difficulty.</param>

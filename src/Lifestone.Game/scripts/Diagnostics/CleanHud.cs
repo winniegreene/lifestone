@@ -21,6 +21,7 @@ public sealed partial class CleanHud : Node
     public static void Attach(Node main)
     {
         ArgumentNullException.ThrowIfNull(main);
+        Lifestone.Client.RetailUi.Chat.GameChatWindow.HideLifestoneLines = true; // M6 sprint: Lifestone's own chat lines stay out of the video's chat window (they still reach the log)
         main.AddChild(new CleanHud { Name = "CleanHud" });
     }
 

@@ -80,7 +80,7 @@ public sealed class FetchQuestTests
     public void Worcer_is_on_the_ladder_with_its_band_and_no_open_todo_and_a_way_out_of_the_redoubt()
     {
         var q = QuestCatalog.Get("worcer-heirlooms");
-        Assert.Equal(new QuestLadder(10, 18, true), q.Ladder);
+        Assert.Equal(new QuestLadder(5, 10, true), q.Ladder); // M6 audit (the owner's decision of 2026-11-19): the Redoubt rung's own levels (D140)
         Assert.Empty(q.Todos);
         var way = TravelRoutes.Default.WayHomeFrom("0x0163", 5);
         Assert.Equal(TravelOutcome.Admitted, way.Outcome);

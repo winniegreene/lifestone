@@ -84,6 +84,14 @@ public enum LoginCheckKind
     /// (<c>--autopilot-minutes</c>, <c>--autopilot-level</c>), then the game logs off and quits; the exit code is the done line's ok.
     /// </summary>
     Autopilot,
+
+    /// <summary>
+    /// <c>--login-check=climber-start</c> (M6 onscreen start, owner ruling 2026-11-19: the sprint's whole run in one game window and one process): on the climber's account (<c>qwinnie</c>: Qwinnie; <c>test</c>: Winnie), the old climber is deleted
+    /// on the character screen and the new one made through character creation's pages to the climber's template (<see cref="Lifestone.Client.Session.Scenarios.ClimberCreateScenario"/> on screen), checked and the old copy purged; then the
+    /// climber's first journey (the Academy and the Pathwarden quest) runs in the same session; then, only when the creation read <c>granted=0</c> and the journey <c>cheat_free=yes granted=0 place=0 recovery_place=0</c>
+    /// (<see cref="Lifestone.Client.Session.Scenarios.ClimberStartGate"/>), the play host's autopilot is installed and its <c>--autopilot-*</c> options apply (with <c>--autopilot-start</c>, the level up job starts at once).
+    /// </summary>
+    ClimberStart,
 }
 
 /// <summary>
@@ -133,6 +141,12 @@ public sealed record PlayOptions
     /// travel's turn) and logs the showpiece events, but saves no frame, so a screen capture of the window records the run at its full frame rate (a 1080p frame's save stalls the game about 0.5 s).
     /// </summary>
     public bool JourneyFilm { get; init; }
+
+    /// <summary>
+    /// <c>--climber-start-wait-file=PATH</c> (M6 onscreen start, with <c>--login-check=climber-start</c> only): the climber start holds at the character list until this file exists (the recorder's go: <c>tools\climb.ps1 -OneWindow -Record</c>
+    /// writes it once the window's recording has begun), so the video holds the whole creation; null: no hold. Resolved by the output-path rule (relative to the repository).
+    /// </summary>
+    public string? ClimberStartWaitFile { get; init; }
 
     /// <summary>
     /// The folder <c>--play-panel-shots=DIR</c> saves one frame of each registered panel page to (M3 2.2 s0; <see cref="PanelFramesPlan"/>), or null: in a plain <c>--play</c> run, after the arrival settles, each page is
@@ -600,6 +614,7 @@ public sealed record PlayOptions
                         ("hunt", LoginCheckKind.Hunt),
                         ("journey", LoginCheckKind.Journey),
                         ("autopilot", LoginCheckKind.Autopilot),
+                        ("climber-start", LoginCheckKind.ClimberStart),
                         ("keep", LoginCheckKind.Keep),
                         ("all", LoginCheckKind.All)),
                 };
@@ -608,6 +623,7 @@ public sealed record PlayOptions
 
         options = JourneyChecked(options, args, errors);
         options = AutopilotChecked(options, args, errors);
+        options = ClimberStartChecked(options, args, errors);
         options = JourneyShotsChecked(options, args, errors);
         if (options is { LoginCheck: LoginCheckKind.Buff or LoginCheckKind.BsdFight or LoginCheckKind.BsdDeath or LoginCheckKind.Hunt or LoginCheckKind.Journey or LoginCheckKind.Autopilot, ScreenshotPath: { } shot, ScreenshotAfterGiven: false })
         {
@@ -728,6 +744,48 @@ public sealed record PlayOptions
         }
 
         return options;
+    }
+
+    /// <summary>
+    /// <c>--login-check=climber-start</c>'s rules (M6 onscreen start): the run is on a climber's account (<c>qwinnie</c> or <c>test</c>; no <c>--account</c> is the test account) and <c>--climber-start-wait-file</c> is read by it alone.
+    /// </summary>
+    private static PlayOptions ClimberStartChecked(PlayOptions options, IEnumerable<CommandLineArgument> args, List<string> errors)
+    {
+        string? account = null;
+        string? waitFile = null;
+        foreach (var argument in args)
+        {
+            if (argument.Name == "--account" && argument.HasValue)
+            {
+                account = argument.Value;
+            }
+            else if (argument.Name == "--climber-start-wait-file")
+            {
+                waitFile = argument.HasValue && !string.IsNullOrWhiteSpace(argument.Value) ? argument.Value : null;
+                if (waitFile is null)
+                {
+                    errors.Add("--climber-start-wait-file: needs a path (relative to the repository)");
+                }
+            }
+        }
+
+        if (options.LoginCheck != LoginCheckKind.ClimberStart)
+        {
+            if (waitFile is not null)
+            {
+                errors.Add("--climber-start-wait-file: only --login-check=climber-start reads it");
+            }
+
+            return options;
+        }
+
+        var effective = string.IsNullOrWhiteSpace(account) ? "test" : account;
+        if (Lifestone.Client.Session.Scenarios.Journey.JourneyPlans.Climbers.All(p => !string.Equals(p.Account, effective, StringComparison.Ordinal)))
+        {
+            errors.Add($"--login-check=climber-start: the climber start runs on a climber's account ({string.Join(" or ", Lifestone.Client.Session.Scenarios.Journey.JourneyPlans.Climbers.Select(p => p.Account))}); '{effective}' is refused");
+        }
+
+        return options with { ClimberStartWaitFile = waitFile };
     }
 
     /// <summary>

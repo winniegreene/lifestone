@@ -301,14 +301,29 @@ public sealed partial class JourneyTravel : IJourneyTravel
                 }
 
                 var wayHome = _dungeon is null ? null : WayHomeRule.Choose(_dungeon, session.State.Self.Spellbook);
-                if (wayHome is { Kind: WayHomeKind.Walk })
+                var near = session.State.Self.Position is { } stands && _dungeon is not null && WayHomeRule.StandsNear(_dungeon, stands.CellId);
+                if (wayHome is { Kind: WayHomeKind.Walk } && near)
                 {
                     return WalkHome(session, request, _dungeon!, wayHome, now);
                 }
 
                 if (HomeByPortals(session, request, homeLandblock) is { } byPortals)
                 {
-                    return byPortals; // M6 4 F1 (4-R1): the book lacks Lifestone Recall (D43) and a way home by portals is known
+                    return byPortals; // M6 4 F1 (4-R1): the book lacks Lifestone Recall (D43), or (M6 sprint) she cannot cast it, and a way home by portals is known
+                }
+
+                if (wayHome is { Kind: WayHomeKind.Walk })
+                {
+                    // M6 sprint: not near home and no way by portals: a walk across the world is no way home; named, never planned
+                    _log.Warn(LogCategory, $"journey travel: REFUSED the walk home to {destination.Name}: she stands at {Where(session)}, not in {_dungeon!.Home.Town}'s landblock or {_dungeon.Key}'s, and no way home by portals is known: travel:home:not-near");
+                    return new FixedLeg(TravelMeans.None, "travel:home:not-near"); // a refusal: nothing moves
+                }
+
+                if (wayHome is { Kind: WayHomeKind.Recall } && RecallReadiness.Of(session.State, _facts, null) is { Castable: false } cannot) // the book, the run's refusal and the tie (the components are the travel rule's, read with the spell table before this leg)
+                {
+                    // M6 sprint: the recall is the way left, and it cannot be cast: named before the cast, not by the server's refusal
+                    _log.Warn(LogCategory, $"journey travel: REFUSED Lifestone Recall home: {cannot.WhyNot}, and no way home by portals is known from {Where(session)}: travel:recall:not-castable");
+                    return new FixedLeg(TravelMeans.Recall, "travel:recall:not-castable");
                 }
 
                 if (wayHome is { Kind: not WayHomeKind.Recall })
@@ -463,7 +478,7 @@ public sealed partial class JourneyTravel : IJourneyTravel
         }
 
         var state = session.State;
-        var input = AutopilotTravelRule.Input(state, ground, _facts, context.Routes, direction, context.Grounds);
+        var input = AutopilotTravelRule.Input(state, ground, _facts, context.Routes, direction, context.Grounds, context.Spells);
         var bookRead = AutopilotTravelRule.BookRead(state.Self.Spellbook);
         var decided = direction == RungDirection.Home ? AutopilotTravelRule.Home(input, bookRead, context.Routes) : AutopilotTravelRule.Out(input, bookRead, context.Routes);
         _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"journey travel: the travel rule: direction={(direction == RungDirection.Home ? "home" : "out")} way={decided.WayName} ground={ground.Key} place={input.Place} where={input.Where.ToString().ToLowerInvariant()}{(input.BodyGround is { } body ? " body_ground=" + body.Key : string.Empty)} level={input.Level} tie={input.Tie.ToString().ToLowerInvariant()} lifestone_recall={(input.KnowsLifestoneRecall ? "yes" : "no")} route={decided.Route ?? "n/a"}; why: {decided.Reason}"));
@@ -771,6 +786,14 @@ public sealed partial class JourneyTravel : IJourneyTravel
                         var slot = JourneyFacts.SlotHoldsFailure(holder);
                         owner._log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"journey travel: the recall to {target.Key} landed in cell 0x{landed.CellId:X8}, {holder.Key}'s arrival: the primary tie's one slot holds {holder.Key}, so {target.Key} is untied: {slot}"));
                         return End(TravelStatus.Failed, "travel:" + slot);
+                    }
+
+                    if (home && recall.SpellId == RecallHome.LifestoneRecallSpell && recall.RefusedForComponents)
+                    {
+                        // M6, the recall's components (live 2026-11-18 20:29:54 UTC: this leg's cast was refused 0x0400 and the fact stayed unset until the recall-home station was refused too, 50 s later): the seam names it as that
+                        // station does (M6 7 AV), so the caller's recovery and every later way-home decision of the run leave the recall out.
+                        owner._facts.LifestoneRecallUnavailable = true;
+                        owner._log.Info(LogCategory, "journey travel: recall-unavailable:components: ACE refused Lifestone Recall for a missing component (0x0400): the recall counts as not available for the rest of this run");
                     }
 
                     var step = recall.Failure is { } f && f.StartsWith("recall:", StringComparison.Ordinal) ? f["recall:".Length..] : recall.Failure ?? "unknown";

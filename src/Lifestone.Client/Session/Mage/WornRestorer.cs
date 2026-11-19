@@ -176,7 +176,7 @@ public sealed class WornRestorer
     {
         ArgumentNullException.ThrowIfNull(ground);
         var ladder = LadderLoader.WarMage;
-        var rung = level >= 1 && level <= ladder.TopLevel && ladder.RungFor(level) is { } r && string.Equals(r.GroundKey, ground.Key, StringComparison.Ordinal) ? r : null;
+        var rung = level >= 1 && level <= ladder.TopLevel && ladder.RungFor(level) is { } r && (string.Equals(r.GroundKey, ground.Key, StringComparison.Ordinal) || Grounds.RungFallback.Names(r, ground.Key)) ? r : null; // M6 redoubt: the rung's outdoor ground is the rung's too
         var element = SelfEquipJudge.ElementOf(rung?.Element, ground.PlanFor(level)?.Family, out var how);
         source = rung is null ? how + string.Create(CultureInfo.InvariantCulture, $" (no ladder rung of level {level} names {ground.Key})") : how + $" (rung {rung.Key})";
         return element;

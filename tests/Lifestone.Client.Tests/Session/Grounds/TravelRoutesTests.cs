@@ -14,7 +14,7 @@ public sealed class TravelRoutesTests
     private static readonly TravelRoutes Routes = TravelRoutes.Default;
 
     private static readonly string[] IslandGrounds =
-        ["tusker-burrow", "tusker-lodge", "tusker-cave", "tusker-cavern", "tusker-abode", "tusker-habitat", "tusker-quarters", "tusker-barracks", "tusker-holding"];
+        ["tusker-burrow", "tusker-retreat", "tusker-lodge", "tusker-cave", "tusker-cavern", "tusker-abode", "tusker-habitat", "tusker-quarters", "tusker-barracks", "tusker-holding"];
 
     private static readonly string[] StopTowns = ["fort-tethana", "stonehold", "plateau", "qalabar", "dryreach"];
 
@@ -121,7 +121,7 @@ public sealed class TravelRoutesTests
         Assert.NotEmpty(Routes.Places);
         Assert.All(Routes.Edges, e => Assert.False(string.IsNullOrWhiteSpace(e.Source), e.Key));
         Assert.Equal(Routes.Edges.Count, Routes.Edges.Select(e => e.Key).Distinct().Count());
-        Assert.Equal(["tusker-abode", "tusker-armory", "tusker-barracks", "tusker-burrow", "tusker-cave", "tusker-cavern", "tusker-habitat", "tusker-holding", "tusker-lodge", "tusker-quarters"],
+        Assert.Equal(["tusker-abode", "tusker-armory", "tusker-barracks", "tusker-burrow", "tusker-cave", "tusker-cavern", "tusker-habitat", "tusker-holding", "tusker-lodge", "tusker-quarters", "tusker-retreat"],
             Routes.GroundKeys.Where(k => k.StartsWith("tusker-", StringComparison.Ordinal) && !k.StartsWith("tusker-temple", StringComparison.Ordinal)).OrderBy(k => k, StringComparer.Ordinal));
         Assert.Throws<KeyNotFoundException>(() => Routes.Edge("no-such-edge"));
     }
@@ -183,6 +183,36 @@ public sealed class TravelRoutesTests
         Assert.Equal(new TravelGate(10, null), Routes.RoutesFor("tusker-burrow").Single(r => r.Key == "by-refuge").Gate);
         Assert.Equal(new TravelGate(15, null), Routes.RoutesFor("tusker-burrow").Single(r => r.Key == "by-facility-hub").Gate);
         Assert.True(Routes.RoutesFor("tusker-burrow").Single(r => r.Key == "by-facility-hub").Run!.Metres < Routes.RoutesFor("tusker-burrow").Single(r => r.Key == "by-refuge").Run!.Metres);
+    }
+
+    /// <summary>
+    /// M6 retreat (the owner, 2026-11-19: the 10-14 rung hunts the Tusker Retreat): by the Refuge from 10 (921.5 m straight from Oolutanga's arrival, by via points round the island's camps), and from 15 by the hub's Lodge portal, whose drop is
+    /// 200.5 m from the Retreat's entry (the hub has no Retreat portal); the entry's own gate is 5, under both. Its Surface exit drops on the island place's 0xF97E, whose way home is the Refuge's.
+    /// </summary>
+    [Fact]
+    public void The_retreat_is_reached_by_the_refuge_from_10_and_by_the_hubs_lodge_drop_from_15()
+    {
+        var routes = Routes.RoutesFor("tusker-retreat");
+        Assert.Equal(["by-facility-hub", "by-refuge"], routes.Select(r => r.Key));
+        Assert.Equal(["holtburg-to-network", "network-to-facility-hub", "hub-lodge"], routes[0].Steps.Select(s => s.Edge.Key));
+        Assert.Equal(new TravelGate(15, null), routes[0].Gate);
+        Assert.Equal(new TravelGate(10, null), routes[1].Gate);
+        Assert.InRange(routes[0].Run!.Metres, 200.4, 200.6);
+        Assert.InRange(routes[1].Run!.Metres, 921.4, 921.6);
+        Assert.Equal((22694u, 0x7F97E000u), (routes[1].Run!.EntryWcid, routes[1].Run!.EntryGuid));
+        Assert.Equal(TravelOutcome.Refused, Routes.FirstAdmitted("tusker-retreat", 9, entryMinLevel: 5).Outcome);
+        Assert.Equal("by-refuge", Routes.FirstAdmitted("tusker-retreat", 10, entryMinLevel: 5).Route!.Key);
+        Assert.Equal("by-refuge", Routes.FirstAdmitted("tusker-retreat", 14, entryMinLevel: 5).Route!.Key);
+        Assert.Equal("by-facility-hub", Routes.FirstAdmitted("tusker-retreat", 15, entryMinLevel: 5).Route!.Key);
+        foreach (var r in routes)
+        {
+            var via = r.Run!.Via!;
+            Assert.Equal(31, via.BelowLevel); // the low tables' creatures are level 30 at most
+            Assert.All(via.Points, p => Assert.False(string.IsNullOrWhiteSpace(p.Why)));
+        }
+
+        Assert.Equal("island", Routes.PlaceOf("0xF97E")?.Key);
+        Assert.Equal("refuge", Routes.WayHomeFrom("0xF97E", 10).WayHome!.Key);
     }
 
     /// <summary>M6 7 J: the Holding by the Barracks drop first (gate 40, the nearest start, D51), the Refuge second, with the entry's own gate over both.</summary>

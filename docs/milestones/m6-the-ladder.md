@@ -190,6 +190,33 @@ unattended play, about 16-18 without it (computed; the low rungs assumed). The d
 Abode holds Redeemers at 60, not Minions at 40; the Quarters and Barracks hold level-80 Slaves and Guards); the
 strategist's memo §4 lists each correction.
 
+**The Redoubt (2026-11-18).** The row "Holtburg's outskirts and the Redoubt" was hunted on the outdoor half alone:
+the ground `holtburg-outskirts`, one creature to a cell and 300 s to the next, where the live run of 2026-11-18
+walked 1,488 of its 2,606 s for 51 kills (`cache/m6/sprint/run1/step3-levelup.log`, the `[ladder]` line). By the
+owner's decision of 2026-11-18 the rung `outskirts` (levels 5 to 9) hunts the Holtburg Redoubt instead. Its ground
+is `holtburg-redoubt` (landblock 0x0163): 18 level 8 drudges on one generator (delay 90 s, tick 60 s; the pinned
+world SQL), entered on foot by a portal for levels 1 to 20 that stands 458 m from Holtburg's lifestone. The fight
+simulator's row for it (`tools\fight-sim.ps1 rank --her Qwinnie --max-level 40`, 2026-11-18) reads 18,720 experience
+and 47 s of casting a clear and a respawn of 120 s; its live rate is not measured yet. Its hall has a walkway whose
+floor other cells hold, so the profile names its galleries (`galleries`, `HoltburgRedoubtDatTests`).
+
+The switch is made in `ladder/war-mage.json`: the rung keeps its key and its band and names the Redoubt, with the
+Drudge Prowler as its hitter by the rung's own rule. The outdoor ground stays the rung's, as its outdoor fallback
+(listed as its alternate; `RungFallback`), by three rules:
+
+- A new run of the rung takes the Redoubt. A climber its portal does not admit (above level 20, held down to the rung
+  by shut gates or by the vitae burn) hunts the outdoor ground in its place; the portal's refusal is named on the
+  choice and logged, and the reason stays the gate's or the vitae's hold.
+- A run that stands on the outdoor ground is a run of this rung and hunts on there: the ladder never pulls a run off
+  it.
+- Every rule that finds a rung by its ground finds this rung for the outdoor ground too (the learn plan, the scroll
+  keep, the corpse run, the worn restorer's element).
+
+The rung's learn plan now holds Bludgeoning Protection Self, because the Redoubt's drudges bludgeon (the profile's
+targets' damage types); on the outdoor ground it planned Armor Self alone. The outdoor ground is never taken by an
+approach's verdict, so `--autopilot-hold-grounds=holtburg-redoubt` does not put her there
+(`TODO(m6-redoubt-alternate)`).
+
 ### 5.3 The Holding (computed; gate D measures it)
 
 A Rampager pays 80,000 XP for 435 health (item 0's SELECT: the start value 280 plus half its Endurance of 310, as ACE's

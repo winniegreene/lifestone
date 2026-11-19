@@ -508,6 +508,17 @@ public sealed partial class FightScenarioTests
         public double? MoveToFailsAfter { get; set; }
 
         private readonly Queue<(uint Corpse, double Due, bool Fail)> _opens = new();
+
+        /// <summary>
+        /// M6 sprint: when above 0, a pick-up lands this many seconds after its send (ACE's pick-up motion, about 1.35 s live); a pick-up whose corpse is no longer the open one by then is refused with no move
+        /// (ACE: "Source item not found!", run 4 04:02:22 UTC). 0: at once.
+        /// </summary>
+        public double PickSeconds { get; set; }
+
+        /// <summary>M6 sprint: the pick-ups refused because their corpse was closed before they landed.</summary>
+        public List<uint> PicksLost { get; } = [];
+
+        private readonly Queue<(uint Item, uint Corpse, double Due)> _picks = new();
         private readonly Queue<double> _keyAnswers = new();
 
         /// <summary>M6 14: the movement controller a test bound with <see cref="BindKeys"/> (its presses and releases), or null: with none bound no key can be pressed.</summary>
@@ -779,6 +790,12 @@ public sealed partial class FightScenarioTests
                             break;
                         }
 
+                        if (PickSeconds > 0)
+                        {
+                            _picks.Enqueue((send.Guid, R.H.State.Containers.ViewedGuid, now + PickSeconds));
+                            break;
+                        }
+
                         R.Server((p, s) => AceM3Writers.PutObjInContainer(p, s, send.Guid, WorldActionRig.Player, 0, 0));
                         break;
                     case FakeSendKind.NoLongerViewingContents:
@@ -847,12 +864,26 @@ public sealed partial class FightScenarioTests
                 R.UseDone(); // M6 14: the Use whose walk a key ended: a UseDone 0 and no contents
             }
 
+            while (_picks.Count > 0 && _picks.Peek().Due <= now)
+            {
+                var pick = _picks.Dequeue();
+                if (R.H.State.Containers.ViewedGuid == pick.Corpse)
+                {
+                    R.Server((p, s) => AceM3Writers.PutObjInContainer(p, s, pick.Item, WorldActionRig.Player, 0, 0));
+                }
+                else
+                {
+                    PicksLost.Add(pick.Item);
+                    R.Server((p, s) => AceM3Writers.InventoryServerSaysFailed(p, s, pick.Item, 0));
+                }
+            }
+
             while (_opens.Count > 0 && _opens.Peek().Due <= now)
             {
                 var open = _opens.Dequeue();
                 if (open.Fail)
                 {
-                    R.UseDone(0x0036);
+                    R.UseDone(); // M6 sprint: as ACE answers a failed walk-to-use, SendUseDoneEvent() with no error (Player_Use.cs:160-166 @95ef426d; run 5's log: "UseDone 0x00000000 with no 0196 ViewContents")
                 }
                 else
                 {

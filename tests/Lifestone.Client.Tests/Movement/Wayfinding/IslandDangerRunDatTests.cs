@@ -26,6 +26,7 @@ namespace Lifestone.Client.Tests.Movement.Wayfinding;
 /// <remarks>
 /// The numbers go to the test log (metres, seconds, cells before and after, the cells by name). The world rows are the travel file's own, checked by <c>TravelRoutesSqlTests.Every_danger_table_is_what_the_pinned_world_SQL_holds</c>.
 /// The fronts are the entry fronts of <see cref="IslandRunDatTests"/>. Water stays what it was: these runs cross none. The back run ends at the Refuge's arrival, 13.5 m from the Refuge's portal 42852, so it reads the way home's side of the island as well.
+/// M6 retreat: the Tusker Retreat's two runs, by the Refuge (10 to 14) and from the hub's Lodge drop (15 on, whose back run ends at that drop).
 /// </remarks>
 [Trait("Tier", "Exhaustive")]
 public sealed class IslandDangerRunDatTests(DatSetFixture fixture, ITestOutputHelper output) : IClassFixture<DatSetFixture>
@@ -42,13 +43,21 @@ public sealed class IslandDangerRunDatTests(DatSetFixture fixture, ITestOutputHe
 
     private static readonly Vector3 RefugeArrival = new(145.7f, 49.9f, 58.0f);
 
-    private sealed record Case(string Name, string Ground, uint FrontBlock, Vector3 Front, int MostNoticed, int MostInDisc);
+    /// <summary>A case: the ground, its route's key and the run's start (the Refuge's arrival, or a hub drop), the entry's front, and the most cells the via runs may notice and enter.</summary>
+    private sealed record Case(string Name, string Ground, uint FrontBlock, Vector3 Front, int MostNoticed, int MostInDisc, string Route = "by-refuge", uint StartCell = RefugeCell, Vector3? Start = null);
+
+    /// <summary>M6 retreat: the hub's Lodge portal 42181 drops at 0xF97F003E (187.876, 122.937, 46.1508) (its Destination row, IslandRunDatTests).</summary>
+    private const uint LodgeDropCell = 0xF97F003E;
 
     private static readonly Case[] Cases =
     [
         // The Burrow's front stands 22.6 m from the generator 0xFA81:0,7: no walk to it keeps out of that one.
         new("burrow", "tusker-burrow", 0xF9810000, new(179.24f, 186.73f, 12.5f), 1, 1),
         new("lodge", "tusker-lodge", 0xFA7F0000, new(10.54f, 120.14f, 45.2f), 0, 1), // out 0 and 0; back, one disc's edge, 33 m from 0xF881:0,1
+        // M6 retreat: the Retreat's front (165.64, 118.52), 3 m along the entry 22694's facing (GroundDraft.FrontOf), stands 18 m outside the disc of 0xFA7E:0,3. Out 0 and 0 on both runs; back, the way round 0xF97F:5,2's
+        // disc (its edge the land leaves no wider) comes 24 m from that generator, and one more disc's edge (0xF881:0,1 at 33 m, 0xF97F:6,4 at 33 m from the hub's drop).
+        new("retreat", "tusker-retreat", 0xF97E0000, new(165.64f, 118.52f, -0.1f), 1, 2),
+        new("retreat-hub", "tusker-retreat", 0xF97E0000, new(165.64f, 118.52f, -0.1f), 1, 2, "by-facility-hub", LodgeDropCell, new(187.876f, 122.937f, 46.1508f)),
     ];
 
     public static TheoryData<string> Names()
@@ -69,11 +78,12 @@ public sealed class IslandDangerRunDatTests(DatSetFixture fixture, ITestOutputHe
     public void The_via_run_arrives_out_and_back_and_keeps_off_the_encounter_cells(string name)
     {
         var c = Cases.Single(x => x.Name == name);
-        var run = TravelRoutes.Default.RoutesFor(c.Ground).Single(r => r.Key == "by-refuge").Run!;
+        var run = TravelRoutes.Default.RoutesFor(c.Ground).Single(r => r.Key == c.Route).Run!;
         var via = run.Via!.Points;
-        var refuge = new CellFrame(RefugeCell, new AcFrame(RefugeArrival, Quaternion.Identity));
+        var startAt = c.Start ?? RefugeArrival;
+        var refuge = new CellFrame(c.StartCell, new AcFrame(startAt, Quaternion.Identity));
         var front = new NavPoint(c.FrontBlock, c.Front);
-        var refugePoint = new NavPoint(RefugeCell & 0xFFFF0000u, RefugeArrival);
+        var refugePoint = new NavPoint(c.StartCell & 0xFFFF0000u, startAt);
         var points = via.Select(v => new NavPoint(v.Cell & 0xFFFF0000u, v.Origin)).ToArray();
 
         var before = Walk(name + " straight", refuge, [front]);

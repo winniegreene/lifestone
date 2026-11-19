@@ -28,8 +28,9 @@ namespace Lifestone.Client.Tests.Session.Autopilot;
 /// </remarks>
 public sealed class HeadlessClimbTests(ITestOutputHelper output)
 {
-    private const string Outskirts = "holtburg-outskirts";
-    private const string Burrow = "tusker-burrow";
+    // M6 redoubt (the owner's decision of 2026-11-18): the rung outskirts' own ground is the Holtburg Redoubt; the outdoor ground holtburg-redoubt is the rung's fallback for a climber the portal does not admit (RungFallback)
+    private const string Outskirts = "holtburg-redoubt";
+    private const string Burrow = "tusker-retreat"; // M6 retreat (the owner, 2026-11-19): the burrow rung's ground is the Tusker Retreat (the Burrow its alternate)
 
     /// <summary>What the run reads standing in a gate line's place: the bot's level VII spell, as the live log read it (<see cref="AutopilotMoveOnLoopTests"/>).</summary>
     private static string? Stands(string line, int level) =>
@@ -193,17 +194,18 @@ public sealed class HeadlessClimbTests(ITestOutputHelper output)
         Assert.Equal(2, rig.Scenarios.Count);
         Assert.Same(rig.Scenarios[1], climb.Autopilot);
         Assert.Equal(Burrow, climb.Rungs.Ground?.Key);
-        Assert.Same(JourneyPlans.Climber, rig.Plans[0]); // an outdoor rung: the climber's plan as it is
+        Assert.Equal(JourneyPlans.Climber with { Ground = StationWhere.Den }, rig.Plans[0]); // M6 redoubt: the rung outskirts is a dungeon rung now (the Holtburg Redoubt): the plan's ground is the den, as the Burrow's
+        Assert.Same(JourneyPlans.Climber, AutopilotHostLogic.PlanFor(rig.Options, GroundCatalog.Get("holtburg-outskirts"))); // an outdoor ground (the rung's fallback): the climber's plan as it is
         Assert.Equal(StationWhere.Den, rig.Plans[1].Ground); // a dungeon rung: the plan's ground is the den (AutopilotHostLogic.PlanFor), chosen by the client, not by the host
         Assert.Equal(StationWhere.Den, climb.Rungs.Plan?.Ground);
 
         // she levelled in the fight, the run read the Burrow's gate open where she stood and ended rung-moved, and the dial restarted once by itself, in the frame of the stop (a headless kit is ready as soon as it is asked for)
-        Assert.Contains(rig.Lines, l => l.StartsWith("ladder: rung: asked by start: level=9 read_at=9", StringComparison.Ordinal) && l.EndsWith("-> rung=outskirts ground=holtburg-outskirts reason=band", StringComparison.Ordinal));
+        Assert.Contains(rig.Lines, l => l.StartsWith("ladder: rung: asked by start: level=9 read_at=9", StringComparison.Ordinal) && l.EndsWith("-> rung=outskirts ground=holtburg-redoubt reason=band", StringComparison.Ordinal));
         Assert.Contains(rig.Lines, l => l.StartsWith("autopilot fight: stop asked (move-on-reached) at kills=3", StringComparison.Ordinal));
         Assert.Single(rig.Lines, l => l.StartsWith("autopilot stop=rung-moved:burrow: ", StringComparison.Ordinal));
         Assert.Equal(1, climb.Logic.MoveOns);
         Assert.Null(climb.Logic.MoveOnRefusal);
-        Assert.Contains(rig.Lines, l => l.Contains("ladder: rung: asked by move-on: level=10 read_at=10", StringComparison.Ordinal) && l.EndsWith("named=burrow -> rung=burrow ground=tusker-burrow reason=stop-named:burrow", StringComparison.Ordinal));
+        Assert.Contains(rig.Lines, l => l.Contains("ladder: rung: asked by move-on: level=10 read_at=10", StringComparison.Ordinal) && l.EndsWith("named=burrow -> rung=burrow ground=tusker-retreat reason=stop-named:burrow", StringComparison.Ordinal));
         Assert.Contains(rig.Lines, l => l.Contains("ladder: move-on restart: act: the next rung's parts are ready; the dial starts the next run now (restart 1)", StringComparison.Ordinal));
 
         // the play host's own lines, word for word, now written by the client: one for each ground the kit was built over, the start's first
@@ -213,11 +215,11 @@ public sealed class HeadlessClimbTests(ITestOutputHelper output)
         Assert.Equal($"autopilot: level up: level 10, the run's ground is {Burrow} ({GroundCatalog.Get(Burrow).Name}); the parts are built over it", built[1]);
 
         // what the restart carries: the ended run's hand-over, and the run stays unattended (the one start's token, then the move-on's)
-        Assert.Contains(rig.Lines, l => l == "autopilot host: the start carries the hand-over of the run that just ended (rung-moved:burrow on holtburg-outskirts): the next run checks each part before it uses it");
+        Assert.Contains(rig.Lines, l => l == "autopilot host: the start carries the hand-over of the run that just ended (rung-moved:burrow on holtburg-redoubt): the next run checks each part before it uses it");
         Assert.Contains(rig.Lines, l => l == "autopilot: started by " + HeadlessClimbScenario.StartedBy);
         Assert.Contains(rig.Lines, l => l == "autopilot: started by " + AutopilotHostLogic.MoveOnReason);
         Assert.True(climb.Logic.StartedByOption);
-        Assert.Contains(rig.Lines, l => l.StartsWith("autopilot start: ", StringComparison.Ordinal) && l.Contains(" on tusker-burrow ", StringComparison.Ordinal));
+        Assert.Contains(rig.Lines, l => l.StartsWith("autopilot start: ", StringComparison.Ordinal) && l.Contains(" on tusker-retreat ", StringComparison.Ordinal));
         Assert.DoesNotContain(rig.Lines, l => l.Contains(AutopilotHostLogic.MoveOnLoopStop, StringComparison.Ordinal));
 
         // the climb's lines hold the ended run's done line though the dial's scenario is the next one
@@ -293,7 +295,7 @@ public sealed class HeadlessClimbTests(ITestOutputHelper output)
         Assert.Equal([Outskirts, Burrow], rig.Kits.MadeOn);
         Assert.True(logic.StartedByOption); // the run stays the unattended one across the rung
         Assert.Contains(rig.Lines, l => l == "autopilot: started by " + AutopilotHostLogic.MoveOnReason);
-        Assert.Contains(rig.Lines, l => l == "autopilot host: the start carries the hand-over of the run that just ended (rung-moved:burrow on holtburg-outskirts): the next run checks each part before it uses it");
+        Assert.Contains(rig.Lines, l => l == "autopilot host: the start carries the hand-over of the run that just ended (rung-moved:burrow on holtburg-redoubt): the next run checks each part before it uses it");
     }
 
     [Fact]
@@ -357,7 +359,7 @@ public sealed class HeadlessClimbTests(ITestOutputHelper output)
 
         Assert.Equal(ScenarioStatus.Failed, status);
         Assert.False(climb.Ok);
-        Assert.StartsWith(AutopilotHostLogic.MoveOnLoopStop + ": the run on holtburg-outskirts stopped with rung-moved:burrow to leave that ground", climb.Failure, StringComparison.Ordinal);
+        Assert.StartsWith(AutopilotHostLogic.MoveOnLoopStop + ": the run on holtburg-redoubt stopped with rung-moved:burrow to leave that ground", climb.Failure, StringComparison.Ordinal);
         Assert.Equal([Outskirts], rig.Kits.MadeOn); // no second run was built
         Assert.Equal(1, climb.Logic.UnattendedEnd!.ExitCode);
     }

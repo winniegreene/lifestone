@@ -170,6 +170,7 @@ public sealed class NpcBodies
     private readonly List<NavBody> _seen = [];
     private readonly List<NavBody> _stamped = [];
     private readonly List<(Vector2 Centre, float Radius)> _discs = [];
+    private readonly List<(NavBody Body, float Gap)> _offLevel = [];
 
     /// <summary>The bodies the last <see cref="Refresh"/> kept (outdoor, on the lattice's level, neither the goal's object nor holding the goal).</summary>
     public IReadOnlyList<NavBody> Seen => _seen;
@@ -185,6 +186,9 @@ public sealed class NpcBodies
 
     /// <summary>The bodies the last refresh left out because they stand on another level than the lattice's ground.</summary>
     public int OffLevel { get; private set; }
+
+    /// <summary>M6 sprint (live 2026-11-19 01:52 UTC, run 3: one body was left out as off its level on every plan of the walk that stood against the Scrivener of Item Magic, and the log could not say which): the bodies the last refresh left out as off level, with the gap in metres between their feet and the lattice's ground at their centre.</summary>
+    public IReadOnlyList<(NavBody Body, float Gap)> OffLevelBodies => _offLevel;
 
     /// <summary>A body's disc: the walker's radius (<see cref="NavCreatures.PlayerRadiusMetres"/>) plus the body's own.</summary>
     /// <param name="bodyRadius">The body's own radius.</param>
@@ -210,6 +214,7 @@ public sealed class NpcBodies
         feed.Fill(from, maxMetres, _fill);
         _seen.Clear();
         _stamped.Clear();
+        _offLevel.Clear();
         Indoor = 0;
         AtGoal = 0;
         OffLevel = 0;
@@ -235,6 +240,7 @@ public sealed class NpcBodies
             if (map is not null && map.TryGetNode(NavPoint.FromGlobal(b.Centre, b.Z), out var node) && MathF.Abs(node.Z - b.Z) > HeightBandMetres)
             {
                 OffLevel++;
+                _offLevel.Add((b, b.Z - node.Z));
                 continue;
             }
 

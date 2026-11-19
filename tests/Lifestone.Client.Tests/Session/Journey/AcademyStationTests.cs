@@ -147,7 +147,7 @@ public sealed class AcademyStationTests(DatSetFixture fixture, ITestOutputHelper
         var plan = JourneyPlans.Climber;
         Assert.True(plan.CheatFree);
         Assert.Equal(0, plan.TeleportBudget);
-        Assert.Equal([StationKinds.Academy, StationKinds.Pathwarden], plan.Stations.Select(s => s.Kind));
+        Assert.Equal([StationKinds.Academy, StationKinds.BuffBot, StationKinds.Pathwarden], plan.Stations.Select(s => s.Kind)); // M6 sprint: the bot stop between them, only while the run's bot is on
         Assert.Equal(AcademyStation.SkipKey, plan.Stations[0].Arguments[JourneyPlans.QuestArgument]); // M6 0 F7, D37: the climber takes the tutorial's own skip
         Assert.Equal(JourneyPlans.AcademySkipSeconds, plan.Stations[0].ExpectedSeconds);
         Assert.Contains(StationKinds.Academy, StationKinds.All);

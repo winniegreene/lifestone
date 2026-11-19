@@ -919,6 +919,7 @@ public sealed partial class NavRunner : IDisposable
         _tracking = false;
         _nextCreatureRefresh = now;
         _lastCreatureReplan = double.NegativeInfinity;
+        ResetNpcAhead(now); // M6 sprint: m6-npc-ahead
         FailureReason = null;
         State = NavRunState.Running;
         _zoneLogged = false;
@@ -1313,6 +1314,17 @@ public sealed partial class NavRunner : IDisposable
         }
 
         if (StepCreatures(now, position, here, route, s))
+        {
+            if (IsDone || _confirming || _route is null)
+            {
+                return;
+            }
+
+            route = _route;
+            s = Progress(route, here);
+        }
+
+        if (StepNpcBodies(now, position, here, route, s)) // M6 sprint (m6-npc-ahead): a body seen on the route ahead after the plan
         {
             if (IsDone || _confirming || _route is null)
             {
@@ -2103,6 +2115,22 @@ public sealed partial class NavRunner : IDisposable
             return false;
         }
 
+        // M6 sprint (live 2026-11-18 20:30:09-20:30:44 UTC, journey-cell-62: a walk planned from Dryreach to the Holtburg outskirts waited 30 s, in 4-5 s plans on the main thread, for about a hundred tiles): while the body
+        // stands, the hosts' corridor feed attaches only the focus ring round her landblock and the next HeadlessStreamer.AheadLandblocks along the line to the goal (FollowRoute with no path: AheadBlocks of the straight
+        // line). A wait helps only when a missing tile lies in that set; with none there the tiles cannot come while she stands: no wait, the failure names them at once.
+        var here = NavMap.FromCellFrame(position).Global;
+        var reach = StreamableWhileStanding(here, _goal!.Point.Global);
+        if (!missing.Any(reach.Contains))
+        {
+            if (_tilesWaitSince is null)
+            {
+                _log.Info(LogCategory, "check before: the missing tiles lie beyond what the streamer attaches round the standing body: no wait", new LogField("name", Options.Name), new LogField("reason", path.Reason), new LogField("missing", names), new LogField("streamable", reach.Count));
+            }
+
+            gaveUp = string.Create(CultureInfo.InvariantCulture, $"; the tiles {names} lie beyond the ring round her landblock and the next {HeadlessStreamer.AheadLandblocks} along the line, which is all the streamer attaches while she stands: no wait");
+            return false;
+        }
+
         if (_tilesWaitSince is { } waiting)
         {
             if (now - waiting >= HorizonWaitSeconds)
@@ -2127,6 +2155,31 @@ public sealed partial class NavRunner : IDisposable
         ReleaseAll();
         _lastProgressTime = now;
         return true;
+    }
+
+    /// <summary>
+    /// The landblocks (<c>0xXXYY0000</c>) the hosts attach while the body stands at <paramref name="body"/> with no path (M6 sprint, <see cref="WaitForTiles"/>): the focus ring of one landblock round the body's
+    /// (<see cref="HeadlessStreamer.AheadBlocks"/>'s <c>ring</c>) and the corridor's next <see cref="HeadlessStreamer.AheadLandblocks"/> along the straight line to <paramref name="goal"/>.
+    /// </summary>
+    /// <param name="body">The body's global position in metres.</param>
+    /// <param name="goal">The goal's global position in metres.</param>
+    internal static HashSet<uint> StreamableWhileStanding(Vector2 body, Vector2 goal)
+    {
+        var set = new HashSet<uint>(HeadlessStreamer.AheadBlocks(body, [], goal, HeadlessStreamer.AheadLandblocks));
+        var id = NavPoint.FromGlobal(body, 0f).LandblockId;
+        var (x, y) = ((int)(id >> 24), (int)((id >> 16) & 0xFF));
+        for (var dx = -1; dx <= 1; dx++)
+        {
+            for (var dy = -1; dy <= 1; dy++)
+            {
+                if (x + dx is >= 0 and <= 0xFF && y + dy is >= 0 and <= 0xFF)
+                {
+                    set.Add(((uint)(x + dx) << 24) | ((uint)(y + dy) << 16));
+                }
+            }
+        }
+
+        return set;
     }
 
     /// <summary>The landblocks (<c>0xXXYY0000</c>) with no attached tile on the straight line from <paramref name="from"/> to <paramref name="to"/>, in order, walked in land-cell steps.</summary>
@@ -2234,6 +2287,11 @@ public sealed partial class NavRunner : IDisposable
             return keep.FirstMeeting(path.Waypoints) is { } met ? KeepOffName(keep, met.Portal, $"leg {met.Leg} of the plan's {path.Waypoints.Count} waypoints passes within the clearance") : null;
         }
 
+        if (path.Reason is "no-path" or "no-horizon" && _paths.Map is { } map && _goal is { } goal && MissingTiles(map, NavMap.FromCellFrame(position).Global, goal.Point.Global).Count > 0)
+        {
+            return null; // M6 sprint: a plan that failed with tiles missing on its line is the tile wait's (WaitForTiles), not the portals': a plan without the list over the same missing tiles fails the same way, so it is not made (half the cost of each attempt)
+        }
+
         if (rooms is not null)
         {
             rooms.KeepOff = null;
@@ -2320,7 +2378,17 @@ public sealed partial class NavRunner : IDisposable
             new LogField("at_goal", _npcs.AtGoal),
             new LogField("off_level", _npcs.OffLevel),
             new LogField("indoor", _npcs.Indoor),
-            new LogField("plans", plans));
+            new LogField("plans", plans),
+            new LogField("stamped_bodies", BodyNames(_npcs.Stamped.Select(b => (b, (float?)null)))),
+            new LogField("off_level_bodies", BodyNames(_npcs.OffLevelBodies.Select(o => (o.Body, (float?)o.Gap)))));
+    }
+
+    /// <summary>M6 sprint: the bodies of a log line by guid, name, distance from the body and (off level) the gap to the lattice's ground: which NPC the plan held or left out.</summary>
+    private string BodyNames(IEnumerable<(NavBody Body, float? Gap)> bodies)
+    {
+        var here = (Vector2?)NavMap.FromCellFrame(_body.Position).Global;
+        var parts = bodies.Select(x => string.Create(CultureInfo.InvariantCulture, $"0x{x.Body.Guid:X8}:{x.Body.Name.Replace(' ', '_')}{(here is { } h ? $"@{Vector2.Distance(h, x.Body.Centre):0.0}m" : string.Empty)}{(x.Gap is { } g ? $":dz={g:+0.0;-0.0}" : string.Empty)}")).ToArray();
+        return parts.Length == 0 ? "none" : string.Join(",", parts);
     }
 
     /// <summary>

@@ -55,6 +55,20 @@
     <Reference Include="Microsoft.EntityFrameworkCore" HintPath="$(_LsAceDir)Microsoft.EntityFrameworkCore.dll" Private="false" />
   </ItemGroup>
 
+  <!--
+    Her in-fight policy (InFight.cs, docs/fight-sim.md "With her heals"): the fight plays the client's own pure rules
+    (Session/Vitals: FightEmergency's heal line, HealPick, VitalsPolicy; Mage/BuffStatMods; Grounds/LadderLoader), called
+    here rather than copied (M6 item 16, D139, the owner's ruling of 2026-11-17: one owner per automation decision). Lifestone.Client is engine-free (no Godot);
+    it brings Lifestone.Data's one package, Chorizite.DatReaderWriter, the repository's own. The two transitive packages
+    Directory.Build.props keeps out of every Lifestone build output are kept out here the same way (this project is outside
+    src/ and tests/, so the props do not apply to it): no package is added.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Lifestone.Client\Lifestone.Client.csproj" />
+    <PackageReference Include="DotNet.Standard.Common" Version="2.0.1" ExcludeAssets="all" PrivateAssets="all" />
+    <PackageReference Include="ZLibDotNet" Version="0.1.1" ExcludeAssets="all" PrivateAssets="all" />
+  </ItemGroup>
+
   <Target Name="LifestoneFightSimCheckAce" BeforeTargets="ResolveAssemblyReferences">
     <Error Condition="!Exists('$(_LsAceDir)ACE.Server.dll')"
            Text="Lifestone fight sim: no ACE.Server.dll in '$(_LsAceDir)'. Set the backend up once from the main checkout (server\README.md), or pass -p:AceDir=&lt;the folder of a built ACE&gt;\." />

@@ -198,13 +198,81 @@ public sealed class HuntingGroundDatTests(DatSetFixture fixture, ITestOutputHelp
         }
     }
 
-    /// <summary>The dungeons the climber (Winnie, account <c>test</c>) hunts (M6 3 F3); M6 14 holding safety: the Holding too, its kit now the climber's general one (no longer BSD Mage's den lines); M6 14 armory: the Armory, the Holding rung's alternate with its kit.</summary>
+    /// <summary>The dungeons the climber (Winnie, account <c>test</c>) hunts (M6 3 F3); M6 14 holding safety: the Holding too, its kit now the climber's general one (no longer BSD Mage's den lines); M6 14 armory: the Armory, the Holding rung's alternate with its kit; M6 redoubt: the Holtburg Redoubt, built for the rung outskirts.</summary>
     public static readonly string[] ClimberAccountKeys =
     [
-        "tusker-burrow", "tusker-lodge", "tusker-cavern", "tusker-cave", "tusker-temple-20-40", "tusker-abode", "tusker-habitat", "tusker-quarters", "tusker-barracks", "cave-of-alabree", "tusker-holding", "tusker-armory",
+        "tusker-burrow", "tusker-lodge", "tusker-cavern", "tusker-cave", "tusker-temple-20-40", "tusker-abode", "tusker-habitat", "tusker-quarters", "tusker-barracks", "cave-of-alabree", "tusker-holding", "tusker-armory", "holtburg-redoubt", "tusker-retreat",
     ];
 
     public static TheoryData<string> ClimberKeys() => new(ClimberAccountKeys);
+
+    /// <summary>M6 sprint (2026-11-18): Archmage Cindrue's weenie class.</summary>
+    private const uint Cindrue = 2304;
+
+    /// <summary>
+    /// M6 sprint (2026-11-18): the five spell components the profiles' rows of Archmage Cindrue lacked, with the price of her rate (max(1, ceil(1.35 x Value - 0.1)), Vendor.cs 577-585 @95ef426d; Values 5, 10, 10, 5 and 5: her
+    /// create-list rows 21033, 20980, 20982, 21003 and 21007, a read-only SELECT of 2026-11-18 on the world copy, named in each profile's sources.vendors).
+    /// </summary>
+    private static readonly (uint Wcid, string Name, int Price)[] CindrueComponents = [(746, "Hazel Talisman", 7), (767, "Comfrey", 14), (769, "Dragonsblood", 14), (788, "Powdered Malachite", 7), (792, "Powdered Turquoise", 7)];
+
+    /// <summary>Every profile that lists Archmage Cindrue.</summary>
+    public static TheoryData<string> CindrueKeys() => new(GroundCatalog.All.Where(g => g.Vendors.Any(v => v.Wcid == Cindrue)).Select(g => g.Key));
+
+    /// <summary>Every profile that lists Archmage Cindrue, for each of the climbers' accounts (Winnie's <c>test</c>, Qwinnie's <c>qwinnie</c>: CLAUDE.md, the accounts).</summary>
+    public static TheoryData<string, string> CindrueKeysByAccount()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var key in GroundCatalog.All.Where(g => g.Vendors.Any(v => v.Wcid == Cindrue)).Select(g => g.Key))
+        {
+            data.Add(key, "test");
+            data.Add(key, "qwinnie");
+        }
+
+        return data;
+    }
+
+    /// <summary>
+    /// M6 sprint (the live log of 2026-11-18, 20:25:31 UTC: the learn step named Comfrey, Powdered Malachite, Dragonsblood, Hazel Talisman and Powdered Turquoise short, "no vendor of Holtburg sells it", though the world's
+    /// create list of Archmage Cindrue holds all five): every profile's row of her sells the five at her rate, so the learn step's shopping list finds a vendor for each (wares only: <c>TODO(m6-recall-components-stock)</c>).
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(CindrueKeys))]
+    public void Every_profiles_row_of_Archmage_Cindrue_sells_the_five_components_the_live_log_named_short(string key)
+    {
+        var ground = GroundCatalog.Get(key);
+        var cindrue = Assert.Single(ground.Vendors, v => v.Wcid == Cindrue);
+        foreach (var (wcid, name, price) in CindrueComponents)
+        {
+            var ware = Assert.Single(cindrue.Sells, w => w.Wcid == wcid);
+            Assert.Equal((name, price), (ware.Name, ware.Price));
+            Assert.True(ComponentWeenies.TryGetByWcid(wcid, out _), $"{name} is a spell component: the loader takes it as a ware without a supply line");
+        }
+    }
+
+    /// <summary>
+    /// M6 sprint (the live log of 2026-11-18, 20:29:54 UTC: the server refused Lifestone Recall, YouDontHaveAllTheComponents): every component Lifestone Recall (spell 1635) burns on the full formula of a climber's account
+    /// (<see cref="SpellFormulaRules.CustomizeForAccount"/>, the dats) is a ware of a vendor of every profile that lists Archmage Cindrue, so a town trip can buy the way home's components.
+    /// </summary>
+    [RequiresDatsTheory]
+    [MemberData(nameof(CindrueKeysByAccount))]
+    public void A_profile_with_Archmage_Cindrue_sells_every_component_Lifestone_Recall_burns_on_a_climbers_account_formula(string key, string account)
+    {
+        var ground = GroundCatalog.Get(key);
+        var info = SpellTableData.Load(fixture.Dats).Spells[Lifestone.Client.Session.Fighter.RecallHome.LifestoneRecallSpell];
+        var missing = new List<string>();
+        foreach (var id in SpellFormulaRules.CustomizeForAccount(info.Formula, info.FormulaVersion, account).Where(i => i != 0).Distinct())
+        {
+            var weenie = ComponentWeenies.TryGetByComponent(id, out var w) ? w : throw new InvalidOperationException($"component {id} is not in the component map");
+            var seller = ground.Vendors.FirstOrDefault(v => v.Sells.Any(s => s.Wcid == weenie.Wcid));
+            output.WriteLine($"{key} {account}: {info.Name} burns wcid {weenie.Wcid}: {(seller is null ? "no vendor of the profile sells it" : "sold by " + seller.Name)}");
+            if (seller is null)
+            {
+                missing.Add($"wcid {weenie.Wcid}");
+            }
+        }
+
+        Assert.True(missing.Count == 0, $"{key}, account {account}: no vendor of the profile sells a component of {info.Name}: {string.Join(", ", missing)}");
+    }
 
     /// <summary>
     /// M6 7 X (spells are the armor): the climber's low grounds stock every component of the protective lines' levels the rung reaches, on the account test's formula (<see cref="SpellFormulaRules.CustomizeForAccount"/>: she holds no focus of Life
@@ -216,11 +284,15 @@ public sealed class HuntingGroundDatTests(DatSetFixture fixture, ITestOutputHelp
     [InlineData("tusker-burrow", "Armor Self", 2, 3)]
     [InlineData("tusker-burrow", "Bludgeoning Protection Self", 2, 3)]
     [InlineData("tusker-burrow", "Mana Renewal Self", 2, 3)]
+    [InlineData("tusker-retreat", "Armor Self", 2, 3)] // M6 retreat: the 10-14 rung's ground, the Burrow's lines
+    [InlineData("tusker-retreat", "Bludgeoning Protection Self", 2, 3)]
+    [InlineData("tusker-retreat", "Mana Renewal Self", 2, 3)]
     [InlineData("tusker-lodge", "Armor Self", 2, 3)]
     [InlineData("tusker-lodge", "Bludgeoning Protection Self", 2, 3)]
     [InlineData("tusker-lodge", "Mana Renewal Self", 2, 3)]
     [InlineData("holtburg-outskirts", "Stamina to Mana Self", 1, 1)]
     [InlineData("tusker-burrow", "Stamina to Mana Self", 1, 1)]
+    [InlineData("tusker-retreat", "Stamina to Mana Self", 1, 1)]
     [InlineData("tusker-lodge", "Stamina to Mana Self", 1, 1)]
     public void A_climbers_low_grounds_carry_the_protective_lines_formula(string key, string line, int from, int to)
     {

@@ -111,6 +111,8 @@ public sealed partial class ResupplyRun
         var judge = Judge(ground);
         foreach (var h in ShedStones(ground, "the visit's start")) { yield return h; }
 
+        foreach (var h in AcademyOil()) { yield return h; } // M6 sprint: the Training Wand made an Academy Wand with the oil she carries, before the caster pick (ResupplyStation.AcademyOil.cs)
+
         foreach (var h in SwapBestCaster(ground, judge, skills)) { yield return h; }
 
         foreach (var h in SortPacks(ground, "the visit's start")) { yield return h; }

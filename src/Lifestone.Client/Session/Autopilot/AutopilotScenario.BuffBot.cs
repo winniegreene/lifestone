@@ -25,6 +25,7 @@ public sealed partial class AutopilotScenario
     private readonly List<BuffBotLineRead> _botReads = [];
     private bool _botWordSaid;
     private bool _botFailedThisVisit;
+    private int _botStopTry; // M6 audit (fix 1): the failed tries of this time home's stop
     private string? _botNotedWhy;
     private bool? _botStationKnown;
     private string? _botStationMissing;
@@ -84,6 +85,48 @@ public sealed partial class AutopilotScenario
 
         return _botTripLeast < BuffBotRule.TripUrgentUnderSeconds
             && TripUrgent(session, string.Create(CultureInfo.InvariantCulture, $"the buff bot's lines lapse in {_botTripLeast:0} s (under {BuffBotRule.TripUrgentUnderSeconds:0}) and no lull came (m6-buffbot-trip-urgent)"));
+    }
+
+    /// <summary>The trigger the bot's hour last held, so the hold is logged once a trigger (M6 audit, <see cref="BotHourHolds"/>).</summary>
+    private string? _botHourHeld;
+
+    /// <summary>
+    /// M6 audit (fix 2, the owner's decision of 2026-11-19: town trips once an hour, just in time for the bot's rebuff; about 75 minutes of consumables): a trip the counters call for a reason the hourly trip serves
+    /// (a stock line under its trip line, a scroll or a focus due, a sale, the sale cadence, the main pack's slots) waits for the bot's trip while the bot's stop applies and its lines stand, and while no such stock line
+    /// runs down to its stop line before the bot's trip is due (her use since the last visit, <see cref="PackRoomMemory.Measure"/>; an unmeasured line does not wait). The bot's trip is the town trip: the forced
+    /// logistics trip with its stop at the bot (<see cref="BuffBotTripWanted"/>). A stop line, the burden line, a full pack of keepers and the hour's load trip never wait. Live 2026-11-19 (run 4, level 11, the Burrow):
+    /// a Mana Potion trip at 04:02:21 UTC and a taper trip at 04:25:50, 23 minutes apart, each its own walk home.
+    /// </summary>
+    private bool BotHourHolds(IGameSessionView session, LogisticsVerdict verdict)
+    {
+        if (!BuffBotApplies() || !BuffBotCover.For(session.State).On || !_botTripArmed)
+        {
+            return false; // no bot's hour stands: the trip goes as before
+        }
+
+        var now = session.Clock.Now;
+        BuffBotRule.Read(BotProfile, session.State.Self.Qualities, now, _botReads);
+        var least = BuffBotRule.MinRemaining(_botReads);
+        var (stopUnder, used, minutes, name) = (0, 0, 0.0, string.Empty);
+        if (verdict.Cause == LogisticsCause.StockLow && verdict.Line is { } line)
+        {
+            var measure = PackRoomMemory.For(session.State).Measure(now, [line.Wcid], _ => verdict.Held);
+            (stopUnder, used, minutes, name) = (line.StopUnder, measure?.UseOf(line.Wcid) ?? 0, measure?.Minutes ?? 0, line.Name + ": ");
+        }
+
+        var holds = TripHourRule.Holds(verdict.Cause, least, BuffBotRule.TripUnderSeconds, verdict.Held, stopUnder, used, minutes, out var why);
+        if (holds && _botHourHeld != verdict.Trigger)
+        {
+            _botHourHeld = verdict.Trigger;
+            _log.Info(LogCategory, $"autopilot fight: the trip waits for the bot's hour (m6-audit-trip-hour): {verdict.Reason}; {name}{why}");
+        }
+        else if (!holds && _botHourHeld == verdict.Trigger)
+        {
+            _botHourHeld = null;
+            _log.Info(LogCategory, $"autopilot fight: the bot's hour holds the trip no more: {verdict.Reason}; {name}{why}");
+        }
+
+        return holds;
     }
 
     /// <summary>The fight is asked to stop for the bot's trip: by name, and the rule stands down until the lines read fresh again.</summary>
@@ -216,6 +259,7 @@ public sealed partial class AutopilotScenario
         if (ok)
         {
             BuffBotStops++;
+            _botStopTry = 0;
             _log.Info(LogCategory, $"buff bot: check after: every line landed ({fields}): her own pass for what the bot does not cover");
             foreach (var task in _options.KillTasks)
             {
@@ -226,6 +270,14 @@ public sealed partial class AutopilotScenario
         }
 
         BuffBotFailures++;
+        if (++_botStopTry < BuffBotRule.StopTries)
+        {
+            // M6 audit (fix 1, the owner's decision of 2026-11-19): a stop that failed is asked again at once, up to BuffBotRule.StopTries, before her own pass takes its place
+            _log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"buff bot: the stop failed ({JourneyVerdict.Token(why ?? "failed")}; {fields}): try {_botStopTry + 1} of {BuffBotRule.StopTries} now (m6-audit-bot-retry)"));
+            return BeginRun(AutopilotState.Buff, BuffBotSpec, string.Create(CultureInfo.InvariantCulture, $"home: the buff bot's stop failed: try {_botStopTry + 1} of {BuffBotRule.StopTries}"));
+        }
+
+        _botStopTry = 0;
         _botFailedThisVisit = true;
         _botTripArmed = false; // no trip home for a bot that did not answer at home
         _log.Warn(LogCategory, $"buff bot: the stop failed ({JourneyVerdict.Token(why ?? "failed")}; {fields}): the run goes on, her own whole pass runs now, and the stop is tried again at her next time home (m6-buffbot-fallback)");

@@ -323,7 +323,7 @@ public sealed class CreatureBehaviourTests(DatSetFixture fixture, ITestOutputHel
     }
 
     [Fact]
-    public void Of_the_47_kinds_the_ground_profiles_name_8_are_pinned_and_37_of_the_other_39_are_avoided_at_ACE_s_default_instead_of_their_own_range()
+    public void Of_the_54_kinds_the_ground_profiles_name_12_are_pinned_and_40_of_the_other_42_are_avoided_at_ACE_s_default_instead_of_their_own_range()
     {
         var named = ProfileWcids();
         var pinned = named.Where(CreatureAwareness.IsPinned).ToList();
@@ -335,15 +335,15 @@ public sealed class CreatureBehaviourTests(DatSetFixture fixture, ITestOutputHel
             output.WriteLine(string.Create(C, $"weenie {c.Wcid} {c.Name}: read today {c.Today} m (ACE's default), its own range {c.Table} m ({c.Table - c.Today:+0.#;-0.#} m)"));
         }
 
-        Assert.Equal((47, 8, 39), (named.Count, pinned.Count, unpinned.Count));
+        Assert.Equal((54, 12, 42), (named.Count, pinned.Count, unpinned.Count)); // M6 redoubt: the Holtburg Redoubt's five drudges: 7, 192, 193 and 940 are pinned, the Drudge Slinker 1468 is not; M6 retreat: the Tusker Retreat names the two Tusker Kin, 22509 and 22510
         Assert.All(pinned, w => Assert.Equal((double)CreatureAwareness.MetresOf(w), Bestiary.Find(w)!.Awareness.TableVisualMetres)); // a pinned kind would not change
         Assert.All(unpinned, w => Assert.Equal(CreatureAwareness.DefaultMetres, Bestiary.Find(w)!.Awareness.AwarenessMetres)); // an unpinned kind is read at 18 m today
 
-        // 37 of the 39 would change; the other two see 18 m by their own rows
-        Assert.Equal(37, changes.Count);
+        // 40 of the 42 would change; the other two see 18 m by their own rows
+        Assert.Equal(40, changes.Count);
         Assert.Equal(2, unpinned.Count - changes.Count);
 
-        // the largest: a Cursed Wisp sees 30 m, 12 m past the 18 m the walker keeps off it; twelve kinds see 25 m; the Tusker Minions and Worshippers see 15 m, 3 m short of it
+        // the largest: a Cursed Wisp sees 30 m, 12 m past the 18 m the walker keeps off it; twelve kinds see 25 m; the Tusker Minions, Worshippers and Kin see 15 m, 3 m short of it
         Assert.Equal((7126u, 30.0), (changes[0].Wcid, changes[0].Table));
         Assert.Equal([1629u, 7184u, 10810u, 11540u, 11541u, 16916u, 22053u, 22591u, 22593u, 22599u, 22611u, 27800u], changes.Where(c => c.Table == 25).Select(c => c.Wcid));
         Assert.Equal([11u, 236u, 1628u, 22585u, 22589u, 22597u, 22605u, 22746u, 22747u], changes.Where(c => c.Table == 24).Select(c => c.Wcid));
@@ -351,9 +351,10 @@ public sealed class CreatureBehaviourTests(DatSetFixture fixture, ITestOutputHel
         Assert.Equal([7607u, 22519u, 22520u, 22595u, 22600u, 22601u], changes.Where(c => c.Table == 20).Select(c => c.Wcid));
         Assert.Equal([199u, 23082u], changes.Where(c => c.Table == 17).Select(c => c.Wcid));
         Assert.Equal([23u], changes.Where(c => c.Table == 16).Select(c => c.Wcid));
-        Assert.Equal([22511u, 22512u, 22515u, 22516u], changes.Where(c => c.Table == 15).Select(c => c.Wcid));
+        Assert.Equal([22509u, 22510u, 22511u, 22512u, 22515u, 22516u], changes.Where(c => c.Table == 15).Select(c => c.Wcid)); // M6 retreat: the Tusker Kin see 15 m too
         Assert.Equal(30, changes.Count(c => c.Table > c.Today)); // 30 see farther than they are avoided at
-        Assert.Equal(7, changes.Count(c => c.Table < c.Today)); // 7 see less far
+        Assert.Equal([1468u], changes.Where(c => c.Table == 10).Select(c => c.Wcid)); // M6 redoubt: the Redoubt's Drudge Slinker 1468 sees 10 m (its row) and is avoided at 18 m
+        Assert.Equal(10, changes.Count(c => c.Table < c.Today)); // 10 see less far (M6 retreat: and the two Tusker Kin)
     }
 
     [Fact]

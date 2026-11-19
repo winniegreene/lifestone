@@ -72,8 +72,13 @@ public sealed class PackBudgetTests
         }
     }
 
+    /// <summary>
+    /// M6 audit (the owner, 2026-11-19: about 75 minutes of consumables, the town trip hourly with the bot's rebuff): her live shape with the loot wanting 135,771 in 57 minutes. The rule of before cut every ware to its
+    /// line and one interval's use (the tapers to 817) and gave the rest to the loot; now each ware's need is its line and 75 minutes of her use (<see cref="PackBudgetRule.SupplyMinutes"/>), the needs come first, and the
+    /// loot's room is what is left (<see cref="PackBudgetVerdict.KitFirst"/>).
+    /// </summary>
     [Fact]
-    public void Her_live_shape_cuts_the_keeps_to_what_an_interval_uses_and_sells_the_drinks_she_did_not_drink()
+    public void Her_live_shape_keeps_75_minutes_of_her_use_before_the_loots_room_and_sells_the_drinks_she_did_not_drink()
     {
         var lines = HerLines();
         Assert.Equal(12_576, SuppliesOf(lines)); // the snapshot's supplies, about 14,000 with the smaller lines
@@ -81,14 +86,17 @@ public sealed class PackBudgetTests
 
         var budget = PackBudgetRule.Plan(Capacity, MageLootThresholds.DefaultLoadLinePercent, burden, 2_000, lines, HerHour());
 
-        Assert.Equal(PackBudgetVerdict.AtNeeds, budget.Verdict); // 135,771 burden of loot wanted in 57 minutes: no capacity holds it, so every cut ware stands at its need
-        Assert.Equal((17_850L, Fixed, 135_771L), (budget.Line, budget.Fixed, budget.Room));
+        Assert.Equal(PackBudgetVerdict.KitFirst, budget.Verdict); // 135,771 burden of loot wanted in 57 minutes: no capacity holds it, so the needs come first and the loot gets the rest
+        Assert.Equal((17_850L, Fixed, 135_771L), (budget.Line, budget.Fixed, budget.Wanted));
         Assert.Equal(12_880, budget.AtTop);
+        Assert.Equal(8_810, budget.AtLow);
+        Assert.Equal(17_850 - Fixed - 8_810, budget.Room); // the loot's room: the line less the fixed and the needs
 
-        Assert.Equal(817, budget.KeepOf(Taper)); // her line 300 and the 517 she burned: the buys stop at 817, not the profile's 850
+        Assert.Null(budget.KeepOf(Taper)); // her line 300 and 75 minutes of the 517 she burned in 57 (681): 981, over the profile's 850, so the keep stands (no cut; the profile's keep is the cap)
+        Assert.Equal(850, budget.Cuts.Single(c => c.Line.Wcid == Taper).Need);
         Assert.Equal(0, budget.SellOf(Taper)); // a ware that is not a drink is never sold
-        Assert.Equal(95, budget.KeepOf(PyrealScarab)); // need 45; held 95 is never sold, so the buys stop where she stands
-        Assert.Null(budget.KeepOf(GoldScarab)); // held 100 over her need of 65: nothing to cut, nothing sold
+        Assert.Equal(95, budget.KeepOf(PyrealScarab)); // need 47 (40 and 75 minutes of 5 in 57); held 95 is never sold, so the buys stop where she stands
+        Assert.Null(budget.KeepOf(GoldScarab)); // held 100 over her need of 73: nothing to cut, nothing sold
         Assert.Null(budget.KeepOf(688));
 
         Assert.Equal(11, budget.KeepOf(FighterKit.ManaPotionWcid)); // one over its trip line 10: she drank none, and a line left on its trip line would call a trip at her first drink
@@ -100,13 +108,28 @@ public sealed class PackBudgetTests
         Assert.All(budget.Cuts, c => Assert.True(c.Target >= c.Line.Floor, $"{c.Line.Name}: {c.Target} under its line {c.Line.Floor}"));
         Assert.All(budget.Cuts.Where(c => c.Cuts && c.Line.Kind != PackLineKind.LootDrink), c => Assert.True(c.Target > c.Line.Floor, $"{c.Line.Name}: {c.Target} on its trip line {c.Line.Floor}"));
 
-        Assert.Equal(8_612, budget.Planned);
-        Assert.Equal(6_038, budget.RoomLeft); // from 1,770 at the profile's keeps
-        Assert.Contains("over even at the needs", budget.Summary(), StringComparison.Ordinal);
-        Assert.Contains("the loot's room 135771 (57.0 min of it since the last visit)", budget.Summary(), StringComparison.Ordinal);
-        Assert.Contains(budget.CutLines(), l => l.StartsWith("pack budget: cut Prismatic Taper (20631, Stock): 850 -> 817 (held 811, keep 850; need 817: its line 300 and 517 used in 57.0 min", StringComparison.Ordinal));
+        Assert.Equal(8_810, budget.Planned);
+        Assert.Equal(5_840, budget.RoomLeft); // from 1,770 at the profile's keeps
+        Assert.Contains("the needs come first, so the loot's room is cut to 5840", budget.Summary(), StringComparison.Ordinal);
+        Assert.Contains("the loot wanted 135771 (57.0 min of it since the last visit)", budget.Summary(), StringComparison.Ordinal);
+        Assert.DoesNotContain(budget.CutLines(), l => l.StartsWith("pack budget: cut Prismatic Taper", StringComparison.Ordinal));
+        Assert.Contains(budget.CutLines(), l => l.StartsWith("pack budget: cut Pyreal Scarab (690, Town): 100 -> 95 (held 95, keep 100; need 47: its line 40 and 75 min of her use (5 used in 57.0 min)", StringComparison.Ordinal));
         Assert.Contains(budget.CutLines(), l => l.StartsWith("pack budget: cut Health Elixir (2458, LootDrink): 9 -> 0", StringComparison.Ordinal) && l.Contains("sells 9", StringComparison.Ordinal));
-        Assert.Equal(new Dictionary<uint, int> { [Taper] = 817, [FighterKit.PotionWcid] = 7, [FighterKit.ManaPotionWcid] = 11, [HealthDrinks.TinctureWcid] = 7, [ManaDrinks.TinctureWcid] = 11, [PyrealScarab] = 95 }, budget.Keeps);
+        Assert.Equal(new Dictionary<uint, int> { [FighterKit.PotionWcid] = 7, [FighterKit.ManaPotionWcid] = 11, [HealthDrinks.TinctureWcid] = 7, [ManaDrinks.TinctureWcid] = 11, [PyrealScarab] = 95 }, budget.Keeps);
+    }
+
+    /// <summary>M6 audit: even with no room for the loot, needs over the line fall back toward one interval's use by one scale, never under it (the rule of before at worst).</summary>
+    [Fact]
+    public void Needs_over_the_line_even_with_no_loot_room_scale_back_toward_one_intervals_use()
+    {
+        var lines = HerLines();
+        var budget = PackBudgetRule.Plan(11_911, 100, Fixed + SuppliesOf(lines) + 2_000, 2_000, lines, HerHour()); // the line less the fixed: 8,711
+
+        Assert.Equal(PackBudgetVerdict.AtNeeds, budget.Verdict); // over one interval's needs (8,612), under 75 minutes' (8,810)
+        Assert.Equal(0, budget.Room);
+        Assert.InRange(budget.Scale, 0.49, 0.51); // 99 of 198
+        Assert.Equal(817 + 16, budget.KeepOf(Taper)); // one interval's 817 and half the 33 to its need of 850
+        Assert.True(budget.Planned <= 11_911 - Fixed, $"{budget.Planned}");
     }
 
     [Fact]
@@ -115,13 +138,13 @@ public sealed class PackBudgetTests
         var lines = HerLines();
         var budget = PackBudgetRule.Plan(Capacity, 100, Fixed + SuppliesOf(lines) + 2_000, 2_000, lines, HerHour(lootKept: 3_000, leftItems: 0, leftBurden: 0));
 
-        Assert.Equal(PackBudgetVerdict.Scaled, budget.Verdict); // the budget 11,650 sits between the needs (8,612) and the keeps (12,880)
+        Assert.Equal(PackBudgetVerdict.Scaled, budget.Verdict); // the budget 11,650 sits between the needs at 75 minutes of her use (8,810) and the keeps (12,880)
         Assert.Equal(11_650, budget.Budget);
-        Assert.InRange(budget.Scale, 0.71, 0.72);
+        Assert.InRange(budget.Scale, 0.69, 0.70); // 2,840 of 4,070
         Assert.True(budget.Planned <= budget.Budget, $"{budget.Planned} over {budget.Budget}");
-        Assert.Equal(74, budget.KeepOf(FighterKit.ManaPotionWcid)); // 11 + 71% of the 89 between its need and its top
-        Assert.Equal(26, budget.SellOf(FighterKit.ManaPotionWcid));
-        Assert.Equal(840, budget.KeepOf(Taper)); // 817 + 71% of 33
+        Assert.Equal(73, budget.KeepOf(FighterKit.ManaPotionWcid)); // 11 + 69.8% of the 89 between its need and its top
+        Assert.Equal(27, budget.SellOf(FighterKit.ManaPotionWcid));
+        Assert.Null(budget.KeepOf(Taper)); // its need, 75 minutes of her use, is its keep: never cut
     }
 
     [Fact]

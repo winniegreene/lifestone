@@ -206,7 +206,10 @@ public sealed class HuntingGroundTests
         Assert.Equal(0x000CB000u, cindrue.BuysItemTypes);
         Assert.True(cindrue.Buys(0x1000)); // SpellComponents
         Assert.False(cindrue.Buys(0x1)); // MeleeWeapon
-        Assert.Equal([new VendorWare(20631, "Prismatic Taper", 30), new VendorWare(686, "Copper Scarab", 135), new VendorWare(688, "Silver Scarab", 338), new VendorWare(691, "Lead Scarab", 14), new VendorWare(2472, "Wand", 270), new VendorWare(20630, "Trade Note (250,000)", 287500)], cindrue.Sells); // M5 7 G1: the largest trade note, which the sell trip buys with the coin above the purse's coin (1.15 x 250,000) // the taper, the travel spells' Copper Scarab (M5 3 m1), then the kit's wand (M5 3 m0; her robe 6071 left the kit, M5 7 F13)
+        Assert.Equal([new VendorWare(20631, "Prismatic Taper", 30), new VendorWare(686, "Copper Scarab", 135), new VendorWare(688, "Silver Scarab", 338), new VendorWare(691, "Lead Scarab", 14), new VendorWare(2472, "Wand", 270), new VendorWare(20630, "Trade Note (250,000)", 287500),
+            // M6 sprint (2026-11-18): the five components the learn step named short (wares only, rows 21033, 20980, 20982, 21003 and 21007 of her create list), then Lifestone Recall's other four on the account formula (rows 21029, 21017, 21041 and 21044)
+            new VendorWare(746, "Hazel Talisman", 7), new VendorWare(767, "Comfrey", 14), new VendorWare(769, "Dragonsblood", 14), new VendorWare(788, "Powdered Malachite", 7), new VendorWare(792, "Powdered Turquoise", 7),
+            new VendorWare(750, "Rowan Talisman", 7), new VendorWare(762, "Turpeth", 7), new VendorWare(1647, "Indigo Taper", 34), new VendorWare(1652, "White Taper", 34)], cindrue.Sells); // M5 7 G1: the largest trade note, which the sell trip buys with the coin above the purse's coin (1.15 x 250,000) // the taper, the travel spells' Copper Scarab (M5 3 m1), then the kit's wand (M5 3 m0; her robe 6071 left the kit, M5 7 F13)
         var ecutha = den.VendorOf(719)!;
         Assert.Equal([new VendorWare(5851, "Faran Robe with Hood", 68)], ecutha.Sells); // M5 7 F13 (D87): 1.35 x Value 50, ceil(67.4)
         Assert.Equal((0xA9B4012Au, 0xA9B4012Au), (ecutha.Cell, ecutha.StopCell));

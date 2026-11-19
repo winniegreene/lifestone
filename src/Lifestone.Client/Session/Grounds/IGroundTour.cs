@@ -97,6 +97,16 @@ public interface IGroundTour
     void Seed(WorldObjectTable objects, double now)
     {
     }
+
+    /// <summary>
+    /// M6 audit (the owner's decision of 2026-11-19: every tusk when it is due): the creatures the fight wants first (the carriers of a wanted trophy whose item is not held yet), or none. A tour with a schedule offers a living one
+    /// it knows, else a standing slot of one, before any other target or slot (the timed return and the loop guard still come first). The default does nothing.
+    /// </summary>
+    /// <param name="wcids">The carriers' weenie class ids (empty: none).</param>
+    /// <param name="why">What they carry, for the offer's note.</param>
+    void Prefer(IReadOnlyCollection<uint> wcids, string why)
+    {
+    }
 }
 
 /// <summary>Why the tour offers a waypoint (F5, D47: the character always moves with purpose), logged at the leg's start and counted on the fight's line (<c>walks_by_purpose=</c>).</summary>

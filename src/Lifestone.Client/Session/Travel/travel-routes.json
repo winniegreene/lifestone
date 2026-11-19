@@ -55,9 +55,10 @@
         "0xFA7F",
         "0xF07F",
         "0xEA7B",
-        "0xEF7F"
+        "0xEF7F",
+        "0xF97E"
       ],
-      "source": "0xF682: weenie_properties_position object_Id 43002 position_Type 2 (network-to-refuge): destination; landblock_instance guid 0x7F682018 (weenie 42852, refuge-to-network): cell (+1 more); 0xF681: landblock_instance guid 0x7F681000 (weenie 22725, the Refuge's Healer): cell 0xF6810000; 0xF981: weenie_properties_position object_Id 42177 position_Type 2 (hub-burrow): destination; 0xF97F: weenie_properties_position object_Id 42181 position_Type 2 (hub-lodge): destination; weenie_properties_position object_Id 42178 position_Type 2 (hub-cave): destination; 0xF880: weenie_properties_position object_Id 42179 position_Type 2 (hub-cavern): destination; 0xF67B: weenie_properties_position object_Id 42175 position_Type 2 (hub-abode): destination; 0xF77E: weenie_properties_position object_Id 42180 position_Type 2 (hub-habitat): destination; 0xF67C: weenie_properties_position object_Id 42182 position_Type 2 (hub-quarters): destination; 0xF07E: weenie_properties_position object_Id 42176 position_Type 2 (hub-barracks): destination; 0xF982: the destination of an island dungeon's Surface exit portal (weenie_properties_position object_Id 22664, 22689, 22666, 22668, 22655, 22679, 22693, 22662, 22681, 22658 position_Type 2; the list in TravelRoutesSqlTests); 0xFA7F: the destination of an island dungeon's Surface exit portal (weenie_properties_position object_Id 22664, 22689, 22666, 22668, 22655, 22679, 22693, 22662, 22681, 22658 position_Type 2; the list in TravelRoutesSqlTests); 0xF07F: the destination of an island dungeon's Surface exit portal (weenie_properties_position object_Id 22664, 22689, 22666, 22668, 22655, 22679, 22693, 22662, 22681, 22658 position_Type 2; the list in TravelRoutesSqlTests); 0xEA7B: the destination of an island dungeon's Surface exit portal (weenie_properties_position object_Id 22664, 22689, 22666, 22668, 22655, 22679, 22693, 22662, 22681, 22658 position_Type 2; the list in TravelRoutesSqlTests); 0xEF7F: the destination of an island dungeon's Surface exit portal (weenie_properties_position object_Id 22664, 22689, 22666, 22668, 22655, 22679, 22693, 22662, 22681, 22658 position_Type 2; the list in TravelRoutesSqlTests; M6 14 armory: the Tusker Armory's Surface 22658 drops at 0xEF7F000B); checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
+      "source": "0xF682: weenie_properties_position object_Id 43002 position_Type 2 (network-to-refuge): destination; landblock_instance guid 0x7F682018 (weenie 42852, refuge-to-network): cell (+1 more); 0xF681: landblock_instance guid 0x7F681000 (weenie 22725, the Refuge's Healer): cell 0xF6810000; 0xF981: weenie_properties_position object_Id 42177 position_Type 2 (hub-burrow): destination; 0xF97F: weenie_properties_position object_Id 42181 position_Type 2 (hub-lodge): destination; weenie_properties_position object_Id 42178 position_Type 2 (hub-cave): destination; 0xF880: weenie_properties_position object_Id 42179 position_Type 2 (hub-cavern): destination; 0xF67B: weenie_properties_position object_Id 42175 position_Type 2 (hub-abode): destination; 0xF77E: weenie_properties_position object_Id 42180 position_Type 2 (hub-habitat): destination; 0xF67C: weenie_properties_position object_Id 42182 position_Type 2 (hub-quarters): destination; 0xF07E: weenie_properties_position object_Id 42176 position_Type 2 (hub-barracks): destination; 0xF982: the destination of an island dungeon's Surface exit portal (weenie_properties_position object_Id 22664, 22689, 22666, 22668, 22655, 22679, 22693, 22662, 22681, 22658 position_Type 2; the list in TravelRoutesSqlTests); 0xFA7F: the destination of an island dungeon's Surface exit portal (weenie_properties_position object_Id 22664, 22689, 22666, 22668, 22655, 22679, 22693, 22662, 22681, 22658 position_Type 2; the list in TravelRoutesSqlTests); 0xF07F: the destination of an island dungeon's Surface exit portal (weenie_properties_position object_Id 22664, 22689, 22666, 22668, 22655, 22679, 22693, 22662, 22681, 22658 position_Type 2; the list in TravelRoutesSqlTests); 0xEA7B: the destination of an island dungeon's Surface exit portal (weenie_properties_position object_Id 22664, 22689, 22666, 22668, 22655, 22679, 22693, 22662, 22681, 22658 position_Type 2; the list in TravelRoutesSqlTests); 0xEF7F: the destination of an island dungeon's Surface exit portal (weenie_properties_position object_Id 22664, 22689, 22666, 22668, 22655, 22679, 22693, 22662, 22681, 22658 position_Type 2; the list in TravelRoutesSqlTests; M6 14 armory: the Tusker Armory's Surface 22658 drops at 0xEF7F000B); 0xF97E: the Tusker Retreat's entry portal (landblock_instance guid 0x7F97E000, weenie 22694) and the destination of its Surface exit (weenie_properties_position object_Id 22695 position_Type 2: 0xF97E0035; M6 retreat); checked row by row by TravelRoutesSqlTests (Every_edge_start_and_run_is_what_the_pinned_world_SQL_holds), which fails a landblock no checked row holds (D28)"
     },
     {
       "key": "facility-hub",
@@ -2302,6 +2303,287 @@
         }
       ]
     },
+    "tusker-retreat": {
+      "routes": [
+        {
+          "key": "by-facility-hub",
+          "start": "holtburg",
+          "steps": [
+            {
+              "edge": "holtburg-to-network",
+              "walk_m": 80.0
+            },
+            {
+              "edge": "network-to-facility-hub",
+              "walk_m": 43.2
+            },
+            {
+              "edge": "hub-lodge",
+              "walk_m": 51.2
+            }
+          ],
+          "run": {
+            "to": {
+              "wcid": 22694,
+              "name": "Tusker Retreat",
+              "guid": "0x7F97E000",
+              "cell": "0xF97E0000",
+              "origin": {
+                "x": 166.295,
+                "y": 115.594,
+                "z": -0.095
+              },
+              "facing": {
+                "w": -0.994031,
+                "x": 0,
+                "y": 0,
+                "z": -0.109099
+              }
+            },
+            "metres": 200.5,
+            "source": "straight line on global x/y (landblock index * 192 + local) from the last drop 0xF97F003E (the hub's Lodge portal 42181) to the entry portal's landblock_instance row (guid 0x7F97E000, weenie 22694); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z",
+            "via": {
+              "below_level": 31,
+              "points": [
+                {
+                  "cell": "0xF97F0036",
+                  "origin": {
+                    "x": 150.5,
+                    "y": 140.5,
+                    "z": 43.3
+                  },
+                  "why": "off the Lodge's ridge to the west: the straight line south to the Retreat crosses the discs of 0xF97F:6,4, 0xF97F:7,2, 0xFA7F:0,3 and 0xFA7F:0,0 (202 m inside them); this point lies 8.5 m outside 0xF97F:6,4"
+                },
+                {
+                  "cell": "0xF97F0026",
+                  "origin": {
+                    "x": 119.5,
+                    "y": 128.5,
+                    "z": 33.3
+                  },
+                  "why": "between 0xF97F:6,4 and 0xF97F:4,7, 4.2 and 4.5 m outside their discs, the gap down the slope"
+                },
+                {
+                  "cell": "0xF97F0025",
+                  "origin": {
+                    "x": 100.5,
+                    "y": 106.5,
+                    "z": 24.4
+                  },
+                  "why": "down the slope west of 0xF97F:6,4 (8.3 m outside its disc)"
+                },
+                {
+                  "cell": "0xF97F001A",
+                  "origin": {
+                    "x": 72.5,
+                    "y": 46.5,
+                    "z": 0.0
+                  },
+                  "why": "the valley floor west of 0xF97F:5,2 (11 m outside its disc)"
+                },
+                {
+                  "cell": "0xF97F0019",
+                  "origin": {
+                    "x": 94.5,
+                    "y": 21.5,
+                    "z": 0.0
+                  },
+                  "why": "round the south-west of 0xF97F:5,2's disc, its edge: the land there leaves no wider way"
+                },
+                {
+                  "cell": "0xF97E0028",
+                  "origin": {
+                    "x": 97.5,
+                    "y": 172.5,
+                    "z": 1.0
+                  },
+                  "why": "south of 0xF97F:5,2 and north of 0xF97E:3,4 (34.7 and 44.2 m from their discs' edges)"
+                },
+                {
+                  "cell": "0xF97E0030",
+                  "origin": {
+                    "x": 143.5,
+                    "y": 168.5,
+                    "z": 0.4
+                  },
+                  "why": "east along the valley, 18 m outside 0xFA7F:0,0 and 39 m outside 0xF97F:7,2"
+                },
+                {
+                  "cell": "0xF97E0036",
+                  "origin": {
+                    "x": 164.5,
+                    "y": 132.5,
+                    "z": 7.3
+                  },
+                  "why": "down to the front between 0xFA7F:0,0 and 0xFA7E:0,3 (about 30 m outside each); the front itself is 18 m outside 0xFA7E:0,3"
+                }
+              ],
+              "source": "computed offline (M6 retreat), as M6 7 Z's: a 1 m search over the attached tiles of 0xF4..0xFC by 0x7E..0x86 with the planner's own step costs (PathPlanner.StepCost) plus a cost inside every danger_cells disc (ClearMetres) and a falling cost in an 8 m band outside it, its route pulled to straight lines and its points hand-thinned; the walk is proven by IslandDangerRunDatTests. Soft: a via that cannot be walked is skipped by name. A level from below_level on runs straight: the low tables' creatures are level 30 at most"
+            }
+          },
+          "note": "first (M6 retreat, as M6 7 J): admitted from level 15 (the hub portal's gate), it takes the climber to the Lodge's drop, 200.5 m from the Retreat's entry in a straight line (the hub holds no Retreat portal: its eight tusker portals are 42175 to 42182); the run from the drop is proven on the dats (IslandRunDatTests) and so is the via run (IslandDangerRunDatTests)"
+        },
+        {
+          "key": "by-refuge",
+          "start": "holtburg",
+          "steps": [
+            {
+              "edge": "holtburg-to-network",
+              "walk_m": 80.0
+            },
+            {
+              "edge": "network-to-refuge",
+              "walk_m": 116.7
+            }
+          ],
+          "run": {
+            "to": {
+              "wcid": 22694,
+              "name": "Tusker Retreat",
+              "guid": "0x7F97E000",
+              "cell": "0xF97E0000",
+              "origin": {
+                "x": 166.295,
+                "y": 115.594,
+                "z": -0.095
+              },
+              "facing": {
+                "w": -0.994031,
+                "x": 0,
+                "y": 0,
+                "z": -0.109099
+              }
+            },
+            "metres": 921.5,
+            "source": "straight line on global x/y (landblock index * 192 + local) from the last drop 0xF6820033 to the entry portal's landblock_instance row (guid 0x7F97E000, weenie 22694); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z",
+            "via": {
+              "below_level": 31,
+              "points": [
+                {
+                  "cell": "0xF7820003",
+                  "origin": {
+                    "x": 21.5,
+                    "y": 50.5,
+                    "z": 59.6
+                  },
+                  "why": "the Lodge route's first point (tusker-lodge by-refuge): along the Refuge's plateau before the descent"
+                },
+                {
+                  "cell": "0xF781003C",
+                  "origin": {
+                    "x": 191.5,
+                    "y": 73.5,
+                    "z": 44.1
+                  },
+                  "why": "the Lodge route's: the descent, about 50 m north of 0xF881:0,1"
+                },
+                {
+                  "cell": "0xF8810021",
+                  "origin": {
+                    "x": 110.5,
+                    "y": 0.5,
+                    "z": 12.0
+                  },
+                  "why": "the Lodge route's: the valley floor, 73 m north of 0xF880:5,5"
+                },
+                {
+                  "cell": "0xF8800040",
+                  "origin": {
+                    "x": 190.5,
+                    "y": 189.5,
+                    "z": 23.8
+                  },
+                  "why": "the Lodge route's: the climb east, 51 m north of 0xF880:7,6"
+                },
+                {
+                  "cell": "0xF9800016",
+                  "origin": {
+                    "x": 49.5,
+                    "y": 122.5,
+                    "z": 44.3
+                  },
+                  "why": "the Lodge route's: the ridge east of 0xF980:0,2"
+                },
+                {
+                  "cell": "0xF97F0038",
+                  "origin": {
+                    "x": 145.5,
+                    "y": 184.5,
+                    "z": 47.4
+                  },
+                  "why": "along the ridge north of 0xF97F:4,7 (10.7 m outside its disc); the Lodge's route turns east here, the Retreat's south"
+                },
+                {
+                  "cell": "0xF97F002F",
+                  "origin": {
+                    "x": 140.5,
+                    "y": 144.5,
+                    "z": 41.2
+                  },
+                  "why": "between 0xF97F:4,7 and 0xF97F:6,4 (8.8 and 12.1 m outside their discs): the straight line from the ridge to the slope passes 0xF97F:4,7 inside its disc"
+                },
+                {
+                  "cell": "0xF97F0025",
+                  "origin": {
+                    "x": 100.5,
+                    "y": 108.5,
+                    "z": 24.5
+                  },
+                  "why": "down the slope west of 0xF97F:6,4 (8.8 m outside its disc)"
+                },
+                {
+                  "cell": "0xF97F001A",
+                  "origin": {
+                    "x": 72.5,
+                    "y": 45.5,
+                    "z": 0.0
+                  },
+                  "why": "the valley floor west of 0xF97F:5,2 (11 m outside its disc)"
+                },
+                {
+                  "cell": "0xF97F0019",
+                  "origin": {
+                    "x": 94.5,
+                    "y": 21.5,
+                    "z": 0.0
+                  },
+                  "why": "round the south-west of 0xF97F:5,2's disc, its edge: the land there leaves no wider way"
+                },
+                {
+                  "cell": "0xF97E0028",
+                  "origin": {
+                    "x": 97.5,
+                    "y": 172.5,
+                    "z": 1.0
+                  },
+                  "why": "south of 0xF97F:5,2 and north of 0xF97E:3,4 (34.7 and 44.2 m from their discs' edges)"
+                },
+                {
+                  "cell": "0xF97E0030",
+                  "origin": {
+                    "x": 143.5,
+                    "y": 168.5,
+                    "z": 0.4
+                  },
+                  "why": "east along the valley, 18 m outside 0xFA7F:0,0 and 39 m outside 0xF97F:7,2"
+                },
+                {
+                  "cell": "0xF97E0036",
+                  "origin": {
+                    "x": 163.5,
+                    "y": 134.5,
+                    "z": 8.5
+                  },
+                  "why": "down to the front between 0xFA7F:0,0 and 0xFA7E:0,3 (28 and 32 m outside their discs); the front itself is 18 m outside 0xFA7E:0,3"
+                }
+              ],
+              "source": "computed offline (M6 retreat), as M6 7 Z's: a 1 m search over the attached tiles of 0xF4..0xFC by 0x7E..0x86 with the planner's own step costs (PathPlanner.StepCost) plus a cost inside every danger_cells disc (ClearMetres) and a falling cost in an 8 m band outside it, its route pulled to straight lines and its points hand-thinned; the first five are the Lodge route's, whose search found the same way to the ridge; the walk is proven by IslandDangerRunDatTests. Soft: a via that cannot be walked is skipped by name. A level from below_level on runs straight: the low tables' creatures are level 30 at most"
+            }
+          },
+          "note": "second (M6 retreat, as M6 7 J): the route a level under 15 takes, the ladder's rung of 10 to 14; its hops are the Burrow's and the Lodge's (TownNetworkWalkDatTests); a failed hop of the first route does not fall back to this one by itself: the station stops by name, or uses the gem when it is held (RungChangeStation)"
+        }
+      ]
+    },
     "tusker-lodge": {
       "routes": [
         {
@@ -3278,6 +3560,37 @@
             "source": "straight line on global x/y (landblock index * 192 + local) from Holtburg's lifestone (guid 0x7A9B404F) to the entry portal's landblock_instance row (guid 0x7A7B3007, weenie 4937, landblock 0xA7B3, two landblocks west and one south of Holtburg 0xA9B4); a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z"
           },
           "note": "M6 5 q6b (D55): no portal step; the run from Holtburg to the entry portal's front point and the entry's Use (MinLevel 1, MaxLevel 20, PortalBitmask 1: tieable); the cave's own exit 4938 'Surface' leads back to 0xA7B3001E, 379 m from Holtburg's lifestone (TODO(m6-alabree-way-home): the walk home from 0xA7B3 is not in the file)"
+        }
+      ]
+    },
+    "holtburg-redoubt": {
+      "routes": [
+        {
+          "key": "on-foot-to-the-entry",
+          "start": "holtburg",
+          "steps": [],
+          "run": {
+            "to": {
+              "wcid": 4935,
+              "name": "Holtburg Redoubt",
+              "guid": "0x7AAB1000",
+              "cell": "0xAAB10000",
+              "origin": {
+                "x": 99.7059,
+                "y": 180.63,
+                "z": 124.005
+              },
+              "facing": {
+                "w": 0.536112,
+                "x": 0,
+                "y": 0,
+                "z": 0.844147
+              }
+            },
+            "metres": 458.3,
+            "source": "straight line on global x/y (landblock index * 192 + local) from Holtburg's lifestone (guid 0x7A9B404F, (81.3304, 11.7974) in 0xA9B4) to the entry portal's landblock_instance row (guid 0x7AAB1000, weenie 4935, (99.7059, 180.63) in 0xAAB1, one landblock east and three south of Holtburg 0xA9B4): 210.4 m east and 407.2 m south; a hint: the run is planned at run time from the profile's entry front point; facing: the entry row's angles_W/X/Y/Z (the edge holtburg-to-redoubt is the same row)"
+          },
+          "note": "M6 redoubt (the owner's decision of 2026-11-18: the rung outskirts hunts the Redoubt, ladder/war-mage.json): no portal step; the run from Holtburg to the entry portal's front point and the entry's Use (MinLevel 1, MaxLevel 20, PortalBitmask 1: tieable), the Cave of Alabree's shape; the walk is planned on the dats (HoltburgRedoubtDatTests; the fetch quest worcer-heirlooms walks the same ground, TownNetworkWalkDatTests). The way home is Lifestone Recall when the book holds it. Without it the Redoubt's exit 4936 'Surface' (the edge redoubt-to-holtburg) drops at 0xAAB10020, a landblock of the place holtburg 458 m from the lifestone, and the file holds no way home from that place itself: TODO(m6-redoubt-way-home): the rung change stops TODO(m6-way-home) there (the quest's own steps walk it; the rung change's rule is not changed in this slice)"
         }
       ]
     },

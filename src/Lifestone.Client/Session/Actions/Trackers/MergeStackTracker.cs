@@ -29,9 +29,9 @@ internal sealed class MergeStackTracker(ActionHandle handle, uint from, uint to,
             return Refuse(ActionReason.NotSameItem, "cannot merge the stack " + ActionText.Hex(Item) + " into itself");
         }
 
-        if (!place.Held)
+        if (!place.Held && !InViewedContainer(api.State, Item))
         {
-            return Refuse(ActionReason.NotHeld, "the source stack " + ActionText.Hex(Item) + " is not held by the player");
+            return Refuse(ActionReason.NotHeld, "the source stack " + ActionText.Hex(Item) + " is not held by the player and not in the container she has open");
         }
 
         var inventory = api.State.Self.Inventory;
@@ -118,9 +118,9 @@ internal sealed class MergeStackTracker(ActionHandle handle, uint from, uint to,
                 return;
             }
         }
-        else if (!inventory.TryGetStack(Item, out var sourceNow, out _) || sourceNow != _sourceBefore - (uint)amount)
+        else if (inventory.Contains(Item) && (!inventory.TryGetStack(Item, out var sourceNow, out _) || sourceNow != _sourceBefore - (uint)amount))
         {
-            return;
+            return; // a source in the open container is not in the pack's model: the target's size is the answer
         }
 
         Resolve(new ActionOutcome(ActionOutcomeKind.Confirmed, 0, "merged " + ActionText.Count(amount) + " into " + ActionText.Hex(to) + ", now " + ActionText.Count(targetNow)));
@@ -138,6 +138,29 @@ internal sealed class MergeStackTracker(ActionHandle handle, uint from, uint to,
             ActionOutcomeKind.ServerError,
             e.Error,
             "the server refused the merge of " + ActionText.Hex(Item) + " into " + ActionText.Hex(to) + " (WeenieError " + ActionText.Hex(e.Error) + (e.Error == 0 ? "; ACE gives none for most refusals" : string.Empty) + ")"));
+    }
+
+    /// <summary>
+    /// M6 sprint (run 5, "Unable to put Pyreal into container" eight times with the main pack at 102 of 102): a source still in the container she has open (a corpse's coin) may merge into a held stack, as retail lets a player drag
+    /// it onto the stack. ACE finds the source among <c>SearchLocations.LocationsICanMove</c> (<c>HandleActionStackableMerge</c>, <c>Player_Inventory.cs</c> 2849ff), checks the burden of a source from outside the pack, and for a whole
+    /// source sends its 0x0024 and the target's 0x0197 (<c>DoHandleActionStackableMerge</c> 3096-3123 @95ef426d).
+    /// </summary>
+    private static bool InViewedContainer(GameState state, uint guid)
+    {
+        if (state.Containers.Viewed is not { } view)
+        {
+            return false;
+        }
+
+        foreach (var entry in view.Entries)
+        {
+            if (entry.Guid == guid)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>The stack the model holds for a held stack: the server's last 0x0197, else the weenie description's; null for an item with neither.</summary>

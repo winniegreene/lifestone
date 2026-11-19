@@ -247,6 +247,63 @@ public sealed class ClimbScriptTests
         Assert.Contains("RC=2", result.Output, StringComparison.Ordinal); // two arrivals after a rung change
     }
 
+    [Fact]
+    public void M6_onscreen_start_one_window_prints_one_process_with_the_climber_start_and_the_level_up_arguments()
+    {
+        var plan = Pwsh("-File", RepositoryFiles.PathOf("tools", "climb.ps1"), "-PlanOnly", "-OneWindow", "-Climber", "Qwinnie", "-NoQuests", "-Minutes", "90", "-TargetLevel", "80");
+
+        Assert.Equal(0, plan.ExitCode);
+        Assert.Contains("[climb] one window: pwsh -NoProfile -File tools\\play.ps1 -Account qwinnie -Offscreen -IsolateUserData -KeepServer -NoBuild -TimeoutSeconds 8700 ", plan.Output, StringComparison.Ordinal); // the level up job's 6300 s and -HeadlessTimeoutSeconds' 2400
+        Assert.Contains("\"-GameArgs:--login-check=climber-start --video-pace=1.8 --autopilot-job=level-up --autopilot-start --autopilot-minutes=90 --autopilot-level=80 --max-fps=60 --mute --fight-loot=on --autopilot-climber=Qwinnie --autopilot-ladder-quests=off\"", plan.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("-Character Qwinnie", plan.Output, StringComparison.Ordinal); // the climber is created in the window
+        Assert.DoesNotContain("[climb] step 1 create:", plan.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("--climber-start-wait-file", plan.Output, StringComparison.Ordinal); // no recording: nothing to wait for
+        Assert.Contains("climber start: gate level_up=allowed", plan.Output, StringComparison.Ordinal);
+
+        var recorded = Pwsh("-File", RepositoryFiles.PathOf("tools", "climb.ps1"), "-PlanOnly", "-OneWindow", "-Climber", "Qwinnie", "-Record", "-RecordDir", Path.Combine(Path.GetTempPath(), "lifestone-climb-onewindow-plan"), "-CreationPace", "2.5");
+        Assert.Equal(0, recorded.ExitCode);
+        Assert.Contains("--login-check=climber-start --video-pace=2.5 --climber-start-wait-file=cache/m6/climb/", recorded.Output, StringComparison.Ordinal);
+        Assert.Contains("/record-go --autopilot-job=level-up ", recorded.Output, StringComparison.Ordinal);
+        Assert.Contains("--video-cantrip-look\"", recorded.Output, StringComparison.Ordinal); // the hero cut's screen reaches the one process
+        Assert.Contains("the one window from the character screen on", recorded.Output, StringComparison.Ordinal);
+
+        var skip = Pwsh("-File", RepositoryFiles.PathOf("tools", "climb.ps1"), "-PlanOnly", "-OneWindow", "-SkipCreate");
+        Assert.Equal(1, skip.ExitCode);
+        Assert.Contains("[climb] REFUSED: -OneWindow is the whole run", skip.Output, StringComparison.Ordinal);
+
+        var pace = Pwsh("-File", RepositoryFiles.PathOf("tools", "climb.ps1"), "-PlanOnly", "-CreationPace", "2");
+        Assert.Equal(1, pace.ExitCode);
+        Assert.Contains("[climb] REFUSED: -CreationPace is read only with -OneWindow", pace.Output, StringComparison.Ordinal);
+
+        var threeSteps = Pwsh("-File", RepositoryFiles.PathOf("tools", "climb.ps1"), "-PlanOnly");
+        Assert.Equal(0, threeSteps.ExitCode);
+        Assert.DoesNotContain("climber-start", threeSteps.Output, StringComparison.Ordinal); // the three-step path is unchanged without the switch
+    }
+
+    [Fact]
+    public void M6_onscreen_start_reads_the_one_logs_first_creation_and_journey_lines_and_the_games_gate()
+    {
+        var result = Pwsh(
+            "-Command",
+            $"Import-Module '{Module}' -Force; "
+            + "$t = \"x INFO  [climber] verdict fresh=recreated purged=1 granted=0 template=ok level=1`nx INFO  [climber] climber start: creation done ok=true fresh=recreated purged=1 granted=0 template=ok level=1`n"
+            + "x INFO  [logincheck] journey done ok=true name=qwinnie stations=2/2`nx INFO  [logincheck] journey climber cheat_free=yes level=6 granted=0 place=0 recovery_place=0 stop=none`n"
+            + "x INFO  [climber] climber start: gate level_up=allowed creation=[fresh=recreated] journey=[cheat_free=yes]`n"
+            + "x journey done ok=false name=later`nx journey climber cheat_free=no level=30 granted=3 place=0 recovery_place=0`n[ladder] at=done n=2 level=7 rung=r kills=9`nautopilot done ok=yes stop=level kills=9 deaths=0 granted=0 places=0\"; "
+            + "$c = Get-ClimbCreateVerdict -Text $t -ExitCode 1 -OneWindow; $j = Get-ClimbJourneyVerdict -Text $t -ExitCode 1 -OneWindow; $g = Get-ClimbGameGate -Text $t; "
+            + "Write-Output ('CREATE=' + $c.Ok + ' ' + $c.Granted + ' ' + $c.Level); Write-Output ('JOURNEY=' + $j.Ok + ' ' + $j.CheatFree + ' ' + $j.Granted + ' ' + $j.Level); "
+            + "Write-Output ('GATE=' + $g.Word + ' SCRIPT=' + (Test-ClimbMayLevelUp -Create $c -Journey $j).Allowed); "
+            + "$bad = Get-ClimbCreateVerdict -Text \"[climber] climber start: creation done ok=false why=x\" -ExitCode 0 -OneWindow; Write-Output ('BAD=' + $bad.Ok + ' ' + $bad.Why); "
+            + "Write-Output ('NOGATE=[' + (Get-ClimbGameGate -Text 'nothing').Word + ']')");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("CREATE=True 0 1", result.Output, StringComparison.Ordinal); // the run's own done line; the exit code is the whole process's, not read here
+        Assert.Contains("JOURNEY=True yes 0 6", result.Output, StringComparison.Ordinal); // the FIRST journey lines: the start-up journey's, not anything later in the same log
+        Assert.Contains("GATE=allowed SCRIPT=True", result.Output, StringComparison.Ordinal);
+        Assert.Contains("BAD=False the creation done line is not ok=true; no '[climber] verdict' line", result.Output, StringComparison.Ordinal);
+        Assert.Contains("NOGATE=[]", result.Output, StringComparison.Ordinal);
+    }
+
     private static (int ExitCode, string Output) Pwsh(params string[] arguments)
     {
         foreach (var shell in new[] { "pwsh", "powershell" })

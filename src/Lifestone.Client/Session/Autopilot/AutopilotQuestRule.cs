@@ -138,6 +138,37 @@ public static class AutopilotQuestRule
         return want;
     }
 
+    /// <summary>
+    /// M6 audit (the owner's decision of 2026-11-19: every tusk when it is due): the carriers of the wanted trophies of <paramref name="groundKey"/>, from each quest file's hunt-until <c>carriers</c> (the creature whose create list holds the
+    /// tusk; on the Tusker Barracks 5 of its 54 Tusker Guards, wcid 22593 among 49 of wcid 1629 by the pinned world SQL's landblock_instance rows of 0x5A48), distinct, in catalog order; empty when none is wanted or no file names one.
+    /// </summary>
+    /// <param name="groundKey">The rung's ground key, or null.</param>
+    /// <param name="quests">The catalog.</param>
+    /// <param name="want">The fight's want set (<see cref="Want"/>).</param>
+    public static IReadOnlyList<Scenarios.WantCarrier> Carriers(string? groundKey, IReadOnlyList<Quest> quests, IReadOnlyList<uint> want)
+    {
+        ArgumentNullException.ThrowIfNull(want);
+        var list = new List<Scenarios.WantCarrier>();
+        foreach (var (_, hunt) in Trophies(groundKey, quests))
+        {
+            var item = hunt.Item!.Wcid!.Value;
+            if (!want.Contains(item) || hunt.Carriers is not { } carriers)
+            {
+                continue;
+            }
+
+            foreach (var c in carriers)
+            {
+                if (!list.Exists(x => x.Creature == c.Wcid && x.Item == item))
+                {
+                    list.Add(new Scenarios.WantCarrier(c.Wcid, item, c.Shade, hunt.Item.Name));
+                }
+            }
+        }
+
+        return list;
+    }
+
     /// <summary>(b) and (c): the decision for each trophy quest of the ground, in catalog order (empty when the ground has none).</summary>
     /// <param name="input">The inputs.</param>
     public static IReadOnlyList<TrophyQuestCall> Calls(TrophyQuestInput input)

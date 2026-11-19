@@ -167,7 +167,7 @@ public sealed class LadderLineTests(ITestOutputHelper output)
 
         Assert.Equal((LadderStepKind.Hunt, "outskirts", null, true, AutopilotScenario.QuestsDoneReason), (decision.Kind, decision.Rung!.Key, decision.Stop, decision.Ok, decision.Reason));
         Assert.Equal(["academy-skip", "pathwarden"], done); // every quest the rung names is asked
-        Assert.Equal("holtburg-outskirts", AutopilotScenario.LadderGroundFor(level, out _, _ => true)?.Key);
+        Assert.Equal("holtburg-redoubt", AutopilotScenario.LadderGroundFor(level, out _, _ => true)?.Key); // M6 redoubt: the rung outskirts' own ground
         var line = new LadderLine("cycle", 1, level, decision.Rung.Key, "holtburg-outskirts", new AutopilotTally(), 0, decision.Rung.MoveOn, null, decision.Reason).Text();
         Assert.Equal("outskirts", Field(line, "rung"));
         Assert.EndsWith(" reason=quests-done", line, StringComparison.Ordinal);
@@ -206,7 +206,7 @@ public sealed class LadderLineTests(ITestOutputHelper output)
         Assert.Null(FightOptions.GroundError("holtburg-outskirts")); // M6 0 a5: the fight walks an outdoor ground's cells
         Assert.Equal((LadderStepKind.Hunt, null, true), (hunt.Kind, hunt.Stop, hunt.Ok));
         Assert.Equal((LadderStepKind.Moved, "rung-moved:outskirts", true), (moved.Kind, moved.Stop, moved.Ok));
-        Assert.Equal("holtburg-outskirts", AutopilotScenario.LadderGroundFor(5, out _)?.Key);
+        Assert.Equal("holtburg-redoubt", AutopilotScenario.LadderGroundFor(5, out _)?.Key); // M6 redoubt: a new run of the rung outskirts takes its own ground
     }
 
     [Fact]
@@ -308,7 +308,7 @@ public sealed class LadderLineTests(ITestOutputHelper output)
         // M6 1 a (D41, D27 report-only): the level up job on its own rung's ground reaches the bolt line; it names the rung's plan, the live level on the current War Magic and the chance, and the fight's spec carries the plan chance.
         var w = new ApWorld("holtburg-outskirts", output, atHome: false);
         w.Level(5);
-        var autopilot = w.Autopilot(new AutopilotOptions { Job = AutopilotJob.LevelUp });
+        var autopilot = w.Autopilot(new AutopilotOptions { Job = AutopilotJob.LevelUp, LadderQuests = false }); // M6 sprint: no quest station in this rig, and the cycle's check now calls a due ladder errand (m6-errand-at-cycle)
         w.Run(autopilot, _ => w.Lines.Any(l => l.Contains("ladder: the fight's cast chance", StringComparison.Ordinal)), 6000);
 
         var bolt = w.Lines.First(l => l.Contains("ladder: bolt: ", StringComparison.Ordinal)); // M6 1 c (D41): the rig's book lacks the plan's Flame Bolt, so a learn trip (trigger learn:<spell>) comes first and the cycle after it names its bolt line again
@@ -370,7 +370,7 @@ public sealed class LadderLineTests(ITestOutputHelper output)
         w.Trip.Vendor.R.Server((p, s) => Lifestone.Tests.Shared.Net.AceM3Writers.WieldObject(p, s, wielded, 0x01000000));
         w.Trip.Vendor.R.Tick();
         w.Trip.Own("Spare Wand", 31336, 0x8000, 100);
-        var autopilot = w.Autopilot(new AutopilotOptions { Job = AutopilotJob.LevelUp });
+        var autopilot = w.Autopilot(new AutopilotOptions { Job = AutopilotJob.LevelUp, LadderQuests = false }); // M6 sprint: no quest station in this rig, and the cycle's check now calls a due ladder errand (m6-errand-at-cycle)
         var status = w.Run(autopilot);
 
         Assert.Equal(ScenarioStatus.Failed, status);
@@ -395,7 +395,7 @@ public sealed class LadderLineTests(ITestOutputHelper output)
         // nothing is trained; the experience is spent (the scripted ACE's 6,000) and the [ladder] lines carry it with trained=none.
         var w = new ApWorld(Den, output, atHome: false);
         w.Level(level);
-        var autopilot = w.Autopilot(new AutopilotOptions { Job = AutopilotJob.LevelUp });
+        var autopilot = w.Autopilot(new AutopilotOptions { Job = AutopilotJob.LevelUp, LadderQuests = false }); // M6 sprint: no quest station in this rig, and the cycle's check now calls a due ladder errand (m6-errand-at-cycle)
         Assert.Equal(ScenarioStatus.Failed, w.Run(autopilot));
         Assert.Equal(stop, autopilot.StopName);
 
@@ -442,7 +442,7 @@ public sealed class LadderLineTests(ITestOutputHelper output)
         }
 
         state.Self.Qualities.Enchantments = [new(666, 1, 666, 0, 666, 0, 1800.0, 0x50000001, 0f, 0f, 0.0, EnchantmentRules.Multiplicative, 0, 1f, 0, EnchantmentBucket.Vitae)]; // one enchantment still up
-        var autopilot = w.Autopilot(new AutopilotOptions { Job = AutopilotJob.LevelUp, Minutes = 60 });
+        var autopilot = w.Autopilot(new AutopilotOptions { Job = AutopilotJob.LevelUp, Minutes = 60, LadderQuests = false }); // M6 sprint: no quest station in this rig, and the cycle's check now calls a due ladder errand (m6-errand-at-cycle)
         w.Run(autopilot, _ => Kinds(w).Contains("den-fight"), 6000, _ => AnswerWieldsAndModes(w));
 
         Assert.True(Kinds(w).Length >= 2, string.Join(" | ", w.Lines.Where(l => l.Contains("autopilot", StringComparison.Ordinal)).Take(30)));
@@ -483,7 +483,7 @@ public sealed class LadderLineTests(ITestOutputHelper output)
             book.Learn(spell.SpellId); // every scrivener's line known, so the counters ask no learn trip and the fight stands open-ended
         }
 
-        var autopilot = w.Autopilot(new AutopilotOptions { Job = AutopilotJob.LevelUp, Minutes = 30 });
+        var autopilot = w.Autopilot(new AutopilotOptions { Job = AutopilotJob.LevelUp, Minutes = 30, LadderQuests = false }); // M6 sprint: no quest station in this rig, and the cycle's check now calls a due ladder errand (m6-errand-at-cycle)
         return (w, autopilot, () => kills);
     }
 
@@ -605,7 +605,7 @@ public sealed class LadderLineTests(ITestOutputHelper output)
     public void The_host_builds_a_quest_rungs_level_on_the_next_rung_provisionally(int level)
     {
         var ground = AutopilotHostLogic.LevelUpGround(level, out var why);
-        Assert.Equal("holtburg-outskirts", ground?.Key);
+        Assert.Equal("holtburg-redoubt", ground?.Key);
         Assert.StartsWith("provisional", why, StringComparison.Ordinal);
     }
 }

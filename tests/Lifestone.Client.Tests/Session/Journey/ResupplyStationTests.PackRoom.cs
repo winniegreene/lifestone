@@ -54,14 +54,14 @@ public sealed partial class ResupplyStationTests
         Assert.Equal(ScenarioStatus.Succeeded, home.Run(run, 1_200));
 
         var budget = run.PackBudget!;
-        Assert.Equal(PackBudgetVerdict.AtNeeds, budget.Verdict);
+        Assert.Equal(PackBudgetVerdict.KitFirst, budget.Verdict); // M6 audit (the owner's decision of 2026-11-19): 75 minutes of her use come before the loot's room
         Assert.Equal(17_850, budget.Capacity);
         Assert.Single(home.Lines, l => l.Contains("pack budget (m6-pack-room): capacity 17850 at the loot's load line 100% = 17850", StringComparison.Ordinal));
         Assert.True(home.Logged("pack budget: measured: 57."), string.Join(" | ", home.Lines.Where(l => l.Contains("pack budget", StringComparison.Ordinal))));
 
         var tapers = Assert.Single(run.BuyList, b => b.Line.Wcid == GearKit.PrismaticTaperWcid);
-        Assert.Equal((817, 484), (tapers.Line.Keep, tapers.Count)); // her line 300 and the 517 she burned, not the 517 back to the profile's 850
-        Assert.True(home.Logged("pack budget: Prismatic Taper: this visit buys to 817, not the profile's keep 850 (held 333)"));
+        Assert.Equal((850, 517), (tapers.Line.Keep, tapers.Count)); // her line 300 and 75 minutes of the 517 she burned in 57 (981) pass the profile's 850: the keep stands (it was 817, one interval's use)
+        Assert.False(home.Logged("pack budget: Prismatic Taper: this visit buys to"));
         Assert.DoesNotContain(run.BuyList, b => b.Line.Wcid is FighterKit.ManaPotionWcid or FighterKit.PotionWcid);
 
         int Held(uint wcid) => GearInventory.CountOf(state, [], wcid);

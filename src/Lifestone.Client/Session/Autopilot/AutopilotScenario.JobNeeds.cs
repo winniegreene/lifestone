@@ -60,6 +60,73 @@ public sealed partial class AutopilotScenario
             ? quest.Steps.Where(s => s.Kind == QuestStepKind.HuntUntil && s.Item?.Wcid is not null).Sum(s => QuestCombineChain.HuntHeld(quest, s, w => GearInventory.CountOf(session.State, _huntScratch, w))) // M6 14 combine3: the equivalents along the no-roll chain
             : 0;
 
+    /// <summary>M6 audit (fix 10): true when a quest station's <c>fail=</c> is a roll held under <see cref="RecipeChance.RollFloor"/> (<c>&lt;kind&gt;:roll-held</c>): nothing was used, the errand stays callable.</summary>
+    /// <param name="fail">The station's <c>fail=</c> token, or null.</param>
+    internal static bool RecipeRollHeld(string? fail) => fail is not null && fail.EndsWith(":roll-held", StringComparison.Ordinal);
+
+    /// <summary>M6 audit (fix 10): the first roll step of the ladder errands of her band (its skill and difficulty, the quest's key), or null.</summary>
+    private (uint Skill, uint Difficulty, string Quest)? JobRoll()
+    {
+        if (_session is not { } session || !_options.LadderQuests)
+        {
+            return null;
+        }
+
+        foreach (var quest in LadderJobs(session.State.Self.Qualities.Level))
+        {
+            if (quest.Steps.FirstOrDefault(s => s.RecipeSkill is not null && s.RecipeDifficulty is not null) is { } step)
+            {
+                return (step.RecipeSkill!.Value, step.RecipeDifficulty!.Value, quest.Key);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>M6 audit (fix 10): her current value of <paramref name="skill"/> (the SkillTable's formula, her buffs in), or null when untrained or unread.</summary>
+    private uint? CurrentSkill(IGameSessionView session, uint skill)
+    {
+        var q = session.State.Self.Qualities;
+        return session.SkillTable is { } table && table.TryGetSkill(skill, out var entry) && q.TryGetSkill(skill, out var held) && held.AdvancementClass >= SkillRules.TrainedClass && SkillRules.TryCurrent(q, skill, entry!.Formula, entry.MinLevel, out var value)
+            ? value
+            : null;
+    }
+
+    /// <summary>M6 audit (fix 10): the level-up spend's read of the roll a ladder errand of her band makes (<see cref="RecipeSpend"/>), or null.</summary>
+    private RecipeSpendFacts? LadderRecipeFacts() =>
+        JobRoll() is { } roll && _session is { } session && CurrentSkill(session, roll.Skill) is { } current ? new RecipeSpendFacts(roll.Skill, current, roll.Difficulty, roll.Quest) : null;
+
+    private readonly HashSet<string> _rollWaitNoted = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// M6 audit (fix 10, the owner's decision of 2026-11-19: only start the errand once she could reasonably get the skill to at least an 80% chance): a ladder errand with a roll waits while her current skill's chance is under
+    /// <see cref="RecipeChance.RollFloor"/> (the level-up spend buys toward it, <see cref="RecipeSpend"/>, in the caster rule's reach); said once a level.
+    /// </summary>
+    private bool ErrandWaitsForRoll(string key)
+    {
+        if (_session is not { } session || QuestCatalog.All.FirstOrDefault(q => q.Key == key) is not { } quest || quest.Steps.FirstOrDefault(s => s.RecipeSkill is not null && s.RecipeDifficulty is not null) is not { } step)
+        {
+            return false;
+        }
+
+        var skill = step.RecipeSkill!.Value;
+        var difficulty = step.RecipeDifficulty!.Value;
+        var current = CurrentSkill(session, skill);
+        var chance = current is { } v ? RecipeChance.Of(v, difficulty) : 0;
+        if (chance >= RecipeChance.RollFloor)
+        {
+            return false;
+        }
+
+        var level = session.State.Self.Qualities.Level;
+        if (_rollWaitNoted.Add(key + ":" + level.ToString(CultureInfo.InvariantCulture)))
+        {
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"autopilot quest: key={key}: the errand waits for its roll (m6-audit-roll-floor): {MageTemplate.SkillName(skill)} {(current is { } c ? c.ToString(CultureInfo.InvariantCulture) : "untrained")} against {difficulty} is a chance of {chance:0.000}, under {RecipeChance.RollFloor:0.00} (skill {RecipeChance.SkillFor(difficulty, RecipeChance.RollFloor)}); the level-up spend buys toward it"));
+        }
+
+        return true;
+    }
+
     /// <summary>True when a job she will take needs <paramref name="skill"/> trained (the credit order's need, D136).</summary>
     private bool JobNeedsSkill(uint skill) => _jobSkills.Contains(skill);
 

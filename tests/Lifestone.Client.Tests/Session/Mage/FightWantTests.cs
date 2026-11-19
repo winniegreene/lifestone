@@ -49,6 +49,20 @@ public sealed class FightWantTests
     }
 
     [Fact]
+    public void A_want_met_already_is_no_want_and_the_item_goes_to_the_ordinary_rules()
+    {
+        // M6 sprint (run 5, 15:58:31-15:59:18 UTC): one Female Tusker Tusk held, the next corpse's tusk was planned as wanted and ACE refused its pick-up after a 25 s wait. With no until, one held meets the want.
+        var met = new MageLootRules(new MageLootThresholds { MinValuePerBurden = 60, MinPayout = 4000, MaxItemBurden = 50, KeepScroll = FightScenario.WantHook([Tusk], new HashSet<uint>(), _ => null, met: w => w == Tusk) });
+        var tusk = Planned(met, 7, Tusk, burden: 100);
+
+        var plan = met.Plan("Corpse of Female Tusker", "Amy", [tusk], burden: 0, capacity: 1500, freeSlots: 20);
+
+        Assert.Null(tusk.KeepAside);
+        Assert.Empty(plan.Kept); // value 0 and over the burden cap: left like any such find
+        Assert.Equal("quest: want 31001", Planned(Rules(), 8, Tusk, burden: 100).KeepAside); // with no met predicate, as before
+    }
+
+    [Fact]
     public void A_wanted_item_is_still_bounded_by_the_pack_slots()
     {
         var rules = Rules();

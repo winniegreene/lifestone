@@ -8,6 +8,8 @@
       step 2  headless --scenario=journey --journey=climber: the Academy and the Pathwarden by play, cheat-free.
       step 3  the play host's level up job for Winnie (tools\play.ps1 -Offscreen -IsolateUserData -KeepServer ... --autopilot-job=level-up).
     Step 3 is refused unless step 1 read granted=0 and step 2 read cheat_free=yes granted=0 place=0 recovery_place=0 in THIS run (a count a log did not give is a refusal, not a zero).
+    With -OneWindow (M6 onscreen start) the three run as ONE play process in one window (--login-check=climber-start): the creation through the retail screens, the journey and the level up job, the same rule enforced in the game
+    and read again here from the one log.
     It ends with ONE line, report-only (D27):
       [climb] verdict level_start= level_end= rung= kills= deaths= granted= place= recovery_place= minutes= (then casters= and health_by_level=<level>:<health>,... when the log gives them)
     The backend is the lead's: this script never starts or stops it, never runs server\*.ps1, and refuses unless the backend is up with the Lifestone mod ready. It holds the display on during step 3
@@ -94,8 +96,20 @@
 .PARAMETER RecordSegmentSeconds
     The length of one recording file in seconds (default 3600, soak.ps1's). Read only with -Record.
 
+.PARAMETER OneWindow
+    M6 onscreen start (owner ruling 2026-11-19: the sprint's whole run in one game window, one process, recorded from its first frame): the three steps run as ONE tools\play.ps1 process with --login-check=climber-start. In the window the live
+    climber is deleted on the character screen and the new one made through character creation's pages to the same template the headless creation sends (checked, the old copy purged: the same '[climber] verdict' line); the start-up
+    journey (the Academy and the Pathwarden quest) runs in the same session ('journey done', 'journey climber' lines); the game's own gate ('climber start: gate level_up=allowed|refused', the same rule as step 3's) then lets the level up job
+    start in the same window with the level up arguments this script builds (every switch above applies). The verdict and gate lines below are read from the one log; the script applies its own rule to them too and reports a
+    disagreement with the game's as a finding. With -Record the window is recorded from the character screen on: the game holds at the character list until the recording has begun (--climber-start-wait-file). The one process's hard
+    stop is the level up job's plus -HeadlessTimeoutSeconds. Not with -SkipCreate. Off by default: the three-step path is unchanged.
+
+.PARAMETER CreationPace
+    With -OneWindow: --video-pace, the seconds each character-creation page is held (and a quarter of it after each attribute and skill change), so a viewer can follow the creation (0 to 10; default 1.8, the M2 hero video's pace,
+    docs/session.md). Read only with -OneWindow.
+
 .PARAMETER PlanOnly
-    Prints the three command lines and the rules and exits 0. Starts nothing, reads no backend state.
+    Prints the three command lines (with -OneWindow, the one) and the rules and exits 0. Starts nothing, reads no backend state.
 
 .EXAMPLE
     pwsh -File tools\climb.ps1 -PlanOnly
@@ -133,7 +147,10 @@ param(
     [ValidateSet('Winnie', 'Qwinnie')]
     [string] $Climber = 'Winnie',
     [string] $SteerRun = '',
-    [switch] $NoOrders
+    [switch] $NoOrders,
+    [switch] $OneWindow,
+    [ValidateRange(0.0, 10.0)]
+    [double] $CreationPace = 1.8
 )
 
 Set-StrictMode -Version Latest
@@ -145,6 +162,9 @@ Import-Module (Join-Path $PSScriptRoot 'lib\Climb.psm1') -Force -DisableNameChec
 $playTimeout = $Minutes * 60 + 900   # the stop rule fires at a safe point; the rest is the walk home and the log off
 if ($Quests -and $NoQuests) { Write-Host '[climb] REFUSED: -Quests is a selection and -NoQuests the sprint: give one of them'; exit 1 }
 if (-not $Record -and ($RecordDir -or $PSBoundParameters.ContainsKey('RecordSegmentSeconds'))) { Write-Host '[climb] REFUSED: -RecordDir and -RecordSegmentSeconds are read only with -Record'; exit 1 }
+if ($OneWindow -and $SkipCreate) { Write-Host '[climb] REFUSED: -OneWindow is the whole run from the climber''s re-creation; -SkipCreate resumes an existing climber: give one of them'; exit 1 }
+if (-not $OneWindow -and $PSBoundParameters.ContainsKey('CreationPace')) { Write-Host '[climb] REFUSED: -CreationPace is read only with -OneWindow'; exit 1 }
+$oneWindowTimeout = $playTimeout + $HeadlessTimeoutSeconds   # -OneWindow: the creation and the start-up journey run before the level up job in the same process
 $commands = Get-ClimbCommands -Minutes $Minutes -TargetLevel $TargetLevel -PlayTimeoutSeconds $playTimeout -NoLoot:$NoLoot -NoQuests:$NoQuests -Quests $Quests -NoBuffBot:$NoBuffBot -Climber $Climber -SteerRun $SteerRun -NoOrders:$NoOrders -DenRun:$DenRun -DenRunRehearse:$DenRunRehearse
 
 function ConvertTo-ClimbArgumentString([string[]] $Arguments) {
@@ -184,7 +204,7 @@ if ($Record) {
     # The recording (-Record): step 3 only, where the window exists. The marker is one white frame and a log line, for lining the take up with the log.
     $recordFolder = if ($RecordDir) { [IO.Path]::GetFullPath($RecordDir) } else { Join-Path $OutDir 'record' }
     Import-Module (Join-Path $PSScriptRoot 'WindowCapture.psm1') -Force
-    $recordLimitSeconds = $playTimeout + 600
+    $recordLimitSeconds = $(if ($OneWindow) { $oneWindowTimeout } else { $playTimeout }) + 600
     $levelUp = @($commands.LevelUp)
     $at = -1
     for ($i = 0; $i -lt $levelUp.Count; $i++) { if ($levelUp[$i] -like '-GameArgs:*') { $at = $i } }
@@ -193,20 +213,41 @@ if ($Record) {
     $commands.LevelUp = $levelUp
 }
 
+$goFile = ''
+$recordFirstBytes = 65536 # the take has frames once its first file passes this size (a 1080p keyframe at the recorder's 1800 kbit/s is larger; Lifestone's own threshold)
+$recordLeadInSeconds = 3 # the character list on screen before the delete begins (Lifestone's own)
+if ($OneWindow) {
+    # M6 onscreen start: the one process, made from the level up command as finished above. With -Record the game holds at the character list until this script writes the go file, right after the recording begins.
+    if ($Record) {
+        $goFull = Join-Path $OutDir 'record-go'
+        $goFile = if ($goFull.StartsWith($repoRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { $goFull.Substring($repoRoot.Length + 1).Replace('\', '/') } else { $goFull }
+    }
+    try { $commands.OneWindow = ConvertTo-ClimbOneWindowCommand -LevelUp @($commands.LevelUp) -TimeoutSeconds $oneWindowTimeout -Pace $CreationPace -WaitFile $goFile }
+    catch { Write-Host "[climb] REFUSED: $($_.Exception.Message)"; exit 1 }
+}
+
 if ($PlanOnly) {
     Write-Host "[climb] plan: character $Climber, minutes=$Minutes target_level=$TargetLevel loot=$(if ($NoLoot) { 'off (-NoLoot)' } else { 'on' }) quests=$(if ($NoQuests) { 'off (-NoQuests, the sprint)' } elseif ($Quests) { "$Quests (-Quests, the selection)" } else { 'on' }) buff_bot=$(if ($NoBuffBot) { 'off (-NoBuffBot)' } else { 'on' })$(if ($DenRun) { ' den_run=on (-DenRun: the order; the level rule is not read)' })$(if ($SkipCreate) { ', steps 1-2 skipped (-SkipCreate)' })"
     if (-not $NoBuild) { Write-Host '[climb] build: dotnet build Lifestone.slnx --disable-build-servers -nologo' }
-    Write-Host "[climb] step 1 create:  dotnet $(ConvertTo-ClimbArgumentString $commands.Create)$(if ($SkipCreate) { '   (skipped)' })"
-    Write-Host "[climb] step 2 journey: dotnet $(ConvertTo-ClimbArgumentString $commands.Journey)$(if ($SkipCreate) { '   (skipped)' })"
-    Write-Host "[climb] step 3 level-up: pwsh $(ConvertTo-ClimbArgumentString $commands.LevelUp)"
+    if ($OneWindow) {
+        Write-Host "[climb] one window: pwsh $(ConvertTo-ClimbArgumentString $commands.OneWindow)"
+        Write-Host "[climb] one window: the creation through the retail screens (pace $($CreationPace.ToString('0.###', [Globalization.CultureInfo]::InvariantCulture)) s), the start-up journey, the game's gate, then the level up job, in one process (hard stop $oneWindowTimeout s)"
+    }
+    else {
+        Write-Host "[climb] step 1 create:  dotnet $(ConvertTo-ClimbArgumentString $commands.Create)$(if ($SkipCreate) { '   (skipped)' })"
+        Write-Host "[climb] step 2 journey: dotnet $(ConvertTo-ClimbArgumentString $commands.Journey)$(if ($SkipCreate) { '   (skipped)' })"
+        Write-Host "[climb] step 3 level-up: pwsh $(ConvertTo-ClimbArgumentString $commands.LevelUp)"
+    }
     if ($TrialGround) { Write-Host "[climb] trial: ground=$TrialGround minutes=$TrialMinutes (-TrialGround: the level up job hunts it in place of the ladder's rung for $TrialMinutes minutes of fight time from her first kill there, then returns; the game refuses it by name if a rule fails)" }
     if ($Record) {
         $planArgs = Get-WindowRecordingArguments -Hwnd '<hwnd>' -LimitSeconds $recordLimitSeconds -SegmentSeconds $RecordSegmentSeconds -Folder $recordFolder
-        Write-Host "[climb] record: on (-Record), step 3 only: the game window itself by ffmpeg gfxcapture (tools\WindowCapture.psm1); dir=$recordFolder segment_s=$RecordSegmentSeconds; --video-sync-marker --clean-hud --video-chat --video-timer=$TargetLevel --video-cantrip-look in the game arguments; the window is found after step 3 starts (<hwnd> is a placeholder)"
+        if ($OneWindow) { Write-Host "[climb] record: on (-Record), the one window from the character screen on: the game window itself by ffmpeg gfxcapture (tools\WindowCapture.psm1); dir=$recordFolder segment_s=$RecordSegmentSeconds; --video-sync-marker --clean-hud --video-chat --video-timer=$TargetLevel --video-cantrip-look in the game arguments; the game holds at the character list until the go file $goFile is written, right after the recording begins (<hwnd> is a placeholder)" }
+        else { Write-Host "[climb] record: on (-Record), step 3 only: the game window itself by ffmpeg gfxcapture (tools\WindowCapture.psm1); dir=$recordFolder segment_s=$RecordSegmentSeconds; --video-sync-marker --clean-hud --video-chat --video-timer=$TargetLevel --video-cantrip-look in the game arguments; the window is found after step 3 starts (<hwnd> is a placeholder)" }
         Write-Host "[climb] record: ffmpeg $(ConvertTo-ClimbArgumentString $planArgs)"
     }
     else { Write-Host '[climb] record: off (no -Record)' }
-    Write-Host '[climb] rule: step 3 starts only when step 1 read granted=0 and step 2 read cheat_free=yes granted=0 place=0 recovery_place=0 in this run; the backend is the lead''s (refused unless up with the mod ready); report-only (D27)'
+    if ($OneWindow) { Write-Host '[climb] rule: the level up job starts in the window only when the game''s gate reads the creation''s template=ok granted=0 and the journey''s ok=true cheat_free=yes granted=0 place=0 recovery_place=0 (climber start: gate level_up=allowed); this script reads the same lines from the one log and reports a disagreement as a finding; the backend is the lead''s (refused unless up with the mod ready); report-only (D27)' }
+    else { Write-Host '[climb] rule: step 3 starts only when step 1 read granted=0 and step 2 read cheat_free=yes granted=0 place=0 recovery_place=0 in this run; the backend is the lead''s (refused unless up with the mod ready); report-only (D27)' }
     Write-Host '[climb] -PlanOnly: nothing was started'
     exit 0
 }
@@ -234,7 +275,7 @@ if ($Record) {
     # Fail loudly, before anything starts, when the recording cannot work.
     $ffmpegCheck = Test-WindowCaptureFfmpeg
     if ($ffmpegCheck.Problems.Count -gt 0) { Stop-Climb ($ffmpegCheck.Problems -join '; ') }
-    Write-Climb "[climb] record: on, step 3 only: ffmpeg gfxcapture on the game window, $RecordSegmentSeconds s files in $recordFolder"
+    Write-Climb "[climb] record: on, $(if ($OneWindow) { 'the one window from the character screen on' } else { 'step 3 only' }): ffmpeg gfxcapture on the game window, $RecordSegmentSeconds s files in $recordFolder"
 }
 
 # --- the backend is the lead's: read its state (read-only), never start or stop it ---
@@ -242,7 +283,7 @@ $runtime = Find-LifestoneServerRuntime -RepoRoot $repoRoot
 Import-Module (Join-Path (Split-Path -Parent $runtime) 'lib\LifestoneServer.psm1') -Force -DisableNameChecking
 $state = Get-LsBackendState (Get-LsConfig)
 if (-not ([bool]$state.Ace -and [bool]$state.ModReady)) { Stop-Climb 'the backend is not up with the Lifestone mod ready; the lead starts it (this script never starts or stops it)' }
-Write-Climb "[climb] start out=$OutDir minutes=$Minutes target_level=$TargetLevel skip_create=$([bool]$SkipCreate) quests=$(if ($NoQuests) { 'off' } elseif ($Quests) { $Quests } else { 'on' }) buff_bot=$(if ($NoBuffBot) { 'off' } else { 'on' })"
+Write-Climb "[climb] start out=$OutDir minutes=$Minutes target_level=$TargetLevel skip_create=$([bool]$SkipCreate) one_window=$([bool]$OneWindow) quests=$(if ($NoQuests) { 'off' } elseif ($Quests) { $Quests } else { 'on' }) buff_bot=$(if ($NoBuffBot) { 'off' } else { 'on' })"
 if ($SteerRun) {
     # The clean way to end a watched run early: the game looks for this file every 5 s. One left from an earlier run would end this one at once.
     $stopFile = Join-Path $repoRoot "cache\avatar\$SteerRun\stop"
@@ -259,8 +300,11 @@ foreach ($branch in @('m6/8', 'm6/avatar')) {
 }
 
 function Invoke-ClimbProcess {
-    <# Runs one child with its output in $LogFile (stderr in $LogFile.err, appended after); kills its tree at the timeout. Returns @{ ExitCode; TimedOut; Seconds }. #>
-    param([string] $Exe, [string[]] $Arguments, [string] $LogFile, [int] $TimeoutSeconds, [switch] $Record)
+    <#
+      Runs one child with its output in $LogFile (stderr in $LogFile.err, appended after); kills its tree at the timeout. Returns @{ ExitCode; TimedOut; Seconds }.
+      -GoFile (-OneWindow -Record): written once the recording has begun, or once no window was found, so the game's hold at the character list ends either way.
+    #>
+    param([string] $Exe, [string[]] $Arguments, [string] $LogFile, [int] $TimeoutSeconds, [switch] $Record, [string] $GoFile = '')
     $clock = [Diagnostics.Stopwatch]::StartNew()
     $p = Start-Process -FilePath $Exe -ArgumentList (ConvertTo-ClimbArgumentString $Arguments) -WorkingDirectory $repoRoot -NoNewWindow -PassThru -RedirectStandardOutput $LogFile -RedirectStandardError "$LogFile.err"
     $timedOut = $false
@@ -269,6 +313,22 @@ function Invoke-ClimbProcess {
         $window = Find-LifestoneGameWindow -CommandLineLike '--video-sync-marker' -StableSeconds 5 -TimeoutSeconds 180
         if ($window) { $script:recording = Start-WindowRecording -FfmpegPath $ffmpegCheck.Path -Window $window -LimitSeconds $recordLimitSeconds -SegmentSeconds $RecordSegmentSeconds -Folder $recordFolder -Label 'climb' }
         else { Write-Climb '[climb] record: no game window within 180 s; the run goes on unrecorded' }
+        if ($GoFile -and $window) {
+            # The live try of 2026-11-19 (20:17 UTC): the go file went with ffmpeg's start, and the take's first frame was already the profession page (the character list, the delete and the heritage page unrecorded).
+            # The go waits for frames in the first file (its size past one keyframe's worth), then a lead-in holds the character list on screen.
+            $first = Join-Path $recordFolder 'rec-000.ts'
+            $deadline = [DateTime]::UtcNow.AddSeconds(30)
+            while ([DateTime]::UtcNow -lt $deadline -and -not ((Test-Path -LiteralPath $first) -and (Get-Item -LiteralPath $first).Length -ge $recordFirstBytes)) { Start-Sleep -Milliseconds 250 }
+            $bytes = if (Test-Path -LiteralPath $first) { (Get-Item -LiteralPath $first).Length } else { 0 }
+            Write-Climb "[climb] record: frames in the take: $(if ($bytes -ge $recordFirstBytes) { 'yes' } else { 'not seen within 30 s' }) ($bytes bytes in rec-000.ts); the character list holds $recordLeadInSeconds s more on screen"
+            Start-Sleep -Seconds $recordLeadInSeconds
+        }
+
+        if ($GoFile) {
+            $goPath = if ([IO.Path]::IsPathRooted($GoFile)) { $GoFile } else { Join-Path $repoRoot $GoFile }
+            Set-Content -LiteralPath $goPath -Value ((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ')) -Encoding utf8
+            Write-Climb "[climb] record: the go file is written ($(if ($window) { 'the recording has begun' } else { 'no recording' })): the game's creation begins"
+        }
     }
     while (-not $p.WaitForExit(30000)) {
         Write-Host "[climb]   ... $([int]$clock.Elapsed.TotalSeconds) s"
@@ -277,6 +337,22 @@ function Invoke-ClimbProcess {
     $p.WaitForExit()
     if (Test-Path -LiteralPath "$LogFile.err") { Add-Content -LiteralPath $LogFile -Value (Get-Content -LiteralPath "$LogFile.err" -Raw) -Encoding utf8; Remove-Item -LiteralPath "$LogFile.err" -Force }
     return @{ ExitCode = $(if ($timedOut) { -1 } else { $p.ExitCode }); TimedOut = $timedOut; Seconds = $clock.Elapsed.TotalSeconds }
+}
+
+function Read-ClimbLog {
+    <#
+      A step's log, and, when a line the climb reads is not in it, those lines from the isolated user data's own log (--log-copies keeps Info lines off the console there: the lines read are only the climb's).
+    #>
+    param([string] $LogFile, [datetime] $Since, [string[]] $Needed, [string] $Patterns)
+    $text = Get-Content -LiteralPath $LogFile -Raw
+    if (@($Needed | Where-Object { $text -notmatch [regex]::Escape($_) }).Count -gt 0) {
+        $logs = Join-Path $repoRoot 'cache\godot\roaming\Godot\app_userdata\Lifestone\logs'
+        if (Test-Path -LiteralPath $logs) {
+            $files = @(Get-ChildItem -LiteralPath $logs -File -Filter 'lifestone*.log' | Where-Object { $_.LastWriteTime -ge $Since.AddSeconds(-5) } | Sort-Object LastWriteTime)
+            if ($files.Count -gt 0) { $text += "`n" + ((Select-String -LiteralPath $files.FullName -Pattern $Patterns | ForEach-Object { $_.Line }) -join "`n") }
+        }
+    }
+    return $text
 }
 
 $total = [Diagnostics.Stopwatch]::StartNew()
@@ -290,7 +366,43 @@ try {
         if ($b.ExitCode -ne 0) { throw "the build failed (exit code $($b.ExitCode)); see $(Join-Path $OutDir 'build.log')" }
     }
 
-    if ($SkipCreate) {
+    if ($OneWindow) {
+        # M6 onscreen start: the three steps in one process and one window; the verdict lines are read from its one log.
+        Write-Climb "[climb] one window: pwsh $(ConvertTo-ClimbArgumentString $commands.OneWindow)"
+        if ($TrialGround) { Write-Climb "[climb] trial: ground=$TrialGround minutes=$TrialMinutes (the log's 'ladder: trial:' lines say whether it started, every return and its end)" }
+        if (-not $NoDisplayHold) {
+            $before = Get-GateDisplayState
+            Write-Climb "[climb] display preflight: $($before.Detail)"
+            if ($before.State -ne 'Enabled') { [void](Invoke-GateDisplayWake) }
+            $displayHold = Start-GateDisplayHold -Folder $OutDir
+            Write-Climb "[climb] display hold: $(if ($displayHold) { 'on' } else { 'did not start' })"
+        }
+        $stepStart = Get-Date
+        $oneLog = Join-Path $OutDir 'one-window.log'
+        $r = Invoke-ClimbProcess $pwshExe $commands.OneWindow $oneLog ($oneWindowTimeout + 120) -Record:$Record -GoFile $goFile
+        $text = Read-ClimbLog -LogFile $oneLog -Since $stepStart -Needed @('climber start: gate level_up=', 'autopilot done ok=') -Patterns '\[climber\] verdict|climber start: |journey done ok=|journey climber cheat_free=|\[ladder\] at=|autopilot done ok=|autopilot cycle n='
+        $create = Get-ClimbCreateVerdict -Text $text -ExitCode $r.ExitCode -OneWindow
+        Write-Climb "[climb] step 1 (in the window) ok=$($create.Ok) $($create.Line)$(if ($create.Why) { ' WHY: ' + $create.Why })"
+        $journey = Get-ClimbJourneyVerdict -Text $text -ExitCode $r.ExitCode -OneWindow
+        Write-Climb "[climb] step 2 (in the window) ok=$($journey.Ok) $($journey.Line)$(if ($journey.Why) { ' WHY: ' + $journey.Why })"
+        $gameGate = Get-ClimbGameGate -Text $text
+        $gate = Test-ClimbMayLevelUp -Create $create -Journey $journey
+        Write-Climb "[climb] gate: game=$(if ($gameGate.Word) { $gameGate.Word } else { 'no line' }) script=$(if ($gate.Allowed) { 'allowed' } else { 'refused' })$(if ($gate.Why) { ' WHY: ' + $gate.Why })"
+        if (($gameGate.Word -eq 'allowed') -ne [bool]$gate.Allowed) {
+            $failed = $true
+            Write-Climb "[climb] FINDING: the game's gate and this script's rule disagree on the same log: game '$($gameGate.Line)'; script $(if ($gate.Allowed) { 'allowed' } else { 'refused: ' + $gate.Why })"
+        }
+        if ($gameGate.Word -eq 'allowed') {
+            $levelUp = Get-ClimbLevelUpVerdict -Text $text -ExitCode $r.ExitCode
+            Write-Climb "[climb] step 3 (in the window) ok=$($levelUp.Ok) $($levelUp.Line)$(if ($levelUp.Why) { ' WHY: ' + $levelUp.Why })"
+            if (-not $levelUp.Ok) { $failed = $true }
+        }
+        else {
+            $failed = $true
+            Write-Climb "[climb] REFUSED step 3: the game's gate did not allow the level up job ($(if ($gameGate.Line) { $gameGate.Line } else { 'no gate line: the run ended before it; exit code ' + $r.ExitCode }))"
+        }
+    }
+    elseif ($SkipCreate) {
         Write-Climb '[climb] WARN -SkipCreate: steps 1 and 2 are skipped; their granted, place and recovery_place counts are NOT in the sum, and nothing here proves the character was never granted or placed'
     }
     else {
@@ -311,7 +423,7 @@ try {
         if (-not $gate.Allowed) { $failed = $true; Write-Climb "[climb] REFUSED step 3: $($gate.Why)" }
     }
 
-    if (-not $failed) {
+    if (-not $failed -and -not $OneWindow) {
         Write-Climb "[climb] step 3 level-up: pwsh $(ConvertTo-ClimbArgumentString $commands.LevelUp)"
         if ($TrialGround) { Write-Climb "[climb] trial: ground=$TrialGround minutes=$TrialMinutes (the log's 'ladder: trial:' lines say whether it started, every return and its end)" }
         if (-not $NoDisplayHold) {
@@ -342,7 +454,7 @@ catch {
     Write-Climb "[climb] ERROR $($_.Exception.Message)"
 }
 finally {
-    Stop-WindowRecording -Recording $recording -Label 'climb'
+    if ($Record) { Stop-WindowRecording -Recording $recording -Label 'climb' } # the recording's module is loaded only with -Record: without it the call was an unknown command, the display hold below was skipped and a clean climb exited 1 (live 2026-11-18, the Redoubt tests)
     if ($Record) { $found = Get-WindowRecordingFiles -Folder $recordFolder; Write-Climb "[climb] recording=$recordFolder files=$($found.Count) bytes=$($found.Bytes)" }
     Stop-GateDisplayHold $displayHold
 }

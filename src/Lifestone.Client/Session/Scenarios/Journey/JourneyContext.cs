@@ -273,6 +273,13 @@ public sealed class JourneyFacts
     /// </summary>
     public bool LifestoneRecallUnavailable { get; set; }
 
+    /// <summary>
+    /// M6, the recall's components (<see cref="RecallReadiness"/>): the login name the server hashes for the account's spell formula, set once by the autopilot at its start (the name its buff options carry, M6 1 w), so every way-home
+    /// decision of the run can judge Lifestone Recall's components on the account's full formula when the pack holds no Item Enchantment focus. Null: unknown (a plain journey, a host that gave none): a school without its focus is not
+    /// judged, and the cast's own refusal sets <see cref="LifestoneRecallUnavailable"/>. Hashed, never logged.
+    /// </summary>
+    public string? FormulaAccount { get; set; }
+
     /// <summary>True once Lifestone Tie on Holtburg's lifestone succeeded or a Lifestone Recall arrived; false after a 0x049E; null when unknown.</summary>
     public bool? LifestoneTied { get; set; }
 
@@ -302,6 +309,13 @@ public sealed class JourneyFacts
     /// The minutes rule is offered, and since M6 item 14 a pending stop request too (a pending stop starts nothing new, so no way back is begun under one; the autopilot logs which of the two answered): what the level rule does is not changed.
     /// </summary>
     public Func<bool>? MinutesStopDue { get; set; }
+
+    /// <summary>
+    /// M6 audit (finding 9, the owner's decision of 2026-11-19): at the logistics trip's end at home, the reason the buff pass must run here before the way back (more lines to cast than the ladder's
+    /// <c>pass_home_over_lines</c>), else null; the autopilot sets it for the level up job. Live 2026-11-19, runs 2 to 4 at level 9: the trip learned 43 to 45 spells, walked 456 to 461 m back to the Redoubt, read
+    /// "5 line(s) to cast ... home first" there and recalled home to cast them (3 m 38 s to 4 m 28 s and the first walk lost, every run).
+    /// </summary>
+    public Func<IGameSessionView, string?>? PassAtHomeDue { get; set; }
 
     /// <summary>
     /// M6 item 14 (D125): true while the run's stop at the buff bot applies (the autopilot's option is on, the job is the level up job; <c>AutopilotScenario.BuffBot.cs</c>): the logistics trip then stops at the bot at home,

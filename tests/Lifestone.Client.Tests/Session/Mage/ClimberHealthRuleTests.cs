@@ -21,10 +21,10 @@ public sealed class ClimberHealthRuleTests(DatSetFixture fixture, ITestOutputHel
     private static readonly int[] LateBolts = [123]; // M6 item 14: the climber's split (the named list; 5% for each health stat) leaves one level whose planned bolt comes later than the plan with no floor; before it: 16, 27, 42, 67, 68, 123, 124, 125 (M6 7 finish: the per-stat 5% aim and the 10% cap leave more to the magic skills than the old 30% pair, so 8, 17, 28, 43, 44, 69 and 70 keep their bolt; 124 and 125 join (the cost is at most 5 points))
 
     [Theory]
-    [InlineData(5, "outskirts", 71, 142, "Goldenback Tusker", true)] // M6 14 (D135): the next rung is the Burrow at 10 by the Refuge's walk: the outskirts name that road's Goldenback, as the Burrow does
+    [InlineData(5, "outskirts", 71, 142, "Goldenback Tusker", true)] // M6 14 (D135): the next rung is the island at 10 by the Refuge's walk (M6 retreat: the Tusker Retreat's): the outskirts name that road's Goldenback
     [InlineData(9, "outskirts", 71, 142, "Goldenback Tusker", true)]
-    [InlineData(10, "burrow", 71, 142, "Goldenback Tusker", true)] // the road's two hits (142) outweigh the Female Tuskers' pack of 3 (136): the island road of M6 7 R again, met alone
-    [InlineData(14, "burrow", 71, 142, "Goldenback Tusker", true)]
+    [InlineData(10, "burrow", 36, 288, "Male Tusker", false)] // M6 retreat: the rung hunts the Tusker Retreat: its Male Tuskers' pack of 7 (8 x 36 = 288) outweighs the road's Goldenback met alone (142)
+    [InlineData(14, "burrow", 36, 288, "Male Tusker", false)]
     [InlineData(15, "lodge", 36, 144, "Male Tusker", false)] // the hub's gate: no road; M6 7 AY: the entry trio
     [InlineData(20, "lodge", 36, 144, "Male Tusker", false)]
     [InlineData(21, "cave", 65, 390, "Tusker Crimsonback", false)] // M6 7 AY: a pack of 5
@@ -91,8 +91,8 @@ public sealed class ClimberHealthRuleTests(DatSetFixture fixture, ITestOutputHel
     [Fact]
     public void The_line_names_the_hit_N_the_rung_the_buyer_and_the_prices()
     {
-        // M6 7 AC: the dropped Burrow rung's need, built by hand: the line's road annotation is still the line's format (a rung may carry a road_hitter again)
-        var need = ClimberHealthRule.NeedAt(WarMage, 10)! with { Rung = "burrow", Hit = 71, Want = 142, Hitter = "Goldenback Tusker", Road = true };
+        // M6 7 AC: a road's need, built by hand: the line's road annotation is still the line's format (M6 retreat: the burrow rung's own need is the Retreat's pack now)
+        var need = ClimberHealthRule.NeedAt(WarMage, 10)! with { Rung = "burrow", Hit = 71, Want = 142, Hitter = "Goldenback Tusker", Road = true, Hits = 2, Pack = 1 };
         var buy = new HealthBuy(29, 11, 40, 24_484, "Endurance", 901, 880, true);
         var line = ClimberHealthRule.Line(need, 16, buy);
         Assert.Equal("health: now=16 want=142 reach=40 short=102 why=2x71(Goldenback-Tusker,road) rung=burrow max_health_ranks=29 endurance_ranks=11 buyer=Endurance price_health=901 price_endurance=880 pay_limit=5% limited=yes: the floor raises health 16 -> 40 before the shares", line);
@@ -210,7 +210,7 @@ public sealed class ClimberHealthRuleTests(DatSetFixture fixture, ITestOutputHel
 
     /// <summary>
     /// M6 7 AY: the pack's want at each rung up to the Cave, against the pay limit: what the projection reaches at the band's ends and the level the limit would pay the whole want. M6 14 (D135, the study's bands): the island road's 142 binds
-    /// the outskirts and the Burrow, and the projection reaches it only in the Quarters' band; the Lodge's 144 after it; the Cave's 390 never.
+    /// the outskirts (M6 retreat: the 10-14 rung's Retreat pack, 288, binds it and no level pays it), and the projection reaches 142 only in the Quarters' band; the Lodge's 144 after it; the Cave's 390 never.
     /// </summary>
     [RequiresDatsFact]
     public void The_packs_want_up_to_the_Cave_and_where_the_pay_limit_blocks_it()
@@ -219,7 +219,7 @@ public sealed class ClimberHealthRuleTests(DatSetFixture fixture, ITestOutputHel
         var rows = new (string Rung, int Pack, int Want, int From, int HealthFrom, int To, int HealthTo, int PaidAt)[]
         {
             ("outskirts", 1, 142, 5, 10, 9, 20, 43), // M6 14 (D135): the Burrow's road's Goldenback, met alone
-            ("burrow", 1, 142, 10, 23, 14, 39, 43), // the road outweighs the Female Tuskers' pack of 3 (136)
+            ("burrow", 7, 288, 10, 23, 14, 39, 0), // M6 retreat: the Retreat's Male Tuskers' pack of 7 outweighs the road's 142; 5,040,336,906 experience: no level pays it
             ("lodge", 3, 144, 15, 43, 20, 68, 44),
             ("cave", 5, 390, 21, 72, 24, 86, 0), // 7,996,103,161 experience: no level pays it
         };
@@ -250,10 +250,14 @@ public sealed class ClimberHealthRuleTests(DatSetFixture fixture, ITestOutputHel
     [Fact]
     public void The_heavier_of_the_rungs_pack_and_its_road_decides_and_the_line_names_it()
     {
-        // M6 14 (D135): the Burrow at 10 to 14 is reached by the Refuge's walk: the road's Goldenback, met alone (2 x 71 = 142), outweighs the Female Tuskers' pack of 3 (4 x 34 = 136)
-        var road = ClimberHealthRule.NeedAt(WarMage, 10)!;
+        // M6 14 (D135): the outskirts name the next rung's road, the Refuge's walk: its Goldenback, met alone (2 x 71 = 142), outweighs the Mite Scion's 14
+        var road = ClimberHealthRule.NeedAt(WarMage, 9)!;
         Assert.Equal(("Goldenback Tusker", 1, true, 142), (road.Hitter, road.Pack, road.Road, road.Want)); // a road's hitter is met alone
-        Assert.Contains("why=2x71(Goldenback-Tusker,road) rung=burrow", ClimberHealthRule.Line(road, 40, HealthBuy.None), StringComparison.Ordinal);
+        Assert.Contains("why=2x71(Goldenback-Tusker,road) rung=outskirts", ClimberHealthRule.Line(road, 40, HealthBuy.None), StringComparison.Ordinal);
+        // M6 retreat: from 10 the rung hunts the Tusker Retreat: its Male Tuskers' pack of 7 (8 x 36 = 288) outweighs the same road (142)
+        var retreat = ClimberHealthRule.NeedAt(WarMage, 10)!;
+        Assert.Equal(("Male Tusker", 7, false, 288), (retreat.Hitter, retreat.Pack, retreat.Road, retreat.Want));
+        Assert.Contains("why=8x36(Male-Tusker,pack=7) rung=burrow", ClimberHealthRule.Line(retreat, 40, HealthBuy.None), StringComparison.Ordinal);
         var pack = ClimberHealthRule.NeedAt(WarMage, 15)!; // the Lodge by the hub: no road, the entry trio
         Assert.Equal(("Male Tusker", 3, false, 144), (pack.Hitter, pack.Pack, pack.Road, pack.Want));
         Assert.Contains("why=4x36(Male-Tusker,pack=3) rung=lodge", ClimberHealthRule.Line(pack, 75, HealthBuy.None), StringComparison.Ordinal);
@@ -273,11 +277,11 @@ public sealed class ClimberHealthRuleTests(DatSetFixture fixture, ITestOutputHel
             Assert.True(ClimberHealthRule.ProjectedBuy(table, WarMage, rung.Band.To).Health < want, $"{key}: its want {want} is not paid inside its band");
         }
 
-        // The Burrow's road (M6 7 R, again from D135): its 142 is not paid inside 10-14: the pay limit binds (39 at level 14, the 5% aim of each stat).
-        Assert.Equal(142, ClimberHealthRule.NeedAt(WarMage, 14)!.Want);
+        // The 10-14 rung (M6 retreat: the Retreat's pack of 7; before it the Burrow's road, M6 7 R): its 288 is not paid inside 10-14: the pay limit binds (39 at level 14, the 5% aim of each stat).
+        Assert.Equal(288, ClimberHealthRule.NeedAt(WarMage, 14)!.Want);
         Assert.Equal(39, ClimberHealthRule.ProjectedBuy(table, WarMage, 14).Health);
 
-        // The limit's purpose (the Burrow's road): a Goldenback's 142 prices 2.4M and level 14 has earned 274k; the limit ends the buying under its budget.
+        // The limit's purpose (the island road's, the outskirts' want): a Goldenback's 142 prices 2.4M and level 14 has earned 274k; the limit ends the buying under its budget.
         var budget = ClimberHealthRule.Budget(table.XpForLevel(14), WarMage.HealthPayPercent);
         Assert.True(ClimberHealthRule.Buy(table, 142, MageTemplate.LowAttribute, 0, 0, ulong.MaxValue).Xp > table.XpForLevel(14));
         var road = ClimberHealthRule.Buy(table, 142, MageTemplate.LowAttribute, 0, 0, budget);

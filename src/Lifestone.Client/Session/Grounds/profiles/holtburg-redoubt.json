@@ -1,0 +1,1425 @@
+{
+  "key": "holtburg-redoubt",
+  "name": "Holtburg Redoubt",
+  "kind": "dungeon",
+  "sources": {
+    "landblocks": "the dats: landblock 0x0163 (GroundDraft)",
+    "arrival": "the pinned world SQL v0.9.296: weenie 4935's Destination (PositionType 2) is the arrival cell 0x016301AC (GroundDraft)",
+    "walk": "the doorway lean 0.3, the tusker profiles': GroundDraft at lean 0 and at lean 0.3 reaches the same 128 floored cells of the landblock's 178 from the arrival 0x016301AC (28 floorless, 22 pocket cells); the leg's stop rules are the Temple 40+ profile's (stop within 1.0 m, dwell 0.25 s, a leg at most 90 s), as the Cave of Alabree's, not measured on this ground",
+    "storeys": "the dats (GroundDraft.Cells with the profile's galleries): every cell the arrival 0x016301AC reaches over the doorways RoomGraph.IsPassable accepts at lean 0.3, grouped by origin z; 132 walkable cells in 5 storeys of 178: the 128 floored cells the draft reaches and the four floorless gallery cells a body stands in (0x01630199, 0x0163019A and 0x0163019B on z 0, 0x01630133 on z -12: the galleries section); 24 floorless cells and the 22 pocket cells are left out. The pocket cells: the eight that hold the galleries' floors (the galleries section's floors), and fourteen more the draft's walk does not reach and no slot stands in (0x0163015B to 0x01630161, 0x01630189 to 0x0163018C, 0x016301AF to 0x016301B1), not read further",
+    "no_go": "the exit portal's cell 0x016301A9 (wcid 4936 Surface, to 0xAAB10020, the Redoubt's one exit by portal; no exit by emote), as the draft names it and as the Cave of Alabree's profile holds its own; it is a dead end (its other portal leads to the floorless 0x016301AA), so it cuts no cell and no slot off (DenRoomGraphTests). No other cell is held back by hand",
+    "targets": "the pinned world SQL v0.9.296 through the draft (GroundDraft.World): the weenie of every slot with its Name (PropertyString 1) and Level (PropertyInt 25): Drudge Skulker 7 (11 slots), Drudge Sneaker 940 (2), Drudge Slinker 1468 (2), Drudge Slinker 193 (2), Drudge Prowler 192 (1), all level 8, all role target (none has an emote that is an exit). M6 16 Q12: max_health and magic_defence are read from the bestiary's tables at load (from_bestiary; the draft reads 42 and 9, 36 and 12, 40 and 13, 47 and 15, 38 and 13 from the same rows); the attributes and the damage types (0x0004 bludgeon, the body parts' d_Type) are the draft's. Read-only SELECTs on the world copy through server/runtime/mariadb-ace.cnf, 2026-11-18, each WHERE object_Id IN (7, 192, 193, 940, 1468): weenie_properties_float type 67 (ResistFire) is 1.42 on all five, as types 68 (cold) and 70 (electric) are, with slash 0.86, pierce 0.75, bludgeon 0.66 and acid 0.75, so Flame Bolt, the road's one element, is one of the three best here; type 31 (VisualAwarenessRange) is 10 m, 12 m on the Prowler; weenie_properties_int type 146 (XpOverride) is 1,000 on all five; weenie_properties_d_i_d type 35 (DeathTreasureType) is 453 on all five, the type of the outskirts' own Drudge Skulker 19257 and Drudge Slinker 19258 (tier 1, treasure_death id 208); type 32 (WieldedTreasureType) is 80, 74, 82, 84 and 82: each spawn rolls a wielded weapon. The simulator (pwsh -File tools/fight-sim.ps1 matchup 7, 192, 193, 940 and 1468 --her Qwinnie, ACE's own combat code on the climber as saved at level 9 with the buff bot's lines, health 84, run 2026-11-18): Flame Bolt III lands 98.8 to 99.0 % and kills in 1.03 casts and 15.2 to 15.3 mana; each hit of theirs that lands takes 0 or 1 health; with six of one kind on her at once and no healing she dies in 0.0 % of 2,000 fights (health lost on average 0.0 Skulker, 0.8 and 1.9 the Slinkers, 3.6 Prowler, 5.9 Sneaker); a kill is 1,000 x 1.04 = 1,040 experience. A climber of level 5, or one without the bot's lines, is not simulated: the simulator builds her only as saved",
+    "level_band": "the pinned world SQL v0.9.296 through GroundDraft.LevelBandOf over the five target creatures' levels: all 8 (weenie_properties_int type 25)",
+    "portal": "the pinned world SQL v0.9.296 (GroundDraft's town half): weenie 4935 Holtburg Redoubt's landblock_instance row, guid 0x7AAB1000 at (99.7059, 180.63, 124.005) in landblock 0xAAB1, in the outdoor cell its point lies in, 0xAAB10028 (x/24*8 + y/24 + 1 with whole divisions); 1 instance(s) of the weenie; Primary Portal Tie 47 and Recall 48 are the global spell ids; the tie and the recall are not measured live (TODO(m6-ground-live-facts)); wcid and origin are the row's; front_cell and front_point are the tie point 3 m along the portal's facing (the row's quaternion, the z to the centimetre; GroundDraft.FrontOf, M6 3 a1), derived the way the den's W0 stand reads against its row (3 m along the facing to within 5 cm). The travel file's edge holtburg-to-redoubt is the same row (M6 8 B2a, Worcer's Missing Heirlooms)",
+    "home": "Holtburg's lifestone in cell 0xA9B40019 and the known point (84, 7.7) off it, z 94, the outskirts' and the tusker profiles' (TravelStations.HoltburgLifestone): the climber's town, whose vendors the rung uses. The draft's town half reads that lifestone (guid 0x7A9B404F) 458 m from the entry portal and a nearer one, guid 0x7A9B0005 in 0xA9B00007, 352 m from it (GroundDraftTownTests): this profile's home is by hand, as the den's is",
+    "vendors": "the outskirts profile's six Holtburg rows verbatim, with their 'sells' lists but for nine of Archmage Cindrue's ten trade notes (the purse lists the 10,000 note alone, and a dungeon's wares are checked against the draft's prices, where a trade note is priced at ACE's 1.15 only when the purse lists it: GroundDraftTownTests, as the Cave of Alabree's source says) (holtburg-outskirts.json sources.vendors gives each row's SELECT, its stop and the price rule, the pinned world SQL v0.9.296, price = max(1, ceil(1.35 x Value - 0.1)), Vendor.cs 577-585 @95ef426d): Archmage Cindrue 2304, Thelnoth Cort the Healer 715, Ecutha the Tailor 719, Monyra the Jeweler 716, Shopkeeper Renald the Elder 718 and Fispur Ansel the Grocer 714. The rung is the same town's, at the same character levels, so no price is derived again here M6 sprint (2026-11-18; the live log of that day, 20:25:31 UTC: the learn step named Comfrey 767, Powdered Malachite 788, Dragonsblood 769, Hazel Talisman 746 and Powdered Turquoise 792 short, 'no vendor of Holtburg sells it', and at 20:29:54 the server refused Lifestone Recall for its components): Archmage Cindrue sells all five: SELECT id, weenie_Class_Id FROM weenie_properties_create_list WHERE object_Id = 2304 AND destination_Type = 4 AND weenie_Class_Id IN (746, 767, 769, 788, 792), read-only on the world copy, 2026-11-18: rows 21033 Hazel Talisman (Value 5), 20980 Comfrey (Value 10), 20982 Dragonsblood (Value 10), 21003 Powdered Malachite (Value 5) and 21007 Powdered Turquoise (Value 5), PropertyInt 19; price = max(1, ceil(1.35 x Value - 0.1)): 14 and 7. They are wares only, no stock line: the learn step's shopping list buys a component by the vendor's row, and the loader takes a spell component as a ware without a supply line (GroundCatalog.CheckSupplies); whether a trip keeps them in the pack for the recall is TODO(m6-recall-components-stock). The Gold Scarab 687 the same log names is no row of her list.",
+    "spell_plan": "the outskirts profile's plan (holtburg-outskirts.json sources.spell_plan: character levels 1-15 cast Flame Bolt II as the cap and 16 on Flame Bolt III, by D41's fizzle rule on the live skill), with its last row ended at 20, the entry portal's MaxLevel (weenie_properties_int type 87 of weenie 4935), as the Cave of Alabree's is; the element is the road's one, which these five creatures take at 1.42 (sources.targets)",
+    "components": "the outskirts profile's rows verbatim (holtburg-outskirts.json sources.components): the full formula of the account 'test' for Flame Bolt I, II and III and the foci formula's scarabs and Prismatic Tapers, read from the dats (HuntingGroundDatTests pins both formulas for every climber's dungeon). The foci formula's Prismatic Taper rows (1, 2 and 3 a cast of Flame Bolt I, II and III) are listed too, as the dungeon rule asks: the outdoor profile names them in its sources only",
+    "supplies": "the outskirts profile's stock lines, kit (none), burden line (150) and purse (coin 30,000, min_note 10,000, trip_spend_percent 60) verbatim (holtburg-outskirts.json sources.supplies has every figure and its reason): the same town, vendors, character levels and casts. TODO(m6-redoubt-supplies): the keeps are the outdoor rung's, sized by its burn and its trips; the Redoubt's own burn and trip count are not measured yet (the first live run's [ladder] lines answer it)",
+    "hold_spots": "none: the loop walks the tour and holds no spot",
+    "respawn": "the pinned world SQL v0.9.296 (GroundDraft.World; checked against the profile by DenRoomGraphTests): the one creature generator, guid 0x7016301C (wcid 5485, Linkable Newbie Monster Generator, in 0x01630178), holds the 18 drudges (landblock_instance_link rows 9315-9332, each child is_Link_Child 1); its profile row 4105 has delay 90 s (weenie_properties_generator) and its RegenerationInterval is 60 s (PropertyFloat 41). The simulator's rank row for 0x0163 (pwsh -File tools/fight-sim.ps1 rank --her Qwinnie --max-level 40, 2026-11-18) prints respawn 120 s: the same two rows as delay + tick / 2 (tools/fight-sim/Rank.cs:170), so the two agree; that row also reads 18 slots, 18,720 experience a clear, 47 s of casting a clear and a pack of 1.6. The generators 0x7016300D (Hope Chest 5036), 0x7016301D (Chest 1915), 0x70163022 (Chest 1921) and 0x70163029 (Linkable Item Generator 15759) make no creature and are no slots (the draft's notes). 17 of the 18 slots stand in storey cells; the Drudge Skulker 0x7016301B's row names 0x01630178 at (120.292, -19.866, 0.003), a cell that holds the hall gallery's floor (the galleries section): a body there stands in 0x0163019A, which the tour crosses between 0x016301A3 and 0x016301A0. Its slot is not counted as hunted (RespawnSchedule counts a target slot in a walkable cell): TODO(m6-redoubt-gallery-slot). The landblock holds 13 doors (weenies 568, 278, 5359 and 5031, WeenieType 19; SELECT type, value FROM weenie_properties_bool WHERE object_Id IN (568, 278, 5359, 5031): Open 0, no Locked row, 2026-11-18): the walker opens a door by Use; a fight across a shut door has not been run live. The measured live rate: not measured yet; the lead's first live run on this ground answers it. The ground is the ladder's rung outskirts' own (levels 5 to 9; the owner's decision of 2026-11-18; ladder/war-mage.json), with holtburg-outskirts as the rung's outdoor fallback for a climber the portal does not admit",
+    "tour": "the draft's first tour (GroundDraft.FirstTour): the cells of the 17 target slots that stand in walkable cells (15 cells), storey by storey, nearest first from the arrival. The whole tour walks on the dats over the ground's room graph, every leg arriving on its first plan (HoltburgRedoubtDatTests)",
+    "outdoor": "none: a dungeon"
+  },
+  "landblocks": [
+    "0x0163"
+  ],
+  "arrival": {
+    "cell": "0x016301AC",
+    "origin": {
+      "x": 140,
+      "y": -40,
+      "z": 0
+    },
+    "heading": {
+      "w": -0.707107,
+      "z": -0.707107
+    }
+  },
+  "walk": {
+    "doorway_lean": 0.3,
+    "stop_within_m": 1.0,
+    "stop_dwell_s": 0.25,
+    "leg_s": 90
+  },
+  "storeys": [
+    {
+      "name": "z 0",
+      "z_min": 0,
+      "z_max": 0,
+      "cells": [
+        "0x0163018D",
+        "0x0163018E",
+        "0x0163018F",
+        "0x01630191",
+        "0x01630192",
+        "0x01630193",
+        "0x01630194",
+        "0x01630195",
+        "0x01630196",
+        "0x01630198",
+        "0x01630199",
+        "0x0163019A",
+        "0x0163019B",
+        "0x0163019C",
+        "0x0163019E",
+        "0x0163019F",
+        "0x016301A0",
+        "0x016301A2",
+        "0x016301A3",
+        "0x016301A5",
+        "0x016301A6",
+        "0x016301A7",
+        "0x016301A8",
+        "0x016301A9",
+        "0x016301AB",
+        "0x016301AC",
+        "0x016301AE"
+      ]
+    },
+    {
+      "name": "z -6",
+      "z_min": -6,
+      "z_max": -6,
+      "cells": [
+        "0x01630164",
+        "0x01630165",
+        "0x01630166",
+        "0x01630167",
+        "0x01630168",
+        "0x01630169",
+        "0x0163016A",
+        "0x0163016B",
+        "0x0163016F",
+        "0x01630170",
+        "0x01630171",
+        "0x01630172",
+        "0x01630173",
+        "0x01630174",
+        "0x01630175",
+        "0x01630177",
+        "0x0163017A",
+        "0x0163017B",
+        "0x0163017F",
+        "0x01630180",
+        "0x01630181",
+        "0x01630182",
+        "0x01630183",
+        "0x01630184",
+        "0x01630185",
+        "0x01630186",
+        "0x01630188"
+      ]
+    },
+    {
+      "name": "z -12",
+      "z_min": -12,
+      "z_max": -12,
+      "cells": [
+        "0x01630127",
+        "0x01630129",
+        "0x0163012A",
+        "0x0163012B",
+        "0x0163012C",
+        "0x0163012E",
+        "0x0163012F",
+        "0x01630130",
+        "0x01630131",
+        "0x01630132",
+        "0x01630133",
+        "0x01630135",
+        "0x01630136",
+        "0x01630137",
+        "0x01630138",
+        "0x01630139",
+        "0x0163013A",
+        "0x0163013B",
+        "0x0163013C",
+        "0x0163013D",
+        "0x0163013E",
+        "0x0163013F",
+        "0x01630140",
+        "0x01630141",
+        "0x01630142",
+        "0x01630143",
+        "0x01630145",
+        "0x01630146",
+        "0x01630147",
+        "0x01630148",
+        "0x01630149",
+        "0x0163014B",
+        "0x0163014C",
+        "0x0163014D",
+        "0x0163014E",
+        "0x0163014F",
+        "0x01630150",
+        "0x01630151",
+        "0x01630152",
+        "0x01630154",
+        "0x01630155",
+        "0x01630156",
+        "0x01630157",
+        "0x01630158",
+        "0x0163015A"
+      ]
+    },
+    {
+      "name": "z -18",
+      "z_min": -18,
+      "z_max": -18,
+      "cells": [
+        "0x0163010A",
+        "0x0163010C",
+        "0x0163010D",
+        "0x0163010E",
+        "0x0163010F",
+        "0x01630110",
+        "0x01630111",
+        "0x01630112",
+        "0x01630113",
+        "0x01630114",
+        "0x01630115",
+        "0x01630116",
+        "0x01630117",
+        "0x01630118",
+        "0x01630119",
+        "0x0163011A",
+        "0x0163011E",
+        "0x0163011F",
+        "0x01630120",
+        "0x01630121",
+        "0x01630122",
+        "0x01630123",
+        "0x01630124",
+        "0x01630125",
+        "0x01630126"
+      ]
+    },
+    {
+      "name": "z -24",
+      "z_min": -24,
+      "z_max": -24,
+      "cells": [
+        "0x01630100",
+        "0x01630101",
+        "0x01630103",
+        "0x01630104",
+        "0x01630105",
+        "0x01630106",
+        "0x01630108",
+        "0x01630109"
+      ]
+    }
+  ],
+  "no_go": [
+    "0x016301A9"
+  ],
+  "targets": [
+    {
+      "wcid": 7,
+      "name": "Drudge Skulker",
+      "level": 8,
+      "role": "target",
+      "from_bestiary": ["max_health", "magic_defence"],
+      "attributes": {
+        "strength": 70,
+        "endurance": 60,
+        "coordination": 90,
+        "quickness": 110,
+        "focus": 15,
+        "self": 15
+      },
+      "damage_types": "0x0004"
+    },
+    {
+      "wcid": 192,
+      "name": "Drudge Prowler",
+      "level": 8,
+      "role": "target",
+      "from_bestiary": ["max_health", "magic_defence"],
+      "attributes": {
+        "strength": 60,
+        "endurance": 55,
+        "coordination": 80,
+        "quickness": 135,
+        "focus": 15,
+        "self": 15
+      },
+      "damage_types": "0x0004"
+    },
+    {
+      "wcid": 193,
+      "name": "Drudge Slinker",
+      "level": 8,
+      "role": "target",
+      "from_bestiary": ["max_health", "magic_defence"],
+      "attributes": {
+        "strength": 60,
+        "endurance": 60,
+        "coordination": 90,
+        "quickness": 120,
+        "focus": 15,
+        "self": 15
+      },
+      "damage_types": "0x0004"
+    },
+    {
+      "wcid": 940,
+      "name": "Drudge Sneaker",
+      "level": 8,
+      "role": "target",
+      "from_bestiary": ["max_health", "magic_defence"],
+      "attributes": {
+        "strength": 75,
+        "endurance": 65,
+        "coordination": 95,
+        "quickness": 115,
+        "focus": 20,
+        "self": 20
+      },
+      "damage_types": "0x0004"
+    },
+    {
+      "wcid": 1468,
+      "name": "Drudge Slinker",
+      "level": 8,
+      "role": "target",
+      "from_bestiary": ["max_health", "magic_defence"],
+      "attributes": {
+        "strength": 70,
+        "endurance": 60,
+        "coordination": 80,
+        "quickness": 120,
+        "focus": 15,
+        "self": 15
+      },
+      "damage_types": "0x0004"
+    }
+  ],
+  "level_band": {
+    "min": 8,
+    "max": 8
+  },
+  "portal": {
+    "guid": "0x7AAB1000",
+    "cell": "0xAAB10028",
+    "tie_spell": 47,
+    "recall_spell": 48,
+    "wcid": 4935,
+    "origin": {
+      "x": 99.7059,
+      "y": 180.63,
+      "z": 124.005
+    },
+    "front_cell": "0xAAB10028",
+    "front_point": {
+      "x": 96.9906,
+      "y": 179.3545,
+      "z": 124.01
+    }
+  },
+  "entry": {
+    "wcid": 4935,
+    "guid": "0x7AAB1000",
+    "cell": "0xAAB10028",
+    "origin": {
+      "x": 99.7059,
+      "y": 180.63,
+      "z": 124.005
+    },
+    "front_cell": "0xAAB10028",
+    "front_point": {
+      "x": 96.9906,
+      "y": 179.3545,
+      "z": 124.01
+    },
+    "min_level": 1,
+    "max_level": 20,
+    "tieable": true,
+    "source": "the pinned world SQL v0.9.296 (GroundDraft, M6 3 a1): weenie 4935 Holtburg Redoubt, whose Destination (weenie_properties_position, PositionType 2) is 0x016301AC; its landblock_instance row guid 0x7AAB1000 at the row's origin, in the cell its point lies in (0xAAB10028, x/24*8 + y/24 + 1 for an outdoor row); the front point 3 m along the row's facing (quaternion w 0.536112, z 0.844147), z to the centimetre, in its cell (GroundDraft.FrontOf); min_level from weenie_properties_int type 86 (MinLevel), max_level from type 87 (MaxLevel); tieable from PortalBitmask 0x1 (PropertyInt 111), no NoRecall bit: ACE's Portal.NoTie is NoRecall (ACE.Server/WorldObjects/Portal_Properties.cs:14-16 @95ef426d; the flag ACE.Entity/Enum/PortalBitmask.cs:15)"
+  },
+  "exit": {
+    "kind": "portal",
+    "wcid": 4936,
+    "cell": "0x016301A9",
+    "origin": {
+      "x": 129.714,
+      "y": -53.1287,
+      "z": 0
+    },
+    "destination": "0xAAB10020",
+    "from_arrival_m": 16.7,
+    "source": "the pinned world SQL v0.9.296 (GroundDraft, M6 3 a1): the exit portal, landblock_instance guid 0x70163026 (wcid 4936) in 0x016301A9 at the row's origin, whose weenie's Destination (weenie_properties_position, PositionType 2) is 0xAAB10020, outside the landblock; from_arrival_m 16.7 is a hint, the straight-line distance from the arrival in 0x016301AC to the portal's origin (a walk over the room graph is longer: item 4's); no exit by emote"
+  },
+  "home": {
+    "town": "Holtburg",
+    "lifestone_cell": "0xA9B40019",
+    "lifestone_point": {
+      "x": 84,
+      "y": 7.7,
+      "z": 94
+    }
+  },
+  "vendors": [
+    {
+      "name": "Archmage Cindrue",
+      "wcid": 2304,
+      "guid": "0x7A9B4033",
+      "cell": "0xA9B4011B",
+      "point": {
+        "x": 152.347,
+        "y": 132.546,
+        "z": 69.005
+      },
+      "stop_cell": "0xA9B40117",
+      "stop_point": {
+        "x": 152.3,
+        "y": 132.5,
+        "z": 66
+      },
+      "buys_item_types": "0x000CB000",
+      "buy_price": 0.9,
+      "sells": [
+        {
+          "wcid": 691,
+          "name": "Lead Scarab",
+          "price": 14
+        },
+        {
+          "wcid": 689,
+          "name": "Iron Scarab",
+          "price": 68
+        },
+        {
+          "wcid": 1646,
+          "name": "Grey Taper",
+          "price": 34
+        },
+        {
+          "wcid": 772,
+          "name": "Hawthorn",
+          "price": 14
+        },
+        {
+          "wcid": 790,
+          "name": "Powdered Onyx",
+          "price": 7
+        },
+        {
+          "wcid": 762,
+          "name": "Turpeth",
+          "price": 7
+        },
+        {
+          "wcid": 741,
+          "name": "Birch Talisman",
+          "price": 7
+        },
+        {
+          "wcid": 778,
+          "name": "Saffron",
+          "price": 14
+        },
+        {
+          "wcid": 759,
+          "name": "Quicksilver",
+          "price": 7
+        },
+        {
+          "wcid": 1651,
+          "name": "Violet Taper",
+          "price": 34
+        },
+        {
+          "wcid": 1644,
+          "name": "Brown Taper",
+          "price": 34
+        },
+        {
+          "wcid": 776,
+          "name": "Mugwort",
+          "price": 14
+        },
+        {
+          "wcid": 758,
+          "name": "Gypsum",
+          "price": 7
+        },
+        {
+          "wcid": 780,
+          "name": "Wormwood",
+          "price": 14
+        },
+        {
+          "wcid": 756,
+          "name": "Cobalt",
+          "price": 7
+        },
+        {
+          "wcid": 743,
+          "name": "Cedar Talisman",
+          "price": 7
+        },
+        {
+          "wcid": 774,
+          "name": "Hyssop",
+          "price": 14
+        },
+        {
+          "wcid": 783,
+          "name": "Powdered Amber",
+          "price": 7
+        },
+        {
+          "wcid": 757,
+          "name": "Colcothar",
+          "price": 7
+        },
+        {
+          "wcid": 751,
+          "name": "Willow Talisman",
+          "price": 7
+        },
+        {
+          "wcid": 20631,
+          "name": "Prismatic Taper",
+          "price": 30
+        },
+        {
+          "wcid": 2472,
+          "name": "Wand",
+          "price": 270
+        },
+        {
+          "wcid": 4612,
+          "name": "Tiny Mana Charge",
+          "price": 473
+        },
+        {
+          "wcid": 4613,
+          "name": "Small Mana Charge",
+          "price": 878
+        },
+        {
+          "wcid": 4614,
+          "name": "Moderate Mana Charge",
+          "price": 2025
+        },
+        {
+          "wcid": 4615,
+          "name": "High Mana Charge",
+          "price": 3375
+        },
+        {
+          "wcid": 2625,
+          "name": "Trade Note (10,000)",
+          "price": 11500
+        },
+        {
+          "wcid": 686,
+          "name": "Copper Scarab",
+          "price": 135
+        },
+        {
+          "wcid": 688,
+          "name": "Silver Scarab",
+          "price": 338
+        },
+        {
+          "wcid": 1650,
+          "name": "Red Taper",
+          "price": 34
+        },
+        {
+          "wcid": 1643,
+          "name": "Blue Taper",
+          "price": 34
+        },
+        {
+          "wcid": 1654,
+          "name": "Turquoise Taper",
+          "price": 34
+        },
+        {
+          "wcid": 1652,
+          "name": "White Taper",
+          "price": 34
+        },
+        {
+          "wcid": 1647,
+          "name": "Indigo Taper",
+          "price": 34
+        },
+        {
+          "wcid": 768,
+          "name": "Damiana",
+          "price": 14
+        },
+        {
+          "wcid": 627,
+          "name": "Alder Talisman",
+          "price": 7
+        },
+        {
+          "wcid": 775,
+          "name": "Mandrake",
+          "price": 14
+        },
+        {
+          "wcid": 747,
+          "name": "Hemlock Talisman",
+          "price": 7
+        },
+        {
+          "wcid": 1653,
+          "name": "Yellow Taper",
+          "price": 34
+        },
+        {
+          "wcid": 1645,
+          "name": "Green Taper",
+          "price": 34
+        },
+        {
+          "wcid": 1648,
+          "name": "Orange Taper",
+          "price": 34
+        },
+        {
+          "wcid": 1649,
+          "name": "Pink Taper",
+          "price": 34
+        },
+        {
+          "wcid": 789,
+          "name": "Powdered Moonstone",
+          "price": 7
+        },
+        {
+          "wcid": 782,
+          "name": "Powdered Agate",
+          "price": 7
+        },
+        {
+          "wcid": 626,
+          "name": "Powdered Hematite",
+          "price": 7
+        },
+        {
+          "wcid": 755,
+          "name": "Cinnabar",
+          "price": 7
+        },
+        {
+          "wcid": 763,
+          "name": "Verdigris",
+          "price": 7
+        },
+        {
+          "wcid": 764,
+          "name": "Vitriol",
+          "price": 7
+        },
+        {
+          "wcid": 760,
+          "name": "Realgar",
+          "price": 7
+        },
+        {
+          "wcid": 754,
+          "name": "Cadmia",
+          "price": 7
+        },
+        {
+          "wcid": 750,
+          "name": "Rowan Talisman",
+          "price": 7
+        },
+        {
+          "wcid": 740,
+          "name": "Ashwood Talisman",
+          "price": 7
+        },
+        {
+          "wcid": 746,
+          "name": "Hazel Talisman",
+          "price": 7
+        },
+        {
+          "wcid": 767,
+          "name": "Comfrey",
+          "price": 14
+        },
+        {
+          "wcid": 769,
+          "name": "Dragonsblood",
+          "price": 14
+        },
+        {
+          "wcid": 788,
+          "name": "Powdered Malachite",
+          "price": 7
+        },
+        {
+          "wcid": 792,
+          "name": "Powdered Turquoise",
+          "price": 7
+        }
+      ]
+    },
+    {
+      "name": "Thelnoth Cort the Healer",
+      "wcid": 715,
+      "guid": "0x7A9B4027",
+      "cell": "0xA9B40111",
+      "point": {
+        "x": 30.0196,
+        "y": 159.683,
+        "z": 66.005
+      },
+      "stop_cell": "0xA9B40111",
+      "buys_item_types": "0x00044080",
+      "buy_price": 0.9,
+      "sells": [
+        {
+          "wcid": 379,
+          "name": "Mana Potion",
+          "price": 230
+        }
+      ]
+    },
+    {
+      "name": "Ecutha the Tailor",
+      "wcid": 719,
+      "guid": "0x7A9B4025",
+      "cell": "0xA9B4012A",
+      "point": {
+        "x": 56.52,
+        "y": 132,
+        "z": 66.12
+      },
+      "stop_cell": "0xA9B4012A",
+      "buys_item_types": "0x00040004",
+      "buy_price": 0.9,
+      "sells": [
+        {
+          "wcid": 5851,
+          "name": "Faran Robe with Hood",
+          "price": 68
+        }
+      ]
+    },
+    {
+      "name": "Monyra the Jeweler",
+      "wcid": 716,
+      "guid": "0x7A9B4020",
+      "cell": "0xA9B40117",
+      "point": {
+        "x": 157.19,
+        "y": 135.298,
+        "z": 66.12
+      },
+      "stop_cell": "0xA9B40117",
+      "buys_item_types": "0x00040808",
+      "buy_price": 0.9,
+      "sells": []
+    },
+    {
+      "name": "Shopkeeper Renald the Elder",
+      "wcid": 718,
+      "guid": "0x7A9B4021",
+      "cell": "0xA9B40141",
+      "point": {
+        "x": 139.234,
+        "y": 18.3293,
+        "z": 94.005
+      },
+      "stop_cell": "0xA9B4013F",
+      "stop_point": {
+        "x": 133.9,
+        "y": 15.7,
+        "z": 94
+      },
+      "buys_item_types": "0x480467A7",
+      "buy_price": 0.9,
+      "sells": [
+        {
+          "wcid": 56,
+          "name": "Leather Gauntlets",
+          "price": 1485
+        },
+        {
+          "wcid": 136,
+          "name": "Pack",
+          "price": 88
+        }
+      ]
+    },
+    {
+      "name": "Fispur Ansel the Grocer",
+      "wcid": 714,
+      "guid": "0x7A9B4024",
+      "cell": "0xA9B4016A",
+      "point": {
+        "x": 78.9714,
+        "y": 38.5313,
+        "z": 94.005
+      },
+      "stop_cell": "0xA9B4016A",
+      "buys_item_types": "0x00446220",
+      "buy_price": 0.9,
+      "sells": []
+    }
+  ],
+  "spell_plan": [
+    {
+      "min_level": 1,
+      "max_level": 15,
+      "family": "Flame Bolt",
+      "spell_level": 2
+    },
+    {
+      "min_level": 16,
+      "max_level": 20,
+      "family": "Flame Bolt",
+      "spell_level": 3
+    }
+  ],
+  "components": [
+    {
+      "wcid": 691,
+      "name": "Lead Scarab",
+      "spell_level": 1,
+      "per_cast": 1
+    },
+    {
+      "wcid": 772,
+      "name": "Hawthorn",
+      "spell_level": 1,
+      "per_cast": 1
+    },
+    {
+      "wcid": 790,
+      "name": "Powdered Onyx",
+      "spell_level": 1,
+      "per_cast": 1
+    },
+    {
+      "wcid": 762,
+      "name": "Turpeth",
+      "spell_level": 1,
+      "per_cast": 1
+    },
+    {
+      "wcid": 741,
+      "name": "Birch Talisman",
+      "spell_level": 1,
+      "per_cast": 1
+    },
+    {
+      "wcid": 20631,
+      "name": "Prismatic Taper",
+      "spell_level": 1,
+      "per_cast": 1
+    },
+    {
+      "wcid": 689,
+      "name": "Iron Scarab",
+      "spell_level": 2,
+      "per_cast": 1
+    },
+    {
+      "wcid": 1646,
+      "name": "Grey Taper",
+      "spell_level": 2,
+      "per_cast": 1
+    },
+    {
+      "wcid": 772,
+      "name": "Hawthorn",
+      "spell_level": 2,
+      "per_cast": 1
+    },
+    {
+      "wcid": 790,
+      "name": "Powdered Onyx",
+      "spell_level": 2,
+      "per_cast": 1
+    },
+    {
+      "wcid": 762,
+      "name": "Turpeth",
+      "spell_level": 2,
+      "per_cast": 1
+    },
+    {
+      "wcid": 741,
+      "name": "Birch Talisman",
+      "spell_level": 2,
+      "per_cast": 1
+    },
+    {
+      "wcid": 20631,
+      "name": "Prismatic Taper",
+      "spell_level": 2,
+      "per_cast": 2
+    },
+    {
+      "wcid": 686,
+      "name": "Copper Scarab",
+      "spell_level": 3,
+      "per_cast": 1
+    },
+    {
+      "wcid": 1650,
+      "name": "Red Taper",
+      "spell_level": 3,
+      "per_cast": 1
+    },
+    {
+      "wcid": 772,
+      "name": "Hawthorn",
+      "spell_level": 3,
+      "per_cast": 1
+    },
+    {
+      "wcid": 1647,
+      "name": "Indigo Taper",
+      "spell_level": 3,
+      "per_cast": 1
+    },
+    {
+      "wcid": 790,
+      "name": "Powdered Onyx",
+      "spell_level": 3,
+      "per_cast": 1
+    },
+    {
+      "wcid": 762,
+      "name": "Turpeth",
+      "spell_level": 3,
+      "per_cast": 1
+    },
+    {
+      "wcid": 741,
+      "name": "Birch Talisman",
+      "spell_level": 3,
+      "per_cast": 1
+    },
+    {
+      "wcid": 20631,
+      "name": "Prismatic Taper",
+      "spell_level": 3,
+      "per_cast": 3
+    }
+  ],
+  "supplies": {
+    "stock": [
+      {
+        "wcid": 691,
+        "name": "Lead Scarab",
+        "keep": 10,
+        "trip_under": 4,
+        "stop_under": 2
+      },
+      {
+        "wcid": 689,
+        "name": "Iron Scarab",
+        "keep": 6,
+        "trip_under": 3,
+        "stop_under": 2
+      },
+      {
+        "wcid": 1646,
+        "name": "Grey Taper",
+        "keep": 4,
+        "trip_under": 2,
+        "stop_under": 2
+      },
+      {
+        "wcid": 772,
+        "name": "Hawthorn",
+        "keep": 4,
+        "trip_under": 2,
+        "stop_under": 2
+      },
+      {
+        "wcid": 790,
+        "name": "Powdered Onyx",
+        "keep": 4,
+        "trip_under": 2,
+        "stop_under": 2
+      },
+      {
+        "wcid": 762,
+        "name": "Turpeth",
+        "keep": 4,
+        "trip_under": 2,
+        "stop_under": 2
+      },
+      {
+        "wcid": 741,
+        "name": "Birch Talisman",
+        "keep": 4,
+        "trip_under": 2,
+        "stop_under": 2
+      },
+      {
+        "wcid": 780,
+        "name": "Wormwood",
+        "keep": 4,
+        "trip_under": 2,
+        "stop_under": 2
+      },
+      {
+        "wcid": 756,
+        "name": "Cobalt",
+        "keep": 4,
+        "trip_under": 2,
+        "stop_under": 2
+      },
+      {
+        "wcid": 743,
+        "name": "Cedar Talisman",
+        "keep": 4,
+        "trip_under": 2,
+        "stop_under": 2
+      },
+      {
+        "wcid": 774,
+        "name": "Hyssop",
+        "keep": 4,
+        "trip_under": 2,
+        "stop_under": 2
+      },
+      {
+        "wcid": 783,
+        "name": "Powdered Amber",
+        "keep": 4,
+        "trip_under": 2,
+        "stop_under": 2
+      },
+      {
+        "wcid": 757,
+        "name": "Colcothar",
+        "keep": 4,
+        "trip_under": 2,
+        "stop_under": 2
+      },
+      {
+        "wcid": 751,
+        "name": "Willow Talisman",
+        "keep": 4,
+        "trip_under": 2,
+        "stop_under": 2
+      },
+      {
+        "wcid": 20631,
+        "name": "Prismatic Taper",
+        "keep": 50,
+        "trip_under": 15,
+        "stop_under": 3
+      },
+      {
+        "wcid": 379,
+        "name": "Mana Potion",
+        "keep": 50,
+        "trip_under": 2,
+        "stop_under": 0
+      },
+      {
+        "wcid": 1651,
+        "name": "Violet Taper",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 1644,
+        "name": "Brown Taper",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 776,
+        "name": "Mugwort",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 758,
+        "name": "Gypsum",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 778,
+        "name": "Saffron",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 759,
+        "name": "Quicksilver",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 686,
+        "name": "Copper Scarab",
+        "keep": 3,
+        "trip_under": 1,
+        "stop_under": 1
+      },
+      {
+        "wcid": 688,
+        "name": "Silver Scarab",
+        "keep": 3,
+        "trip_under": 1,
+        "stop_under": 0
+      },
+      {
+        "wcid": 1650,
+        "name": "Red Taper",
+        "keep": 2,
+        "trip_under": 1,
+        "stop_under": 1
+      },
+      {
+        "wcid": 1643,
+        "name": "Blue Taper",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 1654,
+        "name": "Turquoise Taper",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 1652,
+        "name": "White Taper",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 1647,
+        "name": "Indigo Taper",
+        "keep": 2,
+        "trip_under": 1,
+        "stop_under": 1
+      },
+      {
+        "wcid": 1653,
+        "name": "Yellow Taper",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 1645,
+        "name": "Green Taper",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 1648,
+        "name": "Orange Taper",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 1649,
+        "name": "Pink Taper",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 789,
+        "name": "Powdered Moonstone",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 782,
+        "name": "Powdered Agate",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 626,
+        "name": "Powdered Hematite",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 755,
+        "name": "Cinnabar",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 763,
+        "name": "Verdigris",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 764,
+        "name": "Vitriol",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 760,
+        "name": "Realgar",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 754,
+        "name": "Cadmia",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 750,
+        "name": "Rowan Talisman",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 740,
+        "name": "Ashwood Talisman",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 627,
+        "name": "Alder Talisman",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 768,
+        "name": "Damiana",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 775,
+        "name": "Mandrake",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      },
+      {
+        "wcid": 747,
+        "name": "Hemlock Talisman",
+        "keep": 1,
+        "trip_under": 0,
+        "stop_under": 0
+      }
+    ],
+    "kit": [],
+    "burden_trip_percent": 150,
+    "purse": {
+      "coin": 30000,
+      "min_note": 10000,
+      "trip_spend_percent": 60,
+      "notes": [
+        {
+          "wcid": 2625,
+          "name": "Trade Note (10,000)",
+          "value": 10000,
+          "count": 1
+        }
+      ]
+    }
+  },
+  "hold_spots": [],
+  "respawn": {
+    "generators": [
+      {
+        "guid": "0x7016301C",
+        "cell": "0x01630178",
+        "delay_s": 90,
+        "tick_s": 60
+      }
+    ],
+    "slots": [
+      {
+        "generator": "0x7016301C",
+        "cell": "0x01630101",
+        "wcid": 940
+      },
+      {
+        "generator": "0x7016301C",
+        "cell": "0x01630106",
+        "wcid": 7
+      },
+      {
+        "generator": "0x7016301C",
+        "cell": "0x0163010A",
+        "wcid": 7
+      },
+      {
+        "generator": "0x7016301C",
+        "cell": "0x0163010A",
+        "wcid": 940
+      },
+      {
+        "generator": "0x7016301C",
+        "cell": "0x0163011E",
+        "wcid": 192
+      },
+      {
+        "generator": "0x7016301C",
+        "cell": "0x0163011F",
+        "wcid": 1468
+      },
+      {
+        "generator": "0x7016301C",
+        "cell": "0x0163012B",
+        "wcid": 1468
+      },
+      {
+        "generator": "0x7016301C",
+        "cell": "0x01630136",
+        "wcid": 7
+      },
+      {
+        "generator": "0x7016301C",
+        "cell": "0x01630150",
+        "wcid": 193
+      },
+      {
+        "generator": "0x7016301C",
+        "cell": "0x01630150",
+        "wcid": 7
+      },
+      {
+        "generator": "0x7016301C",
+        "cell": "0x01630156",
+        "wcid": 7
+      },
+      {
+        "generator": "0x7016301C",
+        "cell": "0x01630158",
+        "wcid": 7
+      },
+      {
+        "generator": "0x7016301C",
+        "cell": "0x0163016A",
+        "wcid": 7
+      },
+      {
+        "generator": "0x7016301C",
+        "cell": "0x01630178",
+        "wcid": 7
+      },
+      {
+        "generator": "0x7016301C",
+        "cell": "0x01630185",
+        "wcid": 7
+      },
+      {
+        "generator": "0x7016301C",
+        "cell": "0x01630186",
+        "wcid": 193
+      },
+      {
+        "generator": "0x7016301C",
+        "cell": "0x016301A0",
+        "wcid": 7
+      },
+      {
+        "generator": "0x7016301C",
+        "cell": "0x016301A3",
+        "wcid": 7
+      }
+    ]
+  },
+  "loot": {
+    "min_value_per_burden": 10,
+    "min_free_slots": 3,
+    "load_line_percent": 125,
+    "radius_m": 25,
+    "sale_trip_value": 100000,
+    "source": "the outskirts' rule at the same treasure (DeathTreasureType 453 on all five drudges here and on the outskirts' own drudges, sources.targets; holtburg-outskirts.json loot's source has the figures): min_value_per_burden 10, min_free_slots 3 and load_line_percent 125 are its lines verbatim. radius_m 25 and sale_trip_value 100,000 are the Tusker Burrow's lines (tusker-burrow.json loot's source: in a dungeon a corpse farther off lies toward creatures not yet fought, and a sale trip from a dungeon costs the way home and the way back, about 14 minutes there). Neither is measured on this ground: TODO(m6-redoubt-loot-radius): the first live run's 'beyond the loot radius' lines answer the radius; TODO(m6-redoubt-sale-trip): the Redoubt's trip is the Surface portal or a recall and a run of 458 m back (the straight line from Holtburg's lifestone to the entry portal), not the island's, and its seconds are not measured: the first live trip answers it"
+  },
+  "fight": {
+    "pull_mana_percent": 20,
+    "pull_stamina_percent": 30,
+    "pull_rest_until_percent": 80,
+    "pull_rest_posture": "lie",
+    "pull_rest_potions": 1,
+    "pull_aggro_metres": 24,
+    "source": "the outskirts' pull lines verbatim (holtburg-outskirts.json fight's source, M6 7 AN): the same kind of creature at the same level (drudges, level 8) fought by the same climber. No retreat line: the simulator's hits are 0 or 1 health each (sources.targets). pull_aggro_metres 24 is the outskirts' line; the world's rows read a shorter sight here (VisualAwarenessRange 10 m, 12 m on the Prowler, sources.targets), so the line is the careful side of the rows. Not measured on this ground"
+  },
+  "corpse_fetch": {
+    "anywhere": true,
+    "source": "the hit sizes (sources.targets, the simulator of 2026-11-18): each landed hit of the five drudges takes 0 or 1 of her 84 health, and with six of one kind on her and no healing she dies in 0.0 % of 2,000 fights, so no cell of the Redoubt is unsafe to reach for a corpse at that state. By the world's rows alone, the largest uncritical unarmoured hit is the Prowler's body part: d_Val 5 x the Strength 60 modifier 1.055 = 5.3 (weenie_properties_body_part and weenie_properties_attribute type 1 of weenie 192; LadderHitter). A climber of level 5 or without the bot's lines is not simulated"
+  },
+  "tour": [
+    "0x016301A3",
+    "0x016301A0",
+    "0x01630186",
+    "0x01630185",
+    "0x0163016A",
+    "0x01630158",
+    "0x01630150",
+    "0x01630156",
+    "0x01630136",
+    "0x0163012B",
+    "0x0163011E",
+    "0x0163011F",
+    "0x0163010A",
+    "0x01630101",
+    "0x01630106"
+  ],
+  "galleries": {
+    "cells": [
+      "0x01630133",
+      "0x01630199",
+      "0x0163019A",
+      "0x0163019B"
+    ],
+    "floors": [
+      "0x0163011B",
+      "0x0163016C",
+      "0x0163016D",
+      "0x0163016E",
+      "0x01630178",
+      "0x0163017C",
+      "0x0163017D",
+      "0x0163017E"
+    ],
+    "source": "the dats (HoltburgRedoubtDatTests reads each fact): the entrance hall is three rooms long and two storeys high (origins (120, -10), (120, -20) and (120, -30), floor z -6), with a walkway at z 0 over it, 4 m wide. The walkway's floor polygons belong to cells of the rooms below (0x0163016C to 0x0163016E, 0x01630178, 0x0163017C to 0x0163017E: origin z -6, floor polygons at local z 6), whose one portal is the opening overhead; a body on the walkway stands in the floorless cells above them, 0x01630199, 0x0163019A and 0x0163019B (the physics body's cell on the dat walk). The z 0 rooms on the two sides of the hall are joined only over the walkway, and the way down from the arrival leads over it (0x016301A6, the walkway, 0x0163018D, then 0x01630164 on z -6), so without these cells the room graph reaches 8 cells and 1 slot from the arrival. The same shape at z -12: the floorless 0x01630133 over the floor that 0x0163011B holds, between 0x01630136 and 0x0163012B. With them the graph reaches every walkable cell and the whole tour walks (DenRoomGraphTests, HoltburgRedoubtDatTests)"
+  },
+  "outdoor": null
+}

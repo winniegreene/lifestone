@@ -228,6 +228,12 @@ public sealed class LogisticsStation(bool forced = false, ResupplyOptions? resup
                     // the autopilot's next state change reads the same rule and stops here, at home, with no recall to pay for. Only the minutes rule ends a trip this way; the level rule is read where it always was.
                     Log("logistics: the minutes stop rule is due: the errand is done at home, so there is no way back; the run stops here (m6-minutes-stop-safe-point)");
                 }
+                else if (startedInGround && Context.Facts.PassAtHomeDue?.Invoke(S) is { } passDue)
+                {
+                    // M6 audit (finding 9): the visit left more buff lines to cast than a pass in the ground takes (new scrolls read, lines lapsed): the pass runs here, at home, and the autopilot's
+                    // known state at home takes the buff state and then the way out, as after any recall home. No way back is made by the trip.
+                    Log("logistics: the buff pass is due at home (" + passDue + "): there is no way back; she casts it here and the autopilot's way out follows (m6-audit-pass-at-home)");
+                }
                 else if (startedInGround)
                 {
                     Stage = "back";
@@ -277,21 +283,29 @@ public sealed class LogisticsStation(bool forced = false, ResupplyOptions? resup
             }
 
             Log(string.Create(CultureInfo.InvariantCulture, $"logistics: the buff bot before the way back: {BuffBotRule.CountWith(reads, 1)} of {reads.Count} lines of '{profile.Key}' are up, the least {least:0} s left (under {BuffBotRule.RenewUnderSeconds:0})"));
-            var stop = new BuffBotStation().Start(Context);
-            var status = stop.Step(S, S.Clock.Now);
-            while (status == ScenarioStatus.Running)
+            for (var attempt = 1; attempt <= BuffBotRule.StopTries; attempt++)
             {
-                yield return null;
-                status = stop.Step(S, S.Clock.Now);
-            }
+                var stop = new BuffBotStation().Start(Context);
+                var status = stop.Step(S, S.Clock.Now);
+                while (status == ScenarioStatus.Running)
+                {
+                    yield return null;
+                    status = stop.Step(S, S.Clock.Now);
+                }
 
-            if (status == ScenarioStatus.Succeeded && stop.Ok)
-            {
-                Log($"logistics: the buff bot's stop ended {status}: {stop.VerdictFields()}");
-            }
-            else
-            {
-                Log($"WARNING: logistics: the buff bot's stop failed ({stop.VerdictFields()}): the trip goes on, and her own pass recasts her lines on their timers (m6-buffbot-fallback)");
+                if (status == ScenarioStatus.Succeeded && stop.Ok)
+                {
+                    Log($"logistics: the buff bot's stop ended {status}: {stop.VerdictFields()}");
+                    yield break;
+                }
+
+                if (attempt < BuffBotRule.StopTries)
+                {
+                    Log(string.Create(CultureInfo.InvariantCulture, $"WARNING: logistics: the buff bot's stop failed ({stop.VerdictFields()}): try {attempt + 1} of {BuffBotRule.StopTries} now (m6-audit-bot-retry)")); // M6 audit (fix 1)
+                    continue;
+                }
+
+                Log($"WARNING: logistics: the buff bot's stop failed ({stop.VerdictFields()}) after {BuffBotRule.StopTries} tries: the trip goes on, and her own pass recasts her lines on their timers (m6-buffbot-fallback)");
             }
         }
 
@@ -325,6 +339,21 @@ public sealed class LogisticsStation(bool forced = false, ResupplyOptions? resup
             }
 
             var at = HuntGround.StopPoint(cell, height.Value);
+            if (S.State.Self.Position is not { } standing || !WayHomeRule.StandsNear(ground, standing.CellId))
+            {
+                // M6 sprint (live 2026-11-18 20:30:09 UTC: the way home from a town trip to Dryreach had failed, and this walk was planned from there, about a hundred landblocks off, as if she stood in Holtburg, freezing the
+                // game in four-second plans): check before: the walk starts only where the ground's facts say a walk starts (WayHomeRule.StandsNear). Elsewhere the way home comes first, by the travel rule (a recall she can
+                // cast, else the portals); check after, and a body still away fails the station by name, no walk planned.
+                Log(string.Create(CultureInfo.InvariantCulture, $"logistics: way back: check before: she stands at {(S.State.Self.Position is { } p ? $"cell 0x{p.CellId:X8}" : "an unknown place")}, not in {ground.Home.Town}'s landblock 0x{ground.Home.LifestoneCell >> 16:X4} or {ground.Key}'s: the way home first"));
+                foreach (var h in TravelTo(new TravelRequest(Destination("home-lifestone", ground.Home.LifestoneCell, ground.Home.LifestonePoint), TravelPurpose.Home), "home", optional: true)) { yield return h; }
+
+                if (S.State.Self.Position is not { } home || !WayHomeRule.StandsNear(ground, home.CellId))
+                {
+                    Fail(string.Create(CultureInfo.InvariantCulture, $"logistics:way-back:not-near-home: after the way home ({LastTravelFailure ?? "no failure named"}) she stands at {(S.State.Self.Position is { } q ? $"cell 0x{q.CellId:X8}" : "an unknown place")}, not in {ground.Home.Town}'s landblock or {ground.Key}'s: no walk to the ground is planned from there"));
+                    yield break;
+                }
+            }
+
             var from = S.State.Self.Position;
             Log(string.Create(CultureInfo.InvariantCulture, $"walking: purpose=ground (logistics trip: on foot from {ground.Home.Town} to the first cell of {ground.Key}: an outdoor ground has no portal and no place); check before: the player stands at {(from is { } f ? $"cell 0x{f.CellId:X8} ({f.Frame.Origin.X:0.#}, {f.Frame.Origin.Y:0.#})" : "an unknown place")}, the point is cell 0x{first.Cell:X8} ({at.X:0.#}, {at.Y:0.#}, {at.Z:0.#})"));
             if (from is { } here && (here.CellId >> 16) == (first.Cell >> 16) && Planar(here.Frame.Origin, at) <= JourneyTravel.ToleranceMetres)

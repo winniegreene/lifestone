@@ -13,9 +13,17 @@ namespace Lifestone.Game.Diagnostics;
 /// created (her <c>CreationTimestamp</c>, PropertyInt 0x62, as the character information page reads it), so a restart of the game keeps counting. It stops, and logs the moment once, when her level reaches
 /// LEVEL (default <see cref="DefaultLevel"/>). Hidden until the game screen and her creation time are known; a character description without a creation time is a loud TODO and no clock. Lifestone's own
 /// text for videos, not a retail element.
+/// <para>M6 onscreen start (<c>--login-check=climber-start</c>, the run that creates her in the window): before her creation time is known the clock reads 0:00:00, at the top left of the character screen and character creation
+/// (and under the indicators until the description arrives), so the take shows the clock from its first screens; once she is in the world it counts from her creation, as it always does.</para>
 /// </summary>
 public sealed partial class VideoTimer : CanvasLayer
 {
+    /// <summary>The clock's place on the screens before the world, in window pixels from the top left (Lifestone's own, clear of retail's character list and character creation's title).</summary>
+    public static readonly Vector2 ScreensPosition = new(8f, 6f);
+
+    private readonly bool _beforeBirth;
+    private bool _bornKnown;
+    private bool _screensLogged;
     /// <summary>The level the clock stops at without a value (M6 ends at 80).</summary>
     public const int DefaultLevel = 80;
 
@@ -31,7 +39,11 @@ public sealed partial class VideoTimer : CanvasLayer
     private bool _missingLogged;
     private bool _startLogged;
 
-    private VideoTimer(int level) => _level = level;
+    private VideoTimer(int level, bool beforeBirth)
+    {
+        _level = level;
+        _beforeBirth = beforeBirth;
+    }
 
     /// <summary>The level the run asked the clock to stop at, or null when <c>--video-timer</c> is not given (a bad value is a warning and the default).</summary>
     public static int? Requested()
@@ -61,11 +73,14 @@ public sealed partial class VideoTimer : CanvasLayer
     }
 
     /// <summary>Adds the clock to <paramref name="main"/>.</summary>
-    public static void Attach(Node main, int level)
+    /// <param name="main">The main scene.</param>
+    /// <param name="level">The level it stops at.</param>
+    /// <param name="beforeBirth">True when the run creates the character in this window (<c>--login-check=climber-start</c>): 0:00:00 shows on the screens before she exists.</param>
+    public static void Attach(Node main, int level, bool beforeBirth = false)
     {
         ArgumentNullException.ThrowIfNull(main);
-        main.AddChild(new VideoTimer(level) { Name = "VideoTimer", Layer = LayerSlot });
-        Log.Info("video", "--video-timer: a clock since the character's creation under the indicators, stopping at the level", ("level", level));
+        main.AddChild(new VideoTimer(level, beforeBirth) { Name = "VideoTimer", Layer = LayerSlot });
+        Log.Info("video", "--video-timer: a clock since the character's creation under the indicators, stopping at the level", ("level", level), ("before_birth", beforeBirth ? "0:00:00 on the screens until her creation time is known" : "hidden until the game screen"));
     }
 
     /// <summary>The caption before the time (the owner's ruling of 2026-11-18: the clock names its target level): <see cref="Caption"/> of 80 reads Time to Lvl 80 and a colon, the level the run's.</summary>
@@ -92,6 +107,12 @@ public sealed partial class VideoTimer : CanvasLayer
         if (RetailUiLayer.Current is not { } ui || ui.Screens?.Flow.CurrentScreen is not GamePlayScreen { Indicators: { } indicators }
             || SessionHost.Instance?.Session is not { } session)
         {
+            if (_beforeBirth && !_bornKnown && RetailUiLayer.Current is { Screens.Flow.CurrentScreen: not null } screens)
+            {
+                ShowZero(screens, ScreensPosition, true); // the character screen and character creation: she does not exist yet
+                return;
+            }
+
             _label.Visible = false;
             return;
         }
@@ -99,6 +120,13 @@ public sealed partial class VideoTimer : CanvasLayer
         var qualities = session.State.Self.Qualities;
         if (!qualities.TryGetInt(CreationTimestampProperty, out var born) || born <= 0)
         {
+            if (_beforeBirth && !_bornKnown)
+            {
+                var under = new Vector2((indicators.Box.X0 * ui.Scale) + 6, ((indicators.Box.Y0 + indicators.Box.Height) * ui.Scale) + 4);
+                ShowZero(ui, under, indicators.Visible); // in the world before her description: still 0:00:00, where the clock will count
+                return;
+            }
+
             _label.Visible = false;
             if (!_missingLogged && qualities.Level > 0)
             {
@@ -109,6 +137,7 @@ public sealed partial class VideoTimer : CanvasLayer
             return;
         }
 
+        _bornKnown = true;
         var now = (long)Time.GetUnixTimeFromSystem();
         var seconds = _stoppedSeconds ?? now - born;
         if (!_startLogged)
@@ -132,5 +161,21 @@ public sealed partial class VideoTimer : CanvasLayer
         _label.Position = new Vector2((box.X0 * scale) + 6, ((box.Y0 + box.Height) * scale) + 4);
         _label.Text = Caption(_level) + Format(seconds);
         _label.Visible = indicators.Visible;
+    }
+
+    /// <summary>The clock at 0:00:00 (the climber start, before her creation time is known), at <paramref name="position"/> in window pixels, in the size the counting clock uses.</summary>
+    private void ShowZero(RetailUiLayer ui, Vector2 position, bool visible)
+    {
+        if (!_screensLogged)
+        {
+            _screensLogged = true;
+            Log.Info("video", "video timer: 0:00:00 before the character exists (the climber start creates her in this window); it counts from her creation once she is in the world", ("stops_at", _level));
+        }
+
+        var size = Math.Max(14, (int)Math.Round(ui.WindowSize.Y / 49.0));
+        _label.AddThemeFontSizeOverride("font_size", size);
+        _label.Position = position;
+        _label.Text = Caption(_level) + Format(0);
+        _label.Visible = visible;
     }
 }

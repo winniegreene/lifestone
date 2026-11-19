@@ -680,12 +680,12 @@
     "the pinned world SQL v0.9.296 (cache/m6/4/world.sqlite, read offline; cache/m6/8/facts-fetch2.md section 2): Worcer 5035 gives and receives; each of the eight items carries its own pick-up quest (min_Delta 72000 s, max_Solves -1)",
     "timer_seconds 72000: the pick-up quests' gate; the hand-in has no timer and no stamp check (cache/m6/8/facts-fetch2.md section 2); the ladder band runs it once (D118)",
     "level: min 1 and max 20 are the entry portal 4935's MinLevel and MaxLevel (weenie_properties_int types 86 and 87), enforced on this server",
-    "ladder: the band 5 to 10 is the owner's D118 (cache/m6/8/brief-b2a.md): the items' XP is about two levels at 8",
+    "ladder: the band 5 to 10 is the owner's D118 (cache/m6/8/brief-b2a.md): the items' XP is about two levels at 8. M6 8 L (d3028b3b, 2026-11-09) moved it to 10-17 when the outskirts were an outdoor ground; M6 audit (the owner's decision of 2026-11-19): back to from 5 before 10, the Holtburg Redoubt rung's own levels (D140), so she picks the heirlooms up in the ground she hunts (live 2026-11-19, run 4 03:36:49 to 03:54:33 UTC: at 10 the errand sent her home and back into the Redoubt twice, 17 m 44 s, nothing turned in)",
     "the order of the walk: the items by distance from the arrival (section 2's table), the Wedding Band in the Hope Chest in its place; the way out is the Surface portal 14 m from the arrival; no locked door, no lever (section 2)"
   ],
   "ladder": {
-    "from_level": 10,
-    "before_level": 18,
+    "from_level": 5,
+    "before_level": 10,
     "once": true
   }
 }

@@ -124,9 +124,55 @@ public sealed class LadderKillTask
         return Phase switch
         {
             KillTaskPhase.Unread when timers.IsDue(Quest, now) => ArmSteps,
+            KillTaskPhase.TurnedIn or KillTaskPhase.OnTimer when timers.IsDue(Quest, now) && OwnTimerDue(now) => ArmSteps, // M6 audit (fix 3, the owner's decision of 2026-11-19): every round its timer allows, not one a process
             KillTaskPhase.Complete => TurnInSteps,
             _ => null,
         };
+    }
+
+    private (DateTimeOffset At, long Xp)? _roundStart;
+    private long? _roundKillsXp;
+    private DateTimeOffset? _turnedInAt;
+
+    /// <summary>M6 audit (fix 3): true when the quest's own timer has run since this object read the turn-in (<see cref="NoteRound"/>), or it read none: a run that starts with timers not yet read never arms a round early.</summary>
+    private bool OwnTimerDue(DateTimeOffset now) => _turnedInAt is not { } at || Quest.TimerSeconds is not { } seconds || now >= at.AddSeconds(seconds);
+
+    /// <summary>
+    /// M6 audit (fix 3, the owner's decision of 2026-11-19: the task repeats while it remains a boost to her experience an hour): the last whole round's experience an hour, from its arm to its turn-in: the experience
+    /// she earned from the arm to the counter's completion, plus the quest's fixed reward (<see cref="Quest.Experience"/>; the award's own line is not waited for), over the hours from the arm to the turn-in. Null
+    /// before a round was measured whole in this process.
+    /// </summary>
+    public double? LastRoundXpPerHour { get; private set; }
+
+    /// <summary>The last whole round's length (<see cref="LastRoundXpPerHour"/>), or null.</summary>
+    public TimeSpan? LastRoundTime { get; private set; }
+
+    /// <summary>M6 audit (fix 3): notes the round's marks after a read that moved the task from <paramref name="before"/>: the start at the arm, the kills' experience at the completion, the rate at the turn-in.</summary>
+    /// <param name="before">The phase before the read.</param>
+    /// <param name="at">The time (UTC).</param>
+    /// <param name="totalXp">Her total experience now.</param>
+    public void NoteRound(KillTaskPhase before, DateTimeOffset at, long totalXp)
+    {
+        if (Phase == KillTaskPhase.Armed && before != KillTaskPhase.Armed && Counter == 0)
+        {
+            (_roundStart, _roundKillsXp) = ((at, totalXp), null);
+        }
+        else if (Phase == KillTaskPhase.Complete && before != KillTaskPhase.Complete && _roundStart is { } start)
+        {
+            _roundKillsXp = Math.Max(0, totalXp - start.Xp);
+        }
+        else if (Phase == KillTaskPhase.TurnedIn && before != KillTaskPhase.TurnedIn)
+        {
+            _turnedInAt = at;
+        }
+
+        if (Phase == KillTaskPhase.TurnedIn && before != KillTaskPhase.TurnedIn && _roundStart is { } begun && _roundKillsXp is { } kills && at > begun.At)
+        {
+            var reward = Quest.Experience is { Kind: QuestExperienceKind.Fixed, Amount: { } amount } ? amount : 0;
+            LastRoundTime = at - begun.At;
+            LastRoundXpPerHour = (kills + reward) / LastRoundTime.Value.TotalHours;
+            (_roundStart, _roundKillsXp) = (null, null);
+        }
     }
 
     /// <summary>The task as one log fragment: <c>key=tusker-guard-kill-task phase=armed counter=123/500 read=kill-line ground=tusker-barracks</c>.</summary>

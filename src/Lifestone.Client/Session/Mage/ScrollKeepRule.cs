@@ -134,7 +134,9 @@ public static class ScrollKeepRule
     /// <param name="book">The character's spellbook.</param>
     /// <param name="q">The character's qualities (the current skills, the buffs counted, as ACE's <c>Current</c>).</param>
     /// <param name="chance">The plan's cast chance (<see cref="Ladder.PlanCastChance"/>), which sets the line's next level on the current skill.</param>
-    public static ScrollKeepVerdict Evaluate(WorldObject item, IReadOnlyList<ScrollLine> lines, Spellbook book, PlayerQualities q, double chance)
+    /// <param name="spells">M6 sprint (the owner's rule of 2026-11-19: a scroll that drops is picked up and read when she does not know it): the SpellTable; with it, every scroll whose spell the book lacks and ACE lets her read now is
+    /// kept (<see cref="ScrollKeepKind.Keep"/>, any school, any level, a line the buff bot casts included), one ACE would refuse now is left to the loot rules (<see cref="ScrollKeepKind.Unreadable"/>). Null: the plan lines' rule as before.</param>
+    public static ScrollKeepVerdict Evaluate(WorldObject item, IReadOnlyList<ScrollLine> lines, Spellbook book, PlayerQualities q, double chance, IReadOnlyDictionary<uint, SpellInfo>? spells = null)
     {
         ArgumentNullException.ThrowIfNull(item);
         ArgumentNullException.ThrowIfNull(lines);
@@ -154,6 +156,11 @@ public static class ScrollKeepRule
         if (!book.IsKnown)
         {
             return new ScrollKeepVerdict(ScrollKeepKind.SpellbookUnread, "the spellbook is not read yet (no PlayerDescription): nothing is kept on an assumption");
+        }
+
+        if (spells is not null && spells.TryGetValue(id, out var info))
+        {
+            return Unknown(id, info, book, q);
         }
 
         foreach (var line in lines)
@@ -211,6 +218,27 @@ public static class ScrollKeepRule
     }
 
     /// <summary>
+    /// M6 sprint (the owner's rule of 2026-11-19): a looted scroll is kept to be read when its spell is not in the book and ACE lets her read it now (<c>Player.CanReadScroll</c>, Player_Skills.cs:458-471 @95ef426d:
+    /// <see cref="ResupplyRun.CanRead(PlayerQualities, MagicSchool, uint, out string)"/>); known, or refused now, it is the loot rules'. The verdict's <see cref="ScrollKeepVerdict.Level"/> names the spell (level 0: no plan line).
+    /// </summary>
+    private static ScrollKeepVerdict Unknown(uint id, SpellInfo info, Spellbook book, PlayerQualities q)
+    {
+        var c = CultureInfo.InvariantCulture;
+        var level = new ScrollLevel(0, id, info.Name, info.Power);
+        if (book.Knows(id))
+        {
+            return new ScrollKeepVerdict(ScrollKeepKind.NotAbove, string.Create(c, $"{info.Name} ({id}) is in the book already: not kept"), null, level);
+        }
+
+        if (ResupplyRun.CanRead(q, info.School, info.Power, out var readWhy) != LearnReason.None)
+        {
+            return new ScrollKeepVerdict(ScrollKeepKind.Unreadable, string.Create(c, $"{info.Name} ({id}) is not in the book, but ACE would refuse the read now ({readWhy}): not kept"), null, level);
+        }
+
+        return new ScrollKeepVerdict(ScrollKeepKind.Keep, string.Create(c, $"scroll of {info.Name} ({id}, {info.School}, power {info.Power}): not in her book and ACE lets her read it ({readWhy}): kept to be read (the owner's rule of 2026-11-19)"), null, level);
+    }
+
+    /// <summary>
     /// The delegate <c>MageLootThresholds.KeepScroll</c> takes: the reason a scroll is kept, or null. The rung is the ground's at the character's level at each call (<see cref="ScrivenerLearnPlan.RungOf"/>), so the book, the skills and the plan
     /// are those of the time; a ground no rung names keeps nothing.
     /// </summary>
@@ -250,7 +278,7 @@ public static class ScrollKeepRule
                 (cachedRung, cachedCover, cached) = (rung.Key, cover, PlanLines(rung, spells, cat, cover));
             }
 
-            var verdict = Evaluate(item, cached, book(), q, ladder.PlanCastChance);
+            var verdict = Evaluate(item, cached, book(), q, ladder.PlanCastChance, spells); // M6 sprint: with the SpellTable, every unknown scroll she can read
             return verdict.Keep ? verdict.Reason : null;
         };
     }

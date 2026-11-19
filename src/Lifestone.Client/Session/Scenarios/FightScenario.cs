@@ -235,8 +235,17 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
     private Func<WorldObject, string?> KeepScrollHook(string groundKey, IReadOnlyDictionary<uint, SpellInfo> spells)
     {
         var hook = ScrollKeepRule.Hook(LadderLoader.WarMage, groundKey, spells, () => _hookSession!.State.Self.Spellbook, () => _hookSession!.State.Self.Qualities, botCovers: () => BuffBotCover.For(_hookSession!.State).Covering); // M6 item 14 S3: no scroll of a line the buff bot casts is kept
-        return WantHook(_options.Want, _wantRefused, item => _hookSession is null ? null : hook(item));
+        return WantHook(_options.Want, _wantRefused, item => _hookSession is null ? null : hook(item), _options.Until is null ? WantHeld : null); // M6 sprint: with no until, one held is the want met
     }
+
+    private readonly List<uint> _wantScratch = [];
+
+    /// <summary>
+    /// M6 sprint (run 5, cache/m6/sprint/run5/step3-levelup.log 15:58:31-15:59:18 UTC: one Female Tusker Tusk taken, then the next corpse's tusk planned as wanted too; ACE refused it, "You have solved this quest too recently!",
+    /// after a 25 s wait): in a fight with no <see cref="FightOptions.Until"/> (the ladder's trophies: one a quest, each gated at the pick-up for 20 h), a wanted item already held is wanted no more. A fight with an until (a quest's
+    /// hunt of N, its combine chain) keeps its own count.
+    /// </summary>
+    private bool WantHeld(uint wcid) => _hookSession is { } session && Mage.GearInventory.CountOf(session.State, _wantScratch, wcid) > 0;
 
     /// <summary>
     /// M6 5 q4 (D57): the wanted wcids whose pick-up the server refused: the plan kept a quest-want item of the wcid, it is not held now and the chat lines since the pick-ups began carry the server's refusal (<see cref="QuestSolvedTooText"/>).
@@ -277,8 +286,9 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
     /// <param name="want">The wanted wcids.</param>
     /// <param name="refused">The wcids the server refused in this fight.</param>
     /// <param name="next">The hook for every other item.</param>
-    internal static Func<WorldObject, string?> WantHook(IReadOnlyList<uint> want, IReadOnlySet<uint> refused, Func<WorldObject, string?> next) =>
-        want.Count == 0 ? next : item => want.Contains(item.Weenie.WeenieClassId) && !refused.Contains(item.Weenie.WeenieClassId)
+    /// <param name="met">M6 sprint: true when the want of a wcid is met already (one held, in a fight with no until), or null for none: an item of a met want goes to <paramref name="next"/> like any other.</param>
+    internal static Func<WorldObject, string?> WantHook(IReadOnlyList<uint> want, IReadOnlySet<uint> refused, Func<WorldObject, string?> next, Func<uint, bool>? met = null) =>
+        want.Count == 0 ? next : item => want.Contains(item.Weenie.WeenieClassId) && !refused.Contains(item.Weenie.WeenieClassId) && met?.Invoke(item.Weenie.WeenieClassId) != true
             ? MageLootRules.QuestWantPrefix + item.Weenie.WeenieClassId.ToString(CultureInfo.InvariantCulture)
             : next(item);
 
@@ -1571,12 +1581,18 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             _drain.Note(healthHeld); // M5 7 F7: health_min=
         }
 
+        _loot?.DrainStep(session, clock); // M6 sprint (m6-loot-close-after-pickup): a left corpse closes once its pick-up in flight lands, in every phase
         var walkCut = _loot is not null && _loot.WalkCutStep(session, clock); // M6 14 (m6-loot-walk-cut): the after-check of a corpse's walk ended with a key, read in every phase
         CastWaitWatch(session, clock); // M6 14 (m6-cast-wait): report-only
         ExpiryWatch(clock); // M6 14 upkeep mana: a buff line's lapse is named in every phase, not only at a decision
         switch (_phase)
         {
             case Phase.Choose:
+                if (StanceHold(session, clock))
+                {
+                    return ScenarioStatus.Running; // M6 sprint (m6-stance-after-read): the magic stance is asked; no cast until it is answered
+                }
+
                 _loot?.Sweep(session, clock); // M5 7 loot retry: a put-off corpse whose window passed, or that is gone, is given up
                 if (walkCut)
                 {
@@ -1891,11 +1907,25 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
                 return ScenarioStatus.Running; // M5 7 P7b (D139 j): a put-off corpse lost from view is walked back to before the tour walks on
             }
 
+            if (_lootHold is null && _loot is { Active: true })
+            {
+                // M6 sprint (live 2026-11-19 04:16:29 to 04:16:57 UTC, run 4, the Tusker Burrow): four Female Tuskers killed, the last one's corpse not yet in the table (the loot step waits for it, CorpseAppearSeconds, and
+                // gives the frame to the fight meanwhile), and with no target in reach the fight walked the tour 203 m to a slot not yet seen: the walk held the frames for 28 s, the corpse was then 66 m off and left, and the
+                // two corpses put off in the fight went out of view and were lost. A kill that still waits for its corpse, or a corpse in hand, holds the tour walk: the loot step goes first.
+                return ScenarioStatus.Running;
+            }
+
+            if (ReadStep(session, clock) is { } reading)
+            {
+                return reading; // M6 sprint (m6-read-looted-scroll): a looted scroll she does not know is read now, between fights (FightScenario.ScrollRead.cs)
+            }
+
             if (PullStep(session, clock, in here, defence) is { } pulled)
             {
                 return pulled; // M6 7 AX: the wanted trophy's pull, before the tour walks on (FightScenario.Pull.cs)
             }
 
+            CarrierPreference(session); // M6 audit: the wanted tusk's carriers first (FightScenario.TrophyCarriers.cs)
             return StartWalk(session, clock, _pickExcluded.Count > _killed.Count ? NoClearLine : leaving ? TourLeaves : NoTargetInRange);
         }
 
@@ -2989,6 +3019,14 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             return ComponentRefusal(session, in report); // M6 7 K: dropped for the fight, the next castable, or the fight's named end; no miss, no walk
         }
 
+        if (last is { Reason: ActionReason.NotInMagicStance })
+        {
+            // M6 sprint (run 6, 21:14:58 UTC): the stance guard refused the cast before it was sent: no miss, no walk; the magic stance is asked and the casts wait for it (FightScenario.Stance.cs)
+            AskMagicStance(session, clock, "a cast was refused for the stance");
+            _phase = Phase.Choose;
+            return ScenarioStatus.Running;
+        }
+
         if (!fizzleEnd)
         {
             _tally.NoteMiss();
@@ -3675,7 +3713,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
     public const int LootBusyRetries = LootStep.BusyRetries;
 
     /// <summary>True while the loot step has a kill to loot or a corpse in hand (always false with looting off).</summary>
-    public bool LootBusy => _loot is { Active: true };
+    public bool LootBusy => _loot is { Active: true } or { Draining: true };
 
     /// <summary>M6 6 F3 (<c>m6-resume-loot-queue</c>): the kills of this fight whose corpse is found and not yet looted (a read-only export: guid and the corpse's name), for the autopilot's checkpoint. Empty with looting off.</summary>
     public IReadOnlyList<KillCorpse> KillCorpses => _loot?.Pending() ?? [];
@@ -3880,6 +3918,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         private bool _aceWalk; // M5 7 F27: the open in hand is out of reach, so ACE's MoveTo walks the mage to the corpse first
         private readonly List<uint> _approach = []; // M5 7 P7s (D148): the cells of ACE's straight approach to the corpse in hand
         private bool _ownWalked; // M5 7 P7s (D148): the fight's own walk went toward the corpse in hand once (it is not walked toward twice)
+        private string _ownWalkWhy = OwnWalkWhy; // M6 sprint: why the own walk goes (the no-go approach's, or a failed ACE walk's: m6-loot-walk-after-stall)
         private bool _ownWalkStarted;
         private CellFrame _ownWalkSpot;
         private bool _traceTodoLogged;
@@ -4030,6 +4069,11 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         /// <summary>One frame. True: the step used the frame (the fight casts nothing now); false: nothing to do, the fight goes on.</summary>
         public bool Step(IGameSessionView session, double clock)
         {
+            if (DrainStep(session, clock))
+            {
+                return true; // the last corpse stays open until its pick-up in flight lands: no other corpse is opened over it
+            }
+
             if (_stage == Stage.Idle)
             {
                 if (_kills.Count == 0)
@@ -4747,6 +4791,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
                 _ownWalked = true;
                 _ownWalkStarted = false;
                 _ownWalkSpot = lies;
+                _ownWalkWhy = OwnWalkWhy;
                 _stage = Stage.OwnWalk;
                 _stageStart = session.Clock.Now;
                 log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"loot: the corpse 0x{_corpse:X8} of '{_kill.Name}' is {away:0.#} m away and {why}: no Use from here; the fight's own walk, planned over the walkable cells only, goes toward it first (once)"));
@@ -4778,9 +4823,16 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             {
                 _ownWalkStarted = true;
                 var note = string.Create(CultureInfo.InvariantCulture, $"the corpse 0x{_corpse:X8} of '{_kill.Name}' at 0x{_ownWalkSpot.CellId:X8} [{_ownWalkSpot.Origin.X:0.#} {_ownWalkSpot.Origin.Y:0.#} {_ownWalkSpot.Origin.Z:0.#}]");
-                if (!owner.BeginLootWalk(session, clock, _corpse, in _ownWalkSpot, note, OwnWalkWhy, out var why))
+                if (!owner.BeginLootWalk(session, clock, _corpse, in _ownWalkSpot, note, _ownWalkWhy, out var why))
                 {
-                    SkipNoGo(session, "ACE's straight approach may cross a no-go cell and no walk of the fight's own could be planned to it: " + why);
+                    if (ReferenceEquals(_ownWalkWhy, StallWalkWhy))
+                    {
+                        NotReached(session, clock, "ACE's straight walk failed and no walk of the fight's own could be planned to it: " + why); // M6 sprint
+                    }
+                    else
+                    {
+                        SkipNoGo(session, "ACE's straight approach may cross a no-go cell and no walk of the fight's own could be planned to it: " + why);
+                    }
                 }
 
                 return true;
@@ -4836,6 +4888,37 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             _stageStart = session.Clock.Now;
         }
 
+        /// <summary>
+        /// M6 sprint (run 5, 2026-11-19 14:51:06 UTC: ACE's straight walk to a Drudge Skulker's corpse 23.1 m away ran her into a wall; the approach's trace had crossed 5 walkable cells, and the corpse was left): ACE's walk to the
+        /// corpse in hand failed while the fight's own walk has not gone toward it: that walk, planned over the walkable cells, goes once, and the corpse is looked at again from where it ends (within reach it opens with no walk).
+        /// False when the own walk already went, the walk is not this fight's, or the corpse is within reach or unplaced (the caller leaves it, named).
+        /// </summary>
+        private bool OwnWalkAfterStall(IGameSessionView session, double clock, string why)
+        {
+            if (_ownWalked || owner._walk is null || owner._options.ArenaHere || session.State.Self.Position is not { } own || !session.State.Objects.TryGet(_corpse, out var corpse) || corpse.Position is not { } lies)
+            {
+                return false;
+            }
+
+            var away = own.ToGlobal().DistanceTo(lies.ToGlobal());
+            if (away <= HuntScenario.CorpseReachMetres)
+            {
+                return false;
+            }
+
+            WalkedSeconds += Math.Max(0, clock - _stageStart);
+            _ownWalked = true;
+            _ownWalkStarted = false;
+            _ownWalkSpot = lies;
+            _ownWalkWhy = StallWalkWhy;
+            _stage = Stage.OwnWalk;
+            _stageStart = clock;
+            log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"loot: ACE's straight walk to the corpse 0x{_corpse:X8} of '{_kill.Name}' failed ({why}) {away:0.#} m from it: the fight's own walk, planned over the walkable cells, goes toward it once; then it is looked at again (m6-loot-walk-after-stall)"));
+            return true;
+        }
+
+        private const string StallWalkWhy = "ACE's straight walk to the corpse failed (a wall or a body in the way), so the fight's own walk goes round over the walkable cells (m6-loot-walk-after-stall)";
+
         /// <summary>M5 7 F27: a corpse ACE's walk did not bring the mage to: named once (<c>loot: ... not reached: why</c>), counted, the fight resumes; an open view (the walk may have ended at the corpse) is closed.</summary>
         private void NotReached(IGameSessionView session, double clock, string why)
         {
@@ -4854,7 +4937,11 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
                 var limit = _aceWalk ? owner._options.LootWalkSeconds : ActionSeconds;
                 if (clock - _stageStart > limit)
                 {
-                    if (_aceWalk)
+                    if (_aceWalk && OwnWalkAfterStall(session, clock, string.Create(CultureInfo.InvariantCulture, $"ACE's move-to brought no open within {limit:0} s")))
+                    {
+                        _pending = null; // the open's late answer is not this stage's any more
+                    }
+                    else if (_aceWalk)
                     {
                         NotReached(session, clock, string.Create(CultureInfo.InvariantCulture, $"ACE's move-to brought no open within {limit:0} s"));
                     }
@@ -4881,6 +4968,11 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
 
             if (opened.Kind != ActionOutcomeKind.Confirmed)
             {
+                if (_aceWalk && opened.Code == 0 && OwnWalkAfterStall(session, clock, $"the open was not confirmed ({Describe(opened)})")) // a UseDone 0 with no contents: the walk did not arrive (a refusal names its error)
+                {
+                    return true; // M6 sprint: ACE's straight walk failed; the fight's own walk goes once, then the corpse is looked at again
+                }
+
                 if (_aceWalk)
                 {
                     SkippedUnreached++;
@@ -5288,16 +5380,61 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         {
             CutWalk(session, session.Clock.Now, "the corpse is left", wait: true); // M6 14: a corpse left while ACE still walks her to it (the step's own time limits)
             StackMerges += _looter?.StackMerges ?? 0;
+            var looter = _looter;
             _looter?.Abandon("fight-moved-on");
             _looter = null;
             _identifies.Clear();
             if (close && _corpse != 0 && session.State.Containers.Viewed is { } view && view.Guid == _corpse)
             {
-                _ = session.Actions.CloseContainer(_corpse, ActionSource.Automation);
+                if (looter is { IsDraining: true })
+                {
+                    // M6 sprint (run 4, 04:02:22 UTC: "Source item not found!" and a 4,000-value essence lost): the close went while ACE still ran the pick-up's motion (about 1.35 s from its send, CorpseLooter's capture), so
+                    // ACE no longer found the item in a closed corpse (Player_Inventory.cs HandleActionPutItemInContainer, "Source item not found!"). The close now waits for the pick-up's answer, as long as the server takes.
+                    (_drainLooter, _drainCorpse, _drainSince) = (looter, _corpse, session.Clock.Now);
+                    log.Info(LogCategory, $"loot: the close of 0x{_corpse:X8} waits for the pick-up in flight to land (m6-loot-close-after-pickup)");
+                }
+                else
+                {
+                    _ = session.Actions.CloseContainer(_corpse, ActionSource.Automation);
+                }
             }
 
             _pending = null;
             Done();
+        }
+
+        private CorpseLooter? _drainLooter;
+        private uint _drainCorpse;
+        private double _drainSince;
+
+        /// <summary>True while a left corpse's pick-up in flight is awaited before its close (<see cref="DrainStep"/>).</summary>
+        public bool Draining => _drainLooter is not null;
+
+        /// <summary>
+        /// Steps the left corpse's looter until its pick-up in flight settles (or <see cref="CorpseLooter.DrainSeconds"/> pass), then closes the corpse if it is still the open one. True while it waits.
+        /// </summary>
+        public bool DrainStep(IGameSessionView session, double clock)
+        {
+            if (_drainLooter is not { } looter)
+            {
+                return false;
+            }
+
+            looter.Step(session, clock);
+            if (looter.IsDraining && clock - _drainSince < CorpseLooter.DrainSeconds)
+            {
+                return true;
+            }
+
+            if (session.State.Containers.Viewed is { } view && view.Guid == _drainCorpse)
+            {
+                _ = session.Actions.CloseContainer(_drainCorpse, ActionSource.Automation);
+            }
+
+            log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"loot: the pick-up in flight from 0x{_drainCorpse:X8} settled {clock - _drainSince:0.0} s after the corpse was left ({looter.Summary}); the corpse is closed (m6-loot-close-after-pickup)"));
+            _drainLooter = null;
+            _drainCorpse = 0;
+            return false;
         }
 
         private void Done()

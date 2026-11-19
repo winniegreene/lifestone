@@ -515,18 +515,29 @@ internal abstract partial class TravelLeg
             return null;
         }
 
-        if (context.Facts.LifestoneTied == false || context.Facts.LifestoneRecallUnavailable)
+        if (context.Facts.LifestoneTied == false || !RecallReadiness.Of(session.State, context.Facts, context.Spells).Castable)
         {
-            why = "Lifestone Recall cannot take her home (the tie is known false, 0x049E, or the recall is known unavailable): no reserve buys the way out, which is the walk back";
+            why = "Lifestone Recall cannot take her home (the tie is known false, 0x049E, or the recall is known unavailable or the pack is short for it): no reserve buys the way out, which is the walk back";
             return null;
         }
 
+        // M6 audit (finding 8, the owner's decision of 2026-11-19): the heal the reserve pays for is the one she would cast, the highest Heal Self known at the ladder's plan chance on her
+        // current skill (VitalsMeans.Pick, the fight's own pick), else her lowest known level; not the dearest in the book. Live 2026-11-19 00:58:08 and 03:45:13 UTC, run 2 and run 4 at
+        // level 10: the reserve priced Heal Self V (60 mana, cast chance 0.05) and the errand's skirmish refused bolts at 119 and 123 of 168 mana.
         var heal = 0u;
-        foreach (var id in Vitals.VitalsMeans.HealSelf)
+        if (Vitals.VitalsMeans.Pick(session.State.Self.Qualities, session.State.Self.Spellbook, context.Spells, Vitals.VitalsLine.HealSelf, Grounds.LadderLoader.WarMage.PlanCastChance, out _) is { } cast)
         {
-            if (session.State.Self.Spellbook.Knows(id) && context.Spells.TryGetValue(id, out var info))
+            heal = GearCasts.ManaCeiling(cast, 0);
+        }
+        else
+        {
+            foreach (var id in Vitals.VitalsMeans.HealSelf)
             {
-                heal = Math.Max(heal, GearCasts.ManaCeiling(info, 0));
+                if (session.State.Self.Spellbook.Knows(id) && context.Spells.TryGetValue(id, out var info))
+                {
+                    heal = GearCasts.ManaCeiling(info, 0); // the lowest known level: she casts the cheapest heal she has
+                    break;
+                }
             }
         }
 
@@ -549,24 +560,22 @@ internal abstract partial class TravelLeg
         Retreats++;
         var why = _retreatWhy!;
         var from = S.State.Self.Position;
-        var known = S.State.Self.Spellbook.Knows(RecallHome.LifestoneRecallSpell);
         var cost = Context.Spells.TryGetValue(RecallHome.LifestoneRecallSpell, out var info) ? info.BaseMana : 0u;
         var payable = cost == 0 || !S.State.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxMana, out var mana, out _) || mana >= cost;
         // M6 6 FXD2 (6-D4): the recall is judged as the bolt pick judges a bolt (the pack's components, LevelFloor.ShortOf over HeldForAccount) and on the tie (0x049E known false); either failing is the walk back, with the reason on the line.
-        string? shortOf = null;
-        var judged = "components=not judged (the pack or its focus is unread)";
-        if (known && info is not null && LevelFloor.HeldForAccount(S.State, info.School, null) is { } held)
-        {
-            judged = LevelFloor.ShortOf(held, info, out var need) ? "components=short" : "components=held";
-            shortOf = judged == "components=short" ? need : null;
-        }
-
+        // M6, the recall's components: the one read every way home takes (RecallReadiness): a pack without the Item Enchantment focus is judged on the account's formula when the run knows the account, and a recall ACE refused for a
+        // component earlier this run is not cast again under attack.
+        var read = RecallReadiness.Of(S.State, Context.Facts, Context.Spells);
+        var known = read.Known;
+        var shortOf = read.ShortOf;
+        var judged = !read.Judged ? "components=not judged (the pack or its focus is unread)" : shortOf is null ? "components=held" : "components=short";
         var tied = Context.Facts.LifestoneTied != false;
-        var recall = known && payable && shortOf is null && tied;
+        var recall = known && payable && shortOf is null && tied && !read.Unavailable;
         var book = known
             ? payable ? "lifestone_recall=yes" : string.Create(CultureInfo.InvariantCulture, $"lifestone_recall=yes but the mana {VitalWord(MageTemplate.MaxMana)} is under its {cost}")
             : "lifestone_recall=no";
         book += shortOf is not null ? $"; the pack is short for it: {shortOf}" : known ? "; " + judged : string.Empty;
+        book += known && read.Unavailable ? "; ACE refused it for a component earlier this run (recall-unavailable:components)" : string.Empty;
         book += tied ? string.Empty : "; the lifestone tie is known false (0x049E)";
         Log(string.Create(
             CultureInfo.InvariantCulture,
@@ -621,6 +630,11 @@ internal abstract partial class TravelLeg
             if (refusal == 0x049E)
             {
                 Context.Facts.LifestoneTied = false;
+            }
+
+            if (refusal == 0x0400)
+            {
+                Context.Facts.LifestoneRecallUnavailable = true; // M6, the recall's components (M6 7 AV's fact): the check before could not judge the pack, so the rest of the run leaves the recall out
             }
 
             if (refusal is 0x0400 or 0x049E)

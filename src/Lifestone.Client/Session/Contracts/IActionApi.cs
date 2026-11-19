@@ -394,6 +394,17 @@ public interface IActionApi
     ActionHandle AddSpellFavorite(uint spellId, int index, int bar, ActionSource source = ActionSource.Host);
 
     /// <summary>
+    /// M6 sprint (owner ruling 2026-11-19: a spell she learns goes on her spell bar, as a player puts it there): puts the known spell <paramref name="spellId"/> on a spell bar where the player rules place it (the line's tab, in the
+    /// place of the line's lower level), as the rules do before a cast; nothing when it is on a bar already, unknown, or the book is unread. <paramref name="when"/> names the moment in the log line. A test double does nothing.
+    /// </summary>
+    /// <param name="spellId">The spell.</param>
+    /// <param name="when">The moment, for the log line (for example "on its learning").</param>
+    /// <param name="source">Who is asking.</param>
+    void PlaceOnBar(uint spellId, string when, ActionSource source = ActionSource.Automation)
+    {
+    }
+
+    /// <summary>
     /// Takes a spell off one of the character's spell bars (GameAction 0x01E4 {spell, bar}; retail <c>CM_Character::Event_RemoveSpellFavorite</c>, 11.6096 0x006A26B0; ACE <c>GameActionRemoveSpellFavorite</c>). ACE answers
     /// nothing (a spell that is not on the bar is ignored), so this completes as <see cref="ActionOutcomeKind.Sent"/> when it is sent. Refused at once for spell 0, a bar outside 0 to 7, or when the player is not in the world.
     /// </summary>

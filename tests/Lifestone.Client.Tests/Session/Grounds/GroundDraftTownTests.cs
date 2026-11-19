@@ -309,15 +309,18 @@ public sealed class GroundDraftTownTests(DatSetFixture fixture, ITestOutputHelpe
     private static bool IsDen(string key) => key is DenKey or ShoDenKey;
 
     /// <summary>M6 3 p1 (D48): the four spine tusker grounds are hunted from Holtburg like the den (the island has no lifestone and the first three portals are NoRecall), so their homes and stops are Holtburg's hand-set standing points.</summary>
-    private static readonly string[] SpineKeys = ["tusker-burrow", "tusker-lodge", "tusker-cave", "tusker-temple-20-40", "tusker-cavern", "tusker-habitat", "tusker-barracks", "tusker-abode", "tusker-quarters", "tusker-holding", "tusker-armory"]; // M6 3 p3: and the three alternates (Cavern, Habitat, Barracks); M6 14 armory: and the Armory
+    private static readonly string[] SpineKeys = ["tusker-burrow", "tusker-retreat", "tusker-lodge", "tusker-cave", "tusker-temple-20-40", "tusker-cavern", "tusker-habitat", "tusker-barracks", "tusker-abode", "tusker-quarters", "tusker-holding", "tusker-armory"]; // M6 3 p3: and the three alternates (Cavern, Habitat, Barracks); M6 14 armory: and the Armory; M6 retreat: and the Tusker Retreat (the 10-14 rung, hunted from Holtburg, D48)
 
-    private static bool HoltburgHomed(string key) => IsDen(key) || SpineKeys.Contains(key) || key == AlabreeKey || key == CraterCavesKey;
+    private static bool HoltburgHomed(string key) => IsDen(key) || SpineKeys.Contains(key) || key == AlabreeKey || key == CraterCavesKey || key == RedoubtKey;
 
     /// <summary>M6 8 B1: the Crater Caves are hunted from Holtburg (the climber's lifestone), though Crater Lake Village's Life Stone stands 495 m from the portal: the home is the hand-set standing point, as the spine's.</summary>
     private const string CraterCavesKey = "crater-caves";
 
     /// <summary>M6 5 q6b: the Cave of Alabree is hunted from Holtburg, whose own lifestone it is nearest: its home is the hand-set standing point, as the spine's.</summary>
     private const string AlabreeKey = "cave-of-alabree";
+
+    /// <summary>M6 redoubt: the Holtburg Redoubt, homed at Holtburg by hand: its portal stands 458 m from Holtburg's lifestone and 352 m from the lifestone 0x7A9B0005 in landblock 0xA9B0, the draft's default.</summary>
+    private const string RedoubtKey = "holtburg-redoubt";
 
     /// <summary>The draft of the ground's town half. M6 8 B1: the Crater Caves' arrival (0x019A02D6, the room the portal's point stands in) is not the row's stale Destination (0x019A02CA), which is what the draft's lookup asks for.</summary>
     private static DraftWorld DraftOf(HuntingGround ground, ushort? home) => PinnedWorldSql.Draft(Assert.Single(ground.Landblocks), ground.Key == CraterCavesKey ? 0x019A02CAu : ground.Arrival.Cell, home);
@@ -395,7 +398,7 @@ public sealed class GroundDraftTownTests(DatSetFixture fixture, ITestOutputHelpe
             // The den's hand-set home is Holtburg, where the ground's characters live and shop (the project's town since M4): the character recalls home, shops, and returns by Primary Portal Recall tied to the den's
             // portal. The den portal stands in landblock 0x1B90, 28 km from Holtburg; the lifestone nearest it, 2.9 km away, is another town's. The command's 'home' (a landblock) drafts Holtburg's town, as the theory above does.
             Assert.True(!IsDen(key) || ground.Home.LifestoneCell >> 16 != home.Place.Cell >> 16); // the spine grounds' nearest lifestone may be Holtburg's (the Temple 20-40's, 4.4 km)
-            Assert.True(home.Metres > 1000 || key == AlabreeKey || key == CraterCavesKey, $"the lifestone nearest the den's portal is {home.Metres:0} m away"); // M6 5 q6b: the Cave of Alabree's portal stands 355 m from Holtburg's lifestone, which is its home
+            Assert.True(home.Metres > 1000 || key == AlabreeKey || key == CraterCavesKey || key == RedoubtKey, $"the lifestone nearest the den's portal is {home.Metres:0} m away"); // M6 5 q6b: the Cave of Alabree's portal stands 355 m from Holtburg's lifestone, which is its home
         }
         else
         {
@@ -419,7 +422,7 @@ public sealed class GroundDraftTownTests(DatSetFixture fixture, ITestOutputHelpe
             Assert.Equal(GroundRole.Avoid, ground.RoleOf(e.Wcid));
             Assert.All(e.Cells, c => Assert.True(ground.IsNoGo(c), $"{key}: the exit creature {e.Wcid}'s cell 0x{c:X8} is no-go"));
         });
-        if (key is DenKey or ShoDenKey or "tusker-burrow" or "tusker-lodge" or "tusker-cave" or "tusker-cavern" or "tusker-habitat" or "tusker-barracks" or "tusker-abode" or "tusker-quarters" or "tusker-holding" or "tusker-armory" or AlabreeKey or CraterCavesKey)
+        if (key is DenKey or ShoDenKey or "tusker-burrow" or "tusker-retreat" or "tusker-lodge" or "tusker-cave" or "tusker-cavern" or "tusker-habitat" or "tusker-barracks" or "tusker-abode" or "tusker-quarters" or "tusker-holding" or "tusker-armory" or AlabreeKey or CraterCavesKey or RedoubtKey)
         {
             Assert.Empty(world.EmoteExits);
         }

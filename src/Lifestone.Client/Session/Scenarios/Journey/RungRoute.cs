@@ -231,7 +231,9 @@ public sealed record RungLeg(RungLegKind Kind, string Label, RungPortal? Portal 
 /// <param name="StopAtPlace">M6 6 C2: a travel place's key (<see cref="TravelPlace.Key"/>: the island, Holtburg, the hub) the rung change stops in, or null (today: the whole plan). Given, <see cref="RungRoute.Decide"/> keeps the legs up to and including the
 /// first that arrives in one of the place's landblocks (a hop or an enter by its <see cref="RungPortal.DestLandblock"/>, a recall by its landing) and drops the rest (the run, the gate, the tie, the entry's Use): the corpse trip of a death on a leg.</param>
 /// <param name="FailedRoutes">M6 7 M: the keys of the ground's routes that failed on a hop this run (<see cref="JourneyFacts.FailedRoutesOf"/>): planned last, <see cref="TravelRoutes.FirstAdmitted"/>'s <c>avoid</c>; null or empty: none.</param>
-public sealed record RungRouteInput(HuntingGround Ground, RungDirection Direction, RungWhere Where, string Place, int Level, bool KnowsLifestoneRecall, bool KnowsPortalRecall, bool KnowsPortalTie, PortalTie Tie, bool HoldsGem, HuntingGround? BodyGround = null, string? StopAtPlace = null, IReadOnlyCollection<string>? FailedRoutes = null);
+/// <param name="RecallWhyNot">M6, the recall's components: why <paramref name="KnowsLifestoneRecall"/> is false, in <see cref="RecallReadiness.Read.WhyNot"/>'s words (the book lacks it, ACE refused it this run, or the pack is short for one cast), for the home plan's
+/// reason; null: the book lacks it (every caller before the readiness read).</param>
+public sealed record RungRouteInput(HuntingGround Ground, RungDirection Direction, RungWhere Where, string Place, int Level, bool KnowsLifestoneRecall, bool KnowsPortalRecall, bool KnowsPortalTie, PortalTie Tie, bool HoldsGem, HuntingGround? BodyGround = null, string? StopAtPlace = null, IReadOnlyCollection<string>? FailedRoutes = null, string? RecallWhyNot = null);
 
 /// <summary>M6 6 C2: the travel place that holds a corpse lost on a leg, or none, and why (<see cref="RungRoute.PlaceHolding"/>).</summary>
 /// <param name="Key">The place's key, or null when no place holds it (the corpse is off the route: <c>trip_abort=corpse-off-route</c>).</param>
@@ -672,7 +674,7 @@ public static class RungRoute
 
         var legs = new List<RungLeg>();
         var place = input.Place;
-        var why = new List<string> { "the spellbook lacks Lifestone Recall" };
+        var why = new List<string> { input.RecallWhyNot ?? "the spellbook lacks Lifestone Recall" };
         var holder = input.Where == RungWhere.AtGround ? g : input.Where == RungWhere.Elsewhere ? input.BodyGround : null; // M6 4 F1 (4-R3): the ground the body stands in, not the run's
         if (holder is not null)
         {
@@ -688,13 +690,21 @@ public static class RungRoute
 
             if (holder.Exit is not { Kind: GroundExitKind.Portal, Origin: { } origin } exit)
             {
-                var stop = $"TODO(m6-way-home): {holder.Key} is left by {(holder.Exit?.Kind.ToString().ToLowerInvariant() ?? "an unknown way")} and the spellbook lacks Lifestone Recall";
+                var stop = $"TODO(m6-way-home): {holder.Key} is left by {(holder.Exit?.Kind.ToString().ToLowerInvariant() ?? "an unknown way")} and {input.RecallWhyNot ?? "the spellbook lacks Lifestone Recall"}";
                 return new(RungDirection.Home, g.Key, NoRoute, [], tied, gem, "pass", stop, stop);
             }
 
             legs.Add(new RungLeg(RungLegKind.Hop, "exit:" + holder.Key, new RungPortal("exit:" + holder.Key, holder.Name + " exit", exit.Wcid, 0, exit.Cell, origin, exit.Destination >> 16, null, null, holder.Landblocks)));
             place = routes.PlaceOf(Hex(exit.Destination >> 16))?.Key ?? Hex(exit.Destination >> 16);
             why.Add($"the exit portal {exit.Wcid} to 0x{exit.Destination:X8}");
+            if (string.Equals(place, routes.StartPlace, StringComparison.Ordinal) && string.Equals(routes.PlaceOf(Hex(holder.Home.LifestoneCell >> 16))?.Key, routes.StartPlace, StringComparison.Ordinal))
+            {
+                // M6 redoubt (closes TODO(m6-redoubt-way-home)): a dungeon whose exit drops in the start place itself (the Holtburg Redoubt's Surface portal 4936 to 0xAAB10020, a landblock of the place holtburg, 458 m from the
+                // lifestone by the travel file's run) has no way home by portals to plan: the travel file holds none from the start place to itself. The rest of the way is the walk an outdoor ground's way home is, to the
+                // home's lifestone point. A climber of the rung's first levels holds no Lifestone Recall (the sprint of 2026-11-18 bought the scroll at level 8), so this is her first way out.
+                legs.Add(new RungLeg(RungLegKind.WalkHome, "home-lifestone-point", Cell: holder.Home.LifestoneCell, At: holder.Home.LifestonePoint));
+                return new(RungDirection.Home, g.Key, "exit-walk-home", legs, tied, gem, "pass", null, $"{string.Join("; ", why)}; the exit drops in {routes.StartPlace}, {holder.Key}'s home place: the walk to {holder.Home.Town}'s lifestone point");
+            }
         }
 
         var way = routes.WayHomeFrom(place, input.Level);

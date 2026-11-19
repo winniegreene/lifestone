@@ -199,6 +199,12 @@ public sealed class RecallHome : IDisposable
     /// <summary>The recall refusal ACE sent during the last recall (0x049E, 0x049F, 0x04A3, 0x04AD or 0x04CC), or 0: the journey reads the ties from it (M4 P5b contract 4).</summary>
     public uint Refusal => _refusal;
 
+    /// <summary>
+    /// True when the last recall failed because ACE refused the cast for a missing spell component (WeenieError 0x0400, YouDontHaveAllTheComponents): the Action API's outcome names it in <see cref="Detail"/> (live 2026-11-18 20:29:54 UTC:
+    /// <c>ServerError (code 0x400) YouDontHaveAllTheComponents 0x0400</c>). It is no recall refusal of <see cref="Refusal"/>'s list, so the journey reads it here and sets <c>JourneyFacts.LifestoneRecallUnavailable</c> (M6 7 AV).
+    /// </summary>
+    public bool RefusedForComponents => Detail is { } detail && (detail.Contains("0x0400", StringComparison.Ordinal) || detail.Contains("0x400)", StringComparison.Ordinal));
+
     /// <summary>The name of a recall spell for the log: Lifestone Recall, Primary Portal Recall, or "spell N".</summary>
     /// <param name="spellId">The spell id.</param>
     public static string SpellName(uint spellId) => spellId switch

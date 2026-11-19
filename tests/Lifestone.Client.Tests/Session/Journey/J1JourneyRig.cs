@@ -112,6 +112,9 @@ internal sealed class J1JourneyRig
     /// <summary>False: ACE answers Lifestone Recall with 0x049E (no LinkedLifestone).</summary>
     public bool LifestoneTied { get; set; } = true;
 
+    /// <summary>Nonzero: ACE answers Lifestone Recall with this error on the cast's UseDone (0x0400: a component is missing) and no teleport.</summary>
+    public uint LifestoneRecallRefusal { get; set; }
+
     /// <summary>False: ACE answers Primary Portal Recall with 0x04A3 (no portal tied).</summary>
     public bool PortalTied { get; set; } = true;
 
@@ -234,9 +237,14 @@ internal sealed class J1JourneyRig
         if (_castAt is { } cast && Now >= cast + 1.0)
         {
             _castAt = null;
+            var done = 0u;
             if (_castSpell == 1635 && !LifestoneTied)
             {
                 R.WeenieError(0x049E);
+            }
+            else if (_castSpell == 1635 && LifestoneRecallRefusal != 0)
+            {
+                done = LifestoneRecallRefusal; // ACE answers a cast it refuses for a component with the UseDone's own error (live 2026-11-18 20:29:54 UTC: ServerError (code 0x400)), and no teleport
             }
             else if (_castSpell == 48 && !PortalTied)
             {
@@ -260,7 +268,7 @@ internal sealed class J1JourneyRig
                 _teleportCell = _castSpell == 48 ? DenCell : HoltburgCell;
             }
 
-            R.UseDone();
+            R.UseDone(done);
         }
 
         for (var i = 0; i < _places.Count; i++)

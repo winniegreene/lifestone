@@ -40,8 +40,23 @@ function Get-ClimbWord {
 }
 
 function Get-ClimbCreateVerdict {
-    <# Step 1 (--scenario=climber-create): the headless summary line (ok=1) and the climber's verdict line. Returns @{ Ok; Granted; Level; Line; Why }. #>
-    param([string] $Text, [int] $ExitCode)
+    <#
+      Step 1 (--scenario=climber-create): the headless summary line (ok=1) and the climber's verdict line. Returns @{ Ok; Granted; Level; Line; Why }.
+      -OneWindow (M6 onscreen start, --login-check=climber-start): the window's one log instead: the run's own 'climber start: creation done ok=' line and the FIRST verdict line (the run logs one; the level up job that follows logs none).
+      The process's exit code belongs to the whole run there, so it is not read for this part.
+    #>
+    param([string] $Text, [int] $ExitCode, [switch] $OneWindow)
+    if ($OneWindow) {
+        $done = Get-ClimbFirstLine -Text $Text -Pattern 'climber start: creation done ok='
+        $line = Get-ClimbFirstLine -Text $Text -Pattern '(\[climber\]|climber:) verdict '
+        $f = ConvertFrom-ClimbFields $line
+        $why = @()
+        if (-not $done) { $why += "no 'climber start: creation done' line" } elseif ($done -notmatch 'creation done ok=true\b') { $why += 'the creation done line is not ok=true' }
+        if (-not $line) { $why += "no '[climber] verdict' line" }
+        elseif ((Get-ClimbWord $f 'template') -ne 'ok') { $why += "template=$(Get-ClimbWord $f 'template')" }
+        return @{ Ok = ($why.Count -eq 0); Granted = (Get-ClimbCount $f 'granted'); Level = (Get-ClimbCount $f 'level'); Line = $line; Why = ($why -join '; ') }
+    }
+
     $done = Get-ClimbLine -Text $Text -Pattern 'headless done scenario=climber-create'
     $line = Get-ClimbLine -Text $Text -Pattern '(\[climber\]|climber:) verdict ' # the headless console writes 'climber: verdict', the loopback sink '[climber] verdict' (item 0 live probe 2)
     $f = ConvertFrom-ClimbFields $line
@@ -54,13 +69,22 @@ function Get-ClimbCreateVerdict {
 }
 
 function Get-ClimbJourneyVerdict {
-    <# Step 2 (--scenario=journey --journey=climber): the journey's done line and the climber line. Returns @{ Ok; CheatFree; Granted; Place; RecoveryPlace; Level; Stop; Line; Why }. #>
-    param([string] $Text, [int] $ExitCode)
-    $done = Get-ClimbLine -Text $Text -Pattern 'journey done ok='
-    $line = Get-ClimbLine -Text $Text -Pattern 'journey climber cheat_free='
+    <#
+      Step 2 (--scenario=journey --journey=climber): the journey's done line and the climber line. Returns @{ Ok; CheatFree; Granted; Place; RecoveryPlace; Level; Stop; Line; Why }.
+      -OneWindow: the FIRST of each line in the window's one log (the start-up journey's come before anything the level up job logs), and no exit code (the whole run's).
+    #>
+    param([string] $Text, [int] $ExitCode, [switch] $OneWindow)
+    if ($OneWindow) {
+        $done = Get-ClimbFirstLine -Text $Text -Pattern 'journey done ok='
+        $line = Get-ClimbFirstLine -Text $Text -Pattern 'journey climber cheat_free='
+    }
+    else {
+        $done = Get-ClimbLine -Text $Text -Pattern 'journey done ok='
+        $line = Get-ClimbLine -Text $Text -Pattern 'journey climber cheat_free='
+    }
     $f = ConvertFrom-ClimbFields $line
     $why = @()
-    if ($ExitCode -ne 0) { $why += "exit code $ExitCode" }
+    if (-not $OneWindow -and $ExitCode -ne 0) { $why += "exit code $ExitCode" }
     if (-not $done) { $why += "no 'journey done' line" } elseif ($done -notmatch 'journey done ok=true\b') { $why += 'the journey done line is not ok=true' }
     if (-not $line) { $why += "no 'journey climber' line" }
     return @{
@@ -86,6 +110,43 @@ function Test-ClimbMayLevelUp {
         if ($Journey.CheatFree -ne 'yes') { $why += "step 2 read cheat_free=$(if ($null -eq $Journey.CheatFree) { 'unread' } else { $Journey.CheatFree }), not yes" }
     }
     return @{ Allowed = ($why.Count -eq 0); Why = ($why -join '; ') }
+}
+
+function Get-ClimbGameGate {
+    <#
+      -OneWindow (M6 onscreen start): the game's own gate line, 'climber start: gate level_up=allowed|refused ...' (ClimberStartGate: the same rule as Test-ClimbMayLevelUp, enforced in the process). Returns @{ Word = 'allowed'|'refused'|$null; Line }.
+      The script still applies its own rule to the same log's lines; when the two disagree that is a finding (the run says both).
+    #>
+    param([string] $Text)
+    $line = Get-ClimbFirstLine -Text $Text -Pattern 'climber start: gate level_up='
+    $word = if ($line -match 'level_up=(allowed|refused)\b') { $Matches[1] } else { $null }
+    return @{ Word = $word; Line = $line }
+}
+
+function ConvertTo-ClimbOneWindowCommand {
+    <#
+      M6 onscreen start (owner ruling 2026-11-19: the whole run in one window): the one process's tools\play.ps1 arguments, made from the level up command as climb.ps1 finished it (every switch it added to -GameArgs: stays): no -Character (the climber is
+      created in the window; the login check enters nobody by name), the one process's hard stop, and --login-check=climber-start --video-pace=<s> (and --climber-start-wait-file when a recording must begin first) in front of the game arguments.
+    #>
+    param([string[]] $LevelUp, [int] $TimeoutSeconds, [double] $Pace = 1.8, [string] $WaitFile = '')
+    if ($WaitFile -match '\s') { throw "the wait file's path has a space, which -GameArgs cannot carry: $WaitFile (give -OutDir without spaces)" }
+    $out = New-Object System.Collections.Generic.List[string]
+    $found = $false
+    for ($i = 0; $i -lt $LevelUp.Count; $i++) {
+        $a = $LevelUp[$i]
+        if ($a -eq '-Character') { $i++; continue }
+        if ($a -eq '-TimeoutSeconds') { $out.Add($a); $out.Add("$TimeoutSeconds"); $i++; continue }
+        if ($a -like '-GameArgs:*') {
+            $front = '--login-check=climber-start --video-pace=' + $Pace.ToString('0.###', [Globalization.CultureInfo]::InvariantCulture)
+            if ($WaitFile) { $front += " --climber-start-wait-file=$WaitFile" }
+            $out.Add('-GameArgs:' + $front + ' ' + $a.Substring('-GameArgs:'.Length))
+            $found = $true
+            continue
+        }
+        $out.Add($a)
+    }
+    if (-not $found) { throw 'the level up command has no -GameArgs: to add the climber start to' }
+    return [string[]] $out.ToArray()
 }
 
 function Get-ClimbLevelUpVerdict {
@@ -242,4 +303,4 @@ function Add-ClimbHoldGrounds {
     return $Commands
 }
 
-Export-ModuleMember -Function Get-ClimbLine, ConvertFrom-ClimbFields, Get-ClimbCount, Get-ClimbCreateVerdict, Get-ClimbJourneyVerdict, Test-ClimbMayLevelUp, Get-ClimbLevelUpVerdict, Format-ClimbVerdict, Get-ClimbCommands, Add-ClimbTrial, Add-ClimbHoldGrounds, Add-ClimbStartQuest
+Export-ModuleMember -Function Get-ClimbLine, ConvertFrom-ClimbFields, Get-ClimbCount, Get-ClimbCreateVerdict, Get-ClimbJourneyVerdict, Test-ClimbMayLevelUp, Get-ClimbGameGate, ConvertTo-ClimbOneWindowCommand, Get-ClimbLevelUpVerdict, Format-ClimbVerdict, Get-ClimbCommands, Add-ClimbTrial, Add-ClimbHoldGrounds, Add-ClimbStartQuest

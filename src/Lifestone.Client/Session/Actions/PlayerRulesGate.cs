@@ -72,8 +72,8 @@ internal sealed class PlayerRulesGate
     /// <summary>The inventory or the shortcut bar changed: the drinks are looked at again at the next update.</summary>
     internal void Touch() => _drinksDirty = true;
 
-    /// <summary>The cast of <paramref name="spellId"/> is being asked: a spell that is on no bar is put on one first (see the remarks of the class).</summary>
-    internal void BeforeCast(uint spellId, ActionSource source)
+    /// <summary>The cast of <paramref name="spellId"/> is being asked (or, with <paramref name="when"/>, the spell was just learned): a spell that is on no bar is put on one first (see the remarks of the class).</summary>
+    internal void BeforeCast(uint spellId, ActionSource source, string when = "before its cast")
     {
         if (!Covers(source) || spellId == 0 || _api.KillSwitch)
         {
@@ -114,7 +114,7 @@ internal sealed class PlayerRulesGate
         SpellsAdded++;
         _api.Log.Info(
             LogCategory,
-            string.Create(CultureInfo.InvariantCulture, $"spell bar: {spell.Name} (spell {spellId}) goes on {SpellBarRule.TabLabel(place.Bar)} at position {place.Index + 1}, {how}, before its cast (AddSpellFavorite 0x01E3)"));
+            string.Create(CultureInfo.InvariantCulture, $"spell bar: {spell.Name} (spell {spellId}) goes on {SpellBarRule.TabLabel(place.Bar)} at position {place.Index + 1}, {how}, {when} (AddSpellFavorite 0x01E3)"));
         if (!spell.Described && _named.Add(Key(3, spellId)))
         {
             _api.Log.Warn(LogCategory, string.Create(CultureInfo.InvariantCulture, $"TODO(m6-15-spell-undescribed): spell {spellId} is in neither the SpellTable nor the mage's profile; it goes on the utility tab by number, with no line"));

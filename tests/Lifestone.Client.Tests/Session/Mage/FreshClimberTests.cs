@@ -182,7 +182,7 @@ public sealed class FreshClimberTests(DatSetFixture fixture, ITestOutputHelper o
         var plan = JourneyPlans.ForName("climber");
         Assert.NotNull(plan);
         Assert.Equal(("Winnie", "test", 0), (plan.Character, plan.Account, plan.TeleportBudget));
-        Assert.Equal([StationKinds.Academy, StationKinds.Pathwarden], plan.Stations.Select(s => s.Kind)); // M6 0 a3b: the Academy by play first
+        Assert.Equal([StationKinds.Academy, StationKinds.BuffBot, StationKinds.Pathwarden], plan.Stations.Select(s => s.Kind)); // M6 0 a3b: the Academy by play first; M6 sprint (owner ruling 2026-11-19): the bot next, before the Pathwarden
         Assert.DoesNotContain(JourneyPlans.All, p => p.Name == "climber");
         Assert.Contains(StationKinds.Pathwarden, StationKinds.All);
 

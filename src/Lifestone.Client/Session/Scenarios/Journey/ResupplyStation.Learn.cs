@@ -4,6 +4,7 @@ using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Quartermaster;
+using Lifestone.Data.Animation;
 using Lifestone.Data.Magic;
 using DatReaderWriter.Enums;
 
@@ -65,8 +66,59 @@ public sealed partial class ResupplyRun
     /// <summary>The longest wait for the spellbook to gain the spell after the use (ACE's reading motion, the 1 s read and the ready motion take about 4 s).</summary>
     public const double LearnSeconds = 15;
 
-    /// <summary>M6 7 T: the pause after a "too busy" answer to a scroll read, before the one re-send.</summary>
-    public const double BusyPauseSeconds = 2;
+    /// <summary>
+    /// M6 sprint (owner ruling 2026-11-19: a busy answer waits only the server's own time, and lag past it is re-sent at once): the pause after a "too busy" answer when the server's own busy time is spent (lag), before the next re-send
+    /// (Lifestone's own; was 2 s and one re-send).
+    /// </summary>
+    public const double BusyPauseSeconds = 0.5;
+
+    /// <summary>The re-sends after "too busy" answers before the read is refused (Lifestone's own: lag, not a wait).</summary>
+    public const int BusyResends = 5;
+
+    /// <summary>ACE's <c>MotionCommand.Reading</c> (0x4000001C, ACE.Entity/Enum/MotionCommand.cs:35 @95ef426d): the motion a scroll read plays.</summary>
+    private const uint ReadingMotion = 0x4000001C;
+
+    /// <summary>ACE's fixed read time inside the chain (<c>Scroll.ActOnUse</c>: <c>readTime = 1.0f</c>, Scroll.cs 80-81 @95ef426d).</summary>
+    private const double ScrollReadTime = 1.0;
+
+    private double _readBusyUntil = double.NegativeInfinity;
+    private double? _readBusySeconds;
+    private bool _readBusyTold;
+
+    /// <summary>
+    /// How long ACE holds the player busy after a read reaches it (<c>Scroll.ActOnUse</c>, Scroll.cs 64-124 @95ef426d, at peace): the Reading motion's length, the 1 s read, the Ready motion's length, then Reading's length again before
+    /// <c>IsBusy = false</c>; each length is ACE's <c>MotionTable.GetAnimationLength</c> over the player's motion table in NonCombat (<see cref="CastGesturePlanner.AceAnimationLength(Lifestone.Data.Animation.MotionTableData, IAnimationSource, uint, uint)"/>).
+    /// Null when the dats or her motion table are not at hand: the reads then go back to back and a "too busy" answer is re-sent (the lag rule).
+    /// </summary>
+    private double? ReadBusySeconds()
+    {
+        if (_readBusySeconds is { } known)
+        {
+            return known;
+        }
+
+        if (Context.Dats is not { } dats || !S.State.Objects.TryGet(S.State.Self.Guid, out var self) || self.Physics.MotionTableId is not (> 0 and var tableId))
+        {
+            return null;
+        }
+
+        var source = new DatAnimationSource(dats);
+        if (source.GetMotionTable(tableId) is not { } table)
+        {
+            return null;
+        }
+
+        var reading = CastGesturePlanner.AceAnimationLength(table, source, MotionCommands.NonCombat, ReadingMotion);
+        var ready = CastGesturePlanner.AceAnimationLength(table, source, MotionCommands.NonCombat, MotionCommands.Ready);
+        _readBusySeconds = reading + ScrollReadTime + ready + reading;
+        if (!_readBusyTold)
+        {
+            _readBusyTold = true;
+            Log(Text($"learn: ACE holds a read busy {_readBusySeconds:0.00} s (Reading {reading:0.00} s, the read {ScrollReadTime:0.#} s, Ready {ready:0.00} s, Reading again; motion table 0x{tableId:X8}): the next read waits that long after the last one's send (m6-read-server-time)"));
+        }
+
+        return _readBusySeconds;
+    }
 
     private readonly List<LearnLine> _toRead = [];
 
@@ -226,7 +278,7 @@ public sealed partial class ResupplyRun
                 continue;
             }
 
-            var verdict = ScrollKeepRule.Evaluate(scroll, lines, book, q, LadderLoader.WarMage.PlanCastChance);
+            var verdict = ScrollKeepRule.Evaluate(scroll, lines, book, q, LadderLoader.WarMage.PlanCastChance, Context.Spells); // M6 sprint: every unknown scroll she can read (the owner's rule of 2026-11-19)
             if (!verdict.Keep || verdict.Level is not { } level)
             {
                 Log(Text($"learn: held scroll {scroll.Name} (0x{scroll.Guid:X8}, spell {scroll.Weenie.SpellId?.ToString(CultureInfo.InvariantCulture) ?? "none"}): left in the pack, {verdict.Kind}: {verdict.Reason}"));
@@ -494,8 +546,18 @@ public sealed partial class ResupplyRun
     private TownTripInput TownInput(HuntingGround ground) => new(
         TownNetworkTrip.PlaceKeyOf(ground.Home.LifestoneCell >> 16, Context.Routes),
         S.State.Self.Qualities.Level,
-        S.State.Self.Spellbook.Knows(Fighter.RecallHome.LifestoneRecallSpell),
+        RecallRead().Castable, // M6, the recall's components: a recall the pack is short for is no way home (the plan then needs the portals home)
         Context.Routes.StartLifestone.Cell >> 16 == ground.Home.LifestoneCell >> 16);
+
+    /// <summary>
+    /// M6, the recall's components: whether Lifestone Recall can be the trip's way home now (<see cref="RecallReadiness"/>). A journey whose facts hold no formula account (no autopilot set it) takes this station's
+    /// (<see cref="ResupplyOptions.AccountName"/>, the same login name), so the rung change the way home starts (<see cref="RungChangeStation"/>, which reads the facts) judges the pack on the same formula and never plans the recall this read refused.
+    /// </summary>
+    private RecallReadiness.Read RecallRead()
+    {
+        Context.Facts.FormulaAccount ??= _options.AccountName;
+        return RecallReadiness.Of(S.State, Context.Facts, Context.Spells);
+    }
 
     /// <summary>
     /// M6 4 t4a (D40, D43; closes <c>TODO(m6-scrivener-town-network)</c>): the trip by the Town Network for the lines sold only off home, after the home walk and its reads. One town a trip (the first town of the plan's order that the purse and the pack admit, M6 item 14; a line of another town
@@ -691,30 +753,43 @@ public sealed partial class ResupplyRun
     }
 
     /// <summary>
-    /// The trip's way home: Lifestone Recall when the book holds it (the travel seam's <see cref="TravelPurpose.Home"/>), else the rung change's <c>direction=home</c> by portals (the travel file's ways home). After: present in the home's
-    /// landblock (or the travel file's start), then off the lifestone. A failure fails the run by name (the character is away from home).
+    /// The trip's way home: Lifestone Recall when it can be cast (<see cref="RecallRead"/>: in the book, not refused this run, the pack not short for one cast; the travel seam's <see cref="TravelPurpose.Home"/>), else the rung change's
+    /// <c>direction=home</c> by portals (the travel file's ways home); a recall ACE refuses for a component the check could not judge is recovered once by the portals. After: present in the home's landblock (or the travel file's start),
+    /// then off the lifestone. Any other failure fails the run by name (the character is away from home).
     /// </summary>
     private IEnumerable<ActionHandle?> TownTripHome(HuntingGround ground, TownTripPlan plan)
     {
         Stage = "town-trip:home";
-        var recall = S.State.Self.Spellbook.Knows(Fighter.RecallHome.LifestoneRecallSpell);
-        uint homeLandblock;
+        // M6, the recall's components (live 2026-11-18 20:29:54 UTC: the scroll read on this trip, the cast refused 0x0400 in Dryreach and the station failed): check before the act: the book, the run's refusal and the pack's components.
+        var read = RecallRead();
+        var recall = read.Castable;
+        Log(Text($"learn: town trip: the way home: check before: {read.Fields} -> way={(recall ? "recall" : "portals")}{(read.WhyNot is { } whyNot ? " (" + whyNot + ")" : string.Empty)}"));
+        var homeLandblock = ground.Home.LifestoneCell >> 16;
         if (recall)
         {
-            homeLandblock = ground.Home.LifestoneCell >> 16;
             Log(Text($"walking: purpose=home (the learn trip to {plan.Candidate.Town}: Lifestone Recall to {ground.Home.Town})"));
             foreach (var h in TravelTo(new TravelRequest(Destination("home-lifestone", ground.Home.LifestoneCell, ground.Home.LifestonePoint), TravelPurpose.Home), "home", optional: true)) { yield return h; }
 
             if (LastTravelFailure is { } failed)
             {
-                Fail(Text($"learn: town trip: the way home from {plan.Candidate.Town} by Lifestone Recall: {failed}"));
-                throw new InvalidOperationException(Failure);
+                read = RecallRead();
+                if (read.Castable)
+                {
+                    Fail(Text($"learn: town trip: the way home from {plan.Candidate.Town} by Lifestone Recall: {failed}"));
+                    throw new InvalidOperationException(Failure);
+                }
+
+                // The named recovery: ACE refused the cast for a component the check could not judge, or because no lifestone is tied (the travel seam set the fact: recall-unavailable:components, or the tie known false, 0x049E); the way
+                // home is the portals, as for a book without the spell.
+                Log(Text($"learn: town trip: recovery: Lifestone Recall was refused {(read.Untied ? "with no lifestone tied" : "for a component")} ({failed}): the way home by portals instead"));
+                recall = false;
             }
         }
-        else
+
+        if (!recall)
         {
             homeLandblock = Context.Routes.StartLifestone.Cell >> 16;
-            Log(Text($"walking: purpose=home (the learn trip to {plan.Candidate.Town}: the book lacks Lifestone Recall; the rung change direction=home by portals to {Context.Routes.StartPlace})"));
+            Log(Text($"walking: purpose=home (the learn trip to {plan.Candidate.Town}: {(read.Known ? read.WhyNot ?? "Lifestone Recall was refused" : "the book lacks Lifestone Recall")}; the rung change direction=home by portals to {Context.Routes.StartPlace})"));
             var run = new RungChangeStation(RungDirection.Home).Start(Context);
             while (run.Step(S, S.Clock.Now) == ScenarioStatus.Running)
             {
@@ -857,9 +932,22 @@ public sealed partial class ResupplyRun
             foreach (var h in ReadOne(learn)) { yield return h; }
         }
 
+        // M6 redoubt (live 2026-11-18 22:29:09 UTC): the tie comes before the trip by the Town Network, so its way home, and every way home after it, may be the recall the walk at home just taught her; it ran only after the trip,
+        // whose own recall home was then refused 0x049E.
+        foreach (var h in TieAfterLearn()) { yield return h; }
+
         foreach (var h in TownLearnTrip(Context.Dungeon)) { yield return h; }
 
         foreach (var h in TieAfterLearn()) { yield return h; }
+    }
+
+    /// <summary>M6 redoubt: true when <paramref name="cell"/> lies in Holtburg's landblock or one of the eight round it (the walk at home's reach: the scriveners' rooms are in 0xA9B3).</summary>
+    /// <param name="cell">A cell id.</param>
+    internal static bool BesideHoltburg(uint cell)
+    {
+        var (x, y) = ((int)(cell >> 24), (int)((cell >> 16) & 0xFF));
+        var (hx, hy) = ((int)(Fighter.RecallHome.HoltburgLandblock >> 8), (int)(Fighter.RecallHome.HoltburgLandblock & 0xFF));
+        return Math.Abs(x - hx) <= 1 && Math.Abs(y - hy) <= 1;
     }
 
     /// <summary>
@@ -889,9 +977,11 @@ public sealed partial class ResupplyRun
             yield break;
         }
 
-        if (S.State.Self.Position is not { } here || here.CellId >> 16 != Fighter.RecallHome.HoltburgLandblock)
+        // M6 redoubt: at home is Holtburg's landblock or one beside it, not the one landblock alone: the scriveners' rooms stand in the next landblock south (0xA9B3), where the walk at home ends and the scrolls are read, and the bind
+        // station walks to the stone from there as the vendor walks do. A town of the Town Network or a dungeon is many landblocks off and still waits.
+        if (S.State.Self.Position is not { } here || !BesideHoltburg(here.CellId))
         {
-            Log(Text($"learn: tie: both spells are in the book, the tie is not proven and the body stands at {Where()}, not in Holtburg's landblock 0x{Fighter.RecallHome.HoltburgLandblock:X4}: the tie waits for a trip at home (the recall's 0x049E refusal binds, F14)"));
+            Log(Text($"learn: tie: both spells are in the book, the tie is not proven and the body stands at {Where()}, not in Holtburg's landblock 0x{Fighter.RecallHome.HoltburgLandblock:X4} or one beside it: the tie waits for a trip at home (the recall's 0x049E refusal binds, F14)"));
             yield break;
         }
 
@@ -939,7 +1029,14 @@ public sealed partial class ResupplyRun
             string? answer = null;
             for (var attempt = 1; ; attempt++)
             {
+                var serverWait = _readBusyUntil - S.Clock.Now;
+                if (serverWait > 0)
+                {
+                    foreach (var h in Until(() => false, serverWait)) { yield return h; } // the last read's busy chain on the server (m6-read-server-time)
+                }
+
                 var use = S.Actions.Use(scroll, ActionSource.Automation);
+                _readBusyUntil = S.Clock.Now + (ReadBusySeconds() ?? 0);
                 yield return use;
                 if (use.Outcome is not { Kind: ActionOutcomeKind.Confirmed })
                 {
@@ -949,13 +1046,15 @@ public sealed partial class ResupplyRun
 
                 foreach (var h in Until(() => S.State.Self.Spellbook.Knows(learn.SpellId) || (answer = ScrollAnswer(mark)) is { } a && !a.StartsWith("You learn", StringComparison.Ordinal) || TooBusy(mark), LearnSeconds)) { yield return h; }
 
-                // M6 7 T: the previous scroll's use animation can still run when this use arrives: ACE answers "You're too busy!" (0x001D) and reads nothing. One named re-send after a pause, then the refusal as before.
-                if (S.State.Self.Spellbook.Knows(learn.SpellId) || answer is not null || !TooBusy(mark) || attempt >= 2)
+                // M6 7 T: the previous scroll's use animation can still run when this use arrives: ACE answers "You're too busy!" (0x001D) and reads nothing. M6 sprint (the owner): the server's own busy time is waited before each
+                // read (above); a "too busy" past it is lag, re-sent after a short pause, up to BusyResends times, then the refusal as before.
+                if (S.State.Self.Spellbook.Knows(learn.SpellId) || answer is not null || !TooBusy(mark) || attempt > BusyResends)
                 {
                     break;
                 }
 
-                Log(Text($"learn: ACE answered \"You're too busy!\" to the use of {learn.Name} ({learn.SpellId}): the previous read is still finishing; waiting {BusyPauseSeconds:0.#} s, then the scroll is used once more (the one named recovery)"));
+                _readBusyUntil = double.NegativeInfinity; // this use was refused: no chain of its own runs on the server
+                Log(Text($"learn: ACE answered \"You're too busy!\" to the use of {learn.Name} ({learn.SpellId}): the previous read is still finishing (lag past the server's time); the scroll is used again in {BusyPauseSeconds:0.#} s (re-send {attempt} of {BusyResends})"));
                 foreach (var h in Until(() => false, BusyPauseSeconds)) { yield return h; }
 
                 mark = S.State.Chat.Total;
@@ -964,6 +1063,7 @@ public sealed partial class ResupplyRun
             answer ??= ScrollAnswer(mark);
             if (S.State.Self.Spellbook.Knows(learn.SpellId))
             {
+                S.Actions.PlaceOnBar(learn.SpellId, "on its learning (m6-learn-to-bar)"); // M6 sprint (run 5, 18:22:32 UTC): a level learned on a trip and on no bar read the gate's recast shut; it goes on her bar now, as a player puts it there
                 Learned++;
                 Log(Text($"learn: learned {learn.Name} ({learn.SpellId}): the spellbook holds it (the server's update); ACE said: {answer ?? "(no line yet)"}; scrolls of it left in the pack {ScrollsHeld(learn.ScrollWcid).Count}"));
                 EverySpellRead(learn, LearnReason.None, string.Empty);

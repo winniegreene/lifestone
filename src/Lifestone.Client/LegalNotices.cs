@@ -10,7 +10,7 @@ public sealed record Attribution(string Name, string Licence, string Use);
 /// Lifestone's "Appropriate Legal Notices" (GNU AGPL-3.0 §0 and §5(d)): the copyright notice, that there is no
 /// warranty, that the program may be conveyed under the licence and how to see the licence and the source, plus the
 /// attributions and the note on Asheron's Call's own data. The single source of this text: the About panel (F1) shows
-/// it and a test keeps the README's licence section in step with it, so the UI and the docs cannot drift apart.
+/// it and a test keeps TECHNICAL.md's licence section in step with it, so the UI and the docs cannot drift apart.
 /// </summary>
 public static class LegalNotices
 {
@@ -51,7 +51,7 @@ public static class LegalNotices
         "Asheron's Call and its data files are the property of their respective owners. Lifestone contains no retail game " +
         "data: you must supply your own client files.";
 
-    /// <summary>The works Lifestone incorporates, ports from or was checked against (README "License" lists the same).</summary>
+    /// <summary>The works Lifestone incorporates, ports from or was checked against (TECHNICAL.md "License" lists the same).</summary>
     public static IReadOnlyList<Attribution> Attributions { get; } =
     [
         new("ACEmulator (ACE)", "AGPL-3.0", "the bundled server; game rules and algorithms ported from its source"),

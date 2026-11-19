@@ -56,6 +56,19 @@ public static class WayHomeRule
             : new(WayHomeKind.Stop, string.Create(CultureInfo.InvariantCulture, $"the spellbook lacks {RecallHome.SpellName(recallSpell)} and {ground.Key} is not an outdoor ground reachable on foot from {ground.Home.Town} (portal {(ground.Portal is null ? "none" : "yes")}, kind {ground.Kind}); the first tie's walk is item 4's (TODO(m6-first-tie-walk))"));
     }
 
+    /// <summary>
+    /// M6 sprint (live 2026-11-18 20:30:09 UTC: a walk back to the outskirts was planned from Dryreach, about a hundred landblocks away, as if she stood in Holtburg): true when <paramref name="cellId"/> lies where a walk between
+    /// <paramref name="ground"/> and its home starts by the ground's own facts: the home lifestone's landblock (<see cref="GroundHome.LifestoneCell"/>, where the town's vendors of the profile stand) or one of the ground's landblocks.
+    /// Anywhere else a walk is no way home or back: the way is the travel rule's (a recall she can cast, or the portals), named.
+    /// </summary>
+    /// <param name="ground">The ground.</param>
+    /// <param name="cellId">Where she stands.</param>
+    public static bool StandsNear(HuntingGround ground, uint cellId)
+    {
+        ArgumentNullException.ThrowIfNull(ground);
+        return cellId >> 16 == ground.Home.LifestoneCell >> 16 || ground.InLandblocks(cellId);
+    }
+
     /// <summary>True when the ground is outdoors, has no portal and lists cells: it is hunted from its home on foot, so home is reachable on foot from it (the profile's own facts, never a constant).</summary>
     /// <param name="ground">The ground.</param>
     public static bool HomeOnFoot(HuntingGround ground)

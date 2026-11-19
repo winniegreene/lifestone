@@ -86,17 +86,19 @@ public sealed class F6RenaldMoveToDatTests(DatSetFixture fixture, ITestOutputHel
     }
 
     [RequiresDatsFact]
-    public void A_MoveTo_to_Renald_across_his_counter_at_the_default_use_radius_ends_named_by_the_stuck_rule()
+    public void A_MoveTo_to_Renald_across_his_counter_at_the_default_use_radius_ends_named_by_the_no_progress_rule()
     {
+        // M6 sprint (m6-moveto-no-progress): the counter holds the body from the first step, so the MoveTo closes nothing and is ended after ServerMoveToNoProgressSeconds, not ACE's 15 s
         var log = new RecordingLogSink();
         var scene = Scene(new Vector3(136.0f, 18.33f, 94.01f), 90f, renald: true, door: false, log: log);
         scene.MoveToObject(Renald, 0.6f);
         var seconds = scene.RunWhileMovingTo(30.0);
 
-        var line = log.Lines.FirstOrDefault(l => l.Contains("TODO(m5-moveto-stuck)", StringComparison.Ordinal));
+        var line = log.Lines.FirstOrDefault(l => l.Contains("(m6-moveto-no-progress)", StringComparison.Ordinal));
         output.WriteLine($"{seconds:F2} s, {scene.Walker.Position}, cylinder {scene.CylinderTo(Renald):F3} m; {line}");
         Assert.Equal("stuck", scene.Walker.Controller.LastServerMoveToEnd);
-        Assert.InRange(seconds, PlayerMovementController.ServerMoveToLimitSeconds - 0.1, PlayerMovementController.ServerMoveToLimitSeconds + 0.2);
+        Assert.InRange(seconds, PlayerMovementController.ServerMoveToNoProgressSeconds - 0.1, PlayerMovementController.ServerMoveToNoProgressSeconds + 0.5);
+        Assert.Equal(0, log.Lines.Count(l => l.Contains("TODO(m5-moveto-stuck)", StringComparison.Ordinal))); // ACE's timeout never came
         Assert.True(scene.CylinderTo(Renald) > 1.5f, "the counter holds the body on the room's side");
         Assert.NotNull(line);
         Assert.Contains("type=MoveToObject", line, StringComparison.Ordinal);

@@ -103,6 +103,28 @@ public sealed partial class FightScenarioTests
     }
 
     [Fact]
+    public void M6_sprint_a_failed_ACE_walk_to_a_clear_corpse_sends_the_fights_own_walk_once_and_never_loops()
+    {
+        // Run 5 (cache/m6/sprint/run5/step3-levelup.log 14:51:06 UTC): the trace crossed walkable cells only, ACE's straight walk ran her into a wall, the open failed and the corpse was left. Now the fight's own walk goes
+        // toward it once and the corpse is looked at again; here ACE's walk fails every time and the fake walk does not move her, so the second try fails too and the corpse is left, named, with no third.
+        var r = new Rig(fight: NoGoLootFight()) { Corpses = true, MoveToSeconds = 3, MoveToFailsAfter = 3 };
+        StockCorpse(r);
+        r.Add(SlaveA, TuskerSlave, FloorCell, 30);
+        var walk = new FakeWalk { TraceCells = [Den, FloorCell], TicksPerLeg = 2 };
+        var scenario = r.Scenario(walk);
+
+        Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
+
+        Assert.Equal([CorpseA, CorpseA], r.Opened); // ACE's walk, the own walk, ACE's walk again from where it ended
+        Assert.Single(walk.Spots); // the own walk went once
+        Assert.Equal(FloorCell, walk.Spots[0].CellId);
+        Assert.Equal(1, LinesWith(r, "the fight's own walk, planned over the walkable cells, goes toward it once; then it is looked at again (m6-loot-walk-after-stall)"));
+        Assert.Equal(1, LinesWith(r, "loot: the fight's own walk toward the corpse 0x80001101 of 'Tusker Slave' ended; it is looked at again"));
+        Assert.Equal(1, LinesWith(r, "not reached: the open was not confirmed"));
+        Assert.Equal(1, scenario.LootCorpsesLeft);
+    }
+
+    [Fact]
     public void An_attacker_in_a_no_go_cell_with_no_line_leads_to_a_named_step_to_a_spot_with_a_line_and_is_fought_back_not_held()
     {
         var r = new Rig();

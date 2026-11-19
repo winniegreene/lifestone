@@ -99,7 +99,10 @@ public sealed class LadderKillTaskTests
         task.Read(Counter(500), log);
         Assert.True(task.Read(Line("Excellent, now go contemplate what you have learned from fighting the Tusker Guards. You may be able to apply these pratices in various different types of combat with a great variety of creatures.", ChatKind.Tell), log));
         Assert.Equal((KillTaskPhase.TurnedIn, (int?)null, 1), (task.Phase, task.Counter, task.TurnIns));
-        Assert.Null(task.ErrandSteps(new QuestTimers("Qwinnie"), DateTimeOffset.UnixEpoch)); // turned in: nothing until the next process reads it again
+        var timers = new QuestTimers("Qwinnie");
+        timers.Complete(Guard, DateTimeOffset.UnixEpoch, QuestTimers.HowReply); // the turn-in's completion
+        Assert.Null(task.ErrandSteps(timers, DateTimeOffset.UnixEpoch)); // turned in: nothing while the quest's timer runs
+        Assert.Equal(task.ArmSteps, task.ErrandSteps(timers, DateTimeOffset.UnixEpoch.AddSeconds(Guard.TimerSeconds!.Value))); // M6 audit (fix 3): the next round's arm once the timer allows it, in the same process
 
         var waiting = new LadderKillTask(Guard);
         Assert.True(waiting.Read(Line("You have killed many Tusker Guards and have advanced in your skills. Part of our training is knowing when to stop and reflect on what you have done.", ChatKind.Tell), log));

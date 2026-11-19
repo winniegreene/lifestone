@@ -735,7 +735,7 @@ public static class JourneyStations
                 StationKinds.KitRefused => new KitRefusedStation(),
                 StationKinds.HarmHeal => new HarmHealStation(accountName: _kitAccount), // M6 1 w: the login name, not the key (null: the foci rule)
                 StationKinds.Bind => new BindStation(),
-                StationKinds.BuffBot => new BuffBotStation(spec.Arguments.TryGetValue(BuffBotStation.WordArgument, out var botWord) ? botWord : null), // M6 item 14
+                StationKinds.BuffBot => new BuffBotStation(spec.Arguments.TryGetValue(BuffBotStation.WordArgument, out var botWord) ? botWord : null, spec.Arguments.TryGetValue(BuffBotStation.WhenArgument, out var botWhen) && botWhen == BuffBotStation.WhenBotOn), // M6 item 14
                 StationKinds.DenTravel => new DenTravelStation(spec.Arguments.ContainsKey(JourneyPlans.StepOffArgument)),
                 StationKinds.DenFight => spec.Arguments.ContainsKey(GroundArgument) ? (IStation)new GroundContextStation(DenFight(spec), spec, _fight, _arguments) : DenFight(spec),
                 StationKinds.Death => Death(spec),
