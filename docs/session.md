@@ -1659,7 +1659,7 @@ the player is present again; every frame over 30 ms is logged with its stage). N
 `pwsh -File tools\godot.ps1 -Run -Offscreen -IsolateUserData -TimeoutSeconds 840 -Resolution 800x600 -GameArgs:'--account=test --login-check=throwaway'` (840 s: the runner aborts the leg at 600 s and allows 120 s more to recover, so the host's kill comes after both, with start-up and shutdown inside the margin; smoke's step uses the same 840). The smoke step is skipped under
 `-Backend auto` and `start` (it creates and purges a character), and runs, after `login-check` and `login`, under `-Backend require`.
 
-**For a video.** `--video-pace=S` (0 to 10 s, the main scene's video options) holds each character-creation page, and each typed name before Finish, for S seconds with the pointer out of the window (no tooltip), so a screen capture shows them (the M2 hero video used 1.8 with `--clean-hud`). Nothing else in the leg changes; the holds fall outside both judged frame windows.
+**For a video.** `--video-pace=S` (0 to 10 s, the main scene's video options) holds each character-creation page, and each typed name before Finish, for S seconds with the pointer out of the window (no tooltip), so a screen capture shows them (the M2 hero video used 1.8 with `--clean-hud`). The character delete holds its confirmation box empty, then with the typed word, then the list with the character marked for deletion, S seconds each (M6 sprint: unheld, the box was up a tenth of a second and the delete read as a blink). Nothing else in the leg changes; the holds fall outside both judged frame windows.
 
 **Stray rows and the name dialogs.** A leftover is either `Lifestone Throwaway` or a character under the invalid name (only created if ACE accepted it): each live one is deleted through the screen, then each is purged from
 `Lifestone Smoke`. A name is purged until the verb answers `unknown-character` (at most five purges, `ThrowawayLegScenario.MaxPurges`), so an old expired row of the same name that the list never shows is cleared too; the verb
@@ -3959,7 +3959,7 @@ Nothing in this section was run live or in a loopback: the rehearsal, the soak a
 
 **Casters.** A caster scores its war bonus on the rung's element (`WorldObject_Weapon.cs` 382-400), and 0 when a wield requirement is unmet. A tie goes to the mana conversion (only a caster on the rung's element may win one), then to the useful cantrips (`GearScore.CasterBeats`, the M5 7 S2c order). The parts are never summed: a percentage of damage and a percentage of mana conversion are not one coin. A caster out of mana counts no cantrip; its hours of mana are shown, from `ItemCurMana` over the absolute `ManaRate` (Float 5) over 3,600.
 
-**Armour.** Each covered body part (nine parts, `BodyPart.GetCoverageMask`, `Entity/BodyPart.cs` 115-140) scores (AL plus the piece's Impenetrability) times its protection, the protection clamped to [-2, 2] (`Creature_BodyPart.cs` 66-100, `ArmorProfile.cs` 33-58). The ground's damage types are averaged in, but the grounds do not yet carry them, so the score rests on the averaged protections (`TODO(m6-ground-damage-types)`, the armour stub until item 3's ground fields). A body-armour cantrip adds its value to all nine parts unscaled (`GetBodyArmorMod`). A piece's share of the free capacity comes off its total, and a piece that fills the free capacity scores 0. With the Strength unread the burden is not weighed, and the log says so. A piece with neither its armour profile nor the `ArmorModVs` floats scores protection 1 and names the gap (`TODO(m6-armour-profile-unread)`).
+**Armour.** Each covered body part (nine parts, `BodyPart.GetCoverageMask`, `Entity/BodyPart.cs` 115-140) scores (AL plus the piece's Impenetrability) times its protection, the protection clamped to [-2, 2] (`Creature_BodyPart.cs` 66-100, `ArmorProfile.cs` 33-58). The ground's damage types are averaged in, but the grounds do not yet carry them, so the score rests on the averaged protections (`TODO(m6-ground-damage-types)`, the armour stub until item 3's ground fields). A body-armour cantrip adds its value to all nine parts unscaled (`GetBodyArmorMod`). A piece's share of the free capacity comes off its total, and a piece that fills the free capacity scores 0. With the Strength unread the burden is not weighed, and the log says so. A piece with neither its armour profile nor the `ArmorModVs` floats scores protection 1 and names the gap (`TODO(m6-armour-profile-unread)`). The AL and the protections are the piece's own: an appraisal carries them with the enchantments on the piece in them (`AppraiseInfo.cs` 407-408, `ArmorProfile.cs` 40-59) and lists those enchantments, and `ArmourBase` takes them out (the top layer of each spell category, `ArmourSpellRows`: 192 rows of the world's `spell` table, the categories from the dats) before her lines are added, for the wear pick, this score, the armour report and the fight's armour line alike.
 
 **Jewellery** scores its useful cantrips, none when out of mana. The armour cantrips' stat rows that the buff table lacked are a small table in `GearScore.cs`, read from the pinned world SQL's `spell` table: Minor to Legendary Impenetrability (2604, 2592, 4667, 6095) and Armor (2578, 2571, 4911, 6102), values 20, 40, 60 and 80. These are spell facts, not ground facts.
 
@@ -4915,3 +4915,396 @@ what a fight ended without (`PolicyPullRule`, section 92), is not played (`TODO(
 played"); on every row but Winnie's own bars the won fights end as near their starting mana or nearer than before, so these
 rows add no rest. A level's chances are read from her live skill and the source's Magic Defense in the creature tables; one not read is
 taken as sure, as before.
+
+**Undrainable sources (M6 undrainable fills, 2026-11-21).** The Tusker Armory's Armored Tuskers let no drain through: their
+`ResistHealthDrain`, `ResistStaminaDrain` and `ResistManaDrain` are 0 (world database `weenie_properties_float` 125, 72 and 74 of weenies
+11540 and 22611; a Tusker Guard's, 1629, are 1). ACE takes `round(current x Proportion x drainMod)` before the cap, the mod being the
+source's `GetResistanceMod` (`WorldObject_Magic.cs` 719, `Creature_Properties.cs` 207-212 @95ef426d), so a drain on one gives nothing. The
+emergency's heal read this since M6 14 drain resistance (`DrainResist`); the vitals policy did not: it priced every drain at a mod of 1,
+and its stamina drain's source (`FightScenario.ManaLoop.cs` `FullestStamina`) passed over a creature only after one cast of 0 had set that
+creature aside. Against six Armored Tuskers the simulator played about 3.4 Drain Stamina Other a fight that each gave nothing, 23.5 against
+seven (`fight-sim matchup --her Qwinnie --pack 11540x6` and `11540x7 --healed-fights 2000`, the `her casts a fight` line, her save at
+level 58; at level 50, `--pack 11540x6 --trace`: 4.8).
+
+The rule now: every `FillLevel` carries its source's drain resistance (`FillLevel.DrainMod`: `DrainResist.Of` for a health drain's
+source, `DrainResist.StaminaOf`, the behaviour table's `ResistStaminaDrain`, for a stamina drain's), and `BestTransfer` passes it to ACE's
+transfer arithmetic (`BuffStatMods.Transfer`), so a level whose source lets nothing through is never offered and a partial share is priced
+at that share; `FullestStamina` offers no creature whose kind lets no stamina drain through. The simulator reads the same
+(`FoeKind.StaminaDrainResist` from ACE's own `GetResistanceMod(StaminaDrain)`; `InFightRules.FullestStamina`, `InFightRules.Facts`).
+
+Before and after, back to back on one save, 2,000 fights each (`cache/m6/tusker-35/undrainable-pairs.txt`; before: master 161b6f3a,
+after: this change):
+
+| Pack (`--pack`) | Dies before -> after | Out of mana before -> after | Stamina drains a fight |
+|---|---|---|---|
+| `11540x5`, Qwinnie | 0.0% -> 0.0% | 0.0% -> 0.0% | 0.1 -> 0.0 |
+| `11540x6`, Qwinnie | 0.2% -> 0.0% | 3.6% -> 0.0% | 3.4 -> 0.0 |
+| `11540x7`, Qwinnie | 7.3% -> 0.0% | 45.6% -> 0.0% | 23.5 -> 0.0 |
+| `11540x9`, Qwinnie | 70.0% -> 0.2% | 30.0% -> 0.3% | 21.3 -> 0.0 |
+| `1629x10` (the Barracks), Qwinnie | 0.0% -> 0.0% | 0.0% -> 0.0% | 1.4 -> 1.4 |
+| `11x3,22510x2,236x1`, Winnie at level-10 bars | 0.0% -> 0.0% | 0.0% -> 0.0% | 3.6 -> 3.7 |
+| `236x8`, Winnie at level-10 bars | 0.0% -> 0.0% | 0.0% -> 0.0% | 9.4 -> 8.7 |
+
+The drainable rows move only by the runs' spread. Other kinds the profiles place that let nothing through: the Tusker Tunnels' Plated
+Tuskers (11541, 22612, 22613: 0 for health and stamina drains); the Holding's Rampagers (22599, 16916, 10810) are 1. Not played: the
+measured set-aside of the live fight (`StaminaDrainSetAside`), which the change makes moot for a kind recorded at 0 and keeps for any other.
+
+## 120. The fight's attacker and its line (M6 fight targeting; `m6-blow-unpinned`, `m6-line-first`, `m6-shot-drop-place`)
+
+**The finding.** Run 9's live log (`cache/m6/sprint/run9/step3-levelup.log`, 2026-11-20 19:51:11 to 2026-11-21 04:58:57 UTC, the
+Tusker Holding) holds 355 `m6-life-through: ... cannot be reached by the bolt` decisions at Tusker Slaves: 339 Harm Other VI and 16 Drain
+Health Other. Two causes, read from the log (the counts are `grep` over that window):
+
+- **The far ones (253 decisions, "no clear line from here").** They went at 32 Slaves 9.6 to 32.7 m off. Each of the 32 was first made an
+  attacker by a damage notice (`self-defence: Tusker Slave 0x... attacked (damage notice)`), none by a swing order, and no movement order
+  stuck to her (`m6-live-position: wire: ... sticky=` her guid) came from the Slave in the 10 s before any of the 253. A damage or evasion
+  notice names its attacker by name alone; with no swing order of that name in the last 3 s (`FightScenario.SwingBlowSeconds`) the fight
+  took the nearest living creature of the name, and on that ground the nearest Slave was often one on a ledge or a lower floor.
+- **The near ones (102 decisions, "the shot rule dropped it: its bolts came to nothing").** Every one of the window's 12 shot drops was
+  made by the shot check before the cast (`shot drop: ... the shot is blocked`; 0 by wasted casts), with the Slave 3.9 to 21.5 m off by the
+  `decide:` line before it, and no bolt was sent. The drop stood 120 s whatever either moved (`ShotLedger.DropSeconds`), and the pick asked
+  the life rule for a dropped attacker before the close rule (`ShotLedger.CloseMetres`, 3 m) could take the drop back: the Harm Other
+  decisions at them came 1.7 to 11.7 m off. Tusker Slave 0x80006269: dropped 02:11:56.966 at 5 m with her at 0x5B4A01FE
+  [129.9 -52.3 -10.3]; harmed 3.8 m off from 02:13:49.112 with her at [129.2 -53.9 -11.3] (the `m6-live-position` lines of 02:13:44 to
+  02:13:49), so she had moved 2.0 m from where the drop was measured; the drop's time ended 02:13:59.710, and the Flame Bolt VI sent at 02:14:03.095 hit
+  for 126 (02:14:05.558).
+- **The move for a line never ran.** In self-defence's step the life rule came first whenever Harm Other was known, in range and paid for,
+  so the sidestep and the walk to a spot with a line (`SidestepSpot`, `WalkToSpot`) logged 0 decisions in the window.
+
+**The rules.**
+
+- **Who struck (`FightScenario.BlowCanBeFrom`, `m6-blow-unpinned`).** A damage or evasion notice is pinned only on a creature that can
+  have struck her: the one its swing order named (as before), or the nearest of the name when it stands within its kind's reach by the
+  fight's record (`StandsAt`). The reach is the far-blow measure's own melee reach, `FightScenario.LivePositionBlowMetres` (4 m: ACE's
+  `MaxMeleeRange` 0.75 m and the two bodies, `Monster_Navigation.cs:28`); for a kind the bestiary records a thrown attack for, that range
+  (`GroundRanged.RangeMetres`, a ground profile's, through `Bestiary.Find`); for a kind the world database's table says throws or wields a
+  launcher with no range recorded, ACE's cap, 85 yards over its `MetersToYards` 1.094, 77.7 m (`Creature_Missile.cs:402-403`,
+  `FightScenario.AceMissileRangeCapMetres`). One exception, logged each time: when only one living creature bears the name, the name is its
+  identity, wherever its record stands (`WorldObjectTable.LivingCreaturesNamed`). Else the hitter is not known: nothing is pinned, the
+  fight keeps its target and fights what is near, and one line says so with the distance and the reach (`BlowsUnpinned`). Spell lines are
+  pinned as before (a caster strikes from its spell's range).
+- **What first (`FightScenario.DefenceLineSpot`, `m6-line-first`).** An attacker no bolt can be cast at from here is first moved to: a
+  sidestep for a line (an attacker within `SidestepReachMetres`), else the walk to the spot on the line to it with range and a line. Each
+  search is one of its `MaxDefenceWalksTo` (2). Harm Other or a drain (`LifeThroughPlans`) only when neither finds a spot, the leg to the
+  spot cannot be planned (no walkable path), or the searches are spent: the owner's rule of 2026-11-16 for a creature no move reaches (the
+  hovering Zefir) stands. Every arrival of such a leg is checked (`self-defence: the leg for a line to ... arrived ...: the line test finds
+  it clear` or `still blocked`), and the walk phase still drops the leg the moment a line comes. A shot drop that still stands from where
+  she is goes the same way: a spot first, then the life rule.
+- **Where the drop was measured (`ShotLedger.IsDropped(uint, double, in CellFrame, in CellFrame, double)`, `m6-shot-drop-place`).** A
+  drop keeps where she and the target stood and what made it (`ShotDropKind`). It ends before its 120 s when she has moved more than
+  `FightScenario.ShotDropMovedMetres` from there (the fight's own measure of two places, `LivePositionGapMetres`, 1.5 m), when the target has
+  (a drop by the check only: the next check is free), or when a target measured farther than 3 m has come within it. A target measured
+  within 3 m stays dropped while neither moves, so the same blocked check is not asked every frame. A drop for wasted casts does not end
+  when only the target's drawn body moves: a sticky creature's body shifts with each stick and each take-back would pay two more casts
+  (`TODO(m6-sticky-walk-back)`). The pick reads the drop through it (`ShotDropHolds`), and so do the struck proof and the life rule.
+- **The life line's reason.** A life cast at a dropped attacker names what dropped it: "the shot check before the cast found the bolt's
+  path blocked from where she stood, and no bolt was sent", or "its bolts came to nothing" for wasted casts.
+
+**Tests.** `FightScenarioTests.Targeting.cs`, 14 offline tests: the far blow not pinned (5 notices, 0 attackers, no Harm Other); the
+blow within reach and the far swing order; the only one of its name; a thrower within its recorded range and a launcher within the cap;
+the sidestep and the walk before Harm Other; no walkable path and no spot with a line (the Zefir's case) to Harm Other; two legs with no
+line to Harm Other, not the tour's leg; the ledger's three releases and the old rule for a drop with no place; and run 9's near case end to
+end (blocked, harmed while the drop holds, then the check again and the bolt). Eight older tests sent a melee notice from creatures that
+could not have struck her (two or three Virindi 10 to 14 m off in the storey tests, a second Slave 12 m off in the emergency's); they now
+send what such a creature does (a spell line; a swing order before the blow). Two read the sidestep first in their fallback lines.
+
+**Not seen live.** The walks for a line, their arrivals and the drops' ends on movement were run only over the scripted ACE and walk. How
+many blows a live run cannot pin (`m6-blow-unpinned` lines) is not known yet: it is the next live run's count. The shot check reads the
+target's server report (`PhysicsShotCheck.Check`, `victim.Position`) where the fight reads `StandsAt`: at 02:14:03 the check said
+"touching (0.01 m apart)" while the fight had the Slave 3.8 m off; not changed here.
+
+## 121. The stamina dance: whole gives (M6 stamina dance)
+
+**The finding.** The owner: she seemed to use Revitalize and Stamina to Mana inefficiently. Run 9's log
+(`cache/m6/sprint/run9/step3-levelup.log`, 2026-11-20 19:51 to 2026-11-21 04:58 UTC, Qwinnie at levels 53 to 58 in the Tusker
+Quarters, the `[ladder]` cycle lines), counted again for this change:
+
+- **Upkeep top-ups.** 272 `[fight] vitals policy` decisions carried an upkeep target, 238 of them a wanted mana over her maximum
+  (`upkeep target T (wanted W, over her maximum)`). 89 were "the press toward the target", median give 14 mana at a median 96% of her
+  mana (01:37:31 to 01:38:01: Stamina to Mana Self II at 340, 363, 369 and 372 of 375 for 35, 12, 6 and 3). The toward-press took the
+  best-priced level with its give cut at the missing mana, so any gap was topped up a cast at a time (ACE cuts a transfer to the missing
+  amount and charges the whole cost, `WorldObject_Magic.cs` 737-746 @95ef426d).
+- **Revitalize into a full bar.** Of the fight's 204 Revitalize Self VI (`[fight] mana: revitalize:`, each followed by ACE's "You cast
+  Revitalize Self VI and restore N points of your stamina"), 101 were cast from 80 to 90% of her stamina and restored 51.0 each, of a
+  roll of 80 to 160 (`BuffStatMods.Revitalize`; ACE cuts a boost at the maximum, `HandleCastSpell_Boost`, `WorldObject_Magic.cs` 474).
+  The refill (`ManaOrder.TryRefill`) casts the highest payable level whenever the stamina is under `--fight-stamina-full` (90), hooked
+  before the bolt in `FightScenario.BoltNeedsMana`.
+- **Weaker press levels.** 49 presses of III, IV and V (10, 20, 19) at median stamina shares of 96 to 99%. By the decision line before
+  each: 30 (IV 18, V 12) were the policy's "the press's whole give fits", 5 the upkeep's, 1 the mana floor's, and 13 came after the
+  policy's bolt, from the mana order's own dance. At a full bar the ladder's self table (IV 2.94 s, VI 3.78 s) made IV cheaper a point
+  than VI (20:38:50: IV for 200 at 133 of 369 mana, where VI's 252 did not fit the 236 missing). Their stamina was priced at 0 (no
+  stamina drain's source in reach: `prices ... stamina 0`).
+- **The buff reserve.** 20 reserve dances, mean give 100.3 (`[buff] reserve dance: mana A -> B`), each cut at her maximum (19:58:30:
+  Stamina to Mana Self VI's whole give from 348 stamina cut to the 107 missing). Then 20 of the pass's 29 Revitalizes were V (18) or III
+  (2): the pass kept the next line's ceiling (240 for Piercing Bane VI) and the 60 reserve, which left 68 of 368 for a level, and VI
+  costs 70.
+
+**The rules.** The owner's D88 stands (`docs/milestones/m5-plan.md`: mana runs down to near empty, stamina is kept near full, then
+Stamina to Mana and Revitalize). Every number below is read from the spell's rows, the transfer arithmetic or her live state.
+
+- **a. The upkeep's press waits for its whole give** (`VitalsPolicy.UpkeepChoice`). The press toward the target is the best-priced level
+  at its whole give, as the policy's own press is (`press_waits_for_best`), and goes only when that give fits the missing mana. A
+  wanted mana over her maximum changes nothing: a small gap is not topped up. While it waits no drink stands in for it; the decision
+  says so (`VitalsPolicy.UpkeepPressWaitsWhy`). The press that reaches the target, the stamina drain first and the drink with no press
+  are as before.
+- **b. Revitalize only for its whole roll** (`ManaOrder.RevitalizeLevelOf` with the stamina, its maximum and D88's floor, `RefillFit`).
+  The best level is the highest payable one whose top roll (`BoostRow.Max`) fits her bar. It goes when that top roll fits what she is
+  missing, or when the stamina is under D88's floor (`StaminaFloorOf`: the next press needs it now). Otherwise the refill waits. A lower
+  level that fits sooner is not taken: Revitalize Self I rolls 15 to 35 for 15 base mana, VI 80 to 160 for 70. When no payable level
+  fits her bar, or a level has no boost row, the highest payable goes as before. On her bar (354) D88's floor sits under the whole-roll
+  line of VI (194), so for her the floor never decides.
+- **c. A press's stamina is priced at its refill** (`VitalsPolicy.RefillPrice`, `VitalsPolicyFacts.Revitalizes`, `BoostLevel`). While
+  stamina runs short over a kill, a point costs the cheaper of the stamina drain and the best Revitalize level: its seconds, plus its
+  expected mana at the mana's price, over its expected restore (the row's mean at the cast chance; a fizzle's 5 counted). The mana's
+  price carries the stamina's, so the two are solved together (`RefillPriceRounds`). The fight fills the levels from the refill's own
+  (`FightScenario.VitalsPolicy.cs`, while the refill is on and not set aside). The ladder's `cast_seconds_self` is run 9's measure: the
+  mean from the send to the proof of every first-try Stamina to Mana Self of the fight (`[cast] fight mana dance: landed after 1 tries`):
+  II 2.16 (85 casts), III 2.60 (10), IV 3.40 (19), V 3.37 (18), VI 3.64 (31), where it read 1.92, 2.49, 2.94, 3.35 and 3.78; I keeps
+  1.74 (no sample); VII and VIII keep the step of 0.43 from VI (`war-mage.json` `sources.vitals_policy`). The fight's Revitalize Self VI
+  took 3.28 s (203) and the pass's Stamina to Mana Self VI 3.17 s (24): the table is the fight's.
+- **d. The buff reserve presses whole, and keeps the line's expected cost** (`BuffCycle.PassDance`, `PassRevitalize`). While the mana pays
+  the line itself, the press is the reserve's, and it goes only when its whole give fits; the line goes on with the mana it has, named.
+  Under the line's cost the press is the line's and goes as before. The pass's Revitalize keeps the line's expected cost after Mana
+  Conversion (`ManaConversionModel.ExpectedCost`, the upkeep's own number) and the reserve, not the ceiling, so VI is payable, and it
+  picks its level by rule b.
+
+Check before and after: every choice is one log line with the numbers it read (the policy's line, the order's reason, the pass's
+`reserve:` and `Revitalize after` lines, or the line that says why it waits); each cast keeps its own check after (the dance's and the
+refill's landed lines, the pass's mana read).
+
+**The fight's refill hook.** Rule b is in the mana order behind `ManaOrderInput.RevitalizeWholeRoll`, because the fight's hook before
+the bolt (`FightScenario.BoltNeedsMana`) entered the mana phase whenever the stamina was under 90% and a level was payable: had the order
+then declined, the fight would go back to its pick, the hook would fire again and the bolt would never go. Wired at the merge of this
+section's branch with the fight targeting's (`m6/fight-stamina`): `ManaDecide`'s input sets `RevitalizeWholeRoll = true`, and the hook
+asks the order's own test with the order's own numbers, `ManaOrder.RevitalizeLevelOf(_refill.Levels, m, ManaOrder.TargetOf(need,
+triesSpent), s, sMax, _staminaFloor, out _)` (`TargetOf` is the reserve `ManaOrder.Decide` keeps), so the two agree (closes
+`TODO(m6-stamina-dance-refill-hook)`). The way out's reserve (its line and one bolt, M6 7 BE) stays a separate gate of the hook's on
+the old highest-payable test. One call at the way out's reserve does not agree: the whole-roll test is not monotone in its reserve.
+In `FightScenarioTests.WayOut.cs`'s potion tests (mana 143 after the potions, stamina 120 of 275, the rig's Revitalize levels I to VI
+at 10 to 60 mana, the line 60 and the bolt 70) the reserve 130 left only Revitalize Self I, whose top roll of 35 fits the 155 missing,
+while the order at its reserve took VI, whose 160 does not, and waited; the hook entered the mana phase every frame and no bolt went.
+While the refill waits the hook writes one line a run, `mana: the refill waits: stamina s of max is under the 90% share, but the best
+payable Revitalize Self's top roll does not fit the N missing ...: the bolt`, and each `mana: revitalize:` line ends with the order's
+reason. Two of M5 7 F5's tests (`FightManaTests`, the transfer then the revitalize then the bolt, and the stamina low between kills)
+asserted the stamina at the 90% share before the bolt; under rule b the refill ends at the share or where VI's top roll no longer fits
+what she is missing (220 of 275 in the first), and they assert that now. Two fixtures had passed only by the Revitalize rule b
+drops, and are set again with every assertion kept: `FightF24Tests`' gate lapse under constant fire (the dropped casts at 200 and 212
+of 285 had slowed the kills; without them the last kill came at 34.60 s of Quickness Self left against a between-kills horizon of
+34.28 s, so the line starts at 36 s, not 40, and kills 3 to 8 fall inside the window) and `SubFightWatchTests`' retreat by the
+sub-fight's own line (the dropped cast at 213 of 275 had taken one roll of the scripted caster's seeded Mana Conversion stream; without
+it the bolts' rolls shifted and the mana fell under the heal's cost, so the mana is now held at 60 each tick, as the health is). New: `M6_stamina_dance_b_*` in `FightManaTests` (the bolt at
+234 of 275 stamina, 85%, where VI's top roll does not fit the 41 missing; Revitalize Self VI first at 115 of 275, where it fits the
+160 missing). The buff pass used rule b already.
+
+**The evidence.** The simulator plays `VitalsPolicy.Decide` ([fight-sim.md](fight-sim.md), "With her heals"). It does not play the
+refill's Revitalize (the live fight casts it outside the policy), the buffs' upkeep (rule a) or the buff pass (rule d), and its casts
+take the server's seconds, not the ladder's table. Her Revitalize levels now price the stamina a press takes there (rule c). So the
+simulator answers one question: does rule c raise deaths or running out of mana. Before (master daec61e3) and after (this change),
+each before run followed at once by its after on the same save, three rounds of 2,000 fights each
+(`pwsh -File tools\fight-sim.ps1 matchup --her Qwinnie --pack ...` and the Retreat's
+`--her Winnie --pack "11x3,22510x2,236x1" --bars "health=84,stamina=154,mana=161"`; the outputs and the table:
+`cache/m6/stamina-dance/pairs.txt`, the branch's checkout; her save at level 58). Each cell is the three runs' range:
+
+| Pack (`--pack`) | Dies | Out of mana | Mana a fight | Seconds to clear | Presses a fight | Stamina drains a fight |
+|---|---|---|---|---|---|---|
+| `1628x5` (the Quarters), Qwinnie | 0.0 -> 0.0% | 0.0 -> 0.0% | 124.8-125.4 -> 81.8-126.0 | 51.4 -> 51.3-55.9 | 0.0 -> 0.0 | 0.0 -> 0.0 |
+| `11540x6` (the Armory), Qwinnie | 0.0-0.1 -> 0.0-0.1% | 0.0 -> 0.0% | 242.5-246.4 -> 237.0-242.2 | 81.3-81.9 -> 80.0-81.2 | 0.1 -> 0.1 | 0.0 -> 0.0 |
+| `11540x9` (the Armory), Qwinnie | 2.0-3.6 -> 1.3-2.6% | 1.5-1.8 -> 1.1-1.2% | 461.6-475.5 -> 463.7-467.2 | 145.7-147.0 -> 144.0-146.2 | 2.0-2.2 -> 2.0-2.1 | 0.0 -> 0.0 |
+| `1629x10` (the Barracks), Qwinnie | 0.0 -> 0.0% | 0.0 -> 0.0% | 197.0-280.4 -> 198.2-280.9 | 114.5-123.2 -> 114.9-123.4 | 0.0-0.2 -> 0.0-0.2 | 1.4-1.6 -> 1.4-1.6 |
+| `11x3,22510x2,236x1` (the Retreat), Winnie at level-10 bars | 0.0 -> 0.0% | 0.0 -> 0.0% | 291.2-294.8 -> 293.8-296.8 | 43.3-43.7 -> 43.6-44.1 | 4.8 -> 4.8-4.9 | 3.7-3.8 -> 3.8 |
+
+No row dies or runs out of mana more often beyond the runs' spread. The wide mana and seconds ranges of the Quarters and the Barracks
+are the war pick's bolt moving from run to run on both sides (ACE's sampled strikes are not seeded; the table's `her bolt` column: the
+Quarters' six runs bolted with Force Arc VII three times, Flame Arc VI, The Spike and Ilservian's Flame). Winnie knows no Revitalize Self, so every changed rule is inert for her in
+the simulator: the Retreat's row is the spread itself. The Armory's nine is the one pack where rule c moves the press (her save holds
+Revitalize Self III to VII and no source a stamina drain takes from). The tests: `StaminaDanceWholeGivesTests` (a to c, on run 9's
+numbers) and `BuffCycleTests` `M6_stamina_dance_d_*` (d).
+
+**Against the study.** The III to V presses from a full bar came mostly from the table, not from stamina priced at 0: at a full bar IV
+to VI each take half the bar (their proportion is 0.5, `BuffStatMods.StaminaToMana`), and IV's 2.94 s made it the best-priced at its
+whole give; 13 of the 49 were the mana order's dance, which this change does not touch. The stamina's price decides from a half bar and in
+the floor's cut gives (`StaminaDanceWholeGivesTests`: at 200 of 349 stamina under the floor, II priced at 0, VI at the refill's). The
+simulator's note "Revitalize (the climber's policy never casts it)" was wrong about the live fight: the policy does not cast it, but
+the refill does (204 in run 9); the note now says so. The counts here differ a little from the study's (a median give of 14 at 96% for
+its 16 at 94%; 101 Revitalizes for 100; 20 reserve dances giving 100.3 for 25 giving 110; 20 pass Revitalizes for 21); its seconds and
+mana totals for each habit were not counted again.
+
+## 122. A walk to a person arrives at reach (M6 sprint; `m6-vendor-reach`)
+
+**The finding.** Run 10 (`cache/m6/sprint/run10/step3-levelup.log`, 2026-11-21 07:17:25 to 07:18:33 UTC): the learn trip's walk
+to the Grand Master Scrivener of Item Magic in Stonehold was an object goal, 0x764D503D within 3.0 m (his UseRadius: weenie 20212's
+`weenie_properties_float` type 54) of (103.80, 60.70) in his room 0x64D50135. It pressed into his body for 12 stuck rungs in
+0x64D50133, about 1 m from him (07:17:47.769: [104.749 60.982], 0.99 m). Then it ended Blocked, "stuck after 3 plans and 12 rungs",
+and the station skipped him: she went home without Aura of Blood Drinker Self VI and Aura of Heart Seeker Self VI. The same leg
+ended Blocked in run 6 (2026-11-20 10:18:04 and 13:58:20 UTC) and in run 9 (19:53:47 UTC, and 2026-11-21 00:04:39 UTC).
+
+The cause: `NavRunner.CheckArrival` (master 53f22e16, `NavRunner.cs` 1894) let an object goal that names an indoor cell arrive only
+with her body in that room. That rule is M4 P5b F1's guard against an arrival through a wall from the street. The room graph knows no
+bodies (`TODO(m6-npc-indoor-bodies)`), so the route ran to his own point. His body stands at the edge of his room and held her in the
+next cell. The test ran every step, before the rungs, and each step it found her inside the range but in the wrong cell. Run 6's walk
+to the Foci of Artifice seller (`HoltburgScrivenerWalkDatTests`) was the same fault in Holtburg's front room 0xA9B30100. His
+catalog stop worked round it.
+
+**The rule** (`NavRunner.ObjectInReach`). The test runs every step, before any stuck or rung decision, on her drawn body
+(`INavBody.Position`, the owner's one world picture):
+
+- **Touching him arrives.** A contact with the goal object itself in the step just run (`INavBody.ContactObject`) is an arrival
+  (`contact`), whatever the range. The step counts only if the body moved in it or the run held forward. A contact left over from an
+  older step (standing still, just placed after a recall) does not count.
+- **Within range, nothing in between.** She is within the range of the object's live place (`INavBodyFeed.TryPlace`: `NpcBodyFeed`
+  reads the object table) or of the planned point. The planned point still counts, so a creature that moved off it ends the walk
+  where it was planned, and the caller's reach check decides, as before. When the goal names a room, she is in it (`goal-room`, as
+  before) or nothing walls her off (`clear-line`: `RouteConfirmer.WallBetween`). That check sweeps a 0.3 m sphere at 1 m over the
+  floor. It passes creatures, as retail's viewer does, and stops at walls, floors, statics and doors. Without a confirmer the room is
+  required, as before. An outdoor goal arrives on the range alone, as before.
+- **The reason is logged.** Each arrival writes `arrived: the object is in reach reason= metres= range= of=live|plan cell= goal_cell=`
+  (`NavRunner.ArrivalReason`). A wall found in range is logged once a run: `within the object goal's range outside its room, but a
+  wall stands between: walking on`.
+
+Point, cell, portal and door goals are unchanged: a point goal's arrival has no cell test, only its tolerance and the 1.5 m of height.
+`RouteConfirmer.ArcBeyondRange` still confirms from the goal's room, so it checks more of the path than is walked, never less.
+
+**Check, act, check.** The check before is the reach test. The act releases the keys and ends the run Arrived. The check after is the
+station's, as before (`ResupplyStation.Meet`: the centre distance at most `ShopLeg.ReachOf`, 3 + 1.0 = 4.0 m). Its recovery is the
+second walk, then "not met in reach" by name. ACE then accepts the use from where she stands. `Player.CreateMoveToChain`
+(`Player_Move.cs` 37-86 @95ef426d) asks `Landblock.WithinUseRadius` (`Landblock.cs` 1004-1014), which is
+`WorldObject.IsWithinUseRadiusOf` (`WorldObject_Use.cs` 47-61). That passes when the cylinder distance is at most the UseRadius, less
+0.2 m in magic combat mode (`Player_Move.cs` 61-62). The cylinder distance is the centre distance less both radii (`Position.cs`
+100-114), each the Setup's radius times the scale (`PartArray.cs` 204-207). Within it, ACE turns her and uses at once, with no
+move-to.
+
+**The evidence** (`StoneholdVendorReachDatTests`, the retail dats, Stonehold from the headless streamer). His body stands in the
+walker's physics as the server object it is live, from weenie 20212's rows: Setup 0x0200004E (`d_i_d` type 1), PhysicsState 0x200418
+(`int` type 93), no scale. His Setup radius is 0.68 m, as is hers.
+
+| Walk | Old rule (a temporary switch, removed) | New rule |
+|---|---|---|
+| From her stuck point, range 3 m | Arrived after 49.7 s and 11 rungs | Arrived on the first step, `clear-line` at 0.99 m (cylinder -0.36 m) |
+| From her stuck point, range 0.5 m (only a contact can end it) | Blocked, 3 plans and 12 rungs | Arrived after 0.20 s, `contact` at 0.97 m, no rung |
+| From the Network drop 0x64D5000B (`network-to-stonehold`), range 3 m | Blocked, "stuck after 3 plans and 12 rungs" in 0x64D50133, as live | One plan, 86.2 m, Arrived `clear-line` at 2.93 m in 0x64D50133 (cylinder 1.58 m, under ACE's 2.8 m), 0 rungs |
+
+Run 6's Holtburg case turns over too (`HoltburgScrivenerWalkDatTests`, the Foci of Artifice seller 0x7A9B3008 in his counter's cell
+0xA9B30101, the human Setup in the physics). The object-goal walk as live used to be held against his body, and that test pinned it not
+arriving. It now arrives in the front room 0xA9B30100, 2.97 m from him, in one plan and with no rung, so the pin is inverted. His
+catalog stop is walked as before (2.52 m).
+
+The default suite (`Category!=Loopback&Tier!=Soak`): 18,661 tests, 3 failed, 0 warnings. The 3 were timing tests: two cases of
+`PathPlannerTests`' 1 km plan and `HubFirstPlanDatTests`' Facility Hub worker. Each passed when run alone.
+
+**What only a live run can confirm.** Live, the walk has the door 0x764D5037 and the 11 indoor bodies the plan does not know. A live
+run must show four things: that the walk arrives in reach of him; that the server's last echo of her position (`SelfState.Position`,
+which the station's reach check reads, not her drawn body) is within 4.0 m when the check runs; that ACE opens his shop; and that
+ACE sells the two scrolls.
+
+## 123. The dance before running on (M6 the dance before running on)
+
+**The finding.** The owner, 2026-11-21: on a run she refills her stamina and mana before she runs on. Run 10's log
+(`cache/m6/sprint/run10/step3-levelup.log`, UTC 2026-11-21, the run leg from the Facility Hub's Barracks drop to the Tusker Armory's
+entry front, 343 m): the leg began at 07:27:07.968 at health 245/245 and mana 379/379. Fight-back 1 ended at 07:29:07.550 at mana 196,
+with three Stinging Chitticks 25.7 to 28.0 m off left to the run past (`passing`). The crossing's measure asked for the dance to her
+maximum, and the vitals guard's race at 07:29:02.916 read `winning`: health 192 rising 3.1/s, and the heal she can sustain, 12.6/s,
+against the incoming 3.9/s. At 07:29:09.515 the walk dance refused: a chittick 25.5 m off had stung her 1.1 s before. The old lull test
+(`TravelLeg.DanceInTheLull`, `AttackerOnHer`) counts any creature heard attacking within 10 s inside 40 m, so `no lull, no dance`, and
+the dance was then read again only at the next walk stop. The chat damage lines show no hit on her from 07:29:09.726 to 07:29:46.275
+(36.5 s). The next stop was fight-back 2 (a Tusker Guard, 24 m from the portal), at mana 211.
+
+**The rules** (`TravelLegDance.cs`; D88 and section 121's whole-give rules unchanged: the dance itself is the recharge's walk-dance mode,
+`RungChangeStation.Recharge`).
+
+- **a. The gate** (`TravelLeg.DanceGate`). When a fight-back on a walk ends, or the walk stops for an owed dance (b), and the dance is due
+  (`DanceDueNow`: the crossing's own line while her mana is under it, else the top-off), she dances before the walk goes on in a lull,
+  or when the nearest attacker on her stands beyond the run past's melee reach (`RunPast.MeleeReachMetres`) and the vitals guard's own
+  race reads held. Held means `winning` or `holding` (`LosingRaceAnswer.Losing` false): the autopilot hands the guard's
+  `AutopilotVitalsGuard.Race` to the leg as `JourneyFacts.Race`, in the travel and death states only. An attacker within melee reach, a
+  race that is not held, or a race not read (a plain journey) closes the gate: the walk goes on as before, and the dance is owed. Each
+  answer is one line naming the attacker, its distance and the race with its numbers (`walk dance: under fire ..., but she dances before
+  the walk goes on`, or `walk dance: due to N, but she is under attack: ... no lull, no dance`).
+- **b. The owed dance** (`DanceStopsWalk`, read from the walk's frame check after the run past's). Each frame of a walk that owes a dance
+  reads the lull off the threat board (`ThreatBoard.Lull`: no hit from anyone, from the damage lines, not a creature's distance). The
+  lull's window is the slowest attack of the kinds heard in the 10 s before the last hit (`LullWindow`: each kind's
+  `AttackTiming.Seconds`, ACE's attack loop over the dats; the named 2.75 s fallback, `TODO(f11-swing-seconds)`, where it is not
+  derived), at most the old lull's 10 s. Every attacker still on her would have attacked again inside it. In run 10 the kinds were the
+  Stinging Chittick (2.2 s) and the Tusker Slave (2.46 s): the log's `an attack every` lines. The Tusker Guard's last hit, 07:28:55.594,
+  was 14.1 s before. So the lull would have begun about 2.5 s after 07:29:09.726. At the lull's start the dance and the gate are read
+  again. Open, the walk stops at once (`walk dance: a lull on the walk ...: she stops at once and dances`), she dances where she stands,
+  and the walk is planned again from there (`planned again after the walk dance`). Closed, it is read once more just past the old lull
+  (no attack from anyone for 10 s), where no creature is on her by the lull test. A dance no longer due clears the debt, and a new hit
+  starts the lull again. Between the readings a frame reads two numbers off the board. The walk back never dances.
+- **c. Run past stands** (D137). A dance is not a fight: it is no walk stop for the crowded passage's judge (`WalkStops`), and chip hits
+  the race holds from beyond melee do not interrupt it (`RungChangeStation.AttackNow` in the dance reads the same gate; one line each
+  time what it dances through changes). A creature that catches her in the dance (within melee reach, or a race no longer held) is
+  fought back as before (`FightBackInDance`, at most three times a dance).
+
+Check before, act, check after: the gate is read before every dance (at the fight-back's end, at the lull's stop, and before each cast
+of the dance); each cast keeps its own check after; the crossing is measured again after the dance (`CrossingGivenUp`). The recovery
+when the gate is closed is the walk going on, with the dance owed, never a fight.
+
+**The tests** (`RungChangeTests.DanceBeforeRunningOn.cs` over the rung rig's walk dance; the race is run 10's line at 07:29:02.916 or a
+lost one, `LosingRace.Decide`). (a) Stings of 2 and 1 points from 25 m with the race held: she dances before the walk goes on, the
+stings never stop the dance, and the chittick is not bolted in it. An attacker biting from 3 m, or a race that is not held: the walk goes
+on with no dance. (b) A lull 3 s after the last hit (the rig has no dats: the 2.75 s fallback) stops the walk for the owed dance; with
+the race not held, the dance waits until just past the old lull. (c) A Tusker Slave that reaches her at 3 m in the dance is fought back,
+and the dance resumes. `AutopilotDanceRaceTests`: the autopilot wires the race, and it is not read outside travel.
+
+**What only a live run can confirm.** The guard's race read on a run (`Race` after a fight-back, its incoming and trend there). The lull's
+window on the derived timings with the dats. Whether the dance in a sting's range holds her health over the guard's line in practice.
+And how often an owed dance stops a walk on the Armory's and the Holding's approaches.
+
+## 124. One target at a time (M6 one target; `FightScenario.OneTarget.cs`)
+
+**The finding.** The owner ruled on 2026-11-21 that she kills one target at a time, drains apart. Run 10's live log
+(`cache/m6/sprint/run10/step3-levelup.log`, the Tusker Armory, 07:31:00 to 07:34:59 UTC): 21 target changes, 18 of them
+`self-defence: it attacked the player`, with four pairs of Armored Tuskers ping-ponging. Of the 18, 8 followed a kill. 6 left a living
+target right after a bolt in flight was predicted to kill it, and 4 were the weighing (`target switch: switch to ...`) taking that hurt
+one back. The attack notices were not the cause. In
+07:31:30 to 07:35:59 the in-flight ledger (`ExcludeDoomed`, section D124) predicted 9 times that the bolt just confirmed would kill her
+target (`pick: ... is left out: the projectiles in flight are expected to deal 172 against its 157 health left`). The pick then left her
+target out. The old weighing (`KeepsCurrent`) read a target left out as one it could not keep, and the nearest attacker was taken. In 8
+of the 9 the creature lived: each was cast at again, 8.6 to 65.7 s later by the `in flight: ... at <guid>` lines, and the next weighing
+took it back from the fresh one. The predictions were wrong because her own damage lines were put on the wrong tusker. At 07:33:34.456 her
+bolt at 0x8000D03B landed for 138 (`You burn Armored Tusker for 138 points`), but 19 ms later the ledger still counted it in flight against
+0x8000D03B's 157. Meanwhile 0x8000D0E7, which she had never cast at, read 36 % "modelled". A damage line names its victim by name alone,
+and the fight puts it on the nearest living creature of that name (`FightScenario.Emergency.cs` 510-514). That is a fault of its own, not
+fixed here: `TODO(m6-dealt-by-name)`.
+
+**The rule** (in `Choose`, whenever an attacker can be cast at, `DefenceMove.Cast`):
+
+- **Held.** Her target is held while all of these are true:
+  - it is alive, not dropped by the shot rule and not waiting out a wall block;
+  - it is within the cast range with a line (for an attacker, the self-defence pick's own read, the struck proof included);
+  - it is engaged: attacking her, or a creature she has hit. ACE wakes a monster that a player's spell strikes and makes the player its
+    attack target (`Player_Monster.cs:36-53` `OnAttackMonster`, from `SpellProjectile.cs:364`).
+
+  A held target is kept: a new attacker does not take it. One line is written for each pair (`one target: keep ... over the attacker
+  ...`), with the kill order's weighing of the two beside it, report-only.
+- **Bolts in flight.** If a held target is attacking her and the bolts in flight are expected to finish it, she holds: no new cast at
+  another creature until they land. The hold ends on a kill, a damage line, a resist, or the ledger's own end (the flight plus
+  `InFlightMarginSeconds`, 0.67 s at 2.5 m for a 15 m/s bolt). The ledger still logs and counts it (`doomed_skips`). One line is written
+  for each flight (`one target: hold for ...`).
+- **Otherwise,** the next target is the kill order's first among the attackers she can hit, nearest first, less the dropped, the blocked
+  and the doomed: `TargetSwitch.KillOrder`, which folds `TargetSwitch.Decide`. "Otherwise" covers no target, a dead or gone one, one out of
+  range or line, one dropped, a passive target she has not hit, and one not attacking her that the bolts in flight will finish. The fight
+  simulator's `InFightRules.ChooseTarget` now calls the same fold, so the two pick alike. The target line gives the reason: `self-defence: it
+  attacked the player; her target 0x... is dead or gone: the kill order's first of the N attacker(s) on her she can hit ...`.
+- **D88 stands where it was meant.** A passive target (not attacking her, not hit) is left for an attacker at once. An attacker she cannot
+  cast at from here keeps its defence step: the walk, the sidestep and the life spell of section 120.
+- **Drains and heals keep their own source pick:** the emergency's fullest (`FightEmergency.Fullest`), the drain rule's
+  (`FullestDrainTarget`) and the stamina source's (`FullestStamina`). The emergency's drain moves the selected target to its source
+  (`FightScenario.Emergency.cs` 301-305), and so does the ring's anchor. So the rule keeps the creature she attacks apart (`_boltTarget`,
+  set by `BeginTarget` and by the life spell's `LifeThroughBegin`), and after a drain her bolts go back to it (`one target: back on the
+  target she is on ...`).
+
+**Not covered.** With no attacker castable, the profile's pick still takes the nearest profile target. Run 10 at 07:35:35.753 left a tusker
+she had bolted 32.2 m off for one 31.2 m off (`the last target is out of the pick (... or not the nearest)`). A target she has hit and that
+does not attack her is still left by the D124 rule when a bolt in flight is predicted to kill it.
+
+**Tests:** `FightScenarioTests.OneTarget.cs`:
+- two attackers with her target at 6 %: six bolts, all at it, a hold while each is in flight, then the other, never back;
+- a passive target and an attacker: the attacker at once;
+- after a kill: the kill order's first, not the nearest;
+- the fold itself;
+- the emergency drain at the fullest, and the bolts staying on her target.
+
+The weighing's own tests (`FightScenarioTests.TargetSwitch.cs`) pass unchanged, through the keep line. Only a live run can show the hold's
+cost in the Armory's crowds. While the damage lines are misattributed, a doomed target stays doomed until the ledger's end: up to 0.68 s a
+bolt at 2.7 m, by the run 10 lines `counted until 0.68 s from now`.

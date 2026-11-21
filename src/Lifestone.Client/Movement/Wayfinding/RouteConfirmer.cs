@@ -281,8 +281,9 @@ public sealed class RouteConfirmer : IDisposable
     /// metres of arc: an object goal's stop-short (M4 P5b F1). The runner ends an object run at the first point within the range (with sight required,
     /// the arrival test is made there), so nothing past it is walked and nothing past it needs to be standable: the object's own point inside a static
     /// (Renald behind his counter) is never probed. 0 when no point of the path comes within the range but its end. With <paramref name="roomCell"/> (an
-    /// indoor goal's cell) the search starts at the path's first waypoint in that cell, as the runner's arrival waits for the body to be in it (a wall
-    /// between the street and the object is within the range too).
+    /// indoor goal's cell) the search starts at the path's first waypoint in that cell, the latest the runner's arrival comes (a wall between the street and
+    /// the object is within the range too); since the M6 sprint's m6-vendor-reach it may come sooner, within the range with nothing walling the body off or
+    /// on a contact with the object (<c>NavRunner.ObjectInReach</c>), so this check covers more of the path than is walked, never less.
     /// </summary>
     /// <param name="path">The path, start first.</param>
     /// <param name="target">The object's point.</param>

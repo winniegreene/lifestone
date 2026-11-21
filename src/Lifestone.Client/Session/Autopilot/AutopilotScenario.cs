@@ -338,7 +338,14 @@ public sealed partial class AutopilotScenario : IScenario, IDisposable
     public double MinStintSeconds
     {
         get => _stint.Seconds;
-        set => _stint = new TripStint(value);
+        set => _stint = new TripStint(value, _stint.SaleSeconds);
+    }
+
+    /// <summary>M6 safe load: the sale's floor in seconds (<see cref="TripStint.SaleSeconds"/>, the owner's 40 minutes by default; never under the stint): a trip to sell waits this long after the run began or a trip ended. Set before the run starts.</summary>
+    public double MinSaleSeconds
+    {
+        get => _stint.SaleSeconds;
+        set => _stint = new TripStint(_stint.Seconds, value);
     }
 
     /// <summary>M6 14 T: the trips the minimum stint held back, one a trigger a stint.</summary>
@@ -491,6 +498,8 @@ public sealed partial class AutopilotScenario : IScenario, IDisposable
         _context.Facts.EverySpell = options.EverySpell && options.Job == AutopilotJob.LevelUp; // M6 14 (the owner, 2026-11-16): the climb's trips learn every spell she can cast
         _context.Facts.EverySpellVilla = options.Villa && options.Job == AutopilotJob.LevelUp && options.Task.Kind == AutopilotTaskKind.Job; // VillaOn's rule: the reserve holds the villa's price while its track runs
         _context.Facts.QuestOwnKillLoop = options.QuestOwnKillLoop; // M6 16 Q8: the quest steps' old kill loop, the skirmish's fallback for its first live gate
+        _context.Facts.ApproachReportOnly = options.RungHoldsReportOnly; // M6 holding at 60: the crossing's measure reports, never gives up
+        _context.Facts.Race = GuardRace; // M6 the dance before running on (docs/session.md section 123): a travel leg's dance gate reads the vitals guard's own race
         if (options.Task.Kind == AutopilotTaskKind.DenRun)
         {
             _context.Facts.LearnTravelLines = ScrivenerLearnPlan.DenRunLines; // M6 item 14: the den run's two scrolls, first in the trip's learn plan
@@ -2419,6 +2428,11 @@ public sealed partial class AutopilotScenario : IScenario, IDisposable
         {
             _lastCounters = _clock;
             var verdict = _counters.Check(session.State, BuffCycles);
+            if (SaleFloorHolds(verdict))
+            {
+                verdict = _counters.Check(session.State, BuffCycles, skipSale: true); // M6 safe load: the other reasons are not held to the sale's floor
+            }
+
             if (verdict.Kind != LogisticsKind.Unread)
             {
                 NoteFloors(); // M5 7 P7s (D148)
@@ -2502,6 +2516,26 @@ public sealed partial class AutopilotScenario : IScenario, IDisposable
     /// M6 14 T: true while the minimum fight stint holds the counters' trip (<see cref="TripStint"/>): no stop line is under, a visit has just bought what the purse pays (or the run has just begun, after its audit), and the trip is asked
     /// again when the stint is over. Named once a stint for each trigger, with the seconds left.
     /// </summary>
+    /// <summary>
+    /// M6 safe load (the owner, 2026-11-20: she never goes back to town to sell before 40 minutes have passed; other reasons are not held to it): true when <paramref name="verdict"/> is a trip to sell
+    /// (<see cref="LogisticsVerdict.IsSale"/>) and the sale's floor still holds it (<see cref="TripStint.HoldsSale"/>) past the minimum stint, which holds every trip alike. Named once a stint for each trigger, with the seconds left; the
+    /// caller asks the counters again without the sale's triggers, so a trigger after them (the foci, a scroll to learn) still calls its trip.
+    /// </summary>
+    private bool SaleFloorHolds(LogisticsVerdict verdict)
+    {
+        if (!verdict.IsSale || _stint.Holds(_clock) || !_stint.HoldsSale(_clock))
+        {
+            return false;
+        }
+
+        if (_stint.SayOnce("sale-floor:" + verdict.Trigger))
+        {
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"autopilot fight: trip held back by the sale's floor: {verdict.Reason} (trigger={verdict.Trigger}): {_stint.SaleLeft(_clock):0} s of the {_stint.SaleSeconds:0} s since {(_stint.AfterTrip ? "the last trip ended" : "the run began")} are left; a trip to sell waits that long, the loot swaps for better finds meanwhile (m6-sale-floor)"));
+        }
+
+        return true;
+    }
+
     private bool StintHolds(LogisticsVerdict verdict)
     {
         if (!_stint.Holds(_clock))

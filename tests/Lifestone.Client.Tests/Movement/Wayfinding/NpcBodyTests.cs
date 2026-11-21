@@ -85,6 +85,31 @@ public sealed class NpcBodyTests
     }
 
     /// <summary>
+    /// M6 sprint (run 6, 2026-11-20 03:16:39 UTC): Lifestone Recall lands on the lifestone's own point, and the planner, which knew no lifestone, walked the body along the stone into Alcott beside it. A lifestone
+    /// (ItemType 0x10000000, ObjectDescriptionFlags BF_LIFESTONE 0x4000, as weenie 509 is) and a bind stone (BF_BINDSTONE 0x8000000) are bodies; an ethereal one is not, and an object with neither bit nor the creature
+    /// type is not either.
+    /// </summary>
+    [Fact]
+    public void A_lifestone_and_a_bind_stone_are_bodies_though_no_creature()
+    {
+        var table = new WorldObjectTable();
+        table.Set(Make(1, 0x10000000, 0x4000, 10, setup: 0x02000001)); // a lifestone (weenie 509: ItemType LifeStone, BF_LIFESTONE)
+        table.Set(Make(2, 0x80, 0x8000000, 12, setup: 0x02000001)); // a bind stone
+        var ghost = Make(3, 0x10000000, 0x4000, 14, setup: 0x02000001);
+        ghost.State = PhysicsState.Ethereal;
+        table.Set(ghost);
+        table.Set(Make(4, 0x10000000, 0x0, 16, setup: 0x02000001)); // the type with no lifestone bit: not a body by the type alone
+        var feed = new NpcBodyFeed(table, self: 99, null, id => id == 0x02000001 ? HumanRadius : null);
+        var into = new List<NavBody>();
+
+        feed.Fill(P(0, 0, 0x01050000).Global, 100f, into);
+
+        Assert.Equal([1u, 2u], into.Select(b => b.Guid).Order());
+        Assert.True(NpcBodyFeed.IsBody(table.All.Single(o => o.Guid == 1), 99));
+        Assert.False(NpcBodyFeed.IsBody(table.All.Single(o => o.Guid == 3), 99));
+    }
+
+    /// <summary>
     /// M6 item 14 (<c>m6-forge-in-smithy-lane</c>): a body's radius on the plan. A person (bounds 0.68 m) is sized as before; a body wider than a person is as wide as what its collision shape blocks at walking height, never
     /// wider than its bounds, and a person's width when no shape is read. Holtburg's Salvaging Forge: bounds 2.90 m (a disc of 3.38 m that closed the smithy's lane), collision shape 2.05 m (a disc of 2.53 m; the lane passes
     /// 3.3 m from its centre).

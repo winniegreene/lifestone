@@ -230,6 +230,7 @@ internal abstract partial class TravelLeg
     private IEnumerable<ActionHandle?> GuardedWalk(string leg, string name, string label, uint cell, Vector3 at, TravelPurpose purpose, string why, LifeMark life, bool retreating, uint? takenInto = null, PortalKeepOff? keepOff = null, IReadOnlyList<CellFrame>? way = null, string? moveWhat = null, bool door = false, NavUseTarget? use = null)
     {
         var replanned = false;
+        var (danceStops, afterDance) = (0, false); // M6 the dance before running on (rule b): the walk's stops for an owed dance, and whether the last stop was one
         _walkStops.Clear(); // M6 14 the crowded passage: this walk's stops by attackers, judged by progress (WalkStops)
         for (var walk = 0; ; walk++)
         {
@@ -237,7 +238,10 @@ internal abstract partial class TravelLeg
             var lastAlive = S.State.Self.Position;
             string? failure = null;
             BeginRunPastWalk(cell, at, retreating); // M6 14 run past: her trail and the walk's goal, read each frame of the walk
-            var reason = walk == 0 ? why : string.Create(CultureInfo.InvariantCulture, $"{why}; planned again after fight-back {walk}");
+            _danceStop = null;
+            var reason = walk == 0 ? why
+                : afterDance ? string.Create(CultureInfo.InvariantCulture, $"{why}; planned again after the walk dance")
+                : string.Create(CultureInfo.InvariantCulture, $"{why}; planned again after fight-back {walk - danceStops}");
             foreach (var h in Catching(WalkToPoint(name, label, cell, at, purpose, reason, AttackerStopsWalk, keepOff, way, use), f => failure = f))
             {
                 if (!TeleportSince(travelMark) && S.State.Self.Position is { } p)
@@ -286,6 +290,27 @@ internal abstract partial class TravelLeg
                 stopped = onHer;
             }
 
+            if (_danceStop is { } danceStop && string.Equals(danceStop.Stop, stopped, StringComparison.Ordinal))
+            {
+                // M6 the dance before running on (rule b): the walk stopped at a lull for the dance it owed: she dances where she stands (the gate read again first), then the walk is planned again from there; a dance is not a fight
+                // (D137), so no walk stop is counted for it
+                (_danceStop, afterDance) = (null, true);
+                danceStops++;
+                foreach (var h in DanceInTheLull(leg, label, danceStop.Line, danceStop.Why))
+                {
+                    yield return h;
+                }
+
+                if (_retreatWhy is not null)
+                {
+                    yield break; // the dance's fight-back or the measure after it set the retreat due: the walk's retreat follows
+                }
+
+                Log(string.Create(CultureInfo.InvariantCulture, $"walk dance: the walk to {label} is planned again from {CellWord(S.State.Self.Position)} {(_danceOwed is null ? "after the dance it owed" : "with the dance still owed (the gate closed again before it)")} (the dance before running on)"));
+                continue;
+            }
+
+            afterDance = false;
             foreach (var h in FightBackOnWalk(leg, label, stopped, life, retreating, takenInto))
             {
                 yield return h;
@@ -376,10 +401,11 @@ internal abstract partial class TravelLeg
             yield break;
         }
 
-        if (!retreating && ((CrossingDanceDue() is { } due && ManaNow() is { } held && held < due.Line) ? (due.Line, due.Why) : TopOffDue()) is { } dance)
+        if (!retreating && DanceDueNow() is { } dance)
         {
             // M6 14 walk dance: the fight-back ended by its own end test (the lull): the crossing's measure asks for the dance, or (M6 14 top-off, the owner, 2026-11-15) she is not full: she tops herself off before the walk goes on
-            // (mana to her maximum, stamina near full), and the crossing is measured again after
+            // (mana to her maximum, stamina near full), and the crossing is measured again after. M6 the dance before running on (the owner, 2026-11-21): the gate decides (TravelLegDance.cs): chip hits the race holds from beyond
+            // melee do not stop it; a refused dance is owed and the walk reads the lull each frame
             foreach (var h in DanceInTheLull(leg, label, dance.Line, dance.Why))
             {
                 yield return h;
@@ -868,7 +894,9 @@ internal abstract partial class TravelLeg
             return null;
         }
 
-        return WalkStandsDown() ? null : RunPastStops(); // M6 14 run past (D137): an attacker stops the walk only when she cannot outpace it (TravelLegRunPast.cs)
+        // M6 14 run past (D137): an attacker stops the walk only when she cannot outpace it (TravelLegRunPast.cs); M6 the dance before running on (rule b): with no fight to stop for, an owed dance stops it at the lull's start
+        // (TravelLegDance.cs)
+        return WalkStandsDown() ? null : RunPastStops() ?? DanceStopsWalk();
     }
 
     /// <summary>M6 14 run past (D137): the seek to a portal is the walk's door: the attackers still on her are fought there before the Use (<see cref="DoorStops"/>); the run-only road stops for none.</summary>

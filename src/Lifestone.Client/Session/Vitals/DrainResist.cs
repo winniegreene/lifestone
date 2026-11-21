@@ -36,6 +36,14 @@ public static class DrainResist
     /// <param name="wcid">The weenie class id.</param>
     public static double RecordedOf(uint wcid) => Catalog.Value.TryGetValue(wcid, out var resist) ? resist : Grounds.CreatureTable.Find(wcid)?.ResistHealthDrain ?? 1.0;
 
+    /// <summary>
+    /// M6 undrainable fills: the stamina-drain resistance of weenie class <paramref name="wcid"/>, its <c>ResistStaminaDrain</c> (float property 72) as the bestiary records it from the world database
+    /// (<see cref="Creatures.CreatureDefence.StaminaDrainResist"/>, the one reader of the creature tables, stage E1 of docs/automation-engine.md; ACE's <c>GetResistanceMod(StaminaDrain)</c> is it times a creature's natural resistance,
+    /// which is 1: Creature_Properties.cs 154-158, 211-212 @95ef426d), else 1, ACE's default. An Armored Tusker's is 0: a Drain Stamina Other on it takes nothing. The first call loads the bestiary; after that it allocates nothing.
+    /// </summary>
+    /// <param name="wcid">The weenie class id.</param>
+    public static double StaminaOf(uint wcid) => Creatures.Bestiary.Find(wcid)?.Defence.StaminaDrainResist ?? 1.0;
+
     /// <summary>True when a landed drain measured kind <paramref name="wcid"/> at 0 in this process.</summary>
     /// <param name="wcid">The weenie class id.</param>
     public static bool IsMeasuredZero(uint wcid) => MeasuredZero.ContainsKey(wcid);

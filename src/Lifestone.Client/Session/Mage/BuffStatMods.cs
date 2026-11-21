@@ -122,14 +122,15 @@ public static class BuffStatMods
     /// </summary>
     public static IReadOnlyList<uint> RevitalizeBaseMana { get; } = [15, 30, 40, 50, 60, 70];
 
-    /// <summary>The boost row of spell <paramref name="id"/>, or null.</summary>
+    /// <summary>The boost row of spell <paramref name="id"/>, or null. Allocation-free (M6 stamina dance: the refill's whole-roll test reads it at every decision; a foreach over the list boxes its enumerator).</summary>
     public static BoostRow? BoostOf(uint id)
     {
-        foreach (var row in Revitalize)
+        var rows = Revitalize;
+        for (var i = 0; i < rows.Count; i++)
         {
-            if (row.Id == id)
+            if (rows[i].Id == id)
             {
-                return row;
+                return rows[i];
             }
         }
 

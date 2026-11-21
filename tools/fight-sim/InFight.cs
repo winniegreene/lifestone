@@ -40,6 +40,12 @@ internal sealed class HerFight
     /// <summary>The Drain Stamina Other level the fight casts (the highest known whose cast chance reaches <see cref="BuffOptions.DefaultCastChance"/>), or null.</summary>
     public FightSpell? StaminaDrain { get; private set; }
 
+    /// <summary>
+    /// M6 stamina dance: the Revitalize Self levels she knows (I to VII, <see cref="VitalsMeans.RevitalizeSelf"/>, the live refill's list: <c>FightRefill.Fill</c>) whose cast chance reaches <see cref="BuffOptions.DefaultCastChance"/>,
+    /// lowest first, each with its boost row. Not cast here (the live fight's refill is <c>ManaOrder</c>'s, outside the policy): the policy prices the stamina a press takes by them (<see cref="VitalsPolicy.RefillPrice"/>).
+    /// </summary>
+    public IReadOnlyList<(FightSpell Spell, BoostRow Row)> Revitalizes { get; private set; } = [];
+
     /// <summary>Her regeneration a second in magic stance (ACE's heartbeat on her, from empty: <see cref="Economy.RegenPerTick"/>).</summary>
     public (double Health, double Stamina, double Mana) Regen { get; private set; }
 
@@ -93,6 +99,7 @@ internal sealed class HerFight
         fight.HealthDrains = [.. Listed(DrainPicker.Ids).Select(x => fight.Rule(x.Spell, x.Level, DrainPicker.RowOf(x.Spell.Id)))];
         fight.Presses = [.. Listed(BuffStatMods.StaminaToMana.Select(r => r.Id)).Select(x => fight.Rule(x.Spell, x.Level, BuffStatMods.StaminaToMana[x.Level - 1]))];
         fight.HealSelf = Listed(VitalsMeans.HealSelf).Select(x => fight.Rule(x.Spell, x.Level)).LastOrDefault(s => s.CastChance >= BuffOptions.DefaultCastChance);
+        fight.Revitalizes = [.. Listed(VitalsMeans.RevitalizeSelf).Where(x => BuffStatMods.BoostOf(x.Spell.Id) is not null).Select(x => (Spell: fight.Rule(x.Spell, x.Level), Row: BuffStatMods.BoostOf(x.Spell.Id)!.Value)).Where(r => r.Spell.CastChance >= BuffOptions.DefaultCastChance)];
         var book = known.Select(id => new Spell(id)).Where(s => !s.NotFound && s.School == MagicSchool.LifeMagic).OrderBy(s => s.Power).ToList();
         fight.StaminaDrain = book.Where(s => s.MetaSpellType == SpellType.Transfer && !s.IsSelfTargeted && s.Source == PropertyAttribute2nd.Stamina && s.Destination == PropertyAttribute2nd.Stamina
             && s.TransferFlags.HasFlag(TransferFlags.TargetSource) && s.TransferFlags.HasFlag(TransferFlags.CasterDestination)).Select(s => fight.Rule(s)).LastOrDefault(s => s.CastChance >= BuffOptions.DefaultCastChance);
@@ -121,7 +128,7 @@ internal sealed class HerFight
         var tried = Tried;
         string Of(FightSpell s) => string.Create(CultureInfo.InvariantCulture, $"{s.Name}{(tried.Contains(s.Id) ? " *" : string.Empty)} ({s.CastChance:P0}, {s.Seconds:0.00} s, base mana {s.BaseMana})");
         return string.Create(CultureInfo.InvariantCulture,
-            $"Heal Self: {(HealSelf is null ? "none at a cast chance of " + BuffOptions.DefaultCastChance.ToString("P0", CultureInfo.InvariantCulture) : Of(HealSelf))}; Drain Health Other: {(HealthDrains.Count == 0 ? "none" : string.Join(", ", HealthDrains.Select(Of)))}; Stamina to Mana: {(Presses.Count == 0 ? "none" : string.Join(", ", Presses.Select(Of)))}; Drain Stamina Other: {(StaminaDrain is null ? "none" : Of(StaminaDrain))}; Mana Conversion {ManaConversion}; regeneration a second health {Regen.Health:0.00}, stamina {Regen.Stamina:0.00}, mana {Regen.Mana:0.00}");
+            $"Heal Self: {(HealSelf is null ? "none at a cast chance of " + BuffOptions.DefaultCastChance.ToString("P0", CultureInfo.InvariantCulture) : Of(HealSelf))}; Drain Health Other: {(HealthDrains.Count == 0 ? "none" : string.Join(", ", HealthDrains.Select(Of)))}; Stamina to Mana: {(Presses.Count == 0 ? "none" : string.Join(", ", Presses.Select(Of)))}; Drain Stamina Other: {(StaminaDrain is null ? "none" : Of(StaminaDrain))}; Revitalize Self (prices the stamina, not cast): {(Revitalizes.Count == 0 ? "none" : string.Join(", ", Revitalizes.Select(r => Of(r.Spell))))}; Mana Conversion {ManaConversion}; regeneration a second health {Regen.Health:0.00}, stamina {Regen.Stamina:0.00}, mana {Regen.Mana:0.00}");
     }
 }
 
@@ -158,7 +165,7 @@ internal sealed class FoeFight
         var seconds = strike.CastSeconds + her.Overhead;
         var bolt = new FightSpell(strike.Spell.Id, strike.Spell.Name, (int)strike.Spell.Level, strike.Spell.BaseMana, strike.Spell.Power, seconds, strike.CastChance, default);
         var rules = new FoeKind(monster.Name, monster.Health.MaxValue, monster.Stamina.MaxValue, blows.DamagePerSecond, bolt, strike.MeanLanded, plain.Max() - plain.Min(), strike.CastChance * strike.LandChance,
-            seconds > 0 ? strike.MeanPerCast * strike.CastChance / seconds : 0, 1 - resist, monster.GetResistanceMod(ResistanceType.HealthDrain));
+            seconds > 0 ? strike.MeanPerCast * strike.CastChance / seconds : 0, 1 - resist, monster.GetResistanceMod(ResistanceType.HealthDrain), monster.GetResistanceMod(ResistanceType.StaminaDrain));
         return new FoeFight { Monster = monster, Rules = rules, Strike = strike, Log = BlowLog.Of(blows), HealthPerTick = Commands.RegenPerTick(monster), StaminaPerTick = PerTick(monster, monster.Stamina) };
     }
 
@@ -311,7 +318,8 @@ internal static class InFight
     /// <summary>What the fights do not play, said under every table of them.</summary>
     public const string Gaps =
         "not played: the finishing bolt over the emergency's heal (FightScenario.Emergency.cs FinishStep: one attacker, about to die; TODO(fight-sim-finishing-bolt)), the drain rule behind an emergency set aside after five casts "
-        + "that did not land, health and mana potions, the way out's mana reserve and the leave, the buffs' upkeep, the components' level floor, Revitalize (the climber's policy never casts it), walking and arrival "
+        + "that did not land, health and mana potions, the way out's mana reserve and the leave, the buffs' upkeep, the components' level floor, the refill's Revitalize Self (the live fight casts it between bolts outside the "
+        + "vitals policy, ManaOrder's refill at --fight-stamina-full; here it only prices the stamina a press takes: VitalsPolicy.RefillPrice), walking and arrival "
         + "(every creature attacks from the first second)";
 
     /// <summary>Plays <paramref name="fights"/> fights of <paramref name="pack"/> on her and sums them up. Her vitals and the creatures' are put back afterwards.</summary>
@@ -366,6 +374,7 @@ internal static class InFight
             HealthDrains = her.HealthDrains,
             Presses = her.Presses,
             StaminaDrain = her.StaminaDrain,
+            Revitalizes = her.Revitalizes,
             Foes = [.. pack.Select(p => new Foe(p.Rules))],
         };
         var foes = view.Foes;

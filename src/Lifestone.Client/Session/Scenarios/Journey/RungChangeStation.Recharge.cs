@@ -200,8 +200,8 @@ public sealed partial class RungChangeStation
             NoteWork(mana, stamina, always: true);
             for (; ;)
             {
-                // check before each step: an attack (heard in reach, or the health falling) is fought back first
-                if ((_rechargeAttack ?? AttackNow()) is { } attack)
+                // check before each step: an attack (heard in reach, or the health falling) is fought back first; M6 the dance before running on (rule c): in the walk's dance, chip hits the race holds from beyond melee are no attack
+                if ((_rechargeAttack ?? AttackNow(dance is not null)) is { } attack)
                 {
                     _rechargeAttack = null;
                     if (!double.IsNaN(stretchAt))
@@ -606,12 +606,32 @@ public sealed partial class RungChangeStation
 
         private static string Seconds(double s) => double.IsInfinity(s) ? "never" : s.ToString("0", CultureInfo.InvariantCulture);
 
-        /// <summary>An attack now, in words: an attacker heard in reach (the walk's rule), or the health fallen since the last read (a hit from out of reach is still a hit); null when neither.</summary>
-        private string? AttackNow()
+        /// <summary>
+        /// An attack now, in words: an attacker heard in reach (the walk's rule), or the health fallen since the last read (a hit from out of reach is still a hit); null when neither. M6 the dance before running on (rule c, the owner,
+        /// 2026-11-21; docs/session.md section 123): in the walk's dance (<paramref name="dance"/>) the dance's own gate decides (<see cref="TravelLeg.DanceGate"/>): an attacker beyond melee reach whose hits the vitals guard's race holds,
+        /// or a fall the race holds, does not stop the dance (said once each time the reading changes); one within melee reach, or a race that is not held, is an attack, fought back as before.
+        /// </summary>
+        /// <param name="dance">True in the walk's dance.</param>
+        private string? AttackNow(bool dance = false)
         {
+            var c = CultureInfo.InvariantCulture;
             if (AttackerOnHer(out var guid, out var name, out var metres))
             {
-                return string.Create(CultureInfo.InvariantCulture, $"'{name}' 0x{guid:X8} attacked her {HeardAgo(name)} and stands {metres:0.0} m away");
+                var attack = string.Create(c, $"'{name}' 0x{guid:X8} attacked her {HeardAgo(name)} and stands {metres:0.0} m away");
+                if (!dance)
+                {
+                    return attack;
+                }
+
+                var gate = DanceGate();
+                if (!gate.Open)
+                {
+                    _danceHeldSaid = null;
+                    return gate.UnderFire ? $"{attack} ({gate.Why})" : attack;
+                }
+
+                HeldInDance(string.Create(c, $"'{name}' 0x{guid:X8}"), $"{gate.Who}; {gate.Why}");
+                return null;
             }
 
             if (!S.State.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxHealth, out var health, out _))
@@ -621,13 +641,40 @@ public sealed partial class RungChangeStation
 
             if (health < _rechargeHealth)
             {
-                var fell = string.Create(CultureInfo.InvariantCulture, $"the health fell from {_rechargeHealth} to {health}");
+                var fell = string.Create(c, $"the health fell from {_rechargeHealth} to {health}");
                 _rechargeHealth = health;
+                if (dance && RaceHeld(out var race))
+                {
+                    HeldInDance("a fall", $"{fell}; {race}");
+                    return null;
+                }
+
+                _danceHeldSaid = null;
                 return fell;
             }
 
             _rechargeHealth = health;
             return null;
+        }
+
+        /// <summary>M6 the dance before running on (rule c): what the dance last said it dances on through (an attacker, or a fall), so the line comes once each time it changes.</summary>
+        private string? _danceHeldSaid;
+
+        /// <summary>M6 the dance before running on (rule c): the line that the dance goes on under fire the race holds, once each time <paramref name="what"/> changes; the health's baseline moves with it.</summary>
+        private void HeldInDance(string what, string words)
+        {
+            if (S.State.Self.Qualities.TryGetVitalLevels(MageTemplate.MaxHealth, out var health, out _))
+            {
+                _rechargeHealth = health; // the hits the race holds are not counted again as a fall
+            }
+
+            if (string.Equals(_danceHeldSaid, what, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _danceHeldSaid = what;
+            Log($"walk_dance: under fire, the dance goes on (the dance before running on: a dance is not a fight, D137): {words}; health {HealthWord()}");
         }
 
         /// <summary>A rest stretch's line: the posture (lying only when the server's motion shows it, M6 7 AO), the seconds and the rates reached.</summary>

@@ -22,6 +22,12 @@ public sealed partial class FightScenarioTests
     private static void MeleeHit(Rig r, string name = "Virindi") =>
         r.R.Server((p, s) => AceM3Writers.DefenderNotification(p, s, name, 4, 0.1, 12, 4, false, 0));
 
+    /// <summary>
+    /// M6 fight targeting (m6-blow-unpinned): an attack a creature makes from range, as ACE writes it to its target: a war spell's damage line (<c>SpellProjectile.cs</c> 810-845). A melee notice names a name alone and is pinned only on a
+    /// creature that can have struck her (a swing order, melee reach, or the only one of the name), so a test whose attackers stand off her uses this.
+    /// </summary>
+    private static void SpellAttack(Rig r, string name = "Virindi") => r.R.Raw(AceWireWriters.ServerMessage($"{name} scorches you for 12 points with Flame Bolt.", 7));
+
     private static void Evade(Rig r, string name = "Virindi") =>
         r.R.Server((p, s) => AceM3Writers.EvasionDefenderNotification(p, s, name));
 

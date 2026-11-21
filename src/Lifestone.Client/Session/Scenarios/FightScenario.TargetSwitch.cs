@@ -11,14 +11,13 @@ namespace Lifestone.Client.Session.Scenarios;
 /// <summary>
 /// M6 14 tactics (live ladder56 2026-11-17 08:33:02.349 UTC): the self-defence switch weighs the target she is on against the creature that attacked her (<see cref="TargetSwitch"/>), by each one's health left over her damage
 /// a second on its kind and each one's damage a second on her, the losing race's own per-kind read (<see cref="KindIncoming"/> over a <see cref="HostileWatch"/> of the fight's own, the derived rate from the world database's
-/// attacks at ACE's attack timing, <see cref="AttackTimes"/>). The current target is weighed only while it can still be cast at (alive, not doomed by bolts in flight, in range with a clear line, not dropped by the shot rule);
-/// otherwise the attacker is taken as before. Each decision is logged when the pair or the answer changes.
+/// attacks at ACE's attack timing, <see cref="AttackTimes"/>). M6 one target at a time (the owner, 2026-11-21; <c>FightScenario.OneTarget.cs</c>, docs/session.md section 124): the weighing no longer takes her off a target
+/// she holds; it orders the attackers when she has none to hold (<see cref="TargetSwitch.KillOrder"/>, the fight simulator's own fold), and beside a keep it is logged report-only.
 /// </summary>
 public sealed partial class FightScenario
 {
     private HostileWatch? _threatWatch;
     private LiveFightLine? _threatLine;
-    private (uint Current, uint Attacker, bool Keep) _switchLogged;
 
     /// <summary>
     /// M6 14 tactics: the creatures' attack timings the target switch's derived rates read (<see cref="CreatureAttackTimes.For"/> of the session's dats, as the vitals guard's); <see cref="CreatureAttackTimes.None"/> (the default)
@@ -26,10 +25,10 @@ public sealed partial class FightScenario
     /// </summary>
     public CreatureAttackTimes AttackTimes { get; init; } = CreatureAttackTimes.None;
 
-    /// <summary>The target switches weighed (report-only).</summary>
+    /// <summary>The weighings logged beside a keep of the one-target rule, one a pair (report-only).</summary>
     public int SwitchesWeighed { get; private set; }
 
-    /// <summary>The weighings that kept the current target (report-only).</summary>
+    /// <summary>The weighings that would have kept the current target too (report-only).</summary>
     public int SwitchesKept { get; private set; }
 
     private void SubscribeThreats(IGameSessionView session) => _threatWatch ??= new HostileWatch(session, _ground, 0);
@@ -38,35 +37,6 @@ public sealed partial class FightScenario
     {
         _threatWatch?.Dispose();
         _threatWatch = null;
-    }
-
-    /// <summary>
-    /// True when the current target stays the target over <paramref name="attacker"/>, the self-defence pick: the current one is alive, castable from here (range, line, no shot drop), not left to the bolts in flight
-    /// (<see cref="_pickExcluded"/> after <c>ExcludeDoomed</c>), and finishing it first costs her no more health (<see cref="TargetSwitch.Decide"/>).
-    /// </summary>
-    private bool KeepsCurrent(IGameSessionView session, double clock, in CellFrame here, uint attacker)
-    {
-        var current = _target;
-        var objects = session.State.Objects;
-        if (current == 0 || current == attacker || _killed.Contains(current) || TargetGone(objects, current) || _pickExcluded.Contains(current) || Shots.IsDropped(current, clock)
-            || !objects.TryGet(current, out var c) || StandsAt(session, c) is not { } at || at.ToGlobal().DistanceTo(here.ToGlobal()) > _range
-            || !(_options.IgnoreLine || LineIsClear(session, in here, current)) || !objects.TryGet(attacker, out var a))
-        {
-            return false;
-        }
-
-        var currentSide = SideOf(session, clock, c);
-        var attackerSide = SideOf(session, clock, a);
-        var answer = TargetSwitch.Decide(in currentSide, in attackerSide);
-        SwitchesWeighed++;
-        SwitchesKept += answer.Keep ? 1 : 0;
-        if (_switchLogged != (current, attacker, answer.Keep))
-        {
-            _switchLogged = (current, attacker, answer.Keep);
-            _log.Info(LogCategory, answer.Line + " (M6 14 tactics)");
-        }
-
-        return answer.Keep;
     }
 
     /// <summary>One creature for the rule: its health left (the live model), her damage a second on it (her hardest bolt line on its kind, at the chance her War Magic lands against its Magic Defense, over the bolt's seconds), its threat.</summary>

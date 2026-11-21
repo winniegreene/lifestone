@@ -131,6 +131,9 @@ public sealed partial class FightScenarioTests
         var from = spells.Count;
         if (hits)
         {
+            // M6 fight targeting (m6-blow-unpinned): its swing order names it before its blow, as ACE sends every melee swing (Monster_Melee.cs DoSwingMotion); a blow notice of "Tusker Slave" alone, with two of the name
+            // 12 and 20 m off by the rig's records, names neither of them.
+            r.R.H.R.Reducer.OnUpdateMotion(r.R.H.R.Context, new UpdateMotionMsg(extra, 1, 2, 1, false, new Lifestone.Net.Types.ServerMotionState { MovementType = Lifestone.Net.Types.MovementType.Interpreted, Stance = 0x003C, Forward = 0x0062, StickyGuid = Lifestone.Client.Tests.Session.ActionHarness.Amy }));
             Hit(r, scenario, 3, 0);
         }
 

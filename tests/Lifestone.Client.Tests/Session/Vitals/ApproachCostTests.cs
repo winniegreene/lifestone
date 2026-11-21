@@ -77,7 +77,7 @@ public sealed class ApproachCostTests(ITestOutputHelper output)
         Assert.Contains("; a held caster x", change, StringComparison.Ordinal);
         Assert.Contains("; another route a run of ", change, StringComparison.Ordinal);
 
-        // the ladder's way out at 65, the trial switch at 62 and the corpse trip read one verdict
+        // the ladder's way out at 65 and the corpse trip read one verdict; the trial switch at 62 is refused before it (M6 holding at 60, the owner's decision of 2026-11-20: from 60 the Holding is her own rung, never a trial)
         var verdict = Survivable(Holding) with { Cost = cost with { Change = change } };
         Assert.Equal((true, ApproachCost.CostlyPrefix), (verdict.Holds, verdict.Kind));
         var ladder = LadderLoader.WarMage;
@@ -86,7 +86,7 @@ public sealed class ApproachCostTests(ITestOutputHelper output)
         Assert.Contains("approach costly (mana): the crossing would force a recall before the portal", own.Why, StringComparison.Ordinal);
         var tried = RungOwner.Decide(ladder, Ask(62, Holding.Key) with { Trial = new LadderTrial(Holding.Key), Approach = key => key == Holding.Key ? verdict : null });
         Assert.False(tried.Trial!.Steers);
-        Assert.StartsWith("approach costly (mana): ", tried.Trial.Refused, StringComparison.Ordinal);
+        Assert.StartsWith("not-later: ", tried.Trial.Refused, StringComparison.Ordinal);
         var corpse = CorpseApproachRule.Decide(verdict, 62, 30);
         Assert.Equal((false, ApproachCost.CostlyPrefix), (corpse.Walk, corpse.Reason));
     }

@@ -66,9 +66,9 @@ public sealed class AbodeGateTests
 
     [Theory]
     [InlineData(42, "quarters", 41)] // the Quarters' gate shut: held in the Abode
-    [InlineData(64, "quarters", 41)]
-    [InlineData(65, "holding", 64)] // the Holding's shut: held in the Quarters
-    [InlineData(126, "holding", 64)]
+    [InlineData(59, "quarters", 41)]
+    [InlineData(60, "holding", 59)] // the Holding's shut: held in the Quarters (M6 holding at 60, the owner's decision of 2026-11-20)
+    [InlineData(126, "holding", 59)]
     public void Past_the_Abode_each_rung_has_its_gate_and_a_shut_one_holds_her_on_the_rung_before_it(int level, string rung, int held)
     {
         Assert.Equal(rung, L.RungFor(level).Key);

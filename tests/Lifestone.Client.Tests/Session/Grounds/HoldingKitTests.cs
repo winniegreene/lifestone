@@ -113,10 +113,11 @@ public sealed class HoldingKitTests(DatSetFixture fixture, ITestOutputHelper out
     }
 
     [Fact]
-    public void The_plan_names_VI_from_65_and_VII_at_the_projections_crossing_not_the_dens_100()
+    public void The_plan_names_VI_from_60_and_VII_at_the_projections_crossing_not_the_dens_100()
     {
         var ground = Holding;
-        Assert.Equal(new SpellPlanRow(65, 123, "Flame Bolt", 6), ground.PlanFor(65));
+        Assert.Equal(new SpellPlanRow(60, 123, "Flame Bolt", 6), ground.PlanFor(60)); // M6 holding at 60 (the owner's decision, 2026-11-20): the rung, and so its first row, starts at 60
+        Assert.Null(ground.PlanFor(59));
         Assert.Equal(6, ground.PlanFor(100)!.SpellLevel); // the den's "VII from 100" is gone
         Assert.Equal(new SpellPlanRow(124, 126, "Flame Bolt", 7), ground.PlanFor(124));
         Assert.DoesNotContain("TODO(m6-holding-spell-vii-crossing)", ground.Sources["spell_plan"], StringComparison.Ordinal);

@@ -172,15 +172,17 @@ public sealed class LoreSpendTests(ITestOutputHelper output)
         Assert.True(review.LoreGain > 0, review.Why);
         Assert.Contains(string.Create(CultureInfo.InvariantCulture, $"with Arcane Lore {lore + 10} (its ItemDifficulty) the wear pick would wear it"), review.Why, StringComparison.Ordinal);
 
-        // The spend buys the ten ranks first (ten trained ranks: 15 x 10 x 10 = 1,500), each raise named for the ring, and nothing else: the plan was reached.
+        // The spend buys the ten ranks first (ten trained ranks: 15 x 10 x 10 = 1,500), each raise named for the ring, before the shares. M6 holding at 60 (the owner's decision, 2026-11-20): level 62 is the Holding's rung now, whose
+        // health is none on purpose, and the shares then spend what is left (one Max Mana rank, 55 -> 56 for 1,332); on the Quarters' rung, the band before, the spend stopped after the lore.
         var rule = Spend(h, server, () => Facts(h, ring));
         Assert.Null(rule.Failure);
         var decision = rule.LoreDecision!;
         Assert.Equal(RingGuid, decision.Chosen!.Guid);
         Assert.Equal(new StatTarget(S, MageTemplate.ArcaneLore, "Arcane Lore", false, 10), decision.Target);
         Assert.Equal(1_500, decision.Cost);
-        Assert.Equal(Enumerable.Repeat((S, MageTemplate.ArcaneLore), 10), server.Raised.Select(r => (r.Kind, r.Id)));
-        Assert.Equal(1_500u, (uint)server.Raised.Sum(r => (long)r.Xp));
+        Assert.Equal(Enumerable.Repeat((S, MageTemplate.ArcaneLore), 10), server.Raised.Take(10).Select(r => (r.Kind, r.Id)));
+        Assert.Equal(1_500u, (uint)server.Raised.Take(10).Sum(r => (long)r.Xp));
+        Assert.DoesNotContain(server.Raised.Skip(10), r => r.Kind == S && r.Id == MageTemplate.ArcaneLore);
         Assert.Equal(lore + 10, Lore(h));
         var line = Assert.Single(h.Log.Lines, l => l.Contains("xp: lore: buy first: 'Ring' 0x80007DBA: ItemDifficulty ", StringComparison.Ordinal));
         Assert.Contains(string.Create(CultureInfo.InvariantCulture, $"ItemDifficulty {lore + 10} against her Arcane Lore {lore}: 10 point(s), Arcane Lore ranks 0 -> 10 for 1,500 (0.2 h of her play at 9,000 an hour (the test's rate)); the wear pick would wear it at that lore, gain "), line, StringComparison.Ordinal);

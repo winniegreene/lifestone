@@ -955,7 +955,7 @@ public sealed partial class ResupplyStationTests
     }
 
     [Fact]
-    public void M6_sprint_an_item_ace_marks_unsellable_is_appraised_before_the_sale_and_never_offered()
+    public void M6_sprint_an_item_ace_marks_unsellable_is_appraised_before_the_sale_never_offered_and_dropped_at_the_home()
     {
         // Runs 1-5 (2026-11-19): "The Health Draughts is unsellable." and the like, 19 times in run 5: weenies 2457, 377, 379 and 2460 carry IsSellable 0 (world weenie_properties_bool type 69) and ACE refuses them
         // (Player_Commerce.cs 268-272 @95ef426d); they reached the sale as the pack budget's surplus drinks. The rule is the class's, whatever offers it: the appraisal carries the bool, so the sale looks first, the item stays
@@ -975,7 +975,10 @@ public sealed partial class ResupplyStationTests
         Assert.True(home.Logged("m6-sale-appraise"));
         Assert.Equal(1, run.Sold);
         Assert.Equal(["unsellable"], run.Refusals); // the client's own check before the send; no 02EB from the vendor
-        Assert.True(home.Vendor.State.Self.Inventory.Contains(charm));
+        Assert.False(home.Vendor.State.Self.Inventory.Contains(charm)); // M6 sprint (the owner, 2026-11-20: drop anything unsellable once it has no value): dropped on this trip, not after a second refusal
+        Assert.Equal(1, run.DroppedItems);
+        Assert.Single(home.Vendor.H.Net.Of(FakeSendKind.DropItem));
+        Assert.True(home.Logged("is marked unsellable (IsSellable=0) and no rule keeps it, so it has no value to her: dropped at the home"));
         Assert.False(home.Vendor.State.Self.Inventory.Contains(shirt));
         Assert.False(memory.SellableClass[9_998]);
         Assert.True(memory.SellableClass[130]);

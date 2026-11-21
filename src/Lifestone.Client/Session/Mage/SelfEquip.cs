@@ -1061,7 +1061,7 @@ public sealed class SelfEquipJudge
         // would take the whole hauberk off and leave three parts with no armour, and ACE reads a hit's armour by the part struck (Monster_Melee.cs:409-419 @95ef426d). A worn piece of armour level 0 (the Faran Robe with Hood) armours nothing,
         // so its replacement is judged as before.
         var bared = piece.Coverage & GearCoverage.Body & ~candidate.Coverage;
-        if (bared != 0 && piece.Appraisal.ArmorLevel is > 0 and var wornLevel)
+        if (bared != 0 && ArmourBase.Level(piece.Appraisal) is > 0 and var wornLevel)
         {
             return new SelfEquipChoice(SelfEquipKind.None, candidate.Guid, candidate.Name, 0, 0, string.Create(CultureInfo.InvariantCulture, $"better than the worn '{piece.Name}' 0x{piece.Guid:X8} where it covers, but that piece armours 0x{bared:X} more of the body (armour level {wornLevel}) which this one does not cover: not replaced (it would leave those parts bare); {score}"));
         }
@@ -1193,7 +1193,7 @@ public sealed class SelfEquipJudge
         static bool Better(GearCandidate a, GearCandidate b) => ArmorOf(a) != ArmorOf(b) ? ArmorOf(a) > ArmorOf(b) : a.Burden != b.Burden ? a.Burden < b.Burden : a.Guid < b.Guid;
     }
 
-    private static int ArmorOf(GearCandidate c) => c.Appraisal?.ArmorLevel ?? 0;
+    private static int ArmorOf(GearCandidate c) => c.Appraisal is { } a ? ArmourBase.Level(a) : 0;
 
     /// <summary>The pieces the mage wears and wields now, with their coverage and appraisals.</summary>
     public static List<WornPiece> Worn(GameState state)

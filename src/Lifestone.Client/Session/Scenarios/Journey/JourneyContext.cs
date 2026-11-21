@@ -376,6 +376,12 @@ public sealed class JourneyFacts
     public bool EverySpellVilla { get; set; }
 
     /// <summary>
+    /// M6 holding at 60 (the owner, 2026-11-20: send her): true when the approach checks only report (<c>--autopilot-rung-holds=report</c>): the travel leg measures a crossing and logs it, but never gives it up
+    /// (<see cref="AbandonApproach"/>) or recalls her on its projection. The autopilot sets it; a plain journey keeps it off.
+    /// </summary>
+    public bool ApproachReportOnly { get; set; }
+
+    /// <summary>
     /// M6 item 14 (the den run, the owner's order of 2026-11-13: sell first and turn the coin into notes before the run): true while an order wants the trip to leave no coin above nothing. The trip's purse then buys notes down to a
     /// floor of 0 (a death takes half the coin and no trade note: ACE Player_Death.cs:484-502 @95ef426d, the notes are Bonded), and makes no town trip for scrolls (a scroll bought now changes a note back into loose coin).
     /// </summary>
@@ -420,6 +426,14 @@ public sealed class JourneyFacts
     /// facts are not held. The leg sets it at each target and clears it at the fight-back's end; the autopilot's vitals guard offers Drain Health Other on it.
     /// </summary>
     public Vitals.KnownTargetHealth? FightBackTarget { get; set; }
+
+    /// <summary>
+    /// M6 the dance before running on (the owner, 2026-11-21: on a run she refills her stamina and mana before she runs on; docs/session.md section 123): the vitals guard's own race now
+    /// (<see cref="Vitals.LosingRace"/>, both sides: the heal she can sustain against the incoming, her health's trend, the kill side), asked by a travel leg's dance gate (<c>TravelLeg.DanceGate</c>) for the session and the clock; null
+    /// when the race is not read (no guard is built yet, the state is not one a travel leg runs in, or the guard cannot read her health, mana or Life Magic). The autopilot sets it; a plain journey keeps it off, and the leg's lull rule
+    /// then stands alone (no dance while any attacker is on her).
+    /// </summary>
+    public Func<IGameSessionView, double, (Vitals.LosingRaceInput Input, Vitals.LosingRaceAnswer Answer)?>? Race { get; set; }
 
     private readonly Dictionary<string, string> _approachAbandoned = new(StringComparer.Ordinal);
 

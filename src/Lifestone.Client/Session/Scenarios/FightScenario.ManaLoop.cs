@@ -295,6 +295,12 @@ public sealed partial class FightScenario
                 continue;
             }
 
+            // M6 undrainable fills: a kind that lets no stamina drain through (DrainResist.StaminaOf 0: an Armored Tusker's ResistStaminaDrain) is no source; the measured set-aside above learned it only after one wasted cast a creature
+            if (DrainResist.StaminaOf(o.Weenie.WeenieClassId) <= 0)
+            {
+                continue;
+            }
+
             if (!_staminaAskAt.TryGetValue(o.Guid, out var asked) || clock - asked >= StaminaAskSeconds)
             {
                 _staminaAskAt[o.Guid] = clock;

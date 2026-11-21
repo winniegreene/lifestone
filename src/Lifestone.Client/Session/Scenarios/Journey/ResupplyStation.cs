@@ -1688,7 +1688,8 @@ public sealed partial class ResupplyRun : ShopLeg
     /// Walks to the vendor and sets his guid when he is in the object table and may be opened. A vendor whose profile stop cell is his own (Thelnoth): known before the walk, the stop is at his use radius from where he stands (an object
     /// goal in his live cell); unknown, the walk goes to his own point and stops <see cref="ShopLeg.UnseenVendorReachMetres"/> short of it (his body stands there, D120) and, when he then appears out of reach (<see cref="ShopLeg.ReachOf"/>), once more to him. A vendor whose stop cell is a room in front of him
     /// (<see cref="GroundVendor.StopCell"/> is not his <see cref="GroundVendor.Cell"/>: Archmage Cindrue, Renald) and who is not live in some other cell: every walk is a point request to the stop cell and <see cref="GroundVendor.StopPoint"/>
-    /// (else his point), never an object goal, because an object goal that names an indoor cell arrives only in that room and within his range (<c>NavRunner.CheckArrival</c>), which a front room is not. There is no second walk: the room
+    /// (else his point), never an object goal, because an object goal that names an indoor cell arrives within his range only in that room or with nothing walling her off from him, or on a contact with him (<c>NavRunner.ObjectInReach</c>,
+    /// M6 sprint m6-vendor-reach), which a front room before his counter is not. There is no second walk: the room
     /// graph does not join the rooms behind that room (<c>TODO(room-steps)</c>), so he is taken as met when the walk ended and the object table holds him, and the open (the use) lets ACE's move-to walk the last metres.
     /// </summary>
     private IEnumerable<ActionHandle?> Meet(GroundVendor vendor, Action<uint> found)
@@ -1871,8 +1872,8 @@ public sealed partial class ResupplyRun : ShopLeg
             var wire = SellableOnWire(item, o);
             if (wire == false)
             {
-                Refuse("unsellable", Text($"{o.Name} is marked unsellable on the wire (IsSellable=0, by its appraisal or its class's): left in the pack, not offered (m6-sale-appraise)"));
-                NoteRefusal(item, o.Name, dropping);
+                Refuse("unsellable", Text($"{o.Name} is marked unsellable on the wire (IsSellable=0, by its appraisal or its class's): not offered (m6-sale-appraise)"));
+                NoteRefusal(item, o.Name, dropping, certain: true);
                 continue;
             }
 
@@ -1973,11 +1974,14 @@ public sealed partial class ResupplyRun : ShopLeg
     }
 
     /// <summary>
-    /// M5 7 G1 (edge audit item 2): counts one trip's refusal of an item (once a trip, whatever the vendors); the second trip's refusal puts it on the drop list, logged once and never offered again.
+    /// M5 7 G1 (edge audit item 2): counts one trip's refusal of an item (once a trip, whatever the vendors); the second trip's refusal puts it on the drop list, logged once and never offered again. M6 sprint (the owner, 2026-11-20:
+    /// drop anything unsellable once it has no value; run 6, 03:37 UTC: five powders and the surplus Potions of Healing were refused and stayed in the pack): a <paramref name="certain"/> refusal (IsSellable 0 on the wire, which no
+    /// vendor and no later trip changes) puts the item on this trip's drop list at once; a drink she uses stays kept unless the pack budget put it on the sale over its cut keep (<see cref="SurplusDrinks"/>: what she does not drink
+    /// between trips), which is then dropped the same way.
     /// </summary>
-    private void NoteRefusal(uint guid, string name, List<(uint Guid, string Name)> dropping)
+    private void NoteRefusal(uint guid, string name, List<(uint Guid, string Name)> dropping, bool certain = false)
     {
-        if (S.State.Objects.TryGet(guid, out var held) && IsUsableConsumable(held.Weenie.WeenieClassId))
+        if (S.State.Objects.TryGet(guid, out var held) && IsUsableConsumable(held.Weenie.WeenieClassId) && !(certain && _drinkSales.Contains(guid)))
         {
             if (_refusedThisTrip.Add(guid))
             {
@@ -1994,7 +1998,7 @@ public sealed partial class ResupplyRun : ShopLeg
 
         var n = _memory.Refused.GetValueOrDefault(guid) + 1;
         _memory.Refused[guid] = n;
-        if (n >= SaleMemory.DropAfter && _memory.Dropped.Add(guid))
+        if ((certain || n >= SaleMemory.DropAfter) && _memory.Dropped.Add(guid))
         {
             dropping.Add((guid, name));
         }
@@ -2016,7 +2020,10 @@ public sealed partial class ResupplyRun : ShopLeg
             var drop = S.Actions.Drop(guid, ActionSource.Automation);
             yield return drop;
             DroppedItems++;
-            Log(Text($"sale: {name} (0x{guid:X8}) was refused by a vendor on {SaleMemory.DropAfter} trips: dropped at the home, never offered again: {Describe(drop)}"));
+            var why = _memory.Refused.GetValueOrDefault(guid) >= SaleMemory.DropAfter
+                ? Text($"was refused by a vendor on {SaleMemory.DropAfter} trips")
+                : "is marked unsellable (IsSellable=0) and no rule keeps it, so it has no value to her";
+            Log(Text($"sale: {name} (0x{guid:X8}) {why}: dropped at the home, never offered again: {Describe(drop)}"));
         }
 
         dropping.Clear();

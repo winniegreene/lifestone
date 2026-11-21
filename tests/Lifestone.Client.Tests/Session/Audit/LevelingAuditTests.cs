@@ -93,13 +93,14 @@ public sealed class LevelingAuditTests
     {
         var ladder = LadderLoader.WarMage;
 
-        var quarters = Lifestone.Client.Session.Mage.ClimberHealthRule.NeedAt(ladder, 64)!;
+        // M6 holding at 60 (the owner's decision, 2026-11-20): the Holding's band starts at 60, so the levels read are 59 and 60 (64 and 65 before)
+        var quarters = Lifestone.Client.Session.Mage.ClimberHealthRule.NeedAt(ladder, 59)!;
         Assert.Equal(("quarters", 204), (quarters.Rung, quarters.Want));
-        Assert.Null(ladder.RungFor(65).Health);
-        Assert.Null(Lifestone.Client.Session.Mage.ClimberHealthRule.NeedAt(ladder, 65)); // the level's rung, the Holding, has none on purpose
+        Assert.Null(ladder.RungFor(60).Health);
+        Assert.Null(Lifestone.Client.Session.Mage.ClimberHealthRule.NeedAt(ladder, 60)); // the level's rung, the Holding, has none on purpose
         var hunted = ladder.Rungs.Single(r => r.Key == "quarters"); // under the hold she hunts the Quarters
         Assert.Equal(("quarters", 204), (Lifestone.Client.Session.Mage.ClimberHealthRule.NeedFor(ladder, hunted)!.Rung, Lifestone.Client.Session.Mage.ClimberHealthRule.NeedFor(ladder, hunted)!.Want)); // fixed: the spend reads the hunted rung's want
-        Assert.Null(Lifestone.Client.Session.Mage.ClimberHealthRule.NeedFor(ladder, ladder.RungFor(65))); // on the Holding itself, still none
+        Assert.Null(Lifestone.Client.Session.Mage.ClimberHealthRule.NeedFor(ladder, ladder.RungFor(60))); // on the Holding itself, still none
     }
 
     /// <summary>
@@ -254,7 +255,9 @@ public sealed class LevelingAuditTests
     /// ... buy 51 for 30750"; over levels 6 to 10 she bought 79 scrolls for 70,300 pyreals, 28 of them (17,500) of these kinds. The stock
     /// (scrivener-stock.json) holds 89 such lines at each level I to VI: 89 x (1,000 + 5,000 + 10,000 + 50,000) = 5,874,000 pyreals from III
     /// to VI. Here: the run's level-9 trip on real stock rows, each line's school and powers as the spell table gives them (the I to VI
-    /// pattern 1, 50, 100, 150, 200, 250, pinned by EverySpellPlanTests).
+    /// pattern 1, 50, 100, 150, 200, 250, pinned by EverySpellPlanTests). M6 sprint (the owner, 2026-11-20: buy every spell she might cast, not
+    /// the ones that make a target or its armour weaker): the item debuff (Brittlemail) is no longer bought (EverySpellVerdict.NotCast); the
+    /// buffs for others and the weapon auras still are.
     /// </summary>
     [Fact]
     public void Audit_at_level_9_the_every_spell_rule_buys_buffs_for_others_and_weapon_auras()
@@ -290,9 +293,10 @@ public sealed class LevelingAuditTests
         foreach (var line in lines.Keys)
         {
             var pick = result.Picks.Single(p => p.Line == line);
-            Assert.Equal(Lifestone.Client.Session.Mage.EverySpellVerdict.Buy, pick.Verdict); // a fix: refused, no use to her
+            var expected = line == "Brittlemail" ? Lifestone.Client.Session.Mage.EverySpellVerdict.NotCast : Lifestone.Client.Session.Mage.EverySpellVerdict.Buy;
+            Assert.Equal(expected, pick.Verdict); // the buffs for others and the auras: a fix still open (refused, no use to her); the debuff: not bought since the owner's rule of 2026-11-20
         }
 
-        Assert.True(result.Spent >= 6 * 250); // each at its highest level at the bar (II or III here), from 250 to 1,000 a scroll at III
+        Assert.True(result.Spent >= 5 * 250); // each bought line at its highest level at the bar (II or III here), from 250 to 1,000 a scroll at III
     }
 }

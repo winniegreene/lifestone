@@ -105,9 +105,9 @@ public sealed class KeepAsideRule
     {
         ArgumentNullException.ThrowIfNull(spellName);
         var great = new List<string>();
-        if (appraisal is null || appraisal.IsNotFound || !NeedsAppraisal(itemType))
+        if (appraisal is null || appraisal.IsNotFound || !NeedsAppraisal(itemType) || DefenceSkillNeeded(appraisal) is not null)
         {
-            return great;
+            return great; // M6 safe load (the owner, 2026-11-20): a piece that needs a defence skill to wield keeps none of its great cantrips
         }
 
         foreach (var verdict in (judge ?? CantripJudge.Stateless).GreatOf(appraisal, spellName, Setting.Tiers))
@@ -120,6 +120,38 @@ public sealed class KeepAsideRule
 
         return great;
     }
+
+    /// <summary>
+    /// M6 safe load (the owner, 2026-11-20: the great-cantrip pieces that need Melee, Missile or Magic Defense are not kept): the first wield requirement the appraisal names on a defence skill (ACE's <c>WieldRequirement</c> Skill 1, RawSkill 2 or
+    /// Training 8 on the skill 6 Melee Defense, 7 Missile Defense or 15 Magic Defense: <c>CheckWieldRequirement</c>, Player_Inventory.cs @95ef426d), as "Magic Defense 245"; null when it names none. A mage trains none of the three past what
+    /// her buffs lift, and the live case (2026-11-20, a read-only SELECT of her inventory) was a Covenant Helm (Magic Defense 245 base) and Covenant Bracers (Missile Defense 245 base), 1,140 burden she could never wear.
+    /// </summary>
+    /// <param name="appraisal">The item's appraisal, or null.</param>
+    public static string? DefenceSkillNeeded(Appraisal? appraisal)
+    {
+        if (appraisal is null || appraisal.IsNotFound)
+        {
+            return null;
+        }
+
+        foreach (var r in appraisal.WieldRequirements)
+        {
+            if (r.Type is 1 or 2 or 8 && DefenceName(r.Skill) is { } name)
+            {
+                return string.Create(CultureInfo.InvariantCulture, $"{name} {r.Difficulty}");
+            }
+        }
+
+        return null;
+    }
+
+    private static string? DefenceName(int skill) => skill switch
+    {
+        6 => "Melee Defense",
+        7 => "Missile Defense",
+        15 => "Magic Defense",
+        _ => null,
+    };
 
     /// <summary>True when an item of this type could match (a caster, or a wearable or jewellery piece): only those are appraised for the rule.</summary>
     /// <param name="itemType">The item's ItemType.</param>

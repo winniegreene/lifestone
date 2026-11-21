@@ -132,6 +132,34 @@ public readonly record struct ManaOrderInput
 
     /// <summary>M6 7 AD: the dance's level is the one that nets the most (<see cref="ManaOrder.PressLevelOf"/>), not the highest that lands: the fight of a caster with no Mana Conversion, who pays each press's whole base, and the owner's ruling, 2026-11-08: pick by the sum: every press of the ladder's character at any Mana Conversion (<see cref="CharacterPolicy.ManaBySum"/>). The other callers leave it off and press their highest.</summary>
     public bool BestNetPress { get; init; }
+
+    /// <summary>
+    /// M6 stamina dance (<c>docs/session.md</c> section 121): the refill casts Revitalize Self only when the best level's whole roll fits the stamina she is missing, or when a press needs the stamina now
+    /// (<see cref="ManaOrder.RevitalizeLevelOf(ReadOnlySpan{RevitalizeLevel}, uint, uint, uint, uint, uint, out RefillFit)"/>); false: the highest payable level whenever the stamina is under the share, as before. Off by default:
+    /// a caller sets it only together with its hook's whole-roll test, or the two disagree and the bolt is never sent. The fight sets it in <c>FightScenario.ManaDecide</c>, and its hook before the bolt
+    /// (<c>FightScenario.BoltNeedsMana</c>) asks the same <see cref="ManaOrder.RevitalizeLevelOf(ReadOnlySpan{RevitalizeLevel}, uint, uint, uint, uint, uint, out RefillFit)"/> with the order's own reserve
+    /// (<see cref="ManaOrder.TargetOf"/>), the stamina, its maximum and D88's floor (closes <c>TODO(m6-stamina-dance-refill-hook)</c>).
+    /// </summary>
+    public bool RevitalizeWholeRoll { get; init; }
+}
+
+/// <summary>M6 stamina dance: why <see cref="ManaOrder.RevitalizeLevelOf(ReadOnlySpan{RevitalizeLevel}, uint, uint, uint, uint, uint, out RefillFit)"/> chose its level, or none.</summary>
+public enum RefillFit : byte
+{
+    /// <summary>No level is payable with the reserve in hand.</summary>
+    None,
+
+    /// <summary>The best level's top roll fits the stamina she is missing: its whole roll lands.</summary>
+    WholeRoll,
+
+    /// <summary>The stamina is under D88's floor (<see cref="ManaOrder.StaminaFloorOf"/>): the next press needs it now, whole roll or not.</summary>
+    PressNeedsIt,
+
+    /// <summary>The best level's top roll does not fit what she is missing and no press needs the stamina: the refill waits (no top-up into a nearly full bar).</summary>
+    Waits,
+
+    /// <summary>No payable level's top roll fits her bar at all: the highest payable, as before (named).</summary>
+    NoneFitsTheBar,
 }
 
 /// <summary>The decision (<see cref="ManaOrder.Decide"/>): the step, the dance's level, the targets and a fixed reason (no allocation).</summary>
@@ -158,7 +186,7 @@ public readonly record struct ManaDecision(ManaStep Step, int DanceIndex, uint T
 /// M6 7 AD: the dance needs no Mana Conversion (ACE only discounts the cost with it, <c>Creature_Magic.cs:41-44</c> @95ef426d). A mage with none pays each press's whole base, so the level is <see cref="BestNetLevel"/>, and the fight keeps one press in hand (<see cref="KeepPress"/>).
 /// The owner's order for the mage (M5 7 F5, D88: in the fight the mana may run down to nearly empty and the stamina is kept near full): with <see cref="ManaOrderInput.StaminaFullPercent"/> set, whenever the mana is at or
 /// over the target (the next bolt can be paid: after a transfer landed, and between kills) and the stamina is under that share, a Revitalize Self level the mana pays for with that bolt still paid
-/// (<see cref="RevitalizeLevelOf"/>, the highest), or, with no payable level at all, a Stamina Potion. The transfer still comes first, when the bolt cannot be paid.
+/// (<see cref="RevitalizeLevelOf(ReadOnlySpan{RevitalizeLevel}, uint, uint)"/>, the highest; M6 stamina dance: by whole rolls, <see cref="RevitalizeLevelOf(ReadOnlySpan{RevitalizeLevel}, uint, uint, uint, uint, uint, out RefillFit)"/>, when the caller asks), or, with no payable level at all, a Stamina Potion. The transfer still comes first, when the bolt cannot be paid.
 /// </summary>
 public static class ManaOrder
 {
@@ -459,21 +487,106 @@ public static class ManaOrder
         return -1;
     }
 
+    /// <summary>
+    /// M6 stamina dance (<c>docs/session.md</c> section 121; run 9, <c>cache/m6/sprint/run9/step3-levelup.log</c> 2026-11-20 19:51 to 2026-11-21 04:58 UTC: 101 of the fight's 204 Revitalize Self VI were cast from 80 to 90% of her stamina
+    /// and restored 51.0 each, of a roll of 80 to 160, <see cref="BuffStatMods.Revitalize"/>; ACE cuts a boost at the vital's maximum, <c>HandleCastSpell_Boost</c>, <c>WorldObject_Magic.cs</c> 474 @95ef426d): the refill's level by whole
+    /// rolls. The best level is the highest of <paramref name="levels"/> (lowest first) that the <paramref name="mana"/> pays with <paramref name="reserve"/> in hand and whose top roll (its boost row's <see cref="BoostRow.Max"/>) fits her
+    /// bar at all; it is cast when that top roll fits the stamina she is missing (<see cref="RefillFit.WholeRoll"/>), or when the stamina is under <paramref name="staminaFloor"/> (D88's floor, <see cref="StaminaFloorOf"/>: the next press
+    /// needs it now, <see cref="RefillFit.PressNeedsIt"/>); else it waits (-1, <see cref="RefillFit.Waits"/>). A lower level that fits sooner is not taken: it restores fewer points a second and a mana point (Revitalize Self I's roll is
+    /// 15 to 35 for 15 base mana, VI's 80 to 160 for 70). When no payable level's top roll fits her bar, or a level has no boost row, the highest payable goes as before (<see cref="RefillFit.NoneFitsTheBar"/>). Allocation-free.
+    /// </summary>
+    /// <param name="levels">The levels, lowest first.</param>
+    /// <param name="mana">The mana held.</param>
+    /// <param name="reserve">The mana kept in hand after it (the next bolt's).</param>
+    /// <param name="stamina">The stamina held.</param>
+    /// <param name="staminaMax">The stamina's maximum.</param>
+    /// <param name="staminaFloor">D88's stamina floor (0: none).</param>
+    /// <param name="fit">Why.</param>
+    public static int RevitalizeLevelOf(ReadOnlySpan<RevitalizeLevel> levels, uint mana, uint reserve, uint stamina, uint staminaMax, uint staminaFloor, out RefillFit fit)
+    {
+        var highest = RevitalizeLevelOf(levels, mana, reserve);
+        if (highest < 0)
+        {
+            fit = RefillFit.None;
+            return -1;
+        }
+
+        var best = -1;
+        var top = 0;
+        for (var i = highest; i >= 0; i--)
+        {
+            if (mana < levels[i].BaseMana + (ulong)reserve)
+            {
+                continue;
+            }
+
+            if (BuffStatMods.BoostOf(levels[i].SpellId) is not { } row)
+            {
+                fit = RefillFit.NoneFitsTheBar;
+                return highest;
+            }
+
+            if (row.Max <= staminaMax)
+            {
+                (best, top) = (i, row.Max);
+                break;
+            }
+        }
+
+        if (best < 0)
+        {
+            fit = RefillFit.NoneFitsTheBar;
+            return highest;
+        }
+
+        var missing = staminaMax > stamina ? staminaMax - stamina : 0;
+        if (top <= missing)
+        {
+            fit = RefillFit.WholeRoll;
+            return best;
+        }
+
+        if (staminaFloor > 0 && stamina < staminaFloor)
+        {
+            fit = RefillFit.PressNeedsIt;
+            return best;
+        }
+
+        fit = RefillFit.Waits;
+        return -1;
+    }
+
+    /// <summary>
+    /// The mana <see cref="Decide"/> works toward for <paramref name="need"/>: the try floor, or the ceiling once the tries are spent or with no floor. The refill (D88) keeps it in hand. M6 stamina dance: a hook that asks
+    /// whether the order will refill (the fight's before the bolt) asks <see cref="RevitalizeLevelOf(ReadOnlySpan{RevitalizeLevel}, uint, uint, uint, uint, uint, out RefillFit)"/> with this reserve, because that test is not
+    /// monotone in its reserve: a larger one can leave only a low level whose top roll fits, while the order's own finds a higher level whose roll does not, and waits.
+    /// </summary>
+    /// <param name="need">The need.</param>
+    /// <param name="triesSpent">True once the real spell's tries are spent.</param>
+    public static uint TargetOf(in ManaNeed need, bool triesSpent) => triesSpent ? need.Ceiling : Math.Min(need.Floor == 0 ? need.Ceiling : need.Floor, need.Ceiling);
+
     /// <summary>The refill (D88) when the stamina is under the share: the payable Revitalize Self, else (no level payable at all) a Stamina Potion; false when neither (the order goes on as without it).</summary>
     private static bool TryRefill(in ManaOrderInput input, ReadOnlySpan<RevitalizeLevel> levels, uint reserve, out ManaDecision decision)
     {
         var to = FullStamina(input.StaminaMax, input.StaminaFullPercent);
         if (!levels.IsEmpty)
         {
-            var at = RevitalizeLevelOf(levels, input.Mana, reserve);
+            var fit = RefillFit.NoneFitsTheBar;
+            var at = input.RevitalizeWholeRoll ? RevitalizeLevelOf(levels, input.Mana, reserve, input.Stamina, input.StaminaMax, input.StaminaFloor, out fit) : RevitalizeLevelOf(levels, input.Mana, reserve);
             if (at >= 0)
             {
-                decision = new(ManaStep.Revitalize, at, reserve, to, "the stamina is under the share: Revitalize Self");
+                decision = new(ManaStep.Revitalize, at, reserve, to, !input.RevitalizeWholeRoll ? "the stamina is under the share: Revitalize Self"
+                    : fit switch
+                    {
+                        RefillFit.WholeRoll => "the stamina is under the share and the best level's whole roll fits: Revitalize Self",
+                        RefillFit.PressNeedsIt => "the stamina is under D88's floor: the next press needs it now: Revitalize Self",
+                        _ => "the stamina is under the share and no payable level's roll fits her bar whole: Revitalize Self, the highest payable",
+                    });
                 return true;
             }
 
             decision = default;
-            return false; // a level is payable but the mana is short of it with the bolt in hand: the bolt first
+            return false; // a level is payable but the mana is short of it with the bolt in hand (the bolt first), or (M6 stamina dance) the best level's whole roll does not fit yet
         }
 
         if (input.StaminaPotions > 0)
@@ -495,7 +608,7 @@ public static class ManaOrder
     {
         ArgumentNullException.ThrowIfNull(options);
         var need = input.Need;
-        var target = input.TriesSpent ? need.Ceiling : Math.Min(need.Floor == 0 ? need.Ceiling : need.Floor, need.Ceiling);
+        var target = TargetOf(in need, input.TriesSpent);
         var refill = input.Profile == ManaProfile.Mage && input.StaminaFullPercent > 0 && options.On && !need.IsNone && StaminaUnder(input.Stamina, input.StaminaMax, input.StaminaFullPercent);
         if (need.IsNone || input.Mana >= need.Ceiling)
         {

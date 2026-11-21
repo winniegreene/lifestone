@@ -217,7 +217,7 @@ public sealed class CreatureBehaviourTests(DatSetFixture fixture, ITestOutputHel
         // read of them; the proof that the old values stand is the loop above.
         var fields = new Regex(
             @"\.Awareness\.(Table\w+|Tolerance|TargetingTactic|FriendType|FoeType)\b|TableRunSkill\b|TableVisualMetres\b|TableAuralMetres\b|\.Reward\.Xp\b|\.Body\.CreatureType\b|CreatureBody\b"
-            + @"|Bestiary\.Find\([^)]*\)[!?]*\.(Body|Reward)\b|\.Vitals\.(MaxStamina|MaxMana|HealthRate|StaminaRate|ManaRate|UsesMana|HeartbeatSeconds|HealthPerSecond|StaminaPerSecond|ManaPerSecond)\b|\.Defence\.(StaminaDrainResist|ManaDrainResist)\b|CreatureBehaviour(Row)?\b",
+            + @"|Bestiary\.Find\([^)]*\)[!?]*\.(Body|Reward)\b|\.Vitals\.(MaxStamina|MaxMana|HealthRate|StaminaRate|ManaRate|UsesMana|HeartbeatSeconds|HealthPerSecond|StaminaPerSecond|ManaPerSecond)\b|\.Defence\.ManaDrainResist\b|CreatureBehaviour(Row)?\b",
             RegexOptions.CultureInvariant);
         string[] own = ["src/Lifestone.Client/Session/Bestiary/Bestiary.cs", "src/Lifestone.Client/Session/Bestiary/CreatureCapabilities.cs", "src/Lifestone.Client/Session/Grounds/CreatureBehaviour.cs"];
         var readers = CheckoutFiles.CSharpUnder("src/")
@@ -237,6 +237,15 @@ public sealed class CreatureBehaviourTests(DatSetFixture fixture, ITestOutputHel
         Assert.Equal(["src/Lifestone.Client/Movement/Wayfinding/HostileCreatureFeed.cs"], ownReaders);
         Assert.Equal(30f, Bestiary.OwnAwarenessMetres(7126)); // the Cursed Wisp's own 30 m, beside the 18 m above
         Assert.Equal(22f, Bestiary.OwnAwarenessMetres(20)); // the cattle's own range is the table's 22 m, which their pin states (M6 16 E1e)
+
+        // M6 undrainable fills, the pattern narrowed for a second value: a kind's stamina-drain resistance is read outside the facade by DrainResist.StaminaOf alone, which the fight's stamina drain prices and picks its source by
+        // (an Armored Tusker's 0: no Drain Stamina Other on it; VitalsPolicyUndrainableTests). Nothing else reads it.
+        var staminaResist = new Regex(@"\.Defence\.StaminaDrainResist\b", RegexOptions.CultureInvariant);
+        var staminaReaders = CheckoutFiles.CSharpUnder("src/")
+            .Where(path => !own.Contains(path))
+            .Where(path => CheckoutFiles.Lines(CheckoutFiles.ReadText(path)).Any(line => !line.TrimStart().StartsWith("//", StringComparison.Ordinal) && staminaResist.IsMatch(line)))
+            .ToList();
+        Assert.Equal(["src/Lifestone.Client/Session/Vitals/DrainResist.cs"], staminaReaders);
     }
 
     /// <summary>

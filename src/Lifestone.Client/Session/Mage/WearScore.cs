@@ -259,7 +259,7 @@ public static class WearScore
 
         var numbers = string.Create(
             CultureInfo.InvariantCulture,
-            $"gain {gain:0.###}% of the hour = {string.Join(", ", parts)}; '{candidate.Name}' 0x{candidate.Guid:X8} own {own:0.###}{(cantripNames.Count == 0 ? string.Empty : " (" + string.Join(", ", cantripNames) + ")")} [armour level {a.ArmorLevel ?? 0}, burden {a.Burden ?? candidate.Burden}, coverage 0x{candidate.Coverage:X}, ItemDifficulty {a.Int(AppraisalIds.ArcaneLore)?.ToString(CultureInfo.InvariantCulture) ?? "none"} against Arcane Lore {context.Skills.Current(MageTemplate.ArcaneLore)?.ToString(CultureInfo.InvariantCulture) ?? "unread"}, item mana {a.ItemMana?.ToString(CultureInfo.InvariantCulture) ?? "none"}{(GearScore.Attuned(a) ? ", attuned" : string.Empty)}{(GearScore.Bonded(a) ? ", bonded" : string.Empty)}{(spellsOff is null ? string.Empty : ", spells off")}] against {(displaced.Count == 0 ? "a free slot" : string.Join(" + ", displaced.Select(d => $"'{d.Name}' 0x{d.Guid:X8}")) + string.Create(CultureInfo.InvariantCulture, $" own {displacedOwn:0.###}"))}{deadNote}");
+            $"gain {gain:0.###}% of the hour = {string.Join(", ", parts)}; '{candidate.Name}' 0x{candidate.Guid:X8} own {own:0.###}{(cantripNames.Count == 0 ? string.Empty : " (" + string.Join(", ", cantripNames) + ")")} [armour level {ArmourBase.Level(a)}{(a.ArmorLevel is { } appraisedLevel && appraisedLevel != ArmourBase.Level(a) ? string.Create(CultureInfo.InvariantCulture, $" of its own (appraised {appraisedLevel} with the enchantments on it)") : string.Empty)}, burden {a.Burden ?? candidate.Burden}, coverage 0x{candidate.Coverage:X}, ItemDifficulty {a.Int(AppraisalIds.ArcaneLore)?.ToString(CultureInfo.InvariantCulture) ?? "none"} against Arcane Lore {context.Skills.Current(MageTemplate.ArcaneLore)?.ToString(CultureInfo.InvariantCulture) ?? "unread"}, item mana {a.ItemMana?.ToString(CultureInfo.InvariantCulture) ?? "none"}{(GearScore.Attuned(a) ? ", attuned" : string.Empty)}{(GearScore.Bonded(a) ? ", bonded" : string.Empty)}{(spellsOff is null ? string.Empty : ", spells off")}] against {(displaced.Count == 0 ? "a free slot" : string.Join(" + ", displaced.Select(d => $"'{d.Name}' 0x{d.Guid:X8}")) + string.Create(CultureInfo.InvariantCulture, $" own {displacedOwn:0.###}"))}{deadNote}");
         WearPick Pick(SelfEquipKind kind, string why) => new(kind, candidate, location, displaced, gain, parts, why + ": " + numbers) { CantripsAsIf = cantripsAsIf, Own = own, DisplacedOwn = displacedOwn };
 
         if (wield is not null)
@@ -282,6 +282,22 @@ public static class WearScore
         if (displaced.Count > 0 && context.UsefulGreat is not null && context.GreatOn(candidate.Guid, a) is { HoldsSlot: false } itsOwn && displaced.FirstOrDefault(d => context.GreatOn(d.Guid, d.Appraisal).HoldsSlot) is { } keptOn)
         {
             return Pick(SelfEquipKind.None, string.Create(CultureInfo.InvariantCulture, $"the worn '{keptOn.Name}' 0x{keptOn.Guid:X8} casts a great cantrip useful to her and {GreatOnBody.CastsNone(itsOwn)}: never taken off for it"));
+        }
+
+        // M6 cantrips first (the owner, 2026-11-20: we need major cantrips; a lit major cantrip beats armour differences; armour barely matters so long as it is not terrible, and she has no unarmoured areas; priority goes to
+        // Focus, Life, War, Endurance, Creature, Coordination, Strength, Quickness, then the rest): the great cantrips lit on her (Major or better, any family, ACE's top layer of each) are compared down that order, the first family
+        // whose tier differs deciding, then the rest by their tiers; this comes before the core cantrips, the armour, the burden and the margin. Only a swap that would leave a part of her body unarmoured is refused
+        var (great, greatWhy) = GreatCompare(worn, after, context);
+        if (great > 0)
+        {
+            return ArmourLost(worn, after) is { } bare
+                ? Pick(SelfEquipKind.None, string.Create(CultureInfo.InvariantCulture, $"great cantrips first ({GreatPriorityText}): {greatWhy}, but it would leave her body unarmoured where it covers 0x{bare:X} now"))
+                : Pick(displaced.Count == 0 ? SelfEquipKind.Wear : SelfEquipKind.Replace, $"great cantrips first ({GreatPriorityText}): {greatWhy} (the armour differences are secondary)");
+        }
+
+        if (great < 0)
+        {
+            return Pick(SelfEquipKind.None, $"great cantrips first ({GreatPriorityText}): {greatWhy}");
         }
 
         // M6 14 (the owner, 2026-11-15: the aim is a Minor or better cantrip for her core attributes and skills in every slot; every other built-in spell, and even the armour's own numbers, are secondary): cantrips
@@ -423,6 +439,128 @@ public static class WearScore
             .ThenBy(h => context.GreatOn(h.Guid, h.Appraisal).HoldsSlot ? 1 : 0) // M6 16 E5e2, E5e5: of two sides worth the same, the one without a great cantrip that counts for her on her body comes off
             .ThenBy(h => h.Guid).First();
         return (weakest.Location & valid, [weakest], string.Empty);
+    }
+
+    /// <summary>Any cantrip's tiers: a spell is a cantrip when its name begins with one of them (the SpellTable's names: "Minor Armor", "Major Coordination"); every other built-in spell is not.</summary>
+    private static readonly string[] CantripTiers = ["Minor", "Major", "Epic", "Legendary"];
+
+    /// <summary>True when <paramref name="spellName"/> names a cantrip of any tier (<see cref="CantripTiers"/>).</summary>
+    /// <param name="spellName">The spell's name (the SpellTable's), or null.</param>
+    public static bool IsCantrip(string? spellName)
+    {
+        if (string.IsNullOrEmpty(spellName))
+        {
+            return false;
+        }
+
+        foreach (var tier in CantripTiers)
+        {
+            if (spellName.Length > tier.Length && spellName.StartsWith(tier, StringComparison.OrdinalIgnoreCase) && spellName[tier.Length] == ' ')
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// M6 cantrips first: the great cantrips (<see cref="KeepAsideRule.IsGreat"/>: Major, Epic, Legendary; any family) lit on <paramref name="set"/>, as ACE keeps them: the top layer of each family (GetEnchantments_TopLayer,
+    /// EnchantmentManager.cs:123-129 @95ef426d), family to its tier's rank (Major 1, Epic 2, Legendary 3). A piece counts when its spells are on her (lit now, or lit at a wield); a caster counts only in her hands (the caster pick moves it).
+    /// </summary>
+    private static Dictionary<string, int> GreatLit(IReadOnlyList<WornPiece> set, GearContext context)
+    {
+        var lit = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var piece in set)
+        {
+            if (piece.Appraisal is not { IsNotFound: false } a || ((piece.ItemType & SelfEquipJudge.CasterType) != 0 && (piece.Location & SelfEquipJudge.Held) == 0)
+                || (context.LitBy?.Invoke(piece.Guid) != true && SpellsOff(a, context.Skills) is not null))
+            {
+                continue;
+            }
+
+            foreach (var id in a.Spells)
+            {
+                if (context.SpellName(id) is not { } name || !KeepAsideRule.IsGreat(name))
+                {
+                    continue;
+                }
+
+                var space = name.IndexOf(' ', StringComparison.Ordinal);
+                var rank = 1 + KeepAsideRule.GreatTiers.ToList().FindIndex(t => t.Equals(name[..space], StringComparison.OrdinalIgnoreCase));
+                var family = name[(space + 1)..];
+                if (!lit.TryGetValue(family, out var held) || held < rank)
+                {
+                    lit[family] = rank;
+                }
+            }
+        }
+
+        return lit;
+    }
+
+    /// <summary>M6 cantrips first (the owner, 2026-11-20): the great cantrip families in their order of priority, by the SpellTable's family names; every other family is "the rest".</summary>
+    private static readonly string[] GreatPriority = ["Focus", "Life Magic Aptitude", "War Magic Aptitude", "Endurance", "Creature Enchantment Aptitude", "Coordination", "Strength", "Quickness"];
+
+    private const string GreatPriorityText = "Focus, Life, War, Endurance, Creature, Coordination, Strength, Quickness, then the rest";
+
+    /// <summary>
+    /// M6 cantrips first: <paramref name="after"/>'s great cantrips against <paramref name="before"/>'s, down <see cref="GreatPriority"/>: the first family whose lit tier differs decides (1: after is better, -1: worse), then the
+    /// rest by the sum of their tiers; 0 when they tie. The words name what decided.
+    /// </summary>
+    private static (int Sign, string Why) GreatCompare(IReadOnlyList<WornPiece> before, IReadOnlyList<WornPiece> after, GearContext context)
+    {
+        var b = GreatLit(before, context);
+        var a = GreatLit(after, context);
+        string Named(string family, int rank) => KeepAsideRule.GreatTiers[rank - 1] + " " + family;
+        foreach (var family in GreatPriority)
+        {
+            var (rb, ra) = (b.GetValueOrDefault(family), a.GetValueOrDefault(family));
+            if (ra > rb)
+            {
+                return (1, "it lights " + Named(family, ra) + (rb > 0 ? " over " + Named(family, rb) : string.Empty));
+            }
+
+            if (ra < rb)
+            {
+                return (-1, "it would put out " + Named(family, rb) + (ra > 0 ? " for " + Named(family, ra) : string.Empty));
+            }
+        }
+
+        bool Rest(string family) => !GreatPriority.Contains(family, StringComparer.OrdinalIgnoreCase);
+        var restB = b.Where(x => Rest(x.Key)).Sum(x => x.Value);
+        var restA = a.Where(x => Rest(x.Key)).Sum(x => x.Value);
+        if (restA == restB)
+        {
+            return (0, string.Empty);
+        }
+
+        var lit = a.Where(x => Rest(x.Key) && (!b.TryGetValue(x.Key, out var r) || r < x.Value)).Select(x => Named(x.Key, x.Value)).Order(StringComparer.Ordinal).ToList();
+        var dark = b.Where(x => Rest(x.Key) && (!a.TryGetValue(x.Key, out var r) || r < x.Value)).Select(x => Named(x.Key, x.Value)).Order(StringComparer.Ordinal).ToList();
+        return restA > restB
+            ? (1, "it lights " + string.Join(", ", lit) + (dark.Count == 0 ? string.Empty : " for " + string.Join(", ", dark)))
+            : (-1, "it would put out " + string.Join(", ", dark) + (lit.Count == 0 ? string.Empty : " for " + string.Join(", ", lit)));
+    }
+
+    /// <summary>M6 cantrips first (the owner: no unarmoured areas): the body coverage that <paramref name="before"/>'s armour (a piece with an armour level of its own) covers and <paramref name="after"/>'s does not, or null when none is lost.</summary>
+    private static uint? ArmourLost(IReadOnlyList<WornPiece> before, IReadOnlyList<WornPiece> after)
+    {
+        static uint Covered(IReadOnlyList<WornPiece> set)
+        {
+            var mask = 0u;
+            foreach (var w in set)
+            {
+                if (w.Appraisal is { IsNotFound: false } a && (w.ItemType & SelfEquipJudge.CasterType) == 0 && ArmourBase.Level(a) > 0)
+                {
+                    mask |= GearCoverage.OfWorn(w.Coverage, w.Location);
+                }
+            }
+
+            return mask;
+        }
+
+        var lost = Covered(before) & ~Covered(after);
+        return lost == 0 ? null : lost;
     }
 
     private static double CantripTotal(IReadOnlyList<GearScorePart> parts) =>
@@ -608,6 +746,7 @@ public static class WearScore
     /// Her damage factor on <paramref name="set"/>: each part of the body by its share of the hits (<see cref="ArmorReport.HitShares"/>), the mean over the ground's damage types (the seven when it gives none) of ACE's
     /// <c>66.67 / (66.67 + armour)</c>, the part's armour being Armor Self and the strongest body-armour cantrip plus, for each piece that covers it, <c>(ArmorLevel + Impenetrability) x clamp(protection + bane, -2, 2)</c>
     /// (Monster_Melee.cs:409-452, 490-530 @95ef426d); her lines' Impenetrability and bane on every piece of armour (her pass casts them on what she wears), a piece's own stronger Impenetrability in their place while its spells are on.
+    /// The ArmorLevel and the protection are the piece's own (<see cref="ArmourBase"/>): an appraisal taken while she wore the piece holds the enchantments on it, and reading those as the piece's own counted them twice.
     /// </summary>
     /// <param name="set">The worn pieces.</param>
     /// <param name="context">Her numbers and the ground's damage types.</param>
@@ -636,6 +775,11 @@ public static class WearScore
                     break; // its spells are off: no Impenetrability or Armor of its own
                 }
 
+                if (!IsCantrip(context.SpellName(id)))
+                {
+                    continue; // M6 cantrips first (the owner, 2026-11-20): a built-in spell that is no cantrip is ignored: her own spells are cast over it
+                }
+
                 if (GearScore.StatOf(id) is { } row && row.Type == 0x9004 && row.Key == 28)
                 {
                     own = Math.Max(own, row.Value);
@@ -646,7 +790,7 @@ public static class WearScore
                 }
             }
 
-            var level = a.ArmorLevel ?? 0;
+            var level = ArmourBase.Level(a); // its own level: the appraised one holds the Impenetrability on it, which her line or its own spell below would add again
             var coverage = GearCoverage.OfWorn(w.Coverage, w.Location);
             if (coverage != 0 && (level > 0 || own > 0))
             {

@@ -159,6 +159,33 @@ public sealed class InFightRulesTests
     }
 
     [Fact]
+    public void A_kind_that_lets_no_drain_through_is_no_source_and_each_drain_is_priced_at_its_sources_share()
+    {
+        // M6 undrainable fills: an Armored Tusker lets no health or stamina drain through (world DB float 125 and 72 of 11540: 0), so with only them on her the fills have no source; beside a creature that lets half through,
+        // that one is the source and both drains are priced at its half (FightScenario.VitalsPolicy.cs TryPolicyFacts: DrainResistOf, DrainResist.StaminaOf; ManaLoop.cs FullestStamina's kind rule).
+        var drainStamina = new FightSpell(1250, "Drain Stamina Other II", 2, 20, 50, 2.09, 1.0, new TransferRow(1250, 4, 4, 0.1f, -1f, 60));
+        var armored = Kind("Armored Tusker", 435, 2, 10, drainResist: 0) with { StaminaDrainResist = 0 };
+        var halfKind = Kind("Half", 400, 1, 10, drainResist: 0.5) with { StaminaDrainResist = 0.5 };
+        FightView ViewOf(params Foe[] foes)
+        {
+            var view = new FightView { Health = 100, HealthMax = 100, Stamina = 63, StaminaMax = 63, Mana = 160, ManaMax = 160, HealthDrains = [DrainOne], StaminaDrain = drainStamina, Foes = foes };
+            view.Target = InFightRules.ChooseTarget(view);
+            return view;
+        }
+
+        var only = ViewOf(new Foe(armored), new Foe(armored));
+        var none = InFightRules.Facts(only, out _, out _, out var healthSource, out var staminaSource);
+        Assert.Equal((-1, -1), (healthSource, staminaSource));
+        Assert.Equal(0u, none.FullestStamina);
+
+        var mixed = ViewOf(new Foe(armored), new Foe(halfKind));
+        var facts = InFightRules.Facts(mixed, out _, out _, out healthSource, out staminaSource);
+        Assert.Equal((1, 1), (healthSource, staminaSource));
+        Assert.Equal(0.5, facts.HealthDrains.Span[0].DrainMod, 9);
+        Assert.Equal(0.5, facts.StaminaDrains.Span[0].DrainMod, 9);
+    }
+
+    [Fact]
     public void A_kill_is_priced_as_the_war_pick_prices_it()
     {
         var pick = new WarPickSettings();

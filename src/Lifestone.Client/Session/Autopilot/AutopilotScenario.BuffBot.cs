@@ -90,6 +90,9 @@ public sealed partial class AutopilotScenario
     /// <summary>The trigger the bot's hour last held, so the hold is logged once a trigger (M6 audit, <see cref="BotHourHolds"/>).</summary>
     private string? _botHourHeld;
 
+    /// <summary>The trigger the bot's hour last let go, so the reason is logged once a trigger until the trip is called (<see cref="SayCall"/> clears it).</summary>
+    private string? _botHourWent;
+
     /// <summary>
     /// M6 audit (fix 2, the owner's decision of 2026-11-19: town trips once an hour, just in time for the bot's rebuff; about 75 minutes of consumables): a trip the counters call for a reason the hourly trip serves
     /// (a stock line under its trip line, a scroll or a focus due, a sale, the sale cadence, the main pack's slots) waits for the bot's trip while the bot's stop applies and its lines stand, and while no such stock line
@@ -101,7 +104,9 @@ public sealed partial class AutopilotScenario
     {
         if (!BuffBotApplies() || !BuffBotCover.For(session.State).On || !_botTripArmed)
         {
-            return false; // no bot's hour stands: the trip goes as before
+            // no bot's hour stands: the trip goes as before. M6 sprint (run 6, 2026-11-19 23:30:37 UTC, a Vitriol trip 50 minutes after the last one): the line said nothing when the rule let a trip go, so it now names why.
+            BotHourWent(verdict, !BuffBotApplies() ? "the buff bot does not apply to this run" : !BuffBotCover.For(session.State).On ? "the buff bot's lines are not on her" : "the bot's lines have not read fresh since its last trip (the hour is not armed)");
+            return false;
         }
 
         var now = session.Clock.Now;
@@ -123,10 +128,27 @@ public sealed partial class AutopilotScenario
         else if (!holds && _botHourHeld == verdict.Trigger)
         {
             _botHourHeld = null;
+            _botHourWent = verdict.Trigger;
             _log.Info(LogCategory, $"autopilot fight: the bot's hour holds the trip no more: {verdict.Reason}; {name}{why}");
+        }
+        else if (!holds)
+        {
+            BotHourWent(verdict, name + why);
         }
 
         return holds;
+    }
+
+    /// <summary>Logs, once a trigger until the next trip is called, why the bot's hour does not hold a trip the counters call (M6 sprint: the reason was silent).</summary>
+    private void BotHourWent(LogisticsVerdict verdict, string why)
+    {
+        if (_botHourWent == verdict.Trigger)
+        {
+            return;
+        }
+
+        _botHourWent = verdict.Trigger;
+        _log.Info(LogCategory, $"autopilot fight: the bot's hour does not hold the trip (m6-audit-trip-hour): {verdict.Reason}; {why}");
     }
 
     /// <summary>The fight is asked to stop for the bot's trip: by name, and the rule stands down until the lines read fresh again.</summary>

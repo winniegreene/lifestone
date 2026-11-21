@@ -212,26 +212,18 @@ public sealed class RetreatAttackersTests
         Func<string, ApproachVerdict?> Judge(ApproachVerdict verdict) => key => key == holding.Key ? verdict : null;
         var ladder = LadderLoader.WarMage;
 
-        // the trial switch at 62, the way out to the Holding: refused by the approach, by name; the ladder's own rung is chosen
+        // M6 holding at 60 (the owner's decision, 2026-11-20): the Holding's band starts at its portal's 60, so a trial of it is never taken (below 60 its portal refuses, from 60 it is her own rung); its approach is read at the band's way out
         var trial = new LadderTrial(holding.Key);
         var tried = RungOwner.Decide(ladder, Ask(62, holding.Key, leaving: true) with { Trial = trial, Approach = Judge(unsurvivable) });
         Assert.False(tried.Trial!.Steers);
-        Assert.StartsWith("approach: tusker-holding's approach is not survivable at her state", tried.Trial.Refused, StringComparison.Ordinal);
-        Assert.Same(unsurvivable, tried.ApproachHeld);
-        Assert.NotEqual(holding.Key, tried.Ground?.Key ?? tried.Decision.Rung?.GroundKey);
-        trial.Note(tried.Trial, 62, "the way out", NullLogSink.Instance);
-        Assert.Equal(LadderTrialPhase.Refused, trial.Phase);
+        Assert.StartsWith("not-later: ", tried.Trial.Refused, StringComparison.Ordinal);
 
-        var open = RungOwner.Decide(ladder, Ask(62, holding.Key, leaving: true) with { Trial = new LadderTrial(holding.Key), Approach = Judge(survivable) });
-        Assert.True(open.Trial!.Steers);
-        Assert.Null(open.ApproachHeld);
-
-        // the ladder's own way out at 65, the Holding's band: held by name, one rung down, her own ground
-        var own = RungOwner.Decide(ladder, Ask(65, "tusker-quarters", leaving: true) with { Approach = Judge(unsurvivable) });
+        // the ladder's own way out at 60, the Holding's band: held by name, one rung down, her own ground
+        var own = RungOwner.Decide(ladder, Ask(60, "tusker-quarters", leaving: true) with { Approach = Judge(unsurvivable) });
         Assert.Equal(("approach-held:holding", "quarters"), (own.Reason, own.Decision.Rung?.Key));
         Assert.Contains("the rung holding is held and she hunts her own ground instead", own.Why, StringComparison.Ordinal);
-        Assert.Equal("holding", RungOwner.Decide(ladder, Ask(65, "tusker-quarters", leaving: true) with { Approach = Judge(survivable) }).Decision.Rung?.Key);
-        Assert.Equal("holding", RungOwner.Decide(ladder, Ask(65, "tusker-quarters", leaving: false) with { Approach = Judge(unsurvivable) }).Decision.Rung?.Key); // not a way out: not read
+        Assert.Equal("holding", RungOwner.Decide(ladder, Ask(60, "tusker-quarters", leaving: true) with { Approach = Judge(survivable) }).Decision.Rung?.Key);
+        Assert.Equal("holding", RungOwner.Decide(ladder, Ask(60, "tusker-quarters", leaving: false) with { Approach = Judge(unsurvivable) }).Decision.Rung?.Key); // not a way out: not read
     }
 
     [Fact]

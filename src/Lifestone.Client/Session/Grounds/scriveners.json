@@ -623,6 +623,15 @@
             "x": 183.749,
             "y": 79.945,
             "z": 116.005
+          },
+          "stop": {
+            "cell": "0xA9B30100",
+            "point": {
+              "x": 182.2,
+              "y": 81.5,
+              "z": 116.005
+            },
+            "why": "the floor of the front room 0xA9B30100 before his counter, 2.2 m from him. M6 sprint (run 6, 2026-11-19 22:53 to 2026-11-20 00:08 UTC): the walk to him as an object goal in his own cell 0xA9B30101 (the Foci of Artifice's seller, create-list row 77964) ended 'stuck after 3 plans and 12 rungs' five times, the body pressed on his body 1.0 m from his point in the front room, which the runner does not count as his room (NavRunner.CheckArrival), so the Foci of Artifice waited two hours and the item spells burned the account formula's components meanwhile; the stop is planned and walked from the lifestone with his body in the physics (HoltburgScrivenerWalkDatTests)"
           }
         }
       ]

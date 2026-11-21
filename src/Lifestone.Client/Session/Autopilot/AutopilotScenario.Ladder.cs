@@ -1083,7 +1083,7 @@ public sealed partial class AutopilotScenario
     internal RungChoice AskRung(IGameSessionView session, Ladder ladder, int level, string path, bool leaving = false, bool probe = false)
     {
         var buffs = GateBuffs(session);
-        var ask = new RungAsk(level, session.State.Self.Position?.CellId, session.State.Self.Qualities, GateKnows(session), buffs) { RunGround = _ground.Key, Leaving = leaving, MidRun = _ladderMidRun, QuestDone = LadderQuestDone, TrophyDue = key => TrophyJobDue(session, key), StandsByAnother = GateStandsNow(), Trial = _options.Trial, PlanWar = PlanWarForTest ?? SpellPlan.PlanWarOf(session.XpTable), KillTask = SteeringKillTask(), Approach = leaving ? ground => ApproachNow(session, ground, probe) : null, AheadHeld = _options.ApproachHolds.IsHeld, VitaeHeld = _options.ApproachHolds.Vitae.HeldWhy }; // M6 sprint: the vitae burn's hold
+        var ask = new RungAsk(level, session.State.Self.Position?.CellId, session.State.Self.Qualities, GateKnows(session), buffs) { RunGround = _ground.Key, Leaving = leaving, MidRun = _ladderMidRun, QuestDone = LadderQuestDone, TrophyDue = key => TrophyJobDue(session, key), StandsByAnother = GateStandsNow(), Trial = _options.Trial, PlanWar = PlanWarForTest ?? SpellPlan.PlanWarOf(session.XpTable), KillTask = SteeringKillTask(), Approach = leaving ? ground => ApproachForRung(session, ground, probe) : null, AheadHeld = _options.ApproachHolds.IsHeld, VitaeHeld = _options.RungHoldsReportOnly ? null : _options.ApproachHolds.Vitae.HeldWhy, HoldsReportOnly = _options.RungHoldsReportOnly }; // M6 sprint: the vitae burn's hold; M6 holding at 60: --autopilot-rung-holds=report reads and reports, never holds
         var choice = RungOwner.Decide(ladder, ask);
         foreach (var opened in choice.ApproachOpened)
         {
@@ -1197,6 +1197,29 @@ public sealed partial class AutopilotScenario
     }
 
     private readonly Dictionary<string, string> _approachLogged = new(StringComparer.Ordinal);
+
+    /// <summary>M6 holding at 60: the grounds and verdict kinds the report-only line has named (once each).</summary>
+    private readonly HashSet<string> _approachReported = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// M6 holding at 60 (the owner, 2026-11-20: the approach check does not seem correct; send her): the way out's approach verdict for the rung owner: <see cref="ApproachNow"/>'s; or, when the approach checks only report
+    /// (<see cref="AutopilotOptions.RungHoldsReportOnly"/>), judged and logged as ever but handed on as none, so no approach holds a ground (a verdict that would have held is named once).
+    /// </summary>
+    private Vitals.ApproachVerdict? ApproachForRung(IGameSessionView session, string groundKey, bool probe)
+    {
+        var verdict = ApproachNow(session, groundKey, probe);
+        if (!_options.RungHoldsReportOnly || verdict is null)
+        {
+            return verdict;
+        }
+
+        if (!probe && verdict.Holds && _approachReported.Add(groundKey + "|" + verdict.Kind))
+        {
+            _log.Info(LogCategory, $"ladder: approach check at the way out: report only ({AutopilotOptions.RungHoldsOption}=report): {groundKey} is not held, she goes: {verdict.Held}");
+        }
+
+        return null;
+    }
     private string? _rungReasonLogged;
     private string? _runGuardLogged;
     private int _gateRecastCycle = -1;

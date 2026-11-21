@@ -88,6 +88,12 @@ public sealed record RungAsk(int Level, uint? Cell, PlayerQualities Qualities, F
     public Func<string, string?>? VitaeHeld { get; init; }
 
     /// <summary>
+    /// M6 holding at 60 (the owner, 2026-11-20: the only thing that should stop her is her level; <c>--autopilot-rung-holds=report</c>): true when the rungs' gates are read and reported (<see cref="RungChoice.Gates"/>) but hold
+    /// nothing: the band decides. The caller leaves <see cref="Approach"/> and <see cref="VitaeHeld"/> unread for the same switch.
+    /// </summary>
+    public bool HoldsReportOnly { get; init; }
+
+    /// <summary>
     /// M6 14 guard task: the kill task whose counter is armed (<see cref="LadderKillTask.Steers"/>), or null. While it steers, its kill step's ground is chosen in place of her rung's (<see cref="RungOwner.Decide"/>, after a trial); the choice
     /// only reads it.
     /// </summary>
@@ -866,7 +872,7 @@ public static class RungOwner
                 : start is not null ? RungGateRule.AtStart(gate, ask.Qualities, ask.Knows, start)
                 : RungGateRule.AtStart(gate, ask.Qualities, ask.Knows, ask.StandsByAnother);
             read.Add(new RungGateRead(gate, conditions) { WayOutReads = start is null ? [] : RungGateRule.LeftToTheWayOut(gate, start) });
-            return conditions;
+            return ask.HoldsReportOnly ? null : conditions; // M6 holding at 60: read and reported, never a hold
         });
 
         var decision = ask.RunGround is { } ground2

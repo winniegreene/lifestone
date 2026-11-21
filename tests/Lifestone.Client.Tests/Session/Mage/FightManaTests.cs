@@ -735,7 +735,7 @@ public sealed class FightManaTests
         Assert.True(r.DanceAnswers.Any() && r.RevitalizeAnswers.Any() && r.BoltAnswers.Any());
         Assert.True(r.DanceAnswers.First().At < r.RevitalizeAnswers.First().At, "the transfer first");
         Assert.True(r.RevitalizeAnswers.First().At < r.BoltAnswers.First().At, "then the refill, then the bolt");
-        Assert.True(r.Caster.Stamina >= ManaOrder.FullStamina(275, 90), "the stamina is back near full before the bolt: " + r.Caster.Stamina);
+        Assert.True(RefilledToRuleB(r.Caster.Stamina), "the stamina is refilled until the next Revitalize Self VI's whole roll no longer fits before the bolt: " + r.Caster.Stamina);
         Assert.True(scenario.Revitalizes >= 1);
         Assert.Contains(r.Log.Lines, l => l.Contains("mana: revitalize: Revitalize Self", StringComparison.Ordinal) && l.Contains(" at stamina ", StringComparison.Ordinal) && l.Contains(", mana ", StringComparison.Ordinal));
         Assert.Contains($" revitalizes={scenario.Revitalizes} stamina_min=", scenario.VerdictFields(), StringComparison.Ordinal);
@@ -755,7 +755,7 @@ public sealed class FightManaTests
         Assert.True(r.RevitalizeAnswers.Any(), "a revitalize was cast");
         Assert.True(r.RevitalizeAnswers.First().At < r.BoltAnswers.First().At, "the refill comes before the bolt");
         Assert.Empty(r.DanceAnswers); // the mana was there: no transfer
-        Assert.True(r.Caster.Stamina >= ManaOrder.FullStamina(275, 90));
+        Assert.True(RefilledToRuleB(r.Caster.Stamina), "refilled until the next whole roll no longer fits: " + r.Caster.Stamina);
 
         var off = new Rig(mana: 400, stamina: 100) { Fight = new FightOptions { Kills = 1, StaminaFullPercent = 0 } };
         off.Caster.ManaRegenPerSecond = 0;
@@ -765,6 +765,63 @@ public sealed class FightManaTests
         off.Run(offScenario, 30, 0.05, () => off.BoltAnswers.Any());
         Assert.Empty(off.RevitalizeAnswers);
         Assert.Equal(100u, off.Caster.Stamina);
+    }
+
+    /// <summary>The rig's stamina maximum (the scripted caster's description: maximums_with_enchantments=170,275,426).</summary>
+    private const uint RigStaminaMax = 275;
+
+    /// <summary>Revitalize Self VI's top roll, from its boost row (<see cref="BuffStatMods.BoostOf"/>: 80 to 160, the world database's spell row).</summary>
+    private static uint RevitalizeViTop => (uint)BuffStatMods.BoostOf(VitalsMeans.RevitalizeSelf[5])!.Value.Max;
+
+    /// <summary>
+    /// M6 stamina dance (b), docs/session.md section 121: the fight's refill ends at the share (<c>--fight-stamina-full</c> 90) or where the best level's whole roll (the rig's highest is VI) no longer fits what she is missing;
+    /// before rule b it ended only at the share.
+    /// </summary>
+    private static bool RefilledToRuleB(uint stamina) => stamina >= ManaOrder.FullStamina(RigStaminaMax, 90) || stamina + RevitalizeViTop > RigStaminaMax;
+
+    [Fact]
+    public void M6_stamina_dance_b_at_85_percent_stamina_the_fight_sends_the_bolt_when_Revitalize_VI_s_top_roll_does_not_fit()
+    {
+        // Run 9 (cache/m6/sprint/run9/step3-levelup.log, 2026-11-20 19:51 to 2026-11-21 04:58 UTC): 101 of the fight's 204 Revitalize Self VI were cast from 80 to 90% of her stamina and restored 51 each, of a roll of 80 to 160.
+        var stamina = (uint)Math.Ceiling(0.85 * RigStaminaMax); // 234 of 275: under the 90% share, 41 missing
+        Assert.True(stamina + RevitalizeViTop > RigStaminaMax && ManaOrder.StaminaUnder(stamina, RigStaminaMax, 90)); // the case: under the share, and VI's top roll does not fit the missing
+        var r = new Rig(mana: 400, stamina: stamina) { Fight = new FightOptions { Kills = 1 } };
+        r.Caster.ManaRegenPerSecond = 0;
+        r.Caster.StaminaRegenPerSecond = 0;
+        r.AddTusker();
+        var scenario = r.Scenario();
+
+        r.Run(scenario, 30, 0.05, () => r.BoltAnswers.Any());
+
+        Assert.True(r.BoltAnswers.Any(), "the bolt was sent");
+        Assert.True(Rig.IsBolt(r.Caster.Answered.First().Spell), "the first cast is the bolt, not a Revitalize Self");
+        Assert.Empty(r.RevitalizeAnswers);
+        Assert.Equal(0, scenario.Revitalizes);
+        Assert.Equal(stamina, r.Caster.Stamina);
+        var waits = Assert.Single(r.Log.Lines, l => l.Contains("mana: the refill waits: ", StringComparison.Ordinal)); // once a run of waits, with the numbers it read
+        Assert.Contains(string.Create(CultureInfo.InvariantCulture, $"stamina {stamina} of {RigStaminaMax} is under the 90% share"), waits, StringComparison.Ordinal);
+        Assert.Contains(string.Create(CultureInfo.InvariantCulture, $"does not fit the {RigStaminaMax - stamina} missing"), waits, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void M6_stamina_dance_b_the_fight_still_casts_Revitalize_VI_first_when_its_whole_roll_fits()
+    {
+        var stamina = RigStaminaMax - RevitalizeViTop; // 115 of 275: the 160 missing is VI's whole top roll
+        var r = new Rig(mana: 400, stamina: stamina) { Fight = new FightOptions { Kills = 1 } };
+        r.Caster.ManaRegenPerSecond = 0;
+        r.Caster.StaminaRegenPerSecond = 0;
+        r.AddTusker();
+        var scenario = r.Scenario();
+
+        r.Run(scenario, 30, 0.05, () => r.BoltAnswers.Any());
+
+        Assert.True(r.BoltAnswers.Any(), "the bolt follows the refill");
+        Assert.Equal(VitalsMeans.RevitalizeSelf[5], r.Caster.Answered.First().Spell); // Revitalize Self VI, before anything else
+        Assert.True(r.RevitalizeAnswers.First().At < r.BoltAnswers.First().At, "the refill comes before the bolt");
+        Assert.Contains(r.Log.Lines, l => l.Contains(string.Create(CultureInfo.InvariantCulture, $"mana: revitalize: Revitalize Self VI at stamina {stamina} of {RigStaminaMax}"), StringComparison.Ordinal)
+            && l.Contains("the best level's whole roll fits: Revitalize Self", StringComparison.Ordinal));
+        Assert.True(r.Caster.Stamina > stamina, "the refill landed: " + r.Caster.Stamina);
+        Assert.True(RefilledToRuleB(r.Caster.Stamina), "refilled until the next whole roll no longer fits: " + r.Caster.Stamina);
     }
 
     [Fact]

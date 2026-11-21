@@ -640,6 +640,12 @@ public sealed partial class NavRunner : IDisposable
     /// <summary>Why the run ended Blocked, Interrupted, Failed or ArrivedWithoutSight (shaped like <see cref="RouteDriver.FailureReason"/>); else null.</summary>
     public string? FailureReason { get; private set; }
 
+    /// <summary>
+    /// M6 sprint (<c>m6-vendor-reach</c>): why an object goal's run arrived (<c>contact</c>, <c>goal-room</c>, <c>clear-line</c> or <c>outdoor-goal</c>, the metres and whose place: the object's live place or the planned point), logged
+    /// with the arrival; null before an object goal arrives (a point goal's arrival is its tolerance alone).
+    /// </summary>
+    public string? ArrivalReason { get; private set; }
+
     /// <summary>The goal.</summary>
     public NavGoal? Goal => _goal;
 
@@ -920,6 +926,10 @@ public sealed partial class NavRunner : IDisposable
         _nextCreatureRefresh = now;
         _lastCreatureReplan = double.NegativeInfinity;
         ResetNpcAhead(now); // M6 sprint: m6-npc-ahead
+        ArrivalReason = null; // M6 sprint: m6-vendor-reach
+        _wallCheck = null;
+        _reachWallLogged = false;
+        _stepMoved = 0f;
         FailureReason = null;
         State = NavRunState.Running;
         _zoneLogged = false;
@@ -1037,6 +1047,7 @@ public sealed partial class NavRunner : IDisposable
 
         var moved = Vector2.Distance(global, _lastGlobal);
         var jump = MathF.Sqrt((moved * moved) + ((here.Z - _lastZ) * (here.Z - _lastZ)));
+        _stepMoved = jump;
         NoteKeepOff(global, here.Z, position);
         NotePlate(here, position);
         if (jump > TeleportMetres && State != NavRunState.Waiting) // a paused run's station may move the player (a recall); Resume replans
@@ -1890,8 +1901,7 @@ public sealed partial class NavRunner : IDisposable
         var distance = here.HorizontalDistance(goal.Point);
         if (goal.IsObject)
         {
-            // An object goal that names an indoor cell is reached in that room (M4 P5b F1): the range alone is met through a wall from the street.
-            if (distance > goal.Range || (goal.CellId is { } room && !LandDefs.IsOutdoorCell(room) && position.CellId != room))
+            if (!ObjectInReach(position, here, goal, out var target, out distance))
             {
                 return false;
             }
@@ -1909,9 +1919,6 @@ public sealed partial class NavRunner : IDisposable
                 return true;
             }
 
-            var target = goal.CellId is { } cell
-                ? new CellFrame(cell, new AcFrame(goal.Point.Local, Quaternion.Identity))
-                : NavMap.ToCellFrame(goal.Point);
             if (_confirmer.InSight(position, target, out var tries))
             {
                 if (ClosedDoorBetween(position, target) is { } shut)
@@ -1945,6 +1952,152 @@ public sealed partial class NavRunner : IDisposable
 
         End(NavRunState.Arrived, null, now);
         return true;
+    }
+
+    /// <summary>
+    /// M6 sprint (<c>m6-vendor-reach</c>, run 10 2026-11-21 07:17:25 to 07:18:33 UTC, and runs 6 and 9): an object goal's arrival test, made every step before any stuck or rung decision (<see cref="RunStep"/>). The walk to the
+    /// Grand Master Scrivener of Item Magic 0x764D503D (object within 3.0 m, his room 0x64D50135) pressed into his body for 12 rungs about 1 m from him, in 0x64D50133: the old test asked for her body in his room, and his body
+    /// stood between her and it, so the walk ended Blocked inside the range it asked for. The test now, on her drawn body (<see cref="INavBody.Position"/>, the client's own, the owner's one world picture):
+    /// <list type="number">
+    /// <item>a contact with the goal object itself, made under her own keys this step (<see cref="TouchingGoal"/>), is an arrival (<c>contact</c>): she can come no nearer, and ACE measures a use edge to edge;</item>
+    /// <item>else within <see cref="NavGoal.Range"/> of the object's live place (<see cref="INavBodyFeed.TryPlace"/>), or of the planned point <see cref="NavGoal.Point"/> (an object out of view, or one that moved off it: the walk
+    /// ends where it was planned and the caller's reach check decides, as before), when nothing walls her off from it (<see cref="Unwalled"/>).</item>
+    /// </list>
+    /// The arrival and its reason are logged (<see cref="ArrivalReason"/>).
+    /// </summary>
+    private bool ObjectInReach(in CellFrame position, NavPoint here, NavGoal goal, out CellFrame target, out float distance)
+    {
+        var guid = goal.Guid!.Value;
+        var planned = goal.CellId is { } cell
+            ? new CellFrame(cell, new AcFrame(goal.Point.Local, Quaternion.Identity))
+            : NavMap.ToCellFrame(goal.Point);
+        var plannedMetres = here.HorizontalDistance(goal.Point);
+        CellFrame? live = BodyFeed is { } feed && feed.TryPlace(guid, out var at) ? at : null;
+        var liveMetres = live is { } l ? here.HorizontalDistance(NavMap.FromCellFrame(l)) : float.PositiveInfinity;
+
+        if (TouchingGoal(guid))
+        {
+            target = live ?? planned;
+            distance = live is null ? plannedMetres : liveMetres;
+            NoteArrival(position, goal, "contact", distance, live is null ? "plan" : "live");
+            return true;
+        }
+
+        if (live is { } there && liveMetres <= goal.Range && Unwalled(position, goal, there, liveMetres, out var why))
+        {
+            target = there;
+            distance = liveMetres;
+            NoteArrival(position, goal, why, distance, "live");
+            return true;
+        }
+
+        if (plannedMetres <= goal.Range && Unwalled(position, goal, planned, plannedMetres, out why))
+        {
+            target = planned;
+            distance = plannedMetres;
+            NoteArrival(position, goal, why, distance, "plan");
+            return true;
+        }
+
+        target = planned;
+        distance = MathF.Min(plannedMetres, liveMetres);
+        return false;
+    }
+
+    /// <summary>
+    /// Whether the body touched the goal object <paramref name="guid"/> in the physics step just run (<see cref="INavBody.Contact"/>, <see cref="INavBody.ContactObject"/>) while it moved or the run held forward: a contact read
+    /// from a step the body did not take (standing, keys up, just placed after a recall) is the obstacle of an older step and is not counted.
+    /// </summary>
+    private bool TouchingGoal(uint guid) =>
+        _body.Contact == NavBodyContact.Object && _body.ContactObject == guid && (_forward || _stepMoved > ContactMoveMetres);
+
+    /// <summary>The least a step must move the body for its contact to count as this step's (<see cref="TouchingGoal"/>), in metres. Not retail: Lifestone's own.</summary>
+    private const float ContactMoveMetres = 0.001f;
+
+    /// <summary>
+    /// Whether nothing walls the body off from <paramref name="target"/>, an object goal's place within its range (M4 P5b F1: the range alone is met through a wall from the street): an outdoor goal as before (the range alone,
+    /// <c>outdoor-goal</c>); the body in the goal's room (<c>goal-room</c>, as before); else, with the physics world (<see cref="RouteConfirmer.WallBetween"/>: a sphere swept at a metre over the floor, which passes creatures, as
+    /// retail's viewer does, and stops at walls, floors, statics and doors), a clear line (<c>clear-line</c>). Without a confirmer the goal's room is required, as before. A wall found is logged once a run.
+    /// </summary>
+    private bool Unwalled(in CellFrame position, NavGoal goal, in CellFrame target, float metres, out string why)
+    {
+        if (goal.CellId is not { } room || LandDefs.IsOutdoorCell(room))
+        {
+            why = "outdoor-goal";
+            return true;
+        }
+
+        if (position.CellId == room)
+        {
+            why = "goal-room";
+            return true;
+        }
+
+        why = "walled";
+        if (_confirmer is null)
+        {
+            return false;
+        }
+
+        var from = NavMap.FromCellFrame(position);
+        var to = NavMap.FromCellFrame(target);
+        if (_wallCheck is { } last && Vector2.Distance(last.From, from.Global) < WallCheckMoveMetres && MathF.Abs(last.Z - from.Z) < WallCheckMoveMetres && Vector2.Distance(last.To, to.Global) < WallCheckMoveMetres)
+        {
+            if (!last.Walled)
+            {
+                why = "clear-line";
+            }
+
+            return !last.Walled;
+        }
+
+        var walled = _confirmer.WallBetween(position, target);
+        _wallCheck = (from.Global, from.Z, to.Global, walled);
+        if (!walled)
+        {
+            why = "clear-line";
+            return true;
+        }
+
+        if (!_reachWallLogged)
+        {
+            _reachWallLogged = true;
+            _log.Info(
+                LogCategory,
+                "within the object goal's range outside its room, but a wall stands between: walking on (M4 P5b F1)",
+                new LogField("name", Options.Name),
+                new LogField("object", "0x" + goal.Guid!.Value.ToString("X8", CultureInfo.InvariantCulture)),
+                new LogField("metres", metres),
+                new LogField("range", goal.Range),
+                new LogField("cell", "0x" + position.CellId.ToString("X8", CultureInfo.InvariantCulture)),
+                new LogField("goal_cell", "0x" + room.ToString("X8", CultureInfo.InvariantCulture)),
+                new LogField("at", position.ToString()));
+        }
+
+        return false;
+    }
+
+    /// <summary>How far the body or the target must move before the wall check between them is swept again (<see cref="Unwalled"/>), in metres. Not retail: Lifestone's own.</summary>
+    private const float WallCheckMoveMetres = 0.05f;
+
+    private void NoteArrival(in CellFrame position, NavGoal goal, string why, float metres, string of)
+    {
+        ArrivalReason = string.Create(
+            CultureInfo.InvariantCulture,
+            $"{why}: {metres:F2} m from the object's {of} place (range {goal.Range:F1} m), in cell 0x{position.CellId:X8}{(goal.CellId is { } room ? $" (goal cell 0x{room:X8})" : string.Empty)}");
+        _log.Info(
+            LogCategory,
+            "arrived: the object is in reach",
+            new LogField("name", Options.Name),
+            new LogField("object", "0x" + goal.Guid!.Value.ToString("X8", CultureInfo.InvariantCulture)),
+            new LogField("reason", why),
+            new LogField("metres", metres),
+            new LogField("range", goal.Range),
+            new LogField("of", of),
+            new LogField("cell", "0x" + position.CellId.ToString("X8", CultureInfo.InvariantCulture)),
+            new LogField("goal_cell", goal.CellId is { } c ? "0x" + c.ToString("X8", CultureInfo.InvariantCulture) : "none"),
+            new LogField("rungs", Rungs),
+            new LogField("at", position.ToString()));
     }
 
     private bool Plan(double now, in CellFrame position, bool replan, string why)
@@ -3913,6 +4066,9 @@ public sealed partial class NavRunner : IDisposable
     }
 
     private double _contactAt = double.NegativeInfinity;
+    private float _stepMoved; // m6-vendor-reach: how far the body moved in the step just read (TouchingGoal)
+    private (Vector2 From, float Z, Vector2 To, bool Walled)? _wallCheck; // m6-vendor-reach: the last wall check of an object goal in range outside its room (Unwalled)
+    private bool _reachWallLogged;
     private bool _predictiveHeld;
     private double _turnPressedAt;
 

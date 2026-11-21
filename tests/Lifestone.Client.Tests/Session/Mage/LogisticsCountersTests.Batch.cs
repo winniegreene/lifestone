@@ -23,7 +23,7 @@ public sealed partial class LogisticsCountersTests
     }
 
     [Fact]
-    public void A_pass_short_of_a_component_calls_one_trip_by_its_name_at_a_keep_of_two_passes_and_the_stocked_line_calls_none()
+    public void A_pass_short_of_a_component_calls_one_trip_by_its_name_under_one_pass_at_a_keep_of_two_passes_above_it_and_the_stocked_line_calls_none()
     {
         var ground = Ground(Outskirts);
         var needs = TwoLinesShortOfBlueTaper();
@@ -36,10 +36,11 @@ public sealed partial class LogisticsCountersTests
         var due = counters.Check(new Pack(With(ground, BlueTaper, 1), burden: 100).State);
 
         Assert.Equal((LogisticsKind.Trip, LogisticsCause.StockLow, "stock:Blue Taper"), (due.Kind, due.Cause, due.Trigger));
-        Assert.Equal((4, 4), (counters.LineAt(IndexOf(counters, BlueTaper)).Keep, counters.LineAt(IndexOf(counters, BlueTaper)).TripUnder));
-        Assert.Contains("1 held, under its trip line 4", due.Reason, StringComparison.Ordinal);
+        Assert.Equal((6, 2), (counters.LineAt(IndexOf(counters, BlueTaper)).Keep, counters.LineAt(IndexOf(counters, BlueTaper)).TripUnder)); // M6 sprint: the trip line one pass (2), the keep two passes above it (2 + 4)
+        Assert.Contains("1 held, under its trip line 2", due.Reason, StringComparison.Ordinal);
 
-        Assert.Equal(LogisticsKind.None, counters.Check(new Pack(With(ground, BlueTaper, 4), burden: 100).State).Kind); // bought to the keep: once
+        Assert.Equal(LogisticsKind.None, counters.Check(new Pack(With(ground, BlueTaper, 6), burden: 100).State).Kind); // bought to the keep: once
+        Assert.Equal(LogisticsKind.None, counters.Check(new Pack(With(ground, BlueTaper, 2), burden: 100).State).Kind); // M6 sprint (run 6): two passes burned from the keep call no trip; one pass is still castable
     }
 
     [Fact]

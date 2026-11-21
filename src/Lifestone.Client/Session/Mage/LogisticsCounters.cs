@@ -95,6 +95,12 @@ public enum LogisticsCause
 /// <param name="Carried">True when the line is carried (no vendor of the ground sells it, so only its stop applies).</param>
 public readonly record struct LogisticsVerdict(LogisticsKind Kind, LogisticsCause Cause, StockLine? Line, int Held, int Threshold, int BurdenPercent, int LinePercent, bool Carried = false)
 {
+    /// <summary>
+    /// M6 safe load (the owner, 2026-11-20: never a trip home to sell before 40 minutes on the ground; other reasons are not held to it): true for a trip whose cure is a sale, the pack's weight or room or the loot's worth
+    /// (<see cref="LogisticsCause.Burden"/>, <see cref="LogisticsCause.Cadence"/>, <see cref="LogisticsCause.Slots"/>, <see cref="LogisticsCause.Sale"/>, <see cref="LogisticsCause.FullPack"/>); the hour's own trip comes after its hour.
+    /// </summary>
+    public bool IsSale => Kind == LogisticsKind.Trip && Cause is LogisticsCause.Burden or LogisticsCause.Cadence or LogisticsCause.Slots or LogisticsCause.Sale or LogisticsCause.FullPack;
+
     /// <summary>M6 1 c: the plan's answer behind a <see cref="LogisticsCause.Learn"/> trip (the spell, the numbers), else null.</summary>
     public LearnNeed? Learn { get; init; }
 
@@ -136,7 +142,7 @@ public readonly record struct LogisticsVerdict(LogisticsKind Kind, LogisticsCaus
         LogisticsCause.Learn => $"learn {Learn?.Spell?.Name}: {Learn?.Why}",
         LogisticsCause.Foci => $"foci {Focus?.Focus.Name}: {Focus?.Why}",
         LogisticsCause.Sale => string.Create(CultureInfo.InvariantCulture, $"the loot carried is worth {Held} Value, the sale line is {Threshold}, and the coin cannot pay what is wanted{(SalePayout > 0 ? $"; its sale (about {SalePayout} pyreals) does" : string.Empty)}"),
-        LogisticsCause.FullPack => string.Create(CultureInfo.InvariantCulture, $"full pack: the loot left {Held} keep-aside piece(s) (a great cantrip) over its load line {LinePercent}% since the last visit (burden {BurdenPercent}% of the capacity): a trip sells what she carries (m6-pack-room)"),
+        LogisticsCause.FullPack => string.Create(CultureInfo.InvariantCulture, $"full pack: the loot left {Held} great-cantrip piece(s) or quest want(s) over its load line {LinePercent}% since the last visit (burden {BurdenPercent}% of the capacity): a trip sells what she carries (m6-pack-room)"),
         LogisticsCause.Hour => string.Create(CultureInfo.InvariantCulture, $"the hour: {Held} minute(s) fought on a comfortable ground, the cycle's target is {Threshold}; burden {BurdenPercent}% of the capacity under the hour's line {LinePercent}%: a trip sells what she carries (m6-hour-load)"),
         _ => "all well",
     };
@@ -636,7 +642,7 @@ public sealed class LogisticsCounters
             : string.Create(c, $"the burden line {_burdenTripPercent}% is at or over the loot's line {lootLoadLinePercent}%, so the loot never passes it");
         var fullLine = lootLoadLinePercent == 0
             ? "the loot has no load line, so it leaves nothing for the load"
-            : string.Create(c, $"the full-pack line calls a trip once the loot leaves a keep-aside piece (a great cantrip) over its line {lootLoadLinePercent}% (m6-pack-room, amends m6-full-pack-no-trip; the minimum fight stint holds it after a trip)");
+            : string.Create(c, $"the full-pack line calls a trip once the loot leaves a great-cantrip piece or a quest's want over its line {lootLoadLinePercent}% (m6-pack-room, amends m6-full-pack-no-trip; the minimum fight stint holds it after a trip)");
         return $"none: {slotLine}; {burdenLine}; {fullLine}";
     }
 
@@ -847,7 +853,9 @@ public sealed class LogisticsCounters
     /// </summary>
     /// <param name="state">The session's read model.</param>
     /// <param name="buffCycles">M5 7 F29: the buff cycles the caller has counted so far (the schedule compares them with <see cref="CyclesAtTrip"/>); 0 for a caller that keeps no count, which then never sees the schedule.</param>
-    public LogisticsVerdict Check(GameState state, int buffCycles = 0)
+    /// <param name="skipSale">M6 safe load (the owner, 2026-11-20): true to pass over the triggers whose cure is a sale (<see cref="LogisticsVerdict.IsSale"/>), so a trip the sale's floor holds does not hide a later trigger that is not
+    /// held to it (the foci, a scroll to learn).</param>
+    public LogisticsVerdict Check(GameState state, int buffCycles = 0, bool skipSale = false)
     {
         ArgumentNullException.ThrowIfNull(state);
         if (_lines.Length == 0)
@@ -943,12 +951,12 @@ public sealed class LogisticsCounters
         }
 
         FreeSlots = PackView.MainPackFree(state);
-        if (_tripEveryCycles > 0 && buffCycles - _cyclesAtTrip >= _tripEveryCycles)
+        if (!skipSale && _tripEveryCycles > 0 && buffCycles - _cyclesAtTrip >= _tripEveryCycles)
         {
             return new LogisticsVerdict(LogisticsKind.Trip, LogisticsCause.Cadence, null, buffCycles - _cyclesAtTrip, _tripEveryCycles, 0, 0);
         }
 
-        if (_minFreeSlots > 0 && FreeSlots < _minFreeSlots)
+        if (!skipSale && _minFreeSlots > 0 && FreeSlots < _minFreeSlots)
         {
             return new LogisticsVerdict(LogisticsKind.Trip, LogisticsCause.Slots, null, FreeSlots, _minFreeSlots, 0, 0);
         }
@@ -961,13 +969,13 @@ public sealed class LogisticsCounters
             return Unread(LogisticsCause.CapacityUnread, 0);
         }
 
-        if ((long)load.Burden * 100 > (long)load.Capacity * _burdenTripPercent)
+        if (!skipSale && (long)load.Burden * 100 > (long)load.Capacity * _burdenTripPercent)
         {
             var percent = (int)((((long)load.Burden * 100) + load.Capacity - 1) / load.Capacity);
             return new LogisticsVerdict(LogisticsKind.Trip, LogisticsCause.Burden, null, 0, 0, percent, _burdenTripPercent);
         }
 
-        if (PackRoomMemory.For(state).LoadLeftKeepers is > 0 and var left)
+        if (!skipSale && PackRoomMemory.For(state).LoadLeftKeepers is > 0 and var left)
         {
             // M6 14 pack room (m6-pack-room, amends m6-full-pack-no-trip): the loot left a piece she would keep (a keep-aside cantrip piece or a wear upgrade) over its load line since the last visit: a trip sells the rest and makes
             // room for it. Sale loot left behind calls no trip (her loot wants about eight times her capacity an hour: a trip for each would cost a third of the hour). The visit clears the record.
@@ -985,7 +993,7 @@ public sealed class LogisticsCounters
             return new LogisticsVerdict(LogisticsKind.Trip, LogisticsCause.Learn, null, 0, 0, 0, 0) { Learn = learn }; // M6 1 c (D41): the plan's next level, readable and sold at home
         }
 
-        if (_saleTripValue > 0 && (_learnCoinShort || AnyHeldBack()) && CarriedSaleValue(state) is var carried && carried >= _saleTripValue)
+        if (!skipSale && _saleTripValue > 0 && (_learnCoinShort || AnyHeldBack()) && CarriedSaleValue(state) is var carried && carried >= _saleTripValue)
         {
             // M6 7 AT: the sale trip, after every other trigger. M6 14 T: only when the coin with the sale's payout pays a want (a scroll's batch, or a held-back line lifted clear): a sale that does not raise enough is no trip, it waits.
             if (SalePays(state, _salePayout))
@@ -1105,8 +1113,10 @@ public sealed class LogisticsCounters
     public (long Value, long Payout)? SaleEstimate => _saleKey == int.MinValue ? null : (_saleValue, _salePayout);
 
     /// <summary>
-    /// M6 7 AT: raises the stock line of every component the buff passes found short (<see cref="ComponentNeeds"/>) to <see cref="ComponentNeeds.PassesKept"/> passes of the lines that burn it, as its keep and its trip line, so the trip is called by
-    /// name (<c>stock:&lt;component&gt;</c>) and buys that many; the profile's own keep stays the floor. A need whose component no stock line carries is named by <see cref="UnstockedNeeds"/>.
+    /// M6 7 AT: raises the stock line of every component the buff passes found short (<see cref="ComponentNeeds"/>): its trip line to one pass of the lines that burn it (under that, a pass cannot cast them), and its keep to
+    /// <see cref="ComponentNeeds.PassesKept"/> passes above the trip line, so the trip is called by name (<c>stock:&lt;component&gt;</c>) and buys that many; the profile's own lines stay the floor. M6 sprint (run 6, 2026-11-19 22:01
+    /// and 23:30 UTC, Vitriol, and 2026-11-20 00:05, Turquoise Taper, while the Foci of Artifice was not held): the keep and the trip line were both two passes, so the first component a pass burned called a trip of its own (each one
+    /// left the fight 13 to 15 minutes); now a pass or two burns from the keep before the trip line is reached. A need whose component no stock line carries is named by <see cref="UnstockedNeeds"/>.
     /// </summary>
     private void ApplyNeeds()
     {
@@ -1118,10 +1128,17 @@ public sealed class LogisticsCounters
         _needsSeen = _needs.Version;
         for (var i = 0; i < _lines.Length; i++)
         {
-            var want = _needs.WantOf(_lines[i].Wcid);
-            if (want > 0 && !_carried[i] && (want > _lines[i].Keep || want > _lines[i].TripUnder))
+            var pass = _needs.PassOf(_lines[i].Wcid);
+            if (pass <= 0 || _carried[i])
             {
-                _lines[i] = _lines[i] with { Keep = Math.Max(_lines[i].Keep, want), TripUnder = Math.Max(_lines[i].TripUnder, want) };
+                continue;
+            }
+
+            var trip = Math.Max(_lines[i].TripUnder, pass);
+            var keep = Math.Max(_lines[i].Keep, trip + _needs.WantOf(_lines[i].Wcid));
+            if (keep != _lines[i].Keep || trip != _lines[i].TripUnder)
+            {
+                _lines[i] = _lines[i] with { Keep = keep, TripUnder = trip };
             }
         }
     }

@@ -24,7 +24,7 @@ public sealed partial class FightScenarioTests
         {
             if (i % 4 == 0 && attackers.Any(a => !a.Dead))
             {
-                MeleeHit(r);
+                SpellAttack(r); // three Virindi 10 to 14 m off: they cast (a melee notice from that far names no one of the three, m6-blow-unpinned)
             }
         }
 
@@ -83,7 +83,7 @@ public sealed partial class FightScenarioTests
         {
             if (i % 4 == 0 && virindi.Any(a => !a.Dead))
             {
-                MeleeHit(r);
+                SpellAttack(r); // two Virindi 10 and 12 m off: they cast (m6-blow-unpinned)
             }
         }
 

@@ -198,8 +198,9 @@ public static class ArmorReport
                 }
             }
 
-            var protection = damageType == 0x4 ? a.Armor?.Bludgeoning ?? a.Float(15) ?? 1.0 : GearScore.ModVs(a, damageType, out _);
-            list.Add(new ArmorPiece(w.Name, coverage, a.ArmorLevel ?? 0, protection, (int)own));
+            // the piece's own protection and level (ArmourBase): the appraisal holds the bane and the Impenetrability on it, which the factor adds from her lines or the ledger
+            var protection = GearScore.ModVs(a, damageType, out _);
+            list.Add(new ArmorPiece(w.Name, coverage, ArmourBase.Level(a), protection, (int)own));
         }
 
         return list;

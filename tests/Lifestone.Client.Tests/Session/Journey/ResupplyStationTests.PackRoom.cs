@@ -81,6 +81,50 @@ public sealed partial class ResupplyStationTests
         Assert.Null(run.Failure);
     }
 
+    /// <summary>
+    /// M6 sprint (the owner, 2026-11-20: drop anything unsellable once it has no value; run 6, 2026-11-20 03:37 UTC: "Potion of Healing is marked unsellable on the wire", the surplus left in the pack): the Potions of Healing over
+    /// the cut keep go on the sale, ACE marks the class unsellable (IsSellable 0, weenie 377, world weenie_properties_bool type 69), so the surplus is dropped at the home on this trip; the seven of the cut keep stay.
+    /// </summary>
+    [Fact]
+    public void M6_sprint_the_drinks_over_the_cut_that_ace_will_not_buy_are_dropped_and_the_cut_keep_stays()
+    {
+        var description = new PlayerDescriptionMsg
+        {
+            IntProperties = ImmutableDictionary<uint, int>.Empty.Add(PlayerQualities.LevelProperty, 66),
+            Attributes = [new AttributeDesc(1, 0, 119, 0)],
+        };
+        var home = new Home(Barracks, 2_000_000, held: l => l.Wcid switch { GearKit.PrismaticTaperWcid => 333, FighterKit.PotionWcid or FighterKit.ManaPotionWcid => 0, _ => l.Keep }, description: description);
+        var potions = home.Own("Potion of Healing", FighterKit.PotionWcid, MiscType, 33 * 170, stack: 33, maxStack: 100);
+        home.Own("Mana Potion", FighterKit.ManaPotionWcid, MiscType, 100 * 170, stack: 100, maxStack: 100);
+        home.Own("Health Tincture", HealthDrinks.TinctureWcid, MiscType, 21 * 500, stack: 21, maxStack: 100);
+        home.Own("Mana Tincture", ManaDrinks.TinctureWcid, MiscType, 29 * 500, stack: 29, maxStack: 100);
+        home.Vendor.R.PrivateInt(PlayerInventory.EncumbranceProperty, 17_776);
+        home.Shops.AnswersIdentify = true;
+        home.Shops.NotSellable.Add(FighterKit.PotionWcid);
+        var state = home.Vendor.State;
+        var room = PackRoomMemory.For(state);
+        var departed = home.Ground.Supplies.Stock.ToDictionary(l => l.Wcid, l => l.Keep);
+        departed[GearKit.PrismaticTaperWcid] = 850;
+        departed[FighterKit.PotionWcid] = 33;
+        departed[HealthDrinks.TinctureWcid] = 21;
+        departed[ManaDrinks.TinctureWcid] = 29;
+        room.Visited(-57 * 60, departed, new Dictionary<uint, int>());
+        room.NoteLoot(leftItems: 338, leftValue: 2_112_938, leftBurden: 132_036, keptBurden: 3_735);
+        var run = home.Start(new ResupplyOptions(true, () => []));
+
+        Assert.Equal(ScenarioStatus.Succeeded, home.Run(run, 1_200));
+
+        int Held(uint wcid) => GearInventory.CountOf(state, [], wcid);
+        Assert.Equal(7, Held(FighterKit.PotionWcid)); // the cut keep stays
+        Assert.True(state.Self.Inventory.Contains(potions));
+        Assert.True(run.DroppedItems >= 1, $"dropped {run.DroppedItems}");
+        Assert.NotEmpty(home.Vendor.H.Net.Of(FakeSendKind.DropItem));
+        Assert.True(home.Logged("Potion of Healing is marked unsellable on the wire"));
+        Assert.True(home.Logged("is marked unsellable (IsSellable=0) and no rule keeps it, so it has no value to her: dropped at the home"));
+        Assert.False(home.Logged("is a potion she drinks (the emergency rule or the mana rule): kept, never dropped"));
+        Assert.Null(run.Failure);
+    }
+
     [Fact]
     public void M6_14_pack_room_the_first_visit_of_a_session_cuts_nothing_and_starts_the_measure()
     {

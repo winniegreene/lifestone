@@ -73,6 +73,12 @@ public enum EverySpellVerdict
 
     /// <summary>Waits: the pack's room on this trip (its free slots above the loot's floor, its burden under the trip's line).</summary>
     Room,
+
+    /// <summary>
+    /// A spell that only weakens (no level of it is beneficial) and that no rule of hers casts: neither a damage line nor a debuff the fight's picker scores (<see cref="EverySpellPlan.CastDebuffLines"/>). Not bought (the owner,
+    /// 2026-11-20: buy every spell she might cast, not the ones that make a target or its armour weaker).
+    /// </summary>
+    NotCast,
 }
 
 /// <summary>A spell's facts from the SpellTable (the dats): the name, the school, the power, and whether it is beneficial (a buff reads the buff bar).</summary>
@@ -261,6 +267,12 @@ public static class EverySpellPlan
 {
     /// <summary>The health drain the fight casts (<c>FightScenario.Drain.cs</c>'s line).</summary>
     public const string HealthDrainLine = "Drain Health Other";
+
+    /// <summary>
+    /// The debuff and drain lines the fight's picker scores (<see cref="FightDebuffs.Spells"/>: each kind's VI row, its numeral cut off: Weakness Other, ..., Imperil Other, Harm Other, Drain Health Other, Drain Stamina Other), by the
+    /// shop's names. With the damage lines (<see cref="DamageLines"/>) they are the spells that weaken which she may cast; any other line that only weakens is <see cref="EverySpellVerdict.NotCast"/>.
+    /// </summary>
+    public static IReadOnlySet<string> CastDebuffLines { get; } = FightDebuffs.Spells.Where(s => s.Level == 6 && s.Name.EndsWith(" VI", StringComparison.Ordinal)).Select(s => s.Name[..^3]).ToHashSet(StringComparer.Ordinal);
 
     /// <summary>The scroll level the rule keeps, a VI: the catalog's highest (VII is the loot's, D4).</summary>
     private const int TopLevel = 6;
@@ -638,6 +650,11 @@ public static class EverySpellPlan
             facts.Add(fact);
         }
 
+        if (tier == EverySpellTier.Rest && !facts.Any(f => f.Beneficial) && !CastDebuffLines.Contains(line))
+        {
+            return Say(EverySpellVerdict.NotCast, "it only weakens (no level is beneficial) and no rule of hers casts it: neither a damage line nor a debuff the fight's picker scores; not bought (the owner, 2026-11-20)", usable[^1]);
+        }
+
         var school = facts[0].School;
         var own = tier == EverySpellTier.Bootstrap && input.OwnSkill is not null; // M6 14 own buffs: her bootstrap's level is one she casts on her own
         if ((own ? input.OwnSkill!(school) : input.Skill(school)) is not { } skill)
@@ -723,6 +740,7 @@ public static class EverySpellPlan
         EverySpellVerdict.Unreadable => "unreadable",
         EverySpellVerdict.Purse => "purse",
         EverySpellVerdict.Room => "room",
+        EverySpellVerdict.NotCast => "not-cast",
         _ => "other",
     };
 }

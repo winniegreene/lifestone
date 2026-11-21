@@ -12,7 +12,7 @@ using Xunit.Abstractions;
 namespace Lifestone.Client.Tests.Session.Autopilot;
 
 /// <summary>
-/// M6 14 armory (the owner, 2026-11-14: try the Tusker Armory as the climber's next ground): the Armory is the holding rung's first alternate, and the ladder takes it from 65 while the Holding is held by its approach. Proved: at the way
+/// M6 14 armory (the owner, 2026-11-14: try the Tusker Armory as the climber's next ground): the Armory is the holding rung's first alternate, and the ladder takes it from 60 (65 before the owner's decision of 2026-11-20) while the Holding is held by its approach. Proved: at the way
 /// out a held Holding (approach-held, approach-costly or approach-abandoned) is replaced by its first alternate whose own approach is recorded, judged open on her live state, and whose portal and route admit her, on the Holding's band
 /// and gate, the alternate's ground; an alternate with no approach recorded (the Temple, the den, the Quarters) is never taken so; with the Armory held too she hunts the Quarters, as before; a rung taken ahead of its band and held
 /// takes no alternate; a check that is not a way out keeps her on the Armory while the session holds the Holding (no move to it and back, the loop the session's holds end), and so does the host's restart; a way out that judges the
@@ -75,7 +75,7 @@ public sealed class ArmoryLadderTests(ITestOutputHelper output)
         Assert.Equal(("approach-abandoned:holding", Armory), (moved.Reason, moved.Alternate));
         Assert.Equal((LadderStepKind.Moved, "rung-moved:holding", "holding", Armory, (ushort?)0x5948), (moved.Decision.Kind, moved.Decision.Stop, moved.Decision.Rung!.Key, moved.Decision.Rung.GroundKey, moved.Decision.Rung.Landblock));
         Assert.Equal(AutopilotScenario.AlternateReason, moved.Decision.Reason);
-        Assert.Equal((65, 126, 35), (moved.Decision.Rung.Band.From, moved.Decision.Rung.Band.To, moved.Decision.Rung.TargetMargin)); // the rung's band, bolt plan and margin
+        Assert.Equal((60, 126, 35), (moved.Decision.Rung.Band.From, moved.Decision.Rung.Band.To, moved.Decision.Rung.TargetMargin)); // the rung's band (from 60: M6 holding at 60), bolt plan and margin
         Assert.Contains(moved.Gates, g => g.Gate.Rung == "holding" && g.Open);
         Assert.Contains("the rung holding is held and she hunts its alternate tusker-armory in its place", moved.Why, StringComparison.Ordinal);
         Assert.Equal([Armory], moved.ApproachOpened);
@@ -103,11 +103,13 @@ public sealed class ArmoryLadderTests(ITestOutputHelper output)
         var open = RungOwner.Decide(L, Ask(65, Holding, leaving: true) with { Approach = Judge(Open(Holding), Open(Armory)) });
         Assert.Equal((LadderStepKind.Hunt, Holding, (string?)null), (open.Decision.Kind, open.Ground?.Key, open.Alternate));
 
-        // a rung taken ahead of its band (D135: at 63 with her base War Magic over the plan's 290 of level 65): held, it falls to the Quarters, never its alternate ("from 65")
-        var ahead = Ask(63, "tusker-quarters", leaving: true) with { PlanWar = static _ => 290u };
-        Assert.Equal("ahead:holding", RungOwner.Decide(L, ahead).Reason);
-        var under = RungOwner.Decide(L, ahead with { Approach = Judge(Abandoned(Holding), Open(Armory)) });
-        Assert.Equal(("approach-abandoned:holding", "quarters", (string?)null), (under.Reason, under.Decision.Rung?.Key, under.Alternate));
+        // M6 holding at 60 (the owner's decision, 2026-11-20): the Holding's band starts at the level its entry portal admits, so no level takes it ahead of its band (D135's case, at 63 under a band from 65, is gone):
+        // at 59 the portal refuses her, she hunts the Quarters, and its alternate is never read
+        var below = Ask(59, "tusker-quarters", leaving: true) with { PlanWar = static _ => 290u, Approach = Judge(Abandoned(Holding), Open(Armory)) };
+        Assert.Null(RungOwner.Ahead(L, 59, below.Qualities, below.PlanWar, out var refused));
+        Assert.StartsWith("portal: ", refused, StringComparison.Ordinal);
+        var under = RungOwner.Decide(L, below);
+        Assert.Equal(("quarters", (string?)null), (under.Decision.Rung?.Key, under.Alternate));
     }
 
     [Fact]
@@ -152,14 +154,14 @@ public sealed class ArmoryLadderTests(ITestOutputHelper output)
         Assert.Equal((Armory, 30.0), (on.Trial!.Ground, on.Trial.Minutes));
 
         Assert.StartsWith("portal: the entry portal 22657 of tusker-armory admits levels 50 and up; level 49 is not admitted", RungOwner.TrialRefusal(L, Armory, 49, out _), StringComparison.Ordinal);
-        Assert.Null(RungOwner.TrialRefusal(L, Armory, 63, out var rung));
+        Assert.Null(RungOwner.TrialRefusal(L, Armory, 55, out var rung)); // on the Quarters' band (42-59), the Holding the rung after it
         Assert.Equal("holding", rung!.Key);
         Assert.Same(L.GateOf("holding"), RungOwner.TrialGate(L, rung));
 
-        var trial = RungOwner.Decide(L, Ask(63, Armory, leaving: true) with { Trial = new LadderTrial(Armory), Approach = Judge(null, Open(Armory)) });
+        var trial = RungOwner.Decide(L, Ask(55, Armory, leaving: true) with { Trial = new LadderTrial(Armory), Approach = Judge(null, Open(Armory)) });
         Assert.True(trial.Trial!.Steers);
         Assert.Equal(("trial:" + Armory, Armory, (ushort?)0x5948), (trial.Reason, trial.Ground?.Key, trial.Decision.Rung?.Landblock));
-        var held = RungOwner.Decide(L, Ask(63, Armory, leaving: true) with { Trial = new LadderTrial(Armory), Approach = Judge(null, Unsurvivable(Armory)) });
+        var held = RungOwner.Decide(L, Ask(55, Armory, leaving: true) with { Trial = new LadderTrial(Armory), Approach = Judge(null, Unsurvivable(Armory)) });
         Assert.False(held.Trial!.Steers);
         Assert.StartsWith("approach: tusker-armory's approach is not survivable", held.Trial.Refused, StringComparison.Ordinal);
     }

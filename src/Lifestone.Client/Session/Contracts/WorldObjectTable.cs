@@ -147,6 +147,31 @@ public sealed class WorldObjectTable
         return guid != 0;
     }
 
+    /// <summary>
+    /// M6 fight targeting (<c>m6-blow-unpinned</c>): how many living creatures of <paramref name="name"/> with a position the table holds, by the filter of
+    /// <see cref="NearestLivingCreatureNamed"/>. One: the name is an identity (the server's notice names its attacker, and only one bears the name). Allocates nothing.
+    /// </summary>
+    /// <param name="name">The name to match (ordinal).</param>
+    /// <param name="exclude">An id to skip (the player), or 0.</param>
+    /// <param name="live">Where a creature stands now (<see cref="Where"/>), or null for the server's last report.</param>
+    public int LivingCreaturesNamed(string name, uint exclude, LivePositions? live = null)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        var count = 0;
+        foreach (var o in _objects.Values)
+        {
+            if (o.Guid == exclude || o.Position is null || !string.Equals(o.Name, name, StringComparison.Ordinal)
+                || (o.ItemType & CreatureItemType) == 0 || o.Health is <= 0f || o.Motion is { Forward: DeadMotionLowWord } || Where(o, live) is null)
+            {
+                continue;
+            }
+
+            count++;
+        }
+
+        return count;
+    }
+
     /// <summary>The CreateObject description flag of a lifestone (<c>BF_LIFESTONE</c>, 0x4000; ACE <c>ObjectDescriptionFlag.LifeStone</c>), as <c>WorldContentCensus</c> reads it.</summary>
     public const uint LifestoneFlag = 0x4000;
 

@@ -366,10 +366,13 @@ internal static class AutopilotRig
             return c;
         }
 
-        public AutopilotScenario Autopilot(AutopilotOptions options, IAutopilotCheckpointStore? store = null, IAutopilotSession? host = null, AutopilotSeed? seed = null) => new(options, Factory, Context(), store, host, seed) { MinStintSeconds = MinStintSeconds };
+        public AutopilotScenario Autopilot(AutopilotOptions options, IAutopilotCheckpointStore? store = null, IAutopilotSession? host = null, AutopilotSeed? seed = null) => new(options, Factory, Context(), store, host, seed) { MinStintSeconds = MinStintSeconds, MinSaleSeconds = MinSaleSeconds };
 
         /// <summary>M6 14 T: the minimum fight stint of the autopilots this world makes (<see cref="TripStint"/>). 0 here: the scripted world's fights last seconds, and each test is about the trigger it names; the stint's own tests set it (<c>AutopilotTripStintTests</c>).</summary>
         public double MinStintSeconds { get; set; }
+
+        /// <summary>M6 safe load: the sale's floor of the autopilots this world makes (<see cref="TripStint.SaleSeconds"/>). 0 here, as the stint: each test is about the trigger it names; the floor's own tests set it.</summary>
+        public double MinSaleSeconds { get; set; }
 
         /// <summary>M6 7 BD: the context's spell table (the scripted world has an empty one by default).</summary>
         public IReadOnlyDictionary<uint, Lifestone.Data.Magic.SpellInfo>? Spells { get; set; }

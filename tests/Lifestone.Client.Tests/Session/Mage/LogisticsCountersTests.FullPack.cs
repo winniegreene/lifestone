@@ -27,7 +27,7 @@ public sealed partial class LogisticsCountersTests
 
         var rule = counters.FullPackRule(MageLootThresholds.LoadLineOf(abode));
         Assert.Equal(
-            "none: no slot line (the profile names no loot.min_free_slots); the burden line 150% is at or over the loot's line 100%, so the loot never passes it; the full-pack line calls a trip once the loot leaves a keep-aside piece (a great cantrip) over its line 100% (m6-pack-room, amends m6-full-pack-no-trip; the minimum fight stint holds it after a trip)",
+            "none: no slot line (the profile names no loot.min_free_slots); the burden line 150% is at or over the loot's line 100%, so the loot never passes it; the full-pack line calls a trip once the loot leaves a great-cantrip piece or a quest's want over its line 100% (m6-pack-room, amends m6-full-pack-no-trip; the minimum fight stint holds it after a trip)",
             rule);
     }
 
@@ -40,7 +40,7 @@ public sealed partial class LogisticsCountersTests
         Assert.Equal((LogisticsKind.Trip, LogisticsCause.Slots), (verdict.Kind, verdict.Cause));
 
         var rule = counters.FullPackRule(MageLootThresholds.LoadLineOf(holding));
-        Assert.Equal("none: the slot line calls a trip under 5 free slot(s); the burden line 85% is at or over the loot's line 85%, so the loot never passes it; the full-pack line calls a trip once the loot leaves a keep-aside piece (a great cantrip) over its line 85% (m6-pack-room, amends m6-full-pack-no-trip; the minimum fight stint holds it after a trip)", rule);
+        Assert.Equal("none: the slot line calls a trip under 5 free slot(s); the burden line 85% is at or over the loot's line 85%, so the loot never passes it; the full-pack line calls a trip once the loot leaves a great-cantrip piece or a quest's want over its line 85% (m6-pack-room, amends m6-full-pack-no-trip; the minimum fight stint holds it after a trip)", rule);
     }
 
     [Fact]
@@ -63,8 +63,11 @@ public sealed partial class LogisticsCountersTests
         var verdict = counters.Check(pack.State);
         Assert.Equal((LogisticsKind.Trip, LogisticsCause.FullPack, 1, 100), (verdict.Kind, verdict.Cause, verdict.Held, verdict.LinePercent));
         Assert.Equal("full-pack", verdict.Trigger);
-        Assert.Equal("full pack: the loot left 1 keep-aside piece(s) (a great cantrip) over its load line 100% since the last visit (burden 100% of the capacity): a trip sells what she carries (m6-pack-room)", verdict.Reason);
+        Assert.Equal("full pack: the loot left 1 great-cantrip piece(s) or quest want(s) over its load line 100% since the last visit (burden 100% of the capacity): a trip sells what she carries (m6-pack-room)", verdict.Reason);
         Assert.Equal(LogisticsCause.FullPack, new LogisticsCounters(barracks, learnHolds: new LearnHolds(), componentNeeds: new ComponentNeeds()).Check(pack.State).Cause); // the station's own counters read the same session
+        Assert.True(verdict.IsSale);
+        Assert.Equal(LogisticsKind.None, counters.Check(pack.State, skipSale: true).Kind); // M6 safe load: asked past the sale's triggers (the sale's floor holds them), nothing else is due
+        Assert.Equal(LogisticsCause.FullPack, counters.Check(pack.State).Cause); // the skip asks once: the next check reads the trip again
 
         room.Visited(3_600, new Dictionary<uint, int>(), new Dictionary<uint, int>()); // the visit sold it
         Assert.Equal(LogisticsKind.None, counters.Check(pack.State).Kind); // not again at once: the next trip waits for the next item the loot leaves

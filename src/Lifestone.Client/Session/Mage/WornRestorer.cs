@@ -447,7 +447,7 @@ public sealed class WornRestorer
 
     private static bool BetterCloth(GearCandidate a, GearCandidate b)
     {
-        var (la, lb) = (a.Appraisal?.ArmorLevel ?? 0, b.Appraisal?.ArmorLevel ?? 0);
+        var (la, lb) = (a.Appraisal is { } pa ? ArmourBase.Level(pa) : 0, b.Appraisal is { } pb ? ArmourBase.Level(pb) : 0); // each piece's own level, not the one with her Impenetrability in
         return la != lb ? la > lb : a.Burden != b.Burden ? a.Burden < b.Burden : a.Guid < b.Guid;
     }
 

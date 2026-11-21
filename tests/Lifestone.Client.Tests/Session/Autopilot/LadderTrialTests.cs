@@ -137,7 +137,7 @@ public sealed class LadderTrialTests(ITestOutputHelper output)
     {
         Assert.StartsWith("portal: the entry portal 22680 of tusker-holding admits levels 60 and up; level 41 is not admitted", RungOwner.TrialRefusal(L, Holding, 41, out var rung), StringComparison.Ordinal);
         Assert.Equal("holding", rung?.Key);
-        Assert.Null(RungOwner.TrialRefusal(L, Holding, 60, out _)); // at 60 the portal admits her (the Holding is still the rung after the Quarters')
+        Assert.StartsWith("not-later: ", RungOwner.TrialRefusal(L, Holding, 60, out _), StringComparison.Ordinal); // M6 holding at 60 (the owner's decision, 2026-11-20): from 60 the Holding is her own rung, never a trial
 
         var trial = new LadderTrial(Holding);
         var c = Climb(trial);

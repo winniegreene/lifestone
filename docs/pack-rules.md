@@ -190,6 +190,15 @@ less the set she wears now:
   activation requirement is unmet, or a swap that waits for peace mode.
 - **Sell** (`gear-loot`): everything else, after it was read and judged.
 
+**A piece is scored on its own numbers** (`ArmourBase`, src/Lifestone.Client/Session/Mage/ArmourBase.cs). ACE sends an
+appraisal's armour level and protections with the enchantments on the piece already in them (`AppraiseInfo.cs` 407-408,
+`ArmorProfile.cs` 40-59 @95ef426d) and lists those enchantments beside them. The score takes them out again (the
+strongest of each spell family, the families summed, by the rows of `ArmourSpellRows`) before it adds her own lines, so
+a piece she wears and has cast on is judged as the same piece is in the pack. Before, the worn piece counted its
+Impenetrability and its bane twice and won every comparison: in runs 5 and 6 of 2026-11-19 the Pathwarden Robe went
+back on over the leather set a quarter of a second after each swap. The armour report and the fight's own armour line
+read the same numbers (`ArmorReport.Read`).
+
 One guard stands over the pick (M6 16 E5e2, the owner's standing rule): a worn piece that casts a great cantrip useful to
 her (`CantripJudge`: Major and above, a basic attribute or a skill she holds or her plan trains) is never taken off for
 a piece that casts none, whatever the score says. The judge is the session's one (`Wardrobe.JudgeOn`,

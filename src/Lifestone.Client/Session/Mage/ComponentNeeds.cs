@@ -68,6 +68,10 @@ public sealed class ComponentNeeds
         return PassesKept * perPass;
     }
 
+    /// <summary>The count of <paramref name="wcid"/> one pass of the noted lines burns (<see cref="WantOf"/> over <see cref="PassesKept"/>), or 0 when it was never noted.</summary>
+    /// <param name="wcid">The component's weenie class id.</param>
+    public int PassOf(uint wcid) => WantOf(wcid) / PassesKept;
+
     /// <summary>The weenie class ids noted.</summary>
     public IEnumerable<uint> Wcids => _needs.Keys;
 

@@ -405,6 +405,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
     private uint _manaFloor;
     private uint _manaReserve; // M5 7 F5, D88: the Stamina to Mana press floor plus the Revitalize Self press floor, added to the bolt's try floor (ManaOrder.ManaFloorOf)
     private uint _staminaFloor; // D88: the least stamina at which a landed Stamina to Mana pays itself and the Revitalize after it (ManaOrder.StaminaFloorOf)
+    private bool _refillWaitNoted; // M6 stamina dance (b): the hook's "the refill waits" line, once a run of waits
     private bool _triesSpent;
     private bool _preempting;
     private bool _potionsAside;
@@ -1687,6 +1688,17 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
                         }
 
                         SpotLegArrived(session); // M5 7 P7i: an arrival away from a stuck spot starts its count again
+                        if (_defenceLegFor != 0)
+                        {
+                            if (ReferenceEquals(_legNote, _walkToNote))
+                            {
+                                DefenceLegArrived(session); // M6 fight targeting (m6-line-first): the check after a leg for a line
+                            }
+                            else
+                            {
+                                _defenceLegFor = 0; // another leg arrived: the leg for a line was cut before
+                            }
+                        }
 
                         _missesInARow = 0;
                         _phase = Phase.Choose;
@@ -1727,6 +1739,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         Picker.Rates.NoteIncoming(clock, _tally.DamageTaken); // M5 7 F16: the incoming rate is read every decision, the emergency line is worked out from it
         _finishGuid = 0;
         _walkSight = false;
+        _pickWhy = string.Empty; // M6 one target: this pick's own reason for the target line (FightScenario.OneTarget.cs)
         if (ReserveStep(session, clock, recallOnly: true))
         {
             return ScenarioStatus.Running; // M6 8: the retreat waits for the recall's mana: the potion comes before the heal
@@ -1811,33 +1824,63 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         _pickExcluded.Clear();
         _pickExcluded.AddRange(_killed);
         ExcludeWallBlocked(session, clock); // M6 7 AM: a target the bolt could not reach three times waits out its block
-        if (found && Shots.IsDropped(guid, clock) && LifeThroughPlans(session, clock, in here, guid))
+        var oneTarget = OneTargetMove.None;
+        if (defence == DefenceMove.Cast)
         {
-            // M6 14 (m6-life-through): an attacker the shot rule dropped (its bolts came to nothing) is fought with a life spell while the drop stands, before the close-attacker rule takes the drop back for more bolts.
-            if (HealDecide(session, clock))
+            // M6 one target at a time (the owner's ruling of 2026-11-21; run 10's Tusker Armory, 07:31:00-07:34:59 UTC: 18 of 21 target changes by self-defence, four pairs ping-ponging; FightScenario.OneTarget.cs, docs/session.md section 124): her
+            // target, alive, in range with a line and attacking her or hit by her, is kept over a new attacker, and held for while the bolts in flight are expected to finish it; else the kill order's first attacker.
+            oneTarget = OneTargetStep(session, clock, in here, ref guid);
+            switch (oneTarget)
             {
-                NoteDrainStart(session, clock);
-                return ScenarioStatus.Running;
-            }
+                case OneTargetMove.Hold:
+                    if (HealDecide(session, clock))
+                    {
+                        NoteDrainStart(session, clock); // Heal Self while it holds, as the hold for the bolts in flight does below
+                    }
 
-            return LifeThroughBegin(session, clock, in here);
+                    return ScenarioStatus.Running;
+                case OneTargetMove.Keep:
+                    _defendingGuid = IsAttacker(guid) ? guid : 0;
+                    break;
+                case OneTargetMove.Order:
+                    _defendingGuid = guid;
+                    break;
+            }
         }
 
         if (found && ShotDropHolds(session, guid, clock))
         {
-            (guid, found, _defendingGuid) = (0, false, 0); // M6 8 L: an attacker the shot rule dropped is not shot at again until its time is up, or until it stands close
+            // M6 fight targeting (run 9: 102 life-cast decisions at 12 attackers the check dropped 3.9 to 21.5 m off, made 1.7 to 11.7 m off after she or they had moved; m6-shot-drop-place, m6-line-first): the drop belongs to
+            // where it was measured, and ShotDropHolds has taken back one that she or it has moved from, or that has come close. One that still stands from here is moved to first (a sidestep, a walk to a spot with a
+            // line), then fought with a life spell; neither, and it is left alone as before (M6 8 L).
+            if (DropLineSpot(session, clock, in here, guid))
+            {
+                if (HealDecide(session, clock))
+                {
+                    NoteDrainStart(session, clock);
+                    return ScenarioStatus.Running; // Heal Self before the walk, as before any self-defence walk
+                }
+
+                return StartDefenceWalk(session, clock, guid);
+            }
+
+            if (LifeThroughPlans(session, clock, in here, guid))
+            {
+                if (HealDecide(session, clock))
+                {
+                    NoteDrainStart(session, clock);
+                    return ScenarioStatus.Running;
+                }
+
+                return LifeThroughBegin(session, clock, in here);
+            }
+
+            (guid, found, _defendingGuid) = (0, false, 0); // M6 8 L: an attacker the shot rule dropped is not shot at again from here until its time is up, she or it moves, or it comes close
         }
 
         if (ExcludeDoomed(session, clock) && found && _pickExcluded.Contains(guid))
         {
             (guid, found, _defendingGuid) = (0, false, 0); // M5 7 D124 (S1b): an attacker the projectiles in flight will kill is left to them (FightScenario.InFlight.cs)
-        }
-
-        if (found && defence == DefenceMove.Cast && guid != _target && KeepsCurrent(session, clock, in here, guid))
-        {
-            // M6 14 tactics (live ladder56 08:33:02.349 UTC): the attacker is weighed against the target she is on, by each one's seconds to kill and damage a second on her; the one that costs her less health first is
-            // finished first (FightScenario.TargetSwitch.cs), so a hurt wisp is not left to bolt her while a fresh one is taken
-            (guid, _defendingGuid) = (_target, IsAttacker(_target) ? _target : 0);
         }
 
         var killGrace = KillInGrace();
@@ -1929,12 +1972,15 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             return StartWalk(session, clock, _pickExcluded.Count > _killed.Count ? NoClearLine : leaving ? TourLeaves : NoTargetInRange);
         }
 
-        return BeginTarget(session, clock, in here, guid, defence, leaving);
+        // M6 one target: the target line names the rule that chose it; an attacker the self-defence pick let go (the bolts in flight, the shot drop) that the profile's pick then took is the profile's pick.
+        return BeginTarget(session, clock, in here, guid, defence == DefenceMove.Cast && oneTarget == OneTargetMove.None && _defendingGuid != guid ? DefenceMove.None : defence, leaving);
     }
 
     /// <summary>A target is chosen (the pick's, self-defence's or the emergency's finishing bolt): it is selected, the mana order and the picker decide, and the bolt or the war option starts.</summary>
     private ScenarioStatus BeginTarget(IGameSessionView session, double clock, in CellFrame here, uint guid, DefenceMove defence, bool leaving)
     {
+        _boltTarget = guid; // M6 one target: the creature she attacks, which a drain's or a heal's own source pick does not move (FightScenario.OneTarget.cs)
+
         if (!double.IsNaN(_idleSince))
         {
             _idleTotal += clock - _idleSince; // a target to pick again: the time with none ends
@@ -1946,7 +1992,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             var previous = _target;
             _target = guid;
             _tally.SetTarget(session.State.Objects.TryGet(guid, out var chosen) ? chosen.Name : null);
-            var reason = defence == DefenceMove.Cast ? "self-defence: it attacked the player" : leaving ? "the tour leaves this storey: the next storey's nearest" : previous == 0 ? "the first pick: the nearest profile target in range with a clear line" : TargetGone(session.State.Objects, previous) || _killed.Contains(previous) ? "the last target is dead or gone: the nearest profile target in range with a clear line" : "the last target is out of the pick (out of range, no clear line, or not the nearest): the nearest profile target in range with a clear line";
+            var reason = defence == DefenceMove.Cast ? (_pickWhy.Length > 0 ? _pickWhy : "self-defence: it attacked the player") : leaving ? "the tour leaves this storey: the next storey's nearest" : previous == 0 ? "the first pick: the nearest profile target in range with a clear line" : TargetGone(session.State.Objects, previous) || _killed.Contains(previous) ? "the last target is dead or gone: the nearest profile target in range with a clear line" : "the last target is out of the pick (out of range, no clear line, or not the nearest): the nearest profile target in range with a clear line";
             _log.Info(LogCategory, $"target 0x{guid:X8} ({chosen?.Name ?? "unknown"}), was 0x{previous:X8}: {reason}");
             SelectTarget(session, guid, clock); // M5 7 F20: selected, so ACE pushes its health on every change
             ElementFor(session, guid); // M6 14 the element line: the bolt line that hits this creature hardest from her book (FightScenario.Element.cs)
@@ -2214,13 +2260,33 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         if (m >= boltMana)
         {
             // M5 7 F5 (D88): between kills, the stamina under the share and the mana paying a Revitalize Self with the bolt still in hand: the stamina first (the order decides the level; no mana wait: the bolt is not short of mana).
-            if (!drainFirst && _refill.PercentAt(clock) > 0 && ManaOrder.StaminaUnder(s, sMax, _refill.Percent) && ManaOrder.RevitalizeLevelOf(_refill.Levels, m, _wayOut is { } wayOut ? wayOut.Line + _manaNeeded : boltMana == 0 ? _manaNeeded : boltMana) >= 0) // the reserve is the order's target (ManaOrder.Decide), so the hook and the decision agree; M6 7 BE: and it keeps the way out's line
+            // M6 stamina dance (b), docs/session.md section 121: the hook asks the decision's own refill test, the whole-roll RevitalizeLevelOf at the order's target (ManaOrder.TargetOf, the reserve ManaOrder.Decide keeps; the
+            // input's RevitalizeWholeRoll is set in ManaDecide), so a Revitalize the order would refuse (its top roll over what she is missing) never enters the mana phase, and the bolt is sent. M6 7 BE: with the way out
+            // armed a level must also be payable with the line and one bolt in hand (the highest-payable test, the hook's alone, as before). The two are asked apart because the whole-roll test is not monotone in its
+            // reserve: one call at the way out's reserve found Revitalize Self I's top roll to fit while the order, at its target, found VI's over the stamina missing and waited, so the hook fired every frame and no bolt
+            // went (FightScenarioTests.WayOut.cs, the potion tests). Run 9 cast 101 Revitalize VI from 80-90% stamina for 51 each (cache/m6/sprint/run9/step3-levelup.log).
+            if (!drainFirst && _manaNeeded > 0 && _refill.PercentAt(clock) > 0 && ManaOrder.StaminaUnder(s, sMax, _refill.Percent)
+                && (_wayOut is not { } wayOut || ManaOrder.RevitalizeLevelOf(_refill.Levels, m, wayOut.Line + _manaNeeded) >= 0))
             {
-                _manaPhase = ManaPhase.Decide;
-                _phase = Phase.Mana;
-                return true;
+                var reserve = ManaOrder.TargetOf(new ManaNeed(_manaNeeded, _manaFloor), _triesSpent);
+                if (ManaOrder.RevitalizeLevelOf(_refill.Levels, m, reserve, s, sMax, _staminaFloor, out var fit) >= 0)
+                {
+                    _refillWaitNoted = false;
+                    _manaPhase = ManaPhase.Decide;
+                    _phase = Phase.Mana;
+                    return true;
+                }
+
+                if (fit == RefillFit.Waits && !_refillWaitNoted)
+                {
+                    _refillWaitNoted = true; // one line a run of waits: the bolt goes in the refill's place until the stamina falls far enough or reaches the share
+                    _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: the refill waits: stamina {s} of {sMax} is under the {_refill.Percent}% share, but the best payable Revitalize Self's top roll does not fit the {sMax - s} missing (mana {m}, {reserve} kept for the bolt) and the stamina is not under D88's floor {_staminaFloor}: the bolt (M6 stamina dance b)"));
+                }
+
+                return false;
             }
 
+            _refillWaitNoted = false;
             return false;
         }
 
@@ -2509,6 +2575,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
             StaminaFloor = _staminaFloor,
             StaminaFullPercent = refillPercent,
             StaminaPotions = staminaPotions,
+            RevitalizeWholeRoll = true, // M6 stamina dance (b): with the hook's own whole-roll test above (BoltNeedsMana), so the two agree
             BestNetPress = _manaConversion == 0 || CharacterPolicy.For(session.State.Self.Name).ManaBySum, // the owner's ruling, 2026-11-08: pick by the sum: the ladder's character at any Mana Conversion
         };
         var decision = ManaOrder.Decide(in input, _danceLevels.AsSpan(0, clock < _danceAsideUntil ? 0 : _danceCount), _options.Mana, _refill.Levels);
@@ -2534,7 +2601,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
                     return ScenarioStatus.Running; // M5 7 F10: a target in reach and the drain refills faster than Revitalize Self
                 }
 
-                StartRevitalize(session, decision.DanceIndex, m, mMax, s, sMax, clock);
+                StartRevitalize(session, decision.DanceIndex, m, mMax, s, sMax, clock, decision.Reason);
                 return ScenarioStatus.Running;
 
             case ManaStep.StaminaPotion:
@@ -2612,14 +2679,14 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
 
     /// <summary>
     /// Sends the refill (M5 7 F5, D88): Revitalize Self at the level <paramref name="index"/> of the refill's levels, the stamina under <c>--fight-stamina-full</c>. One line each:
-    /// <c>mana: revitalize: &lt;spell&gt; at stamina x of y, mana m of n</c>.
+    /// <c>mana: revitalize: &lt;spell&gt; at stamina x of y, mana m of n (the order's reason)</c>.
     /// </summary>
-    private void StartRevitalize(IGameSessionView session, int index, uint mana, uint manaMax, uint stamina, uint staminaMax, double clock)
+    private void StartRevitalize(IGameSessionView session, int index, uint mana, uint manaMax, uint stamina, uint staminaMax, double clock, string why)
     {
         var level = _refill.Levels[index];
         _manaPhase = ManaPhase.Revitalizing;
         NoteRefill(clock, ended: false);
-        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: revitalize: {(_spells.TryGetValue(level.SpellId, out var info) ? info.Name : "spell")} at stamina {stamina} of {staminaMax}, mana {mana} of {manaMax}"));
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: revitalize: {(_spells.TryGetValue(level.SpellId, out var info) ? info.Name : "spell")} at stamina {stamina} of {staminaMax}, mana {mana} of {manaMax} ({why})"));
         _refill.Start(session, index, clock);
     }
 
@@ -3114,6 +3181,7 @@ public sealed partial class FightScenario : IScenario, IDisposable, IStoppableFi
         {
             _wallHitsOn.Remove(_target); // M6 7 AM: a bolt that reached it ends the count of wall hits on it
             Shots.NoteDamage(_target); // M6 8 L: a target that takes damage is kept
+            NoteHitByHer(_target); // M6 one target: she has hit it, so she finishes it (FightScenario.OneTarget.cs)
             _missesInARow = 0;
             _health = session.Actions.QueryHealth(_target, ActionSource.Host);
             _phase = Phase.Choose;

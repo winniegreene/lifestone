@@ -1,3 +1,4 @@
+using Lifestone.Client.Options;
 using Lifestone.Client.Session.Autopilot;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Grounds;
@@ -11,8 +12,8 @@ namespace Lifestone.Client.Tests.Session.Autopilot;
 
 /// <summary>
 /// M6 14 (D135, the owner, 2026-11-13: the optimal climb's bands for a fresh climber, the island from level 10, reversing the hold until 16 of 2026-11-06): the rung the ladder gives a fresh climber at the study's band edges
-/// (10, 15, 25, 42, 60, 65), with the buff bot's lines up and with them down, and the move-on ahead of the band (<see cref="RungOwner.Ahead"/>). Proved: with the bot's lines up she is on the Burrow at 10, the Lodge at 15, the
-/// Abode at 25, the Quarters at 42 and 60 (the Holding's portal admits her at 60, but the plan's climber moves on at the band) and the Holding at 65; with them down and nothing of her own up she is held back through every gate
+/// (10, 15, 25, 42, 59, 60), with the buff bot's lines up and with them down, and the move-on ahead of the band (<see cref="RungOwner.Ahead"/>). Proved: with the bot's lines up she is on the Burrow at 10, the Lodge at 15, the
+/// Abode at 25, the Quarters at 42 and 59 and the Holding at 60 (M6 holding at 60, the owner's decision of 2026-11-20: from the level its entry portal admits; 65 by D135 before); with them down and nothing of her own up she is held back through every gate
 /// to the outskirts, by name; her own lines at what she casts without the bot open the gates to the Quarters but never the Holding's, which asks the bot's level VII. The move-on: the rung after the band's is taken before its band
 /// only when its portals admit her, its gate reads open and she is at least the plan's climber of its first level; one rung, never two; a run on it stays while that holds and leaves it when its gate shuts at the way out; the
 /// fight's read, the host's named rung and a corpse run follow it; and with no plan read, or a shut gate, or a portal that refuses, the band decides.
@@ -55,8 +56,8 @@ public sealed class LadderBandsTests(DatSetFixture fixture) : IClassFixture<DatS
     [InlineData(15, "lodge")] // the Facility Hub's tusker portals from 15
     [InlineData(25, "abode")] // on Flame Bolt V under the bot's lines
     [InlineData(42, "quarters")]
-    [InlineData(60, "quarters")] // the Holding's entry admits her from 60; the plan's climber moves on at its band, 65
-    [InlineData(65, "holding")] // its gate asks the bot's level VII armour lines: they stand
+    [InlineData(59, "quarters")] // the Holding's entry admits her from 60
+    [InlineData(60, "holding")] // its gate asks the bot's level VII armour lines: they stand
     public void With_the_bots_lines_up_a_fresh_climber_is_on_the_studys_rung(int level, string rung)
     {
         var choice = RungOwner.Decide(L, Ask(level, BotUp, plan: static l => 5000u)); // a plan she is never ahead of: the band decides
@@ -73,8 +74,8 @@ public sealed class LadderBandsTests(DatSetFixture fixture) : IClassFixture<DatS
     [InlineData(15, "lodge")]
     [InlineData(25, "abode")]
     [InlineData(42, "quarters")]
-    [InlineData(60, "quarters")]
-    [InlineData(65, "holding")]
+    [InlineData(59, "quarters")]
+    [InlineData(60, "holding")]
     public void With_the_bots_lines_down_and_nothing_of_her_own_up_she_is_held_back_through_every_gate(int level, string band)
     {
         var choice = RungOwner.Decide(L, Ask(level, BotDown));
@@ -88,7 +89,7 @@ public sealed class LadderBandsTests(DatSetFixture fixture) : IClassFixture<DatS
     [Theory]
     [InlineData(10, 3, "outskirts", 9, "gate-held:burrow")] // her own Armor Self III: the Burrow asks IV (the hold of 2026-11-06, without the bot)
     [InlineData(42, 6, "quarters", 42, "band")] // her own VI meets the Abode's gate on the Quarters
-    [InlineData(65, 6, "quarters", 64, "gate-held:holding")] // the Holding rests on the bot: its VII holds her in the Quarters
+    [InlineData(60, 6, "quarters", 59, "gate-held:holding")] // the Holding rests on the bot: its VII holds her in the Quarters
     public void Without_the_bot_her_own_lines_at_what_she_casts_open_the_gates_but_never_the_Holdings(int level, int own, string rung, int held, string reason)
     {
         var buffs = new RungBuffRead(_ => own, _ => own);
@@ -141,26 +142,28 @@ public sealed class LadderBandsTests(DatSetFixture fixture) : IClassFixture<DatS
     [Fact]
     public void With_no_plan_read_no_rung_is_taken_ahead_and_the_portal_admitting_her_is_not_enough()
     {
-        Assert.Null(RungOwner.Ahead(L, 60, Climber(400), null, out var why));
+        // M6 holding at 60 (2026-11-20): the Holding's band starts at its portal's 60, so the case is the Quarters' (its portal admits 30, its band starts at 42)
+        Assert.Null(RungOwner.Ahead(L, 40, Climber(400), null, out var why));
         Assert.StartsWith("plan: ", why, StringComparison.Ordinal);
-        Assert.Equal("quarters", RungOwner.Decide(L, Ask(60, BotUp, war: 400)).Decision.Rung?.Key); // the Holding's portal admits 60, its gate is open: the band still holds her
+        Assert.Equal("abode", RungOwner.Decide(L, Ask(40, BotUp, war: 400)).Decision.Rung?.Key); // the Quarters' portal admits 40, its gate is open: the band still holds her
 
-        Assert.Equal("holding", RungOwner.Decide(L, Ask(60, BotUp, war: 400, plan: Plan(290))).Decision.Rung?.Key); // a climber at the plan's 290 of level 65 takes it at 60
-        Assert.Equal("ahead:holding", RungOwner.Decide(L, Ask(60, BotUp, war: 400, plan: Plan(290))).Reason);
+        Assert.Equal("quarters", RungOwner.Decide(L, Ask(40, BotUp, war: 400, plan: Plan(290))).Decision.Rung?.Key); // a climber over the plan of level 42 takes it at 40
+        Assert.Equal("ahead:quarters", RungOwner.Decide(L, Ask(40, BotUp, war: 400, plan: Plan(290))).Reason);
     }
 
     [Fact]
     public void A_rung_held_by_its_approach_this_session_is_not_taken_ahead_of_its_band_and_its_own_band_still_takes_it_to_the_way_out()
     {
-        // Live 2026-11-14 (the move-on loop): the caster spend raised her base War Magic to the plan's 290 at 63, the cycle's check took the Holding ahead of its band, the way out held it by its approach (approach-costly), and
-        // the host's restart took it ahead again. Once held, no check takes it ahead; the Quarters stays her rung.
+        // Live 2026-11-14 (the move-on loop): the caster spend raised her base War Magic to the plan's 290 at 63, the cycle's check took the Holding ahead of its band (then from 65), the way out held it by its approach
+        // (approach-costly), and the host's restart took it ahead again. Once held, no check takes it ahead; her band's rung stays hers. The Holding's band now starts at its portal's 60 (M6 holding at 60), so the rule is shown on
+        // the Quarters taken ahead from the Abode's band.
         var holds = new ApproachHolds();
-        Assert.Equal("holding", RungOwner.Decide(L, Ask(63, BotUp, war: 400, plan: Plan(290)) with { AheadHeld = holds.IsHeld }).Decision.Rung?.Key); // nothing held yet: ahead
-        Assert.True(holds.Note("holding", "approach-costly:holding"));
-        Assert.False(holds.Note("holding", "approach-costly:holding")); // noted once
-        var held = RungOwner.Decide(L, Ask(63, BotUp, war: 400, plan: Plan(290)) with { AheadHeld = holds.IsHeld });
-        Assert.Equal("quarters", held.Decision.Rung?.Key);
-        Assert.NotEqual("ahead:holding", held.Reason);
+        Assert.Equal("quarters", RungOwner.Decide(L, Ask(40, BotUp, war: 400, plan: Plan(290)) with { AheadHeld = holds.IsHeld }).Decision.Rung?.Key); // nothing held yet: ahead
+        Assert.True(holds.Note("quarters", "approach-costly:quarters"));
+        Assert.False(holds.Note("quarters", "approach-costly:quarters")); // noted once
+        var held = RungOwner.Decide(L, Ask(40, BotUp, war: 400, plan: Plan(290)) with { AheadHeld = holds.IsHeld });
+        Assert.Equal("abode", held.Decision.Rung?.Key);
+        Assert.NotEqual("ahead:quarters", held.Reason);
 
         Assert.Equal("holding", ApproachHolds.HeldRungOf("approach-costly:holding"));
         Assert.Equal("holding", ApproachHolds.HeldRungOf("approach-abandoned:holding"));
@@ -183,28 +186,30 @@ public sealed class LadderBandsTests(DatSetFixture fixture) : IClassFixture<DatS
     [Fact]
     public void A_shut_gate_ahead_holds_her_on_her_band_and_is_no_hold()
     {
-        // at 64, her own VI up and the bot's lines lapsed: the Quarters' gate is open, the Holding's (VII) shut: she stays on the Quarters, never under it
+        // at 59, her own VI up and the bot's lines lapsed: the Quarters' gate is open, the Holding's (VII) shut and its portal (MinLevel 60) refuses her: she stays on the Quarters, never under it
         var buffs = new RungBuffRead(_ => 6, _ => 6);
-        var choice = RungOwner.Decide(L, Ask(64, buffs, war: 400, run: "tusker-quarters", plan: Plan(200), bot: false));
+        var choice = RungOwner.Decide(L, Ask(59, buffs, war: 400, run: "tusker-quarters", plan: Plan(200), bot: false));
 
-        Assert.Equal((LadderStepKind.Hunt, "quarters", 64), (choice.Decision.Kind, choice.Decision.Rung?.Key, choice.HeldLevel));
-        Assert.Contains(choice.Gates, g => g is { Ahead: true, Open: false } && g.Gate.Rung == "holding");
+        Assert.Equal((LadderStepKind.Hunt, "quarters", 59), (choice.Decision.Kind, choice.Decision.Rung?.Key, choice.HeldLevel));
+        Assert.Null(RungOwner.Ahead(L, 59, Climber(400), Plan(200), out var why));
+        Assert.StartsWith("portal: ", why, StringComparison.Ordinal);
         Assert.False(choice.Reason.StartsWith("gate-held:", StringComparison.Ordinal), choice.Reason);
     }
 
     [Fact]
     public void A_run_on_the_rung_ahead_stays_and_its_way_out_reads_the_gate_again()
     {
-        // the cycle's check on the Holding at 62: her own gate was read when she left for it
-        var on = RungOwner.Decide(L, Ask(62, BotUp, war: 400, run: "tusker-holding", plan: Plan(290)));
-        Assert.Equal((LadderStepKind.Hunt, "holding", "ahead:holding"), (on.Decision.Kind, on.Decision.Rung?.Key, on.Reason));
+        // the cycle's check on the Quarters at 40, ahead of its band (M6 holding at 60: the Holding is never ahead of its band now): her own gate was read when she left for it
+        var on = RungOwner.Decide(L, Ask(40, BotUp, war: 400, run: "tusker-quarters", plan: Plan(290)));
+        Assert.Equal((LadderStepKind.Hunt, "quarters", "ahead:quarters"), (on.Decision.Kind, on.Decision.Rung?.Key, on.Reason));
 
         // the way out with the bot's lines up: she goes
-        Assert.Equal(LadderStepKind.Hunt, RungOwner.Decide(L, Ask(62, BotUp, war: 400, run: "tusker-holding", leaving: true, plan: Plan(290))).Decision.Kind);
+        Assert.Equal(LadderStepKind.Hunt, RungOwner.Decide(L, Ask(40, BotUp, war: 400, run: "tusker-quarters", leaving: true, plan: Plan(290))).Decision.Kind);
 
-        // the way out with them lapsed (her own VI): the Holding's gate is shut, the Quarters' open: back to the Quarters by name, no hold
-        var lapsed = RungOwner.Decide(L, Ask(62, new RungBuffRead(_ => 6, _ => 6), war: 400, run: "tusker-holding", leaving: true, plan: Plan(290), bot: false));
-        Assert.Equal((LadderStepKind.Moved, "rung-moved:quarters", 62), (lapsed.Decision.Kind, lapsed.Decision.Stop, lapsed.HeldLevel));
+        // the way out with them lapsed to her own IV: the Quarters' gate (V) is shut, so the run ahead is left by name
+        var lapsed = RungOwner.Decide(L, Ask(40, new RungBuffRead(_ => 4, _ => 4), war: 400, run: "tusker-quarters", leaving: true, plan: Plan(290), bot: false));
+        Assert.Equal(LadderStepKind.Moved, lapsed.Decision.Kind);
+        Assert.NotEqual("quarters", lapsed.Decision.Rung?.Key);
     }
 
     [Fact]
@@ -220,6 +225,27 @@ public sealed class LadderBandsTests(DatSetFixture fixture) : IClassFixture<DatS
         var corpse = RungOwner.CorpseRun(L, Ask(24, BotUp, war: 200, plan: Plan(200)), "tusker-abode");
         Assert.Equal((true, "abode"), (corpse.Open, corpse.Rung));
         Assert.False(RungOwner.CorpseRun(L, Ask(24, BotUp, war: 199, plan: Plan(200)), "tusker-abode").Open); // the plan's climber: not hers before 25
+    }
+
+    [Fact]
+    public void With_the_rung_holds_report_only_her_level_alone_decides_and_the_gates_are_still_read()
+    {
+        // M6 holding at 60 (the owner, 2026-11-20: the only thing that should stop her is her level): the bot's lines down shut every gate, yet at 60 she is on the Holding and at 59 on the Quarters; each gate is still read
+        var at60 = RungOwner.Decide(L, Ask(60, BotDown) with { HoldsReportOnly = true });
+        Assert.Equal(("holding", 60), (at60.Decision.Rung?.Key, at60.HeldLevel));
+        Assert.Contains(at60.Gates, g => g.Gate.Rung == "holding" && !g.Open);
+        Assert.Equal("quarters", RungOwner.Decide(L, Ask(59, BotDown) with { HoldsReportOnly = true }).Decision.Rung?.Key);
+        Assert.Equal("outskirts", RungOwner.Decide(L, Ask(60, BotDown)).Decision.Rung?.Key); // the default holds, as before
+    }
+
+    [Fact]
+    public void The_rung_holds_switch_reads_hold_and_report_and_refuses_anything_else()
+    {
+        static AutopilotOptions Parse(params string[] args) => AutopilotOptions.FromArguments(CommandLineArgument.ParseAll(args));
+        Assert.False(Parse("--autopilot-job=level-up").RungHoldsReportOnly);
+        Assert.True(Parse("--autopilot-job=level-up", "--autopilot-rung-holds=report").RungHoldsReportOnly);
+        Assert.False(Parse("--autopilot-job=level-up", "--autopilot-rung-holds=hold").RungHoldsReportOnly);
+        Assert.Contains(Parse("--autopilot-job=level-up", "--autopilot-rung-holds=maybe").Errors, e => e.StartsWith("--autopilot-rung-holds: ", StringComparison.Ordinal));
     }
 
     [RequiresDatsFact]

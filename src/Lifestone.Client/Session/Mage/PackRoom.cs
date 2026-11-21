@@ -84,10 +84,12 @@ public sealed class PackRoomMemory
             {
                 case MageLootVerdict.Load:
                     left++;
-                    if (item.KeepAside is not null)
+                    if (item.GreatCantrip || MageLootRules.IsQuestWant(item))
                     {
-                        // M6 14: a keep-aside piece (a great cantrip) left for the load: the full-pack trip's reason. Not a wear upgrade (live 2026-11-15 00:24, ladder19: the fight's loot judge called Leather Sleeves an
-                        // upgrade, the station's wear pick found no gain, and the trip it called was wasted; TODO(m6-fight-wear-judge): the fight's judge reads the station's wear terms, then wear upgrades count again)
+                        // M6 14: a great cantrip (or the quest's want) left for the load: the full-pack trip's reason. Not a wear upgrade (live 2026-11-15 00:24, ladder19: the fight's loot judge called Leather Sleeves an
+                        // upgrade, the station's wear pick found no gain, and the trip it called was wasted; TODO(m6-fight-wear-judge): the fight's judge reads the station's wear terms, then wear upgrades count again).
+                        // M6 safe load (live run 6, 2026-11-19 21:38 to 2026-11-20 17:48 UTC): not a caster kept aside for its War Magic bonus alone either. The loot left about 27 such casters over the line, each counted
+                        // here as "a great cantrip" and each calling a trip, while one great cantrip in the whole run was left for want of room; the station's caster rule sells most of them anyway (gear-caster-kept).
                         keepers++;
                     }
 

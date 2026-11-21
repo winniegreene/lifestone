@@ -208,8 +208,17 @@ public sealed partial class FightScenarioTests
 
         public uint LegGoalCell => _walking ? (_spotLeg ? Spots[^1].CellId : GoalCell) : 0;
 
+        /// <summary>M6 fight targeting: when set, a leg to a spot cannot be planned (no walkable path: a creature no walk reaches, the hovering Zefir's case).</summary>
+        public bool RefuseSpotLegs { get; set; }
+
         public bool BeginLegTo(IGameSessionView session, double now, in CellFrame goal, out string description)
         {
+            if (RefuseSpotLegs)
+            {
+                description = "the fake walk finds no walkable path";
+                return false;
+            }
+
             Spots.Add(goal);
             Legs++;
             _walking = true;

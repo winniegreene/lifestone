@@ -65,6 +65,9 @@ internal abstract partial class TravelLeg
 
         /// <summary>M6 14 walk dance: the last measure's answer in words (the dance's why).</summary>
         public string DanceWhy { get; set; } = string.Empty;
+
+        /// <summary>M6 holding at 60: true once the report-only line has said the crossing would have been given up (logged once a crossing).</summary>
+        public bool ReportedNotGivenUp { get; set; }
     }
 
     private CrossingWatch? _crossing;
@@ -163,6 +166,18 @@ internal abstract partial class TravelLeg
         }
 
         var why = string.Create(CultureInfo.InvariantCulture, $"{answer.Why}; the reserve is {crossing.ReserveWhy}");
+        if (Context.Facts.ApproachReportOnly)
+        {
+            // M6 holding at 60 (the owner, 2026-11-20: send her): the measure reports; the crossing goes on, and the fight-backs' own retreats still guard her
+            if (!crossing.ReportedNotGivenUp)
+            {
+                crossing.ReportedNotGivenUp = true;
+                Log("crossing: " + crossing.Ground + ": report only (--autopilot-rung-holds=report): not given up, she goes on: " + why);
+            }
+
+            return null;
+        }
+
         Context.Facts.AbandonApproach(crossing.Ground, why);
         _crossing = null; // given up: the retreat follows and nothing more is measured
         return why;

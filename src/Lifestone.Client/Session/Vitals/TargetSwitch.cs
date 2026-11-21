@@ -69,6 +69,32 @@ public static class TargetSwitch
         return new SwitchAnswer(keep, keeping, switching, line);
     }
 
+    /// <summary>
+    /// M6 one target at a time (docs/session.md section 124): the kill order over several creatures on her, the one she bolts first. <see cref="Decide"/> folded in the order given, the one in hand kept on a tie: the creature
+    /// whose damage a second on her over the seconds her bolts need to kill it is the most. The live fight folds its castable attackers nearest first (<c>FightScenario.OneTarget.cs</c>), the fight simulator its living foes in their
+    /// order (<c>tools/fight-sim/InFightRules.cs</c> ChooseTarget): one rule, so the two pick alike. -1 when <paramref name="sides"/> is empty; <paramref name="last"/> is the last comparison (default with one side).
+    /// </summary>
+    /// <param name="sides">The creatures, in the order a tie is kept by.</param>
+    /// <param name="last">The last comparison made, for the log.</param>
+    public static int KillOrder(IReadOnlyList<SwitchSide> sides, out SwitchAnswer last)
+    {
+        ArgumentNullException.ThrowIfNull(sides);
+        last = default;
+        var best = sides.Count > 0 ? 0 : -1;
+        for (var i = 1; i < sides.Count; i++)
+        {
+            var kept = sides[best];
+            var next = sides[i];
+            last = Decide(in kept, in next);
+            if (!last.Keep)
+            {
+                best = i;
+            }
+        }
+
+        return best;
+    }
+
     private static string Words(in SwitchSide s) => string.Create(
         CultureInfo.InvariantCulture,
         $"'{s.Name}' 0x{s.Guid:X8} ({s.Health:0} left, her {s.HerDamagePerSecond:0.#}/s on it: dies in {Fmt(s.KillSeconds)}{(double.IsFinite(s.KillSeconds) ? " s" : string.Empty)}; {s.ThreatPerSecond:0.#}/s on her: {s.ThreatWhy})");

@@ -199,7 +199,11 @@ public sealed class FightF24Tests(ITestOutputHelper output)
     [Fact]
     public void M6_14_gate_lapse_under_constant_fire_a_line_is_recast_between_kills_before_it_falls_under_the_hard_floor()
     {
-        // the Barracks' shape: a hostile always in reach (tuskers 12 m off and a hit every second), so no lull comes; Quickness Self has 40 s left, over the 30 s hard floor, Willpower Self 1,500 s
+        // the Barracks' shape: a hostile always in reach (tuskers 12 m off and a hit every second), so no lull comes; Quickness Self has 36 s left, over the 30 s hard floor, Willpower Self 1,500 s
+        // M6 stamina dance (b): the fixture was 40 s, and it passed only because the old refill cast Revitalize Self VI at 200 and 212 of 285 stamina (85 and 73 missing, under VI's top roll of 160), which slowed the
+        // kills. Rule b drops those casts, the eight kills ended by 5.4 s, and the last kill came at 34.60 s left against the between-kills horizon of 34.28 s (the hard floor, the kill gap and the recast,
+        // FightScenario.PickBetweenKills): a 0.32 s miss, then no kill to recast it at. At 36 s the window between the horizon and the hard floor runs from about 1.7 s to 6 s of the fight; under rule b this
+        // rig's kills came at 0.9 to 5.4 s, 0.4 to 0.8 s apart, so kills 3 to 8 fall inside it, and the recast at the first of them leaves over 3 s before the floor. It passes under the old refill too.
         var r = new FightManaTests.Rig(mana: 400, stamina: 200, knowsDrain: true) { HitsToKill = 2, Fight = new FightOptions { Kills = 50 } };
         r.Caster.ManaRegenPerSecond = 40;
         r.Caster.HealthPerCast = 20;
@@ -208,7 +212,7 @@ public sealed class FightF24Tests(ITestOutputHelper output)
             r.AddTusker(12 + (i * 0.5f));
         }
 
-        Prime(r, l => l.Name == "Quickness Self" ? 40 : 1500);
+        Prime(r, l => l.Name == "Quickness Self" ? 36 : 1500);
         var scenario = Armed(r);
         var last = double.NegativeInfinity;
         r.Run(scenario, 40, 0.1, () =>

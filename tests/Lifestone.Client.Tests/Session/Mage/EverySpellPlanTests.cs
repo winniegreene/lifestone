@@ -31,6 +31,7 @@ public sealed class EverySpellPlanTests
         ["Strength Other"] = (MagicSchool.CreatureEnchantment, true),
         ["Bafflement Other"] = (MagicSchool.CreatureEnchantment, false),
         ["Focus Self"] = (MagicSchool.CreatureEnchantment, true),
+        ["Blade Lure"] = (MagicSchool.ItemEnchantment, false), // the owner, 2026-11-20: a spell that only weakens and that no rule of hers casts is not bought
     };
 
     /// <summary>The catalog with a shop of the test's lines only (real rows of the stock file).</summary>
@@ -76,6 +77,27 @@ public sealed class EverySpellPlanTests
         Assert.Contains(EverySpellPlan.CoveredNote, PickOf(result, "Focus Self").Why, StringComparison.Ordinal); // M6 14 own buffs: the bot's cover moves it nowhere
         Assert.Equal(EverySpellVerdict.Unsold, PickOf(result, "Cassius' Ring of Fire").Verdict); // the picker's ring: its scroll is on no vendor's create list
         Assert.Equal(7, result.Wanted);
+    }
+
+    /// <summary>
+    /// The owner, 2026-11-20 (run 6 bought Blade Lure, Acid Lure, Arcane Benightedness Other and other lines that only weaken): buy every spell she might cast, not the ones that make a target or its armour weaker. A line with no
+    /// beneficial level that is neither a damage line nor a debuff the fight's picker scores (<see cref="EverySpellPlan.CastDebuffLines"/>) is <see cref="EverySpellVerdict.NotCast"/>; Bafflement Other, which the picker scores, and
+    /// Harm Other, a damage line, are still bought; Strength Other, beneficial, is too.
+    /// </summary>
+    [Fact]
+    public void A_line_that_only_weakens_and_that_no_rule_of_hers_casts_is_not_bought()
+    {
+        var result = EverySpellPlan.Plan(Input());
+
+        Assert.Equal(EverySpellVerdict.NotCast, PickOf(result, "Blade Lure").Verdict);
+        Assert.Equal("not-cast", PickOf(result, "Blade Lure").Token);
+        Assert.Equal(EverySpellVerdict.Buy, PickOf(result, "Bafflement Other").Verdict);
+        Assert.Equal(EverySpellVerdict.Buy, PickOf(result, "Harm Other").Verdict);
+        Assert.Equal(EverySpellVerdict.Buy, PickOf(result, "Strength Other").Verdict);
+        Assert.Contains("Imperil Other", EverySpellPlan.CastDebuffLines);
+        Assert.Contains("Fire Vulnerability Other", EverySpellPlan.CastDebuffLines);
+        Assert.DoesNotContain("Blade Lure", EverySpellPlan.CastDebuffLines);
+        Assert.Equal(16, EverySpellPlan.CastDebuffLines.Count); // one line per kind the picker scores
     }
 
     [Fact]

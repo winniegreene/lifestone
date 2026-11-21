@@ -271,6 +271,15 @@ public sealed partial class AutopilotScenario
     /// within one more cast (a frame's check with no pick otherwise). Lost with Lifestone Recall paid (<see cref="UrgentRecallRead"/>): true, and the rule leaves at once (<see cref="RetreatRule"/>'s losing-race arm); lost with the recall
     /// unpaid: said once a reason, and the old order stands.
     /// </summary>
+    /// <summary>
+    /// M6 the dance before running on (the owner, 2026-11-21; docs/session.md section 123): the vitals guard's own race (<see cref="AutopilotVitalsGuard.Race"/>, the same read the guard's pick and the fight's retreat make) for a travel
+    /// leg's dance gate (<see cref="JourneyFacts.Race"/>), while a travel leg can run (the travel and death states, as the fight-back's reserve); null otherwise, before the guard is built, or when it cannot read her.
+    /// </summary>
+    /// <param name="session">The session.</param>
+    /// <param name="clock">The session clock.</param>
+    private (LosingRaceInput Input, LosingRaceAnswer Answer)? GuardRace(IGameSessionView session, double clock) =>
+        _state is AutopilotState.Travel or AutopilotState.Death && _guard is { } guard && guard.Race(session, clock, out var input, out var answer) ? (input, answer) : null;
+
     private bool FightRaceLost(IGameSessionView session, uint health, out string why)
     {
         why = string.Empty;

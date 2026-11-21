@@ -18,8 +18,10 @@ namespace Lifestone.Client.Session.Scenarios;
 /// </summary>
 /// <remarks>
 /// <para><b>When.</b> Self-defence has an attacker no bolt can be cast at from where she stands: the line test says blocked and no struck proof stands, or it stands past the bolt's range, or it stands in a no-go cell with
-/// no line (<see cref="DefenceStep"/>'s walk, step and hold), or the shot rule has dropped it after wasted casts (<see cref="ShotLedger.IsDropped(uint, double)"/>: the drop outranks the line test here as it outranks the
-/// struck proof). When that attacker stands within the range of a life spell she can cast, she casts it where she stands, in place of the walk toward it, the sidestep, the tour's leg, the step and the hold. It is asked
+/// no line (<see cref="DefenceStep"/>'s walk, step and hold), or the shot rule has dropped it from where she stands (by the check before the cast or after wasted casts; the drop belongs to the place it was measured at,
+/// <see cref="ShotDropHolds"/>, and outranks the line test here as it outranks the struck proof). M6 fight targeting (<c>m6-line-first</c>, docs/session.md section 120): such an attacker is first moved to, a sidestep or a
+/// walk to a spot with a line (<see cref="DefenceLineSpot"/>); when neither finds a spot, its leg cannot be planned, or the searches are spent, and the attacker stands within the range of a life spell she can cast, she
+/// casts it where she stands, in place of the tour's leg, the step and the hold. It is asked
 /// again at every pick, so it goes on until the attacker is dead, gone, out of the life spells' range, or castable with a bolt again (a clear line with no drop standing: then the bolt, which kills faster, takes it).</para>
 /// <para><b>What.</b> <see cref="LifeThroughRule"/>: Drain Health Other while the drain picker finds a level worth a cast and it takes at least what Harm Other would, else Harm Other (the highest level the book holds,
 /// her Life Magic casts at the fight's cast chance and the pack pays: <see cref="FightDrain.FillHarm"/>). She knows no Harm Other and the drain no longer pays: the walk and the sidestep stand as before, named once.</para>
@@ -96,6 +98,9 @@ public sealed partial class FightScenario
         public int DrainIndex;
         public uint Cost;
         public bool Dropped;
+
+        /// <summary>M6 fight targeting (run 9): what measured the drop, in words (<see cref="DropReasonOf"/>), when <see cref="Dropped"/>.</summary>
+        public string DropReason;
         public double Distance;
         public uint TargetHealth;
         public int TargetMax;
@@ -281,7 +286,8 @@ public sealed partial class FightScenario
         }
 
         var choice = LifeThroughRule.Choose(in drain, drainTakes, harmRow, harmChance, targetHealth, resist);
-        var dropped = Shots.IsDropped(guid, clock);
+        var dropped = ShotDropHoldsAt(guid, clock, in here, in at); // M6 fight targeting: the drop from where it was measured (m6-shot-drop-place)
+        var dropReason = dropped ? DropReasonOf(guid) : string.Empty;
         if (choice.Spell != LifeThroughSpell.None)
         {
             if (state.Casts >= LifeThroughMaxCasts)
@@ -299,6 +305,7 @@ public sealed partial class FightScenario
                 DrainIndex = drain.Index,
                 Cost = choice.Spell == LifeThroughSpell.Harm ? GearCasts.ManaCeiling(harm!, 0) : drain.Mana,
                 Dropped = dropped,
+                DropReason = dropReason,
                 Distance = distance,
                 TargetHealth = targetHealth,
                 TargetMax = maxHealth,
@@ -321,7 +328,7 @@ public sealed partial class FightScenario
         if (harmInRange && mana < harmFloor && harmFloor <= manaMax && boltNeed > 0 && mana < boltNeed)
         {
             state.Noted = LifeNo.None;
-            _lifePlan = new LifePlan { Kind = LifePlanKind.Mana, Guid = guid, Cost = GearCasts.ManaCeiling(harm!, 0), Dropped = dropped, Distance = distance, Mana = mana, ManaMax = manaMax, HarmFloor = harmFloor, Resist = resist };
+            _lifePlan = new LifePlan { Kind = LifePlanKind.Mana, Guid = guid, Cost = GearCasts.ManaCeiling(harm!, 0), Dropped = dropped, DropReason = dropReason, Distance = distance, Mana = mana, ManaMax = manaMax, HarmFloor = harmFloor, Resist = resist };
             return true;
         }
 
@@ -344,7 +351,7 @@ public sealed partial class FightScenario
                     DrainWhy.OutOfRange => "Drain Health Other: it stands out of every level's range",
                     _ => "Drain Health Other: no level is offered",
                 };
-            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"m6-life-through: no life cast at {name} 0x{guid:X8}, {distance:0.#} m off, which no bolt reaches from here ({(dropped ? "the shot rule dropped it" : distance > _range ? "past the bolt's range" : "no clear line")}): {harmText}; {drainText}; her health {health} of {healthMax}, mana {mana} of {manaMax}, its modelled health {targetHealth}{(maxHealth > 0 ? string.Create(CultureInfo.InvariantCulture, $" of {maxHealth}") : " (its maximum is not known, TODO(m5-drain-target-stats))")}: the walk and the sidestep stand as before"));
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"m6-life-through: no life cast at {name} 0x{guid:X8}, {distance:0.#} m off, which no bolt reaches from here ({(dropped ? dropReason : distance > _range ? "past the bolt's range" : "no clear line")}): {harmText}; {drainText}; her health {health} of {healthMax}, mana {mana} of {manaMax}, its modelled health {targetHealth}{(maxHealth > 0 ? string.Create(CultureInfo.InvariantCulture, $" of {maxHealth}") : " (its maximum is not known, TODO(m5-drain-target-stats))")}: the walk and the sidestep stand as before"));
         }
 
         return false;
@@ -377,6 +384,7 @@ public sealed partial class FightScenario
         }
 
         _defendingGuid = guid;
+        _boltTarget = guid; // M6 one target: the creature she attacks, by Life Magic here (FightScenario.OneTarget.cs)
         if (plan.Kind == LifePlanKind.Mana)
         {
             if (WayOutHoldsCast(session, clock, plan.Cost, kill: false, "the life cast"))
@@ -414,7 +422,7 @@ public sealed partial class FightScenario
             return ScenarioStatus.Running; // the mana loop's press or drain before a cast, as before a bolt (FightScenario.ManaLoop.cs)
         }
 
-        var why = plan.Dropped ? "the shot rule dropped it: its bolts came to nothing" : plan.Distance > _range ? string.Create(CultureInfo.InvariantCulture, $"it stands past the bolt's range {_range:0.#} m") : "no clear line from here";
+        var why = plan.Dropped ? plan.DropReason : plan.Distance > _range ? string.Create(CultureInfo.InvariantCulture, $"it stands past the bolt's range {_range:0.#} m") : "no clear line from here";
         var modelled = plan.TargetMax > 0
             ? string.Create(CultureInfo.InvariantCulture, $"{plan.TargetHealth} of {plan.TargetMax} ({(plan.HealthKnown ? TargetHealthModel.Name(plan.HealthSource) : "assumed full")})")
             : string.Create(CultureInfo.InvariantCulture, $"{plan.TargetHealth} (its maximum is not known, TODO(m5-drain-target-stats))");

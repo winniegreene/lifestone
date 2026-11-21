@@ -391,7 +391,8 @@ public sealed class WearWhatWorksTests
         var judge = Wardrobe.For(rig.State).JudgeOn(ground, spells);
         Assert.True(judge.UsefulGreat!(helm) && judge.UsefulGreat(cap)); // the first question says yes of both, which is what the guard read before: it stood down, and the score alone decided
         var scoreAlone = new SelfEquipJudge([], 0, id => spells.TryGetValue(id, out var row) ? row.Name : null, [0x4]).WithWear(terms).Judge(Held(rig, helm), SelfEquipJudge.Worn(rig.State), skills);
-        Assert.True(scoreAlone.Kind == SelfEquipKind.Replace, scoreAlone.Why);
+        Assert.True(scoreAlone.Kind == SelfEquipKind.None, scoreAlone.Why); // M6 cantrips first (the owner, 2026-11-20): the score alone keeps the working Major Endurance on now (the helm's Major Focus can never light)
+        Assert.Contains("it would put out Major Endurance", scoreAlone.Why, StringComparison.Ordinal);
 
         var pick = judge.WithWear(terms).Judge(Held(rig, helm), SelfEquipJudge.Worn(rig.State), skills);
 

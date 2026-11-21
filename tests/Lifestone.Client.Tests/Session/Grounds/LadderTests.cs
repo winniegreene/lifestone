@@ -55,8 +55,8 @@ public sealed class LadderTests
     [InlineData(25, "abode")] // the Abode from 25 on Flame Bolt V under the buff bot's lines
     [InlineData(41, "abode")]
     [InlineData(42, "quarters")] // the Quarters from 42 (the trial at 50: 4.55 M XP/h against the Abode's 3.35 to 3.49)
-    [InlineData(64, "quarters")]
-    [InlineData(65, "holding")]
+    [InlineData(59, "quarters")]
+    [InlineData(60, "holding")] // M6 holding at 60 (the owner's decision, 2026-11-20): the level its entry portal admits
     [InlineData(126, "holding")]
     public void RungForAnswersAtEveryBandEdge(int level, string rung) => Assert.Equal(rung, LadderLoader.WarMage.RungFor(level).Key);
 

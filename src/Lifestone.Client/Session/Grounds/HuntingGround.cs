@@ -1,5 +1,6 @@
 using System.Numerics;
 using Lifestone.Data.Animation;
+using Lifestone.Data.Dat;
 using Lifestone.Data.World;
 
 namespace Lifestone.Client.Session.Grounds;
@@ -236,9 +237,26 @@ public sealed record HuntingGround(
     /// </summary>
     public GroundPlates? Plates { get; init; }
 
-    /// <summary>M6 14 holding plates: <see cref="Plates"/> as the room graph's walls (empty without plates).</summary>
-    public IReadOnlyList<Lifestone.Client.Movement.Wayfinding.KeptPlate> KeptPlates =>
-        Plates is not { } plates ? [] : [.. plates.Points.Select(p => new Lifestone.Client.Movement.Wayfinding.KeptPlate(p.Name, p.Cell, p.Point, plates.ShapeMetres, plates.TopMetres))];
+    /// <summary>
+    /// M6 14 holding plates: <see cref="Plates"/> as the room graph's walls (empty without plates), each plate's shape read from its Setup in <paramref name="dats"/> (<see cref="Lifestone.Client.Movement.Wayfinding.PlateKeepOff.ShapeOf(DatSet, uint)"/>).
+    /// </summary>
+    /// <param name="dats">The dats; null only for a ground without plates.</param>
+    /// <exception cref="InvalidOperationException">The ground has plates and no dats were given to read their shape from.</exception>
+    public IReadOnlyList<Lifestone.Client.Movement.Wayfinding.KeptPlate> KeptPlatesOf(DatSet? dats)
+    {
+        if (Plates is not { } plates)
+        {
+            return [];
+        }
+
+        if (dats is null)
+        {
+            throw new InvalidOperationException($"ground '{Key}' has {plates.Points.Count} plates of Setup 0x{plates.SetupId:X8} and no dats to read their shape from");
+        }
+
+        var (shape, top) = Lifestone.Client.Movement.Wayfinding.PlateKeepOff.ShapeOf(dats, plates.SetupId);
+        return [.. plates.Points.Select(p => new Lifestone.Client.Movement.Wayfinding.KeptPlate(p.Name, p.Cell, p.Point, shape, top))];
+    }
 
     /// <summary>True when the entry portal admits a character of <paramref name="level"/> (its MinLevel and MaxLevel, each when present); true when the profile has no <c>entry</c>. Pure; allocates nothing.</summary>
     /// <param name="level">The character's level.</param>
@@ -1256,12 +1274,11 @@ public sealed record GroundAvoidRegion(string Name, ushort Landblock, System.Num
 /// <summary>M6 14 holding plates: a ground's pressure plates (the profile's <c>plates</c> section), every fact sourced in its <c>source</c>.</summary>
 /// <param name="Wcid">The plates' weenie.</param>
 /// <param name="Name">Its name, as the server says it (the chat line of a plate that fires names it).</param>
-/// <param name="ShapeMetres">How far its collision shape reaches from its origin, seen from above (its Setup's sphere: offset and radius).</param>
-/// <param name="TopMetres">How high over its origin her feet must be to pass over the shape (its sphere's top less her lower sphere's centre and radius).</param>
+/// <param name="SetupId">Its Setup (the world SQL's <c>weenie_properties_d_i_d</c> type 1), whose shape in the dats ACE fires the plate on; the walls read it (<see cref="HuntingGround.KeptPlatesOf"/>).</param>
 /// <param name="Spells">The spells a plate casts on the player who touches it.</param>
 /// <param name="Points">Each plate.</param>
 /// <param name="Source">Where the facts come from.</param>
-public sealed record GroundPlates(uint Wcid, string Name, float ShapeMetres, float TopMetres, IReadOnlyList<GroundPlateSpell> Spells, IReadOnlyList<GroundPlate> Points, string Source);
+public sealed record GroundPlates(uint Wcid, string Name, uint SetupId, IReadOnlyList<GroundPlateSpell> Spells, IReadOnlyList<GroundPlate> Points, string Source);
 
 /// <summary>M6 14 holding plates: a spell a plate casts.</summary>
 /// <param name="Id">The spell id.</param>

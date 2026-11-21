@@ -43,6 +43,15 @@ public sealed class DenRoomGraphTests(DatSetFixture fixture, ITestOutputHelper o
         ["tusker-retreat"] = "TODO(m6-retreat-pockets)", // M6 retreat: 11 of the 71 slots (8 Female Tuskers on the z 6 ring round the shaft over 0x0126, a Male and two Females on z 0 ledges over the z -6 rooms) stand in pocket cells joined only to floorless cells: no walk reaches them at any lean
     };
 
+    /// <summary>
+    /// M6 14 holding plates: the target-slot cells a pressure plate closes: the plate stands on the cell's centre and no floor of the cell lies outside its wall (the box ACE fires on, read from the dats: <c>PlateKeepOff</c>), so the tour's
+    /// leg into it is not begun and the tour rests the cell (<c>FightWalk.Begin</c>, <c>GoalOffPlate</c>). Named and pinned: a change to the walls that opens or closes another shows here (<c>HoldingPlateJumpDatTests</c> counts the slots).
+    /// </summary>
+    private static readonly Dictionary<string, uint[]> ClosedByPlate = new(StringComparer.Ordinal)
+    {
+        ["tusker-holding"] = [0x5B4802B2], // one Rampager 10810 slot; its plate 0x75B48079 stands at the cell's centre
+    };
+
     /// <summary>The keys of every dungeon profile (D46: a new dungeon's JSON file joins every per-ground theory here with no edit).</summary>
     public static TheoryData<string> Dungeons() => new(GroundCatalog.All.Where(g => g.Kind == GroundKind.Dungeon).Select(g => g.Key));
 
@@ -90,6 +99,7 @@ public sealed class DenRoomGraphTests(DatSetFixture fixture, ITestOutputHelper o
         var (_, graph) = GraphOf(ground);
         hunted = Hunted(ground);
         Assert.NotEmpty(hunted);
+        var closed = new List<uint>();
         foreach (var cell in hunted.Select(s => s.Cell).Distinct())
         {
             if (tolerateUnreached && !ground.IsWalkable(cell))
@@ -112,13 +122,25 @@ public sealed class DenRoomGraphTests(DatSetFixture fixture, ITestOutputHelper o
             {
                 // M6 14 holding plates: the room's middle stands inside a plate's wall: the tour's leg ends off it (RunnerLegs.GoalOutOfAvoid), and that is the leg planned
                 var goal = new RunnerLegs(ground, new ProfileTour(ground), graph, NullLogSink.Instance).GoalOutOfAvoid(cell, ground.Arrival.Origin);
-                Assert.True(goal is { } off && graph.Plan(ground.Arrival.Cell, ground.Arrival.Origin, cell, off.Origin) is not null, $"{key}: the room graph plans no leg from the arrival to 0x{cell:X8} off its plate's wall");
+                if (goal is null)
+                {
+                    closed.Add(cell); // no floor of the cell outside its plate's wall: named in ClosedByPlate, checked below
+                    continue;
+                }
+
+                Assert.True(graph.Plan(ground.Arrival.Cell, ground.Arrival.Origin, cell, goal.Value.Origin) is not null, $"{key}: the room graph plans no leg from the arrival to 0x{cell:X8} off its plate's wall");
                 continue;
             }
 
             Assert.True(
                 graph.PlanScripted("slot", ground.Arrival.Frame, cell, ground.Walk.StopWithinMetres, ground.Walk.StopDwellSeconds) is not null,
                 $"{key}: the room graph plans no leg from the arrival to 0x{cell:X8}");
+        }
+
+        Assert.Equal(ClosedByPlate.GetValueOrDefault(key, []), closed.Order().ToArray());
+        if (closed.Count > 0)
+        {
+            output.WriteLine($"{key}: {hunted.Count(s => closed.Contains(s.Cell))} target slots in {string.Join(" ", closed.Select(c => $"0x{c:X8}"))}, whose plate closes the whole floor, get no leg");
         }
 
         return unreached;

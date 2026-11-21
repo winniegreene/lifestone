@@ -41,7 +41,7 @@ public static class GroundRooms
     /// <param name="all">Every cell of the ground's landblock.</param>
     /// <param name="ground">The ground.</param>
     public static RoomGraph GraphOf(LandblockCellSet all, HuntingGround ground) =>
-        new(FloorOf(all, ground), ground.Walk.DoorwayLean) { Jumps = ground.Jumps, PlateList = ground.KeptPlates }; // M6 14 pits: the profile's jumps are edges; M6 14 holding plates: its plates are walls
+        new(FloorOf(all, ground), ground.Walk.DoorwayLean) { Jumps = ground.Jumps, PlateList = ground.KeptPlatesOf(all.Structures.Dats) }; // M6 14 pits: the profile's jumps are edges; M6 14 holding plates: its plates are walls, their shape the dats'
 
     /// <summary>True when <paramref name="cell"/> is the ground's exit portal's cell (<see cref="GroundExitSection.Cell"/>).</summary>
     /// <param name="ground">The ground.</param>
@@ -64,7 +64,7 @@ public static class GroundRooms
         ArgumentNullException.ThrowIfNull(all);
         ArgumentNullException.ThrowIfNull(ground);
         var way = ExitWay(all, ground);
-        return new RoomGraph(LandblockCellSet.FromCells(all.Structures, all.Coord, all.Cells.Where(c => ground.IsWalkable(c.Id) || ground.IsGalleryFloor(c.Id) || IsExitCell(ground, c.Id) || way.Contains(c.Id))), ground.Walk.DoorwayLean) { Jumps = ground.Jumps, PlateList = ground.KeptPlates };
+        return new RoomGraph(LandblockCellSet.FromCells(all.Structures, all.Coord, all.Cells.Where(c => ground.IsWalkable(c.Id) || ground.IsGalleryFloor(c.Id) || IsExitCell(ground, c.Id) || way.Contains(c.Id))), ground.Walk.DoorwayLean) { Jumps = ground.Jumps, PlateList = ground.KeptPlatesOf(all.Structures.Dats) };
     }
 
     /// <summary>

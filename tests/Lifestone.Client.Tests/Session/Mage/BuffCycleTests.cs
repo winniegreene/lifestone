@@ -1,9 +1,12 @@
 using System.Collections.Immutable;
+using System.Globalization;
 using System.Text.RegularExpressions;
 using Lifestone.Client.Options;
+using Lifestone.Client.Session.Casting;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Scenarios;
+using Lifestone.Client.Session.Vitals;
 using Lifestone.Data.Magic;
 using Lifestone.Net.Messages;
 using Lifestone.Net.Types;
@@ -1018,6 +1021,70 @@ public sealed class BuffCycleTests(Xunit.Abstractions.ITestOutputHelper output)
             Assert.NotEmpty(transfers);
             Assert.Equal(transfers.Count, r.DancePresses); // every press landed at once: none refused
             Assert.True(t.Caster.Mana >= 70, $"seed {seed}: the pass ended with {t.Caster.Mana} mana, under the 70 the next press may cost");
+        }
+    }
+
+    [Fact]
+    public void M6_stamina_dance_d_a_start_passs_reserve_press_waits_for_its_whole_give()
+    {
+        // docs/session.md section 121, rule d (run 9 at 19:58:30 UTC: 25 of 25 reserve presses were cut to the missing mana, Stamina to Mana Self VI's 261 to 107): a reserve press is sent only when its whole give fits, so every
+        // reserve dance ends under the maximum it was pressed toward; one that would not fit is named and the line goes on with the mana it has. Every pass still ends with every buff active.
+        var waited = 0;
+        foreach (var (mana, seed) in new[] { (200u, 1), (200u, 2), (300u, 3), (300u, 4), (300u, 5), (12u, 6) })
+        {
+            var t = new Rig(mana: mana, manaSeed: seed);
+            Assert.True(t.Cycle.Start(t.Now));
+            Assert.Equal(BuffStatus.Done, t.Run());
+            Assert.Equal(24, t.Cycle.Result!.Active);
+            var max = 0u;
+            foreach (var line in t.R.H.Log.Lines)
+            {
+                var reserve = Regex.Match(line, @"\] reserve: mana \d+ of (\d+) is under");
+                if (reserve.Success)
+                {
+                    max = uint.Parse(reserve.Groups[1].Value, CultureInfo.InvariantCulture);
+                }
+
+                var dance = Regex.Match(line, @"\] reserve dance: mana (\d+) -> (\d+),");
+                if (dance.Success)
+                {
+                    Assert.True(uint.Parse(dance.Groups[2].Value, CultureInfo.InvariantCulture) < max, $"mana {mana} seed {seed}: {line} (of {max}): the give was cut at the maximum");
+                }
+
+                waited += line.Contains("does not fit the", StringComparison.Ordinal) && line.Contains("no press yet (it waits for its whole give), the line goes on with the mana it has", StringComparison.Ordinal) ? 1 : 0;
+            }
+        }
+
+        Assert.True(waited > 0, "no reserve press waited for its whole give in these passes");
+    }
+
+    [Fact]
+    public void M6_stamina_dance_d_the_passs_Revitalize_keeps_the_lines_expected_cost_so_the_best_level_is_payable()
+    {
+        // Run 9 at 19:58:33 UTC: mana 368 of 368 kept Piercing Bane VI's ceiling 240 and the reserve 60, and the 68 left paid Revitalize Self V (60) and not VI (70). Kept at the line's expected cost (Mana Conversion 252 against
+        // its power 250, the bane pattern's VI: ArmourBanesDatTests), VI is payable. Its whole roll (80 to 160) then decides: at 277 of 348 (71 missing) it waits; at 188 (160 missing) it goes.
+        var expected = (uint)Math.Ceiling(ManaConversionModel.ExpectedCost(240, 250, 252));
+        RevitalizeLevel[] book = [new(1180, 50, 150), new(1181, 60, 200), new(1182, 70, 250)];
+        Assert.Equal(1, ManaOrder.RevitalizeLevelOf(book, 368, 240 + 60)); // the ceiling kept: V, as live
+        Assert.True(368 >= 70 + expected + 60, $"expected {expected}");
+        var row = BuffStatMods.TransferOf(1681)!.Value;
+        var floor = ManaOrder.StaminaFloorOf(in row, 348, 60, 70);
+        Assert.Equal(-1, ManaOrder.RevitalizeLevelOf(book, 368, expected + 60, 277, 348, floor, out var fit));
+        Assert.Equal(RefillFit.Waits, fit);
+        Assert.Equal(2, ManaOrder.RevitalizeLevelOf(book, 368, expected + 60, 188, 348, floor, out fit));
+        Assert.Equal(RefillFit.WholeRoll, fit);
+
+        // In the pass: every Revitalize after a dance names the line's expected cost kept, never more than its ceiling.
+        var t = new Rig(mana: 12);
+        Assert.True(t.Cycle.Start(t.Now));
+        Assert.Equal(BuffStatus.Done, t.Run());
+        var revives = t.R.H.Log.Lines.Where(l => l.Contains("] mana: Revitalize after the ", StringComparison.Ordinal)).ToList();
+        Assert.NotEmpty(revives);
+        foreach (var line in revives)
+        {
+            var kept = Regex.Match(line, @"keeps the (\d+) .* is expected to cost \(up to (\d+)\)");
+            Assert.True(kept.Success, line);
+            Assert.True(uint.Parse(kept.Groups[1].Value, CultureInfo.InvariantCulture) <= uint.Parse(kept.Groups[2].Value, CultureInfo.InvariantCulture), line);
         }
     }
 

@@ -30,7 +30,8 @@ internal sealed class ThrowawayScreens(RetailUiLayer ui, IGameSessionView sessio
 
     private const double MaxVideoPaceSeconds = 10.0;
 
-    /// <summary><c>--video-pace=S</c>: the seconds each character-creation page and typed name are held for a screen capture (0: no hold); the climber start's pages read the same value (<c>ClimberScreens</c>).</summary>
+    /// <summary><c>--video-pace=S</c>: the seconds each character-creation page and typed name, and each step of the character delete (the empty confirmation box, the typed word, the list with the character marked
+    /// for deletion), are held for a screen capture (0: no hold); the climber start's pages read the same value (<c>ClimberScreens</c>).</summary>
     internal static readonly double VideoPaceSeconds = ReadVideoPace();
 
     private static double ReadVideoPace()
@@ -45,7 +46,7 @@ internal sealed class ThrowawayScreens(RetailUiLayer ui, IGameSessionView sessio
 
         if (double.TryParse(argument.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds) && seconds is >= 0 and <= MaxVideoPaceSeconds)
         {
-            Log.Info("logincheck", "--video-pace: character creation's pages and names are held for a screen capture", ("seconds", seconds));
+            Log.Info("logincheck", "--video-pace: character creation's pages and names, and the character delete's steps, are held for a screen capture", ("seconds", seconds));
             return seconds;
         }
 
@@ -503,12 +504,24 @@ internal sealed class ThrowawayScreens(RetailUiLayer ui, IGameSessionView sessio
             yield break;
         }
 
+        // M6 sprint (the run 6 recording, 2026-11-19 21:37:44 UTC): without holds the confirmation box was up for about a tenth of a second (the word typed and Done pressed in five frames), so the
+        // delete read as a blink. Under --video-pace the box is held empty, then with the typed word, and the list with the character marked for deletion; without it nothing changes.
+        foreach (var step in VideoHold())
+        {
+            yield return step;
+        }
+
         Type(field, "delete");
         yield return 3;
         if (field.Text != "delete")
         {
             op.Abort($"the delete dialog's field holds '{field.Text}', not the word to type");
             yield break;
+        }
+
+        foreach (var step in VideoHold())
+        {
+            yield return step;
         }
 
         foreach (var step in Click(done))
@@ -518,6 +531,11 @@ internal sealed class ThrowawayScreens(RetailUiLayer ui, IGameSessionView sessio
 
         yield return Wait(() => Screen is { PleaseWaitDialog: 0, DeleteDialog: 0 } && session.State.Characters.Entries.Any(e => e.Guid == guid && e.PendingDeletion), "the server to mark the character pending deletion and the Please Wait dialog to close");
         yield return 3;
+        foreach (var step in VideoHold())
+        {
+            yield return step;
+        }
+
         op.Succeed();
     }
 

@@ -32,7 +32,7 @@ public sealed class ClimberHealthRuleTests(DatSetFixture fixture, ITestOutputHel
     [InlineData(25, "abode", 82, 164, "Tusker Redeemer", false)] // the Abode from 25
     [InlineData(41, "abode", 82, 164, "Tusker Redeemer", false)]
     [InlineData(42, "quarters", 102, 204, "Tusker Slave", false)] // the Quarters from 42
-    [InlineData(64, "quarters", 102, 204, "Tusker Slave", false)]
+    [InlineData(59, "quarters", 102, 204, "Tusker Slave", false)] // M6 holding at 60: the Quarters end at 59
     public void A_rungs_want_is_the_packs_hits_times_the_mean_hit_of_its_hardest_hitter(int level, string rung, int hit, int want, string hitter, bool road)
     {
         var need = ClimberHealthRule.NeedAt(WarMage, level);
@@ -43,7 +43,8 @@ public sealed class ClimberHealthRuleTests(DatSetFixture fixture, ITestOutputHel
     [Theory]
     [InlineData(1)]
     [InlineData(4)] // the quest rung
-    [InlineData(65)] // the Holding (from 65, D135): the Rampager's hit is not for sale
+    [InlineData(60)] // the Holding (from 60, the owner's decision of 2026-11-20; 65 by D135 before): the Rampager's hit is not for sale
+    [InlineData(65)]
     [InlineData(75)]
     [InlineData(126)]
     [InlineData(127)] // past the top
@@ -312,7 +313,7 @@ public sealed class ClimberHealthRuleTests(DatSetFixture fixture, ITestOutputHel
         var total = table.XpForLevel(80);
         var plain = MageSpendingPlanner.Compute(table, total, [], MageTemplate.SharesAt(80), MageBuild.Traditional);
         Assert.Equal(180, plain.Targets.Single(t => t.Id == MageTemplate.WarMagic && t.Kind == MageStatKind.Skill).Ranks);
-        Assert.Equal(308u, SpellPlan.ProjectedWarBase(table, 80)); // the climber's level 80: 309 with no floor, 308 under the ladder's stat cap and her split (M6 item 14; 307 on the dance split) (SpellPlan projects the ladder's character with cap: ladder.StatCap): the same VI at 0.95
+        Assert.Equal(309u, SpellPlan.ProjectedWarBase(table, 80)); // the climber's level 80: 309 under the ladder's stat cap and her split (M6 holding at 60, 2026-11-20: the Quarters' health floor ends at 59, so levels 60-64 buy no floor; 308 when it ran to 64; M6 item 14; 307 on the dance split) (SpellPlan projects the ladder's character with cap: ladder.StatCap): the same VI at 0.95
         Assert.Equal(SpellPlan.LevelAt(309, WarMage.PlanCastChance), SpellPlan.LevelAt(SpellPlan.ProjectedWarBase(table, 80), WarMage.PlanCastChance));
     }
 }

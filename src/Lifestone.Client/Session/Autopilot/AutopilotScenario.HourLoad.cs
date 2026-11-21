@@ -2,9 +2,11 @@ using System.Globalization;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session.Contracts;
 using Lifestone.Client.Session.Fighter;
+using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Mage;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Session.Scenarios.Journey;
+using Lifestone.Data.CharacterCreation;
 
 namespace Lifestone.Client.Session.Autopilot;
 
@@ -88,7 +90,10 @@ public sealed partial class AutopilotScenario
         double? heal = _guard is { } guard && guard.Race(session, _clock, out var race, out _) ? race.HealPerSecond : null;
         var way = AutopilotTravelRule.Home(AutopilotTravelRule.Input(session.State, _ground, _context.Facts, _context.Routes, RungDirection.Home, _context.Grounds, _context.Spells), AutopilotTravelRule.BookRead(session.State.Self.Spellbook), _context.Routes);
         var trial = _options.Trial is { Phase: LadderTrialPhase.On } on && string.Equals(on.Ground, _ground.Key, StringComparison.Ordinal);
-        var input = new ComfortInput(_ground.Key, _ground.Jumps.Count, way.WayName, trial, Approach: false, _tally.Retreats, _survivalLeavesRun - _hourLeavesAtBegin, _tally.Deaths, load.RacesLost, load.Health, load.IncomingPeak, load.IncomingMean, heal, MageLootThresholds.LoadLineOf(_ground), load.TopPercent);
+        var safe = !trial && SafeGround(); // M6 safe load (the owner, 2026-11-20)
+        var cap = safe && _ground.Jumps.Count > 0 ? JumpCap(session) : null;
+        load.NoteJumpCap(cap);
+        var input = new ComfortInput(_ground.Key, _ground.Jumps.Count, way.WayName, trial, Approach: false, _tally.Retreats, _survivalLeavesRun - _hourLeavesAtBegin, _tally.Deaths, load.RacesLost, load.Health, load.IncomingPeak, load.IncomingMean, heal, MageLootThresholds.LoadLineOf(_ground), load.TopPercent, safe, cap);
         var verdict = ComfortRule.Decide(in input);
         var inForce = load.Apply(in verdict);
         if (BuffBotApplies() && _botTripArmed && double.IsFinite(_botTripLeast) && _botTripLeast > 0)
@@ -98,6 +103,37 @@ public sealed partial class AutopilotScenario
 
         var line = load.LineAt(MageLootThresholds.LoadLineOf(_ground), _ground.Jumps.Count > 0, _clock);
         _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"{ComfortRule.Line(in input, in verdict, inForce)}; the line now {line}%, the ramp ends in {Math.Max(0, load.RampEndClock - _clock) / 60:0.#} min{(load.Latched ? " (latched for the cycle)" : string.Empty)} (m6-hour-load)"));
+    }
+
+    private QualitiesWeenie? _jumpWeenie;
+
+    /// <summary>
+    /// M6 safe load (the owner, 2026-11-20: up to 150% burden when she is safe, safe being inside a known dungeon where she is only levelling): true on a catalog ground of the dungeon kind that is the ladder's rung ground (the level-up
+    /// job; a quest's errand ground is not). The caller rules out a trial.
+    /// </summary>
+    private bool SafeGround() =>
+        _ground.Kind == GroundKind.Dungeon && _ladder is not null && _rung is { GroundKey: { } rungGround } && string.Equals(rungGround, _ground.Key, StringComparison.Ordinal);
+
+    /// <summary>
+    /// M6 safe load: the highest load at which her flight clears the ground's longest jump (<see cref="JumpLoadCap.Percent"/>), from her Run and Jump now, buffs counted (the session's <see cref="QualitiesWeenie"/>, the dats' SkillTable
+    /// rows, as the runner's body reads them); null without the dats or before her skills are read.
+    /// </summary>
+    private int? JumpCap(IGameSessionView session)
+    {
+        if (_context.Dats is not { } dats)
+        {
+            return null;
+        }
+
+        _jumpWeenie ??= QualitiesWeenie.FromSkillTable(session.State.Self.Qualities, SkillTableData.Load(dats), _log);
+        var (run, jump) = (_jumpWeenie.RunSkill, _jumpWeenie.JumpSkill);
+        if (run <= 0 || jump <= 0)
+        {
+            return null;
+        }
+
+        var need = _ground.Jumps.Max(j => j.NeedMetres);
+        return JumpLoadCap.Percent(run, jump, need);
     }
 
     /// <summary>

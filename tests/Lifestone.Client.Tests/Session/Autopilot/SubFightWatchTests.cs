@@ -399,6 +399,10 @@ public sealed class SubFightWatchTests(ITestOutputHelper output)
         {
             Hit(x, 10);
             x.Rig.Caster.SetHealth(70); // 41%: under the 50% line of the fight's own ground
+            // M6 stamina dance (b): the mana is held at 60 each tick, as the health is, so the heal stays payable whatever the bolts' Mana Conversion rolls take. Before, the mana ran down from 60 with the bolts, and
+            // whether the heal was still payable at the end hung on the scripted caster's one seeded roll stream (ScriptedCaster.cs:116-117): the old refill's Revitalize Self VI before this block (at 213 of 275 stamina,
+            // 62 missing, under VI's top roll of 160; rule b drops it) took one roll, and without it the bolts' rolls shifted, the mana fell under the heal's cost and the retreat came as nothing-payable.
+            x.Rig.Caster.SetVitals(60, 0);
             Pump(x);
         });
 

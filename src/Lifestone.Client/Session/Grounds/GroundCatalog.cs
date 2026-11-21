@@ -1242,15 +1242,18 @@ public static class GroundCatalog
         }
 
         /// <summary>
-        /// M6 14 holding plates: the <c>plates</c> section: <c>wcid</c>, <c>name</c>, <c>shape_m</c> and <c>top_m</c> (the Setup's shape seen from above and the height her feet clear it at), <c>spells</c> (each <c>id</c> and <c>name</c>),
+        /// M6 14 holding plates: the <c>plates</c> section: <c>wcid</c>, <c>name</c>, <c>setup</c> (the weenie's Setup, whose shape the walls read from the dats), <c>spells</c> (each <c>id</c> and <c>name</c>),
         /// <c>points</c> (each <c>guid</c>, <c>cell</c> and landblock-local <c>point</c>) and the <c>source</c>.
         /// </summary>
         private GroundPlates Plates(Section s)
         {
             var wcid = (uint)s.Int("wcid", 1, int.MaxValue);
             var name = s.Text("name");
-            var shape = (float)s.Number("shape_m", 0.01, 10);
-            var top = (float)s.Number("top_m", 0, 10);
+            var setup = s.Hex("setup");
+            if (setup >> 24 != 0x02)
+            {
+                throw Fail("$.plates.setup", $"is 0x{setup:X8}, not a Setup (0x02xxxxxx)");
+            }
             var spells = s.List("spells", (e, p) =>
             {
                 var spell = Object(e, p, nullable: false)!;
@@ -1273,7 +1276,7 @@ public static class GroundCatalog
             Unique(points.Select(p => p.Guid), "$.plates.points", "guid");
             var source = s.Text("source");
             s.End();
-            return new GroundPlates(wcid, name, shape, top, spells, points, source);
+            return new GroundPlates(wcid, name, setup, spells, points, source);
         }
 
         /// <summary>M6 3 a1: a target's optional <c>attributes</c> block (the six attributes, each required inside it), or null.</summary>

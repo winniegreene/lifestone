@@ -78,8 +78,9 @@ internal sealed record FightSpell(uint Id, string Name, int Level, uint BaseMana
 /// <param name="HerDamagePerSecond">Her bolt's mean damage a second on it, fizzles and resists counted.</param>
 /// <param name="DrainLand">The chance a Life spell of hers is not resisted by it.</param>
 /// <param name="DrainResist">Its health-drain resistance: the share of a drain's take ACE lets through (0: a drain gives nothing).</param>
+/// <param name="StaminaDrainResist">M6 undrainable fills: its stamina-drain resistance (ACE <c>GetResistanceMod(StaminaDrain)</c>; 0: a Drain Stamina Other gives nothing, an Armored Tusker's).</param>
 internal sealed record FoeKind(string Name, double HealthMax, double StaminaMax, double ThreatPerSecond, FightSpell Bolt, double BoltMeanLanded, double BoltSpread, double BoltLand, double HerDamagePerSecond, double DrainLand,
-    double DrainResist);
+    double DrainResist, double StaminaDrainResist = 1.0);
 
 /// <summary>One creature on her now.</summary>
 internal sealed class Foe
@@ -153,6 +154,9 @@ internal sealed class FightView
 
     /// <summary>The Drain Stamina Other level the fight casts, or null.</summary>
     public FightSpell? StaminaDrain { get; init; }
+
+    /// <summary>M6 stamina dance: the Revitalize Self levels the live refill may cast, lowest first, with their boost rows (the policy prices the stamina a press takes by them; not cast here).</summary>
+    public IReadOnlyList<(FightSpell Spell, BoostRow Row)> Revitalizes { get; init; } = [];
 
     /// <summary>The creatures on her (the dead stay in the list).</summary>
     public IReadOnlyList<Foe> Foes { get; init; } = [];
@@ -228,21 +232,17 @@ internal static class InFightRules
             return v.Target;
         }
 
-        var best = -1;
+        List<SwitchSide> living = [];
         for (var i = 0; i < v.Foes.Count; i++)
         {
-            if (!v.Foes[i].Alive)
+            if (v.Foes[i].Alive)
             {
-                continue;
-            }
-
-            if (best < 0 || !TargetSwitch.Decide(Side(v.Foes[best], best), Side(v.Foes[i], i)).Keep)
-            {
-                best = i;
+                living.Add(Side(v.Foes[i], i));
             }
         }
 
-        return best;
+        var best = TargetSwitch.KillOrder(living, out _); // the live fight's own fold (FightScenario.OneTarget.cs): one rule, so the two pick alike (docs/session.md section 124)
+        return best < 0 ? -1 : (int)living[best].Guid;
     }
 
     private static SwitchSide Side(Foe foe, int index) => new((uint)index, foe.Kind.Name, foe.Health, foe.Kind.HerDamagePerSecond, foe.Kind.ThreatPerSecond, "the race's sampled mean");
@@ -393,7 +393,7 @@ internal static class InFightRules
         var best = -1;
         for (var i = 0; i < v.Foes.Count; i++)
         {
-            if (v.Foes[i].Alive && v.Foes[i].Stamina > 0 && (best < 0 || v.Foes[i].Stamina > v.Foes[best].Stamina))
+            if (v.Foes[i].Alive && v.Foes[i].Stamina > 0 && v.Foes[i].Kind.StaminaDrainResist > 0 && (best < 0 || v.Foes[i].Stamina > v.Foes[best].Stamina)) // M6 undrainable fills: FightScenario.ManaLoop.cs FullestStamina's kind rule
             {
                 best = i;
             }
@@ -420,6 +420,8 @@ internal static class InFightRules
         fullestStamina = FullestStamina(v);
         var healthLand = fullestHealth >= 0 ? v.Foes[fullestHealth].Kind.DrainLand : 1; // the share of a drain's casts that land past the source's resist (FightScenario.VitalsPolicy.cs TryPolicyFacts); the cast chance apart
         var staminaLand = fullestStamina >= 0 ? v.Foes[fullestStamina].Kind.DrainLand : 1;
+        var healthResist = fullestHealth >= 0 ? v.Foes[fullestHealth].Kind.DrainResist : 1; // M6 undrainable fills: the source's share of the take (TryPolicyFacts: DrainResistOf, DrainResist.StaminaOf)
+        var staminaResist = fullestStamina >= 0 ? v.Foes[fullestStamina].Kind.StaminaDrainResist : 1;
         presses = [];
         var pressLevels = new List<FillLevel>();
         foreach (var p in v.Presses)
@@ -442,11 +444,11 @@ internal static class InFightRules
                 continue;
             }
 
-            drainLevels.Add(new FillLevel(drains.Count, d.Level, d.BaseMana, d.Power, d.Seconds, d.Row, d.CastChance, healthLand));
+            drainLevels.Add(new FillLevel(drains.Count, d.Level, d.BaseMana, d.Power, d.Seconds, d.Row, d.CastChance, healthLand, healthResist));
             drains.Add(d);
         }
 
-        FillLevel[] staminaLevels = v.StaminaDrain is { } s ? [new FillLevel(0, s.Level, s.BaseMana, s.Power, s.Seconds, s.Row, s.CastChance, staminaLand)] : [];
+        FillLevel[] staminaLevels = v.StaminaDrain is { } s ? [new FillLevel(0, s.Level, s.BaseMana, s.Power, s.Seconds, s.Row, s.CastChance, staminaLand, staminaResist)] : [];
         var elapsed = v.Clock;
         var read = v.Hits.Read(v.Clock);
         return new VitalsPolicyFacts
@@ -483,6 +485,7 @@ internal static class InFightRules
             Presses = pressLevels.ToArray(),
             StaminaDrains = staminaLevels,
             HealthDrains = drainLevels.ToArray(),
+            Revitalizes = v.Revitalizes.Select((r, i) => new BoostLevel(i, r.Spell.Level, r.Spell.BaseMana, r.Spell.Power, r.Spell.Seconds, r.Row, r.Spell.CastChance)).ToArray(), // M6 stamina dance: TryPolicyFacts' refill levels
         };
     }
 }

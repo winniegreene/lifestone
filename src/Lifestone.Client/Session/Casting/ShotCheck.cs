@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Numerics;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Client.World;
 using Lifestone.Data.Dat;
 using Lifestone.Data.Magic;
 using Lifestone.Data.Physics;
@@ -267,13 +268,42 @@ public sealed class PhysicsShotCheck : IShotCheck
     }
 }
 
+/// <summary>What a shot drop was measured by (<see cref="ShotLedger.Drop(uint, string, double, string, ShotDropKind, ShotPlace?)"/>).</summary>
+public enum ShotDropKind
+{
+    /// <summary>The shot check before the cast found the bolt's path blocked: no bolt was sent, nothing was paid. A new check from another place costs nothing.</summary>
+    Blocked,
+
+    /// <summary><see cref="ShotLedger.WastedBeforeDrop"/> casts in a row came to nothing: the bolts flew (or were cast) and no damage landed. The check did not see what stopped them.</summary>
+    Wasted,
+}
+
+/// <summary>
+/// M6 fight targeting (run 9): where a shot drop was measured: the caster's feet and the target's place as the fight read them at the drop (her own position; the creature where the fight takes it to stand).
+/// </summary>
+/// <param name="Caster">Where she stood.</param>
+/// <param name="Target">Where the target stood.</param>
+public readonly record struct ShotPlace(CellFrame Caster, CellFrame Target)
+{
+    /// <summary>How far apart the two stood, in metres.</summary>
+    public double Metres => Caster.ToGlobal().DistanceTo(Target.ToGlobal());
+}
+
 /// <summary>
 /// M6 8 L: the one rule both fights share. Before a bolt, the shot check is asked and its answer logged (<c>shots_blocked=</c>); after one, a cast that ended with no bolt or no damage landing is counted per target (<c>wasted_casts=</c>), and at <see cref="WastedBeforeDrop"/> in a row the target is
 /// left alone for <see cref="DropSeconds"/>, logged with its name, the count and the reason. A cast the check called clear that the server did not let fly is a disagreement (<c>shot_disagreements=</c>), which measures the check.
 /// </summary>
+/// <remarks>
+/// M6 fight targeting (run 9, 2026-11-20 19:51 to 2026-11-21 04:58 UTC: 12 drops, every one by the check before the cast, measured with the Tusker Slave 3.9 to 21.5 m off; the 102 life-cast decisions at them came with it
+/// 1.7 to 11.7 m off, after she or it had moved, while each drop stood its 120 s; docs/session.md section 120). A drop belongs to where it was measured: a drop made with its <see cref="ShotPlace"/> ends before its time
+/// (<see cref="IsDropped(uint, double, in CellFrame, in CellFrame, double)"/>) when she has moved since, when the target has moved since (a drop by the check only: a new check costs nothing, where a drop for wasted casts
+/// would pay two more casts each time a sticky creature's drawn body shifts, <c>TODO(m6-sticky-walk-back)</c>), or when a target measured farther than <see cref="CloseMetres"/> has come within it.
+/// </remarks>
 /// <param name="log">The fight's log.</param>
 public sealed class ShotLedger(Action<string> log)
 {
+    private readonly record struct DropRecord(double Until, ShotDropKind Kind, ShotPlace? Place);
+
     /// <summary>The wasted casts in a row on one target before it is dropped (two: each costs about 5 mana and 4 s, and the first can be a target caught at a corner).</summary>
     public const int WastedBeforeDrop = 2;
 
@@ -284,7 +314,7 @@ public sealed class ShotLedger(Action<string> log)
     public const double CloseMetres = 3.0;
 
     private readonly Dictionary<uint, int> _wasted = [];
-    private readonly Dictionary<uint, double> _dropped = [];
+    private readonly Dictionary<uint, DropRecord> _dropped = [];
     private uint _calledClear;
     private bool _noCheckLogged;
 
@@ -355,7 +385,15 @@ public sealed class ShotLedger(Action<string> log)
     /// <param name="name">The target's name.</param>
     /// <param name="clock">The clock.</param>
     /// <param name="why">How the cast ended.</param>
-    public bool NoteWasted(uint target, string name, double clock, string why)
+    public bool NoteWasted(uint target, string name, double clock, string why) => NoteWasted(target, name, clock, why, null);
+
+    /// <summary>Counts a wasted cast; true when this one dropped the target, the drop kept with <paramref name="place"/> (where she and the target stood: null when a position is not known).</summary>
+    /// <param name="target">The target's guid.</param>
+    /// <param name="name">The target's name.</param>
+    /// <param name="clock">The clock.</param>
+    /// <param name="why">How the cast ended.</param>
+    /// <param name="place">Where she and the target stand now.</param>
+    public bool NoteWasted(uint target, string name, double clock, string why, ShotPlace? place)
     {
         NoteDisagreement(target, name, why);
         WastedCasts++;
@@ -367,7 +405,7 @@ public sealed class ShotLedger(Action<string> log)
             return false;
         }
 
-        Drop(target, name, clock, string.Create(CultureInfo.InvariantCulture, $"{count} casts in a row wasted, the last: {why}"));
+        Drop(target, name, clock, string.Create(CultureInfo.InvariantCulture, $"{count} casts in a row wasted, the last: {why}"), ShotDropKind.Wasted, place);
         return true;
     }
 
@@ -380,11 +418,25 @@ public sealed class ShotLedger(Action<string> log)
     /// <param name="name">The target's name.</param>
     /// <param name="clock">The clock.</param>
     /// <param name="why">The reason.</param>
-    public void Drop(uint target, string name, double clock, string why)
+    public void Drop(uint target, string name, double clock, string why) => Drop(target, name, clock, why, ShotDropKind.Blocked, null);
+
+    /// <summary>
+    /// Leaves <paramref name="target"/> alone for <see cref="DropSeconds"/>, or (with <paramref name="place"/>) until she or it has moved from where the drop was measured (<see cref="IsDropped(uint, double, in CellFrame, in CellFrame, double)"/>).
+    /// </summary>
+    /// <param name="target">The target's guid.</param>
+    /// <param name="name">The target's name.</param>
+    /// <param name="clock">The clock.</param>
+    /// <param name="why">The reason.</param>
+    /// <param name="kind">What measured it.</param>
+    /// <param name="place">Where she and the target stood, or null when a position is not known (the drop then holds by its time and the close rule alone).</param>
+    public void Drop(uint target, string name, double clock, string why, ShotDropKind kind, ShotPlace? place)
     {
         _wasted.Remove(target);
-        _dropped[target] = clock + DropSeconds;
-        log(string.Create(CultureInfo.InvariantCulture, $"shot drop: 0x{target:X8} ({name}) is left alone for {DropSeconds:0} s: {why}"));
+        _dropped[target] = new DropRecord(clock + DropSeconds, kind, place);
+        var where = place is { } p
+            ? string.Create(CultureInfo.InvariantCulture, $"; measured with her at 0x{p.Caster.CellId:X8} [{p.Caster.Origin.X:0.0} {p.Caster.Origin.Y:0.0} {p.Caster.Origin.Z:0.0}] and it at 0x{p.Target.CellId:X8} [{p.Target.Origin.X:0.0} {p.Target.Origin.Y:0.0} {p.Target.Origin.Z:0.0}], {p.Metres:0.0} m apart: it ends sooner when she{(kind == ShotDropKind.Blocked ? " or it" : string.Empty)} moves from there{(p.Metres > CloseMetres ? string.Create(CultureInfo.InvariantCulture, $" or it comes within {CloseMetres:0} m") : string.Empty)} (m6-shot-drop-place)")
+            : string.Empty;
+        log(string.Create(CultureInfo.InvariantCulture, $"shot drop: 0x{target:X8} ({name}) is left alone for {DropSeconds:0} s: {why}{where}"));
     }
 
     /// <summary>True while <paramref name="target"/> is dropped.</summary>
@@ -392,18 +444,74 @@ public sealed class ShotLedger(Action<string> log)
     /// <param name="clock">The clock.</param>
     public bool IsDropped(uint target, double clock)
     {
-        if (!_dropped.TryGetValue(target, out var until))
+        if (!_dropped.TryGetValue(target, out var drop))
         {
             return false;
         }
 
-        if (clock < until)
+        if (clock < drop.Until)
         {
             return true;
         }
 
         _dropped.Remove(target);
         log($"shot drop: 0x{target:X8} is back: its {DropSeconds:0} s are up");
+        return false;
+    }
+
+    /// <summary>What measured the drop that stands on <paramref name="target"/>; false when none stands (its time is not read: ask <see cref="IsDropped(uint, double)"/> first).</summary>
+    /// <param name="target">The target's guid.</param>
+    /// <param name="kind">What measured it.</param>
+    public bool DropKindOf(uint target, out ShotDropKind kind)
+    {
+        kind = ShotDropKind.Blocked;
+        if (!_dropped.TryGetValue(target, out var drop))
+        {
+            return false;
+        }
+
+        kind = drop.Kind;
+        return true;
+    }
+
+    /// <summary>
+    /// M6 fight targeting (run 9): true while <paramref name="target"/> stays dropped from where she stands now. A drop made with its <see cref="ShotPlace"/> belongs to that place: it ends, logged with the
+    /// numbers, when she has moved more than <paramref name="movedMetres"/> from where she stood, when the target has moved more than that from where it stood (a drop by the check before the cast only: the next check is
+    /// free, see the class remarks), or when a target measured farther than <see cref="CloseMetres"/> has come within it. A target measured within it stays dropped while neither moves: the check was made from this very
+    /// place, and taking the drop back each frame would ask the same blocked check again and cast nothing. A drop made with no place keeps the older rule (<see cref="IsDropped(uint, double, double)"/>).
+    /// </summary>
+    /// <param name="target">The target's guid.</param>
+    /// <param name="clock">The clock.</param>
+    /// <param name="caster">Where she stands now.</param>
+    /// <param name="at">Where the target stands now.</param>
+    /// <param name="movedMetres">The least move that is a new place, in metres (the caller's measured threshold).</param>
+    public bool IsDropped(uint target, double clock, in CellFrame caster, in CellFrame at, double movedMetres)
+    {
+        if (!IsDropped(target, clock))
+        {
+            return false;
+        }
+
+        var metres = caster.ToGlobal().DistanceTo(at.ToGlobal());
+        if (_dropped[target].Place is not { } place)
+        {
+            return IsDropped(target, clock, metres);
+        }
+
+        var kind = _dropped[target].Kind;
+        var herMove = place.Caster.ToGlobal().DistanceTo(caster.ToGlobal());
+        var itsMove = place.Target.ToGlobal().DistanceTo(at.ToGlobal());
+        string? why = herMove > movedMetres ? string.Create(CultureInfo.InvariantCulture, $"she has moved {herMove:0.0} m from where it was measured (more than {movedMetres:0.0} m)")
+            : kind == ShotDropKind.Blocked && itsMove > movedMetres ? string.Create(CultureInfo.InvariantCulture, $"it has moved {itsMove:0.0} m from where it was measured (more than {movedMetres:0.0} m)")
+            : metres <= CloseMetres && place.Metres > CloseMetres ? string.Create(CultureInfo.InvariantCulture, $"it has come within {CloseMetres:0} m (measured {place.Metres:0.0} m off): an attacker this close is fought (M5 D88)")
+            : null;
+        if (why is null)
+        {
+            return true;
+        }
+
+        _dropped.Remove(target);
+        log(string.Create(CultureInfo.InvariantCulture, $"shot drop: 0x{target:X8} is back: {why}; it stands {metres:0.0} m away now, the {(kind == ShotDropKind.Blocked ? "check" : "wasted casts")} belonged to the place it was measured at (m6-shot-drop-place)"));
         return false;
     }
 

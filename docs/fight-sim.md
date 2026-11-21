@@ -198,8 +198,10 @@ row).** The death chance the race gave is mostly gone with her heals; what is le
 **What is not played** (printed under every table): the finishing bolt over the emergency's heal
 (`FightScenario.Emergency.cs` `FinishStep`: one attacker about to die, `TODO(fight-sim-finishing-bolt)`); the drain
 rule behind an emergency set aside after five casts that did not land; health and mana potions; the way out's mana
-reserve and the leave itself; the buffs' upkeep; the components' level floor; Revitalize (the climber's policy never
-casts it); walking and arrival (every creature attacks from the first second); the time between pulls, where the pull's
+reserve and the leave itself; the buffs' upkeep; the components' level floor; the refill's Revitalize Self (the live
+fight casts it between bolts outside the vitals policy, `ManaOrder`'s refill under `--fight-stamina-full`, hooked in
+`FightScenario.BoltNeedsMana`; here her Revitalize levels only price the stamina a press takes, `VitalsPolicy.RefillPrice`,
+[session.md](session.md) section 121); walking and arrival (every creature attacks from the first second); the time between pulls, where the pull's
 rest and dance pay back what a fight ended without (`TODO(fight-sim-between-pulls)`: a rule that moves fills out of a
 fight shows its saving here and not its cost there).
 

@@ -75,6 +75,14 @@ public sealed record AutopilotOptions
     public bool Villa { get; init; } = true;
 
     /// <summary>
+    /// M6 holding at 60 (the owner, 2026-11-20: the approach check does not seem correct; send her; the only thing that should stop her is her level): false (the default, <c>--autopilot-rung-holds=hold</c>): the rungs' gates, a
+    /// ground's approach checks and the vitae burn may hold a rung. True (<c>--autopilot-rung-holds=report</c>): they are read and logged only (<see cref="RungAsk.HoldsReportOnly"/>): the ladder's band and the portals' level limits
+    /// decide, and the travel leg never gives a crossing up or recalls her on its projection. Her buffs are still cast before every trip, the fights' own retreats are unchanged, and the grounds named by
+    /// <see cref="HoldGroundsOption"/> stay held.
+    /// </summary>
+    public bool RungHoldsReportOnly { get; init; }
+
+    /// <summary>
     /// M6 villa (the owner, 2026-11-16: a house needs no account age): false (the default): the account may buy a villa at once (<see cref="Housing.VillaFacts.ClimberAccountOpensVillas"/>), as the server mod sets ACE's
     /// house_15day_account false at every start. True (<c>--autopilot-villa-account-age=ace</c>, to match a server started with <c>LIFESTONE_ACE_HOUSE_ACCOUNT_AGE=ace</c>): retail's 15 days, the climber's account opening
     /// <see cref="Housing.VillaFacts.ClimberAccountOpensVillasRetail"/>.
@@ -421,6 +429,21 @@ public sealed record AutopilotOptions
                 case "--autopilot-villa":
                     o = o with { Villa = OptionValues.Switch(argument, errors, o.Villa) };
                     break;
+                case RungHoldsOption:
+                    switch (argument.Value)
+                    {
+                        case "hold":
+                            o = o with { RungHoldsReportOnly = false };
+                            break;
+                        case "report":
+                            o = o with { RungHoldsReportOnly = true };
+                            break;
+                        default:
+                            errors.Add($"{argument.Name}: '{argument.Value}' is not hold or report");
+                            break;
+                    }
+
+                    break;
                 case "--autopilot-villa-account-age":
                     switch (argument.Value)
                     {
@@ -621,6 +644,9 @@ public sealed record AutopilotOptions
     /// is noted in <see cref="ApproachHolds"/> as a crossing given up, so every way out holds it by name and the ladder hunts the rung before it or the rung's other ground.
     /// </summary>
     public const string HoldGroundsOption = "--autopilot-hold-grounds";
+
+    /// <summary>M6 holding at 60: whether anything but her level holds a rung (<c>--autopilot-rung-holds=hold|report</c>, default hold; <see cref="RungHoldsReportOnly"/>).</summary>
+    public const string RungHoldsOption = "--autopilot-rung-holds";
 
     /// <summary>M6 item 14: the trial's minutes of fight time from her first kill there (<c>--autopilot-trial-minutes</c>, default <see cref="LadderTrial.DefaultMinutes"/>).</summary>
     public const string TrialMinutesOption = "--autopilot-trial-minutes";

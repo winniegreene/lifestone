@@ -142,7 +142,8 @@ public sealed class CapacityGearTests(ITestOutputHelper output)
     [Fact]
     public void A_capacity_gain_changes_the_gear_decision_at_the_load_line()
     {
-        // the same armour as the worn pair, plus Major Strength: at the load line it is worn; with an empty pack the room is not filled and it is not
+        // the same armour as the worn pair, plus Major Strength: at the load line its capacity is a gain, with an empty pack the room is not filled and the capacity is worth nothing; M6 cantrips first (the owner,
+        // 2026-11-20: a lit major cantrip beats armour differences): the Major Strength it lights wears it either way
         var worn = new List<WornPiece> { Wearing(OldShoes, ShoesOf(OldShoes, 234, 251, ImpenetrabilityV)) };
         var find = Candidate(NewShoes, ShoesOf(NewShoes, 234, 251, ImpenetrabilityV, MajorStrength));
         var full = Pick(find, worn, Terms(AtTheLine));
@@ -150,7 +151,8 @@ public sealed class CapacityGearTests(ITestOutputHelper output)
         Assert.Equal(SelfEquipKind.Replace, full.Kind);
         Assert.True(full.Part("capacity") > 0);
         Assert.Equal(0, empty.Part("capacity"));
-        Assert.Equal(SelfEquipKind.None, empty.Kind);
+        Assert.True(empty.Kind == SelfEquipKind.Replace, empty.Why);
+        Assert.Contains("it lights Major Strength", empty.Why, StringComparison.Ordinal);
 
         // the caster pick: a sceptre with Major Strength and otherwise the held caster's numbers beats it by more than the swap margin at the line, and does not with an empty pack
         var held = new WornPiece(0x800003C0, "Piercing Sceptre", 0x8000, SelfEquipJudge.Held, 0, Appraised(0x800003C0, new() { [5] = 50 }, new() { [144] = 0.05 }));

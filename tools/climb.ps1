@@ -67,6 +67,10 @@
     Grounds held for the session (M6 14; default none): passes --autopilot-hold-grounds=<key,key> to the level up job, whose every way out then holds each by name (a crossing given up) and hunts the rung's other ground or the
     rung before it. For a ground found unsafe live until its cause is fixed (the Tusker Armory after the death of 2026-11-14).
 
+.PARAMETER RungHoldsReport
+    Passes --autopilot-rung-holds=report to the level up job (M6 holding at 60, the owner 2026-11-20: the only thing that should stop her is her level; default hold): the rungs' gates, the grounds' approach checks and the vitae
+    burn are read and logged but hold nothing, and a crossing is never given up on its projection; the ladder's band and the portals' level limits decide. -HoldGrounds still holds the grounds it names.
+
 .PARAMETER NoVilla
     Passes --autopilot-villa=off to the level up job (M6 villa, default on): no writ stones, lockpick, purchase, storage or rent steps at the town trips. For a character
     about to be rebuilt (the owner, 2026-11-16: the rebuild tosses everything), whose villa steps would only spend her hunting time.
@@ -105,7 +109,7 @@
     stop is the level up job's plus -HeadlessTimeoutSeconds. Not with -SkipCreate. Off by default: the three-step path is unchanged.
 
 .PARAMETER CreationPace
-    With -OneWindow: --video-pace, the seconds each character-creation page is held (and a quarter of it after each attribute and skill change), so a viewer can follow the creation (0 to 10; default 1.8, the M2 hero video's pace,
+    With -OneWindow: --video-pace, the seconds each character-creation page and each step of the old climber's delete is held (and a quarter of it after each attribute and skill change), so a viewer can follow the delete and the creation (0 to 10; default 1.8, the M2 hero video's pace,
     docs/session.md). Read only with -OneWindow.
 
 .PARAMETER PlanOnly
@@ -137,6 +141,7 @@ param(
     [string] $HoldGrounds = '',
     [string] $StartQuest = '',
     [switch] $NoVilla,
+    [switch] $RungHoldsReport,
     [switch] $DenRun,
     [switch] $DenRunRehearse,
     [switch] $PlanOnly,
@@ -187,6 +192,16 @@ if ($HoldGrounds) {
     if ($DenRun -or $DenRunRehearse) { Write-Host '[climb] REFUSED: -HoldGrounds is the level up job''s own loop; the den run is a task of its own'; exit 1 }
     $commands = Add-ClimbHoldGrounds -Commands $commands -HoldGrounds $HoldGrounds
     Write-Host "[climb] hold: grounds=$HoldGrounds (-HoldGrounds: every way out holds them by name for the session)"
+}
+if ($RungHoldsReport) {
+    if ($DenRun -or $DenRunRehearse) { Write-Host '[climb] REFUSED: -RungHoldsReport is the level up job''s own loop; the den run is a task of its own'; exit 1 }
+    $levelUp = @($commands.LevelUp)
+    $at = -1
+    for ($i = 0; $i -lt $levelUp.Count; $i++) { if ($levelUp[$i] -like '-GameArgs:*') { $at = $i } }
+    if ($at -lt 0) { Write-Host '[climb] REFUSED: the level up command has no -GameArgs: to add --autopilot-rung-holds=report to'; exit 1 }
+    $levelUp[$at] += ' --autopilot-rung-holds=report'
+    $commands.LevelUp = $levelUp
+    Write-Host '[climb] rung holds: report only (-RungHoldsReport: gates, approach checks and the vitae burn are logged, never a hold; her level decides)'
 }
 if ($NoVilla) {
     if ($DenRun -or $DenRunRehearse) { Write-Host '[climb] REFUSED: -NoVilla is the level up job''s own loop; the den run is a task of its own'; exit 1 }

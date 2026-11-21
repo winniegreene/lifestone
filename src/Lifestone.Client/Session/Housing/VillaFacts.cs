@@ -180,7 +180,7 @@ public sealed record StoneCave(string QuestKey, uint StoneWcid, string StoneName
 /// <summary>The writ run's facts (M6 villa; writ-caves.md): the four minor stones, the Agent of the Arcanum's give flow and Holtburg's Agent.</summary>
 public static class WritFacts
 {
-    /// <summary>The Agent of the Arcanum (weenie 12050; 36 placed).</summary>
+    /// <summary>The Agent of the Arcanum (weenie 12050; 34 placed: landblock_instance, read-only SELECT on the world copy, 2026-11-21).</summary>
     public const uint AgentWcid = 12050;
 
     /// <summary>The stones one writ takes.</summary>
@@ -195,7 +195,7 @@ public static class WritFacts
     /// <summary>The Agent's Tell on the second stone: the quest cannot be solved again, so the QuestFailure set (category 13) gives one Writ of Refuge, Tells this line and erases <c>MinorStoneWrit</c>.</summary>
     public const string WritLine = "Here, take this as a reward.";
 
-    /// <summary>Holtburg's Agent of the Arcanum (landblock_instance guid 0x7A9B4038, cell 0xA9B40172, about 79 m east of the lifestone).</summary>
+    /// <summary>Holtburg's Agent of the Arcanum (landblock_instance guid 0x7A9B4038, cell 0xA9B40172, 82.0 m east of the lifestone 0x7A9B404F at (81.330, 11.797), bearing 94 degrees, the same landblock).</summary>
     public static PlacedThing HoltburgAgent { get; } = new(0x7A9B4038, AgentWcid, "Agent of the Arcanum", 0xA9B40172, new Vector3(163.152f, 5.80392f, 94.005f));
 
     /// <summary>

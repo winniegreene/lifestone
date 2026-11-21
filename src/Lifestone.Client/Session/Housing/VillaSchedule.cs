@@ -398,7 +398,7 @@ public static class VillaReads
     /// <summary>
     /// What the packs hold toward a price: pyreal stacks, trade notes' face value, writs and lockpicks (worn items left out). M6 16 E5a1: this is not the quartermaster's purse read (<see cref="Quartermaster.PurseView"/>) and
     /// was left as it is, for it counts differently and the two cannot be one without changing an answer: the pyreals are the coin stacks' sizes (not the coin property), and a note is any item of the promissory type at
-    /// its stack's own value (not one of ACE's ten trade notes at its face).
+    /// its stack's own value (not one of ACE's fourteen trade notes, wcids 2621-2627, 7374-7377 and 20628-20630 at its face).
     /// <para>M6 16 E5a2: a stack's Value is the whole stack's, on the wire as in ACE: a stackable's Value is its unit value times its size (<c>Stackable.SetEphemeralValues</c>, <c>Stackable.cs</c> 48-62;
     /// <c>WorldObject.SetStackSize</c>, <c>WorldObject_Properties.cs</c> 3130-3140 @95ef426d), the description's weenie header carries that Value (<c>WorldObject_Networking.cs</c> 99-100) and the stack-size message carries
     /// it again (<c>GameMessageSetStackSize.cs</c> 15-16). So a stack with no stack-size message since login counts at its description's Value as it is; it was multiplied by the stack's size, which counted three 250,000

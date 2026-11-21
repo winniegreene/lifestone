@@ -40,7 +40,8 @@ public sealed class ElementsUsed
 /// <param name="UsefulGreat">True when it casts a great cantrip useful to her.</param>
 /// <param name="Mana">Its mana (ItemCurMana; 0 when none or unread).</param>
 /// <param name="MaxMana">Its mana capacity (ItemMaxMana; 0 when none).</param>
-public readonly record struct HeldCasterFacts(uint Guid, string Name, bool Wielded, bool Read, bool Usable, bool UsefulGreat, int Mana, int MaxMana);
+/// <param name="Element">Its element: ACE's DamageType bits (PropertyInt 45, <see cref="SelfEquipJudge.DamageTypeInt"/>), 0 for a caster with none (a plain staff, orb or wand: one group of its own).</param>
+public readonly record struct HeldCasterFacts(uint Guid, string Name, bool Wielded, bool Read, bool Usable, bool UsefulGreat, int Mana, int MaxMana, uint Element = 0);
 
 /// <summary>One held caster's verdict (<see cref="CasterKeep.Decide"/>).</summary>
 /// <param name="Guid">The caster.</param>
@@ -62,6 +63,9 @@ public readonly record struct CasterKeepVerdict(uint Guid, string Name, string? 
 /// <item>the mana rule's charged spare (<see cref="CasterManaRule"/>: the spare it swaps to is the one holding the most mana);</item>
 /// <item>a caster short of a wield requirement whose score as wielded beats hers over the swap margin (<see cref="SelfEquipJudge.ShortCasters"/>): the experience spend works toward it (<see cref="CasterSpend"/>).</item>
 /// </list>
+/// M6 safe load (the owner, 2026-11-20: no more than one caster for each element): the first caster kept in that order claims its element (<see cref="HeldCasterFacts.Element"/>; the casters with none are one group), the wielded first,
+/// and no rule after it keeps a second caster of that element: the charged spare is sought among the elements not yet held. The floor's spare ("two casters always") is the one exception: it is the best of another element, and of a
+/// held element only when no other is held (else the floor would buy back at each visit the spare the sale sold). A caster not appraised yet has no element read and is kept as before (never sold blind).
 /// Pure over the read model: allocates the verdicts.
 /// </summary>
 public static class CasterKeep
@@ -93,7 +97,7 @@ public static class CasterKeep
                 var a = state.Appraisals.TryGet(g, out var read) && !read.IsNotFound ? read : null;
                 held.Add((o, a));
                 facts.Add(new HeldCasterFacts(g, o.Name, state.Self.Inventory.Find(g).Kind == InventoryPlaceKind.Equipped || o.Weenie.WielderId is > 0, a is not null,
-                    a is not null && SelfEquipJudge.WieldUnmet(a, skills) is null, a is not null && usefulGreat(g), a?.ItemMana ?? 0, a?.ItemMaxMana ?? 0));
+                    a is not null && SelfEquipJudge.WieldUnmet(a, skills) is null, a is not null && usefulGreat(g), a?.ItemMana ?? 0, a?.ItemMaxMana ?? 0, (uint)Math.Max(0, a?.Int(SelfEquipJudge.DamageTypeInt) ?? 0)));
             }
         }
 
@@ -154,18 +158,34 @@ public static class CasterKeep
         ArgumentNullException.ThrowIfNull(spend);
         var c = CultureInfo.InvariantCulture;
         var kept = new Dictionary<uint, string>();
-        void Keep(uint guid, string why) => kept.TryAdd(guid, why);
+        var byGuid = new Dictionary<uint, HeldCasterFacts>();
         foreach (var x in casters)
         {
-            if (x.Wielded)
+            byGuid.TryAdd(x.Guid, x);
+        }
+
+        var claimed = new Dictionary<uint, uint>(); // M6 safe load (the owner, 2026-11-20): one caster an element, the element's bits to the caster that keeps it
+        bool Free(uint guid) => !byGuid.TryGetValue(guid, out var x) || !x.Read || !claimed.TryGetValue(x.Element, out var holder) || holder == guid;
+        void Keep(uint guid, string why)
+        {
+            if (kept.TryAdd(guid, why) && byGuid.TryGetValue(guid, out var x) && x.Read)
             {
-                Keep(x.Guid, "the caster she wields");
+                claimed.TryAdd(x.Element, guid);
             }
-            else if (!x.Read)
+        }
+
+        foreach (var x in casters.Where(x => x.Wielded))
+        {
+            Keep(x.Guid, "the caster she wields"); // first: hers claims its element
+        }
+
+        foreach (var x in casters.Where(x => !x.Wielded))
+        {
+            if (!x.Read)
             {
                 Keep(x.Guid, "not appraised: never sold blind");
             }
-            else if (x.UsefulGreat)
+            else if (x.UsefulGreat && Free(x.Guid))
             {
                 Keep(x.Guid, "a useful great cantrip");
             }
@@ -194,19 +214,32 @@ public static class CasterKeep
 
         foreach (var (name, bits) in elements)
         {
-            if (Best(bits, _ => false, out var s) is { } g)
+            if (Best(bits, g => !Free(g), out var s) is { } g)
             {
                 Keep(g, string.Create(c, $"the best caster for the {name} line the fight uses (score {s:0.##})"));
             }
         }
 
         // the floor counts as GearFloor.CountsAsCaster does: the wielded, a usable one, and one not read yet
-        while (casters.Count(x => kept.ContainsKey(x.Guid) && (x.Wielded || x.Usable || !x.Read)) < GearFloor.CastersWanted && Best(floorElement, kept.ContainsKey, out var spareScore) is { } spare)
+        while (casters.Count(x => kept.ContainsKey(x.Guid) && (x.Wielded || x.Usable || !x.Read)) < GearFloor.CastersWanted)
         {
-            Keep(spare, string.Create(c, $"the gear floor's spare (two casters always; score {spareScore:0.##} on the element 0x{floorElement:X})"));
+            if (Best(floorElement, g => kept.ContainsKey(g) || !Free(g), out var spareScore) is { } spare)
+            {
+                Keep(spare, string.Create(c, $"the gear floor's spare (two casters always; score {spareScore:0.##} on the element 0x{floorElement:X})"));
+            }
+            else if (Best(floorElement, kept.ContainsKey, out var sameScore) is { } same)
+            {
+                // M6 safe load: the floor's spare is the one exception to one caster an element. Else a mage whose casters share one element (the shops' plain wands) would sell her spare at each visit and the floor would buy
+                // it back (GearFloor.Plan buys under CastersWanted)
+                Keep(same, string.Create(c, $"the gear floor's spare (two casters always; score {sameScore:0.##} on the element 0x{floorElement:X}; no caster of another element, so the floor's spare shares one)"));
+            }
+            else
+            {
+                break;
+            }
         }
 
-        var charged = casters.Where(x => !x.Wielded && x.MaxMana > 0 && x.Mana > 0).OrderByDescending(x => x.Mana).ThenBy(x => x.Guid).ToList();
+        var charged = casters.Where(x => !x.Wielded && x.MaxMana > 0 && x.Mana > 0 && Free(x.Guid)).OrderByDescending(x => x.Mana).ThenBy(x => x.Guid).ToList();
         if (charged.Count > 0)
         {
             Keep(charged[0].Guid, string.Create(c, $"the mana rule's charged spare ({charged[0].Mana}/{charged[0].MaxMana} mana, the most of the spares)"));
@@ -214,7 +247,10 @@ public static class CasterKeep
 
         foreach (var (guid, numbers) in spend)
         {
-            Keep(guid, "the experience spend works toward its wield requirement (" + numbers + ")");
+            if (Free(guid))
+            {
+                Keep(guid, "the experience spend works toward its wield requirement (" + numbers + ")");
+            }
         }
 
         var names = string.Join(", ", elements.Select(e => e.Name));
@@ -223,7 +259,7 @@ public static class CasterKeep
         {
             var why = kept.GetValueOrDefault(x.Guid);
             var line = why is null
-                ? string.Create(c, $"'{x.Name}' 0x{x.Guid:X8}: sell loot (not the wielded, no useful great cantrip, not the best for any of the {elements.Count} element(s) the fight's line uses ({names}), not the floor's spare nor the charged spare{(x.Usable ? string.Empty : ", short of a wield requirement the spend does not work toward")})")
+                ? string.Create(c, $"'{x.Name}' 0x{x.Guid:X8}: sell loot (not the wielded, no useful great cantrip, not the best for any of the {elements.Count} element(s) the fight's line uses ({names}), not the floor's spare nor the charged spare{(x.Usable ? string.Empty : ", short of a wield requirement the spend does not work toward")}{(x.Read && claimed.TryGetValue(x.Element, out var holder) && holder != x.Guid ? string.Create(c, $", one caster an element: its element 0x{x.Element:X} is kept by '{byGuid[holder].Name}' 0x{holder:X8}") : string.Empty)})")
                 : string.Create(c, $"'{x.Name}' 0x{x.Guid:X8}: kept: {why}");
             verdicts.Add(new CasterKeepVerdict(x.Guid, x.Name, why, line));
         }

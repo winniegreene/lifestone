@@ -404,12 +404,13 @@ public static class SaleVerdict
                 return Row("scrolls-kept", SaleStep.KeptAside, scroll);
             }
 
-            if (book.Packs.WearReview.Contains(guid))
+            var defence = KeepAsideRule.DefenceSkillNeeded(appraisal); // M6 safe load (the owner, 2026-11-20): a piece that needs a defence skill to wield is not kept, whatever noted it
+            if (defence is null && book.Packs.WearReview.Contains(guid))
             {
                 return Row("gear-review", SaleStep.KeptAside, "the wear pick keeps it for the next visit's review (pack rule gear-review)");
             }
 
-            if (book.Memory.KeptAside.Contains(guid))
+            if (defence is null && book.Memory.KeptAside.Contains(guid))
             {
                 return Row("kept-aside-noted", SaleStep.KeptAside, "noted by the loot step");
             }
@@ -426,7 +427,7 @@ public static class SaleVerdict
             shed = true; // a stone beyond the kit's target is loot to sell: the trip notes it in the layout's memory
         }
 
-        if (!caster && book.Packs.Rotation.Contains(guid))
+        if (!caster && book.Packs.Rotation.Contains(guid) && KeepAsideRule.DefenceSkillNeeded(book.Appraisal(guid)) is null)
         {
             return Row("gear-rotation", SaleStep.Rotation);
         }

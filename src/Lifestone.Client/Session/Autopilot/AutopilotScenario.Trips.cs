@@ -51,7 +51,11 @@ public sealed partial class AutopilotScenario
     /// <summary>The trigger calls a trip no counters call (the buff bot's, a lapsed line's): the order carries the caller's name with the counts and the purse as they stand.</summary>
     private void CallTrip(IGameSessionView session, string trigger, string reason) => SayCall((_trips ?? TripDesk.For(session.State)).Call(_ground, trigger, reason, _clock));
 
-    private void SayCall(TripOrder order) => _log.Info(LogCategory, $"autopilot fight: trip: the verdict the trip carries: {order.Said}");
+    private void SayCall(TripOrder order)
+    {
+        _botHourWent = null; // the next trip's reason is logged afresh
+        _log.Info(LogCategory, $"autopilot fight: trip: the verdict the trip carries: {order.Said}");
+    }
 
     /// <summary>
     /// The reading twin of the session's counters over the job's ground (<see cref="TripDesk.Reading"/>): a check through it moves nothing the trigger reads. Before the first step, the counters the job states (nothing

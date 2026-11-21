@@ -170,6 +170,11 @@ public sealed class CantripRoomTests
         Assert.Empty(atTheLine.Shorts); // no great cantrip's room is made for any of the three
         Assert.Equal(MageLootVerdict.Load, atTheLine.VerdictOf(61)); // the wand keeps its present rule: left over the line, no room made for it
 
+        // M6 safe load (live run 6, 2026-11-19 to 11-20: 36 casters left over the line, the bonus ones each counted as "a great cantrip" and each calling a trip): a wand left for its War Magic bonus alone calls no full-pack trip
+        var room = new PackRoomMemory();
+        room.NoteLoot(atTheLine);
+        Assert.Equal(0, room.LoadLeftKeepers);
+
         // M6 14 hour load (the owner's ruling, 2026-11-16: she is not married to something just because she picked it up): the Minor ring and the other Major ring are plain sell loot of v/b 60: the first is swapped in for the chainmail (v/b 2),
         // whose 400 make room for the second too
         Assert.Equal([21u], atTheLine.Drops.Select(d => d.Loot.Guid));

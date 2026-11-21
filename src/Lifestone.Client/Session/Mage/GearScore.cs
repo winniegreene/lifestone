@@ -669,7 +669,7 @@ public static class GearScore
         ArgumentNullException.ThrowIfNull(a);
         ArgumentNullException.ThrowIfNull(context);
         var covered = BodyParts.Where(p => (p.Coverage & coverage) != 0).Select(p => p.Part).ToList();
-        var level = a.ArmorLevel ?? 0;
+        var level = ArmourBase.Level(a); // its own level: the appraised one holds the Impenetrability on it, which the spells below would add again
         var unmet = SelfEquipJudge.WieldUnmet(a, context.Skills);
         var spellsOff = unmet is null && context.LitBy?.Invoke(guid) != true ? SelfEquipJudge.ActivationUnmet(a, context.Skills) : null;
         var off = spellsOff is not null || OutOfMana(a);
@@ -760,13 +760,16 @@ public static class GearScore
         return (mean, "the mean of its seven protections from " + read + ": TODO(" + Todo + ")");
     }
 
-    /// <summary>The protection against one damage type: the appraisal's armour profile, else the PropertyFloat (13-19, 165 ArmorModVs...), else 1 (named).</summary>
+    /// <summary>
+    /// The piece's own protection against one damage type: the appraisal's armour profile less the banes and lures on the piece (<see cref="ArmourBase.Protection"/>: ACE sends the profile with them in), else the PropertyFloat
+    /// (13-19, 165 ArmorModVs...), else 1 (named).
+    /// </summary>
     internal static double ModVs(Appraisal a, uint type, out string source)
     {
         if (a.Armor is { } p)
         {
             source = "the armour profile";
-            return type switch
+            return ArmourBase.Protection(a, type, type switch
             {
                 0x1 => p.Slashing,
                 0x2 => p.Piercing,
@@ -777,7 +780,7 @@ public static class GearScore
                 0x40 => p.Lightning,
                 0x400 => p.Nether,
                 _ => 1.0,
-            };
+            });
         }
 
         var id = type switch { 0x1 => 13u, 0x2 => 14u, 0x4 => 15u, 0x8 => 16u, 0x10 => 17u, 0x20 => 18u, 0x40 => 19u, 0x400 => 165u, _ => 0u };

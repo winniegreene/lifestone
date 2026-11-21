@@ -117,7 +117,7 @@ public sealed partial class FightScenarioTests
         Assert.Equal(ScenarioStatus.Succeeded, r.Run(scenario));
 
         Assert.Equal(0, scenario.Sidesteps);
-        Assert.Equal(1, LinesWith(r, "; no sidestep: it stands 10 m off, past the sidestep's reach 6 m"));
+        Assert.Equal(1, LinesWith(r, "falls back to the tour's next leg (as before m5-defend-walk-to): no sidestep: it stands 10 m off, past the sidestep's reach 6 m; ")); // m6-line-first: the sidestep is tried first, then the walk to a spot
         Assert.Equal(1, LinesWith(r, "self-defence: no attacker is in range with a clear line"));
     }
 

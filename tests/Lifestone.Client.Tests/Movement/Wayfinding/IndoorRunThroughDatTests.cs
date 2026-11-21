@@ -7,6 +7,7 @@ using Lifestone.Client.Movement.Wayfinding;
 using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Tests.Session.Grounds;
 using Lifestone.Client.Session.Mage;
+using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Tests.Session;
 using Lifestone.Data.Dat;
 using Lifestone.Data.Physics.Geometry;
@@ -106,9 +107,17 @@ public sealed class IndoorRunThroughDatTests(DatSetFixture fixture, ITestOutputH
         var legs = 0;
         var worstMiss = 0f;
         var totalWall = 0;
+        // M6 14 holding plates: on a ground with plates a leg's goal is the fight's (FightWalk.GoalOutOfAvoid): off a plate's wall where the room's middle stands in one; a cell whose whole floor a plate's wall holds gets no leg
+        var plateGoals = ground.Plates is null ? null : new RunnerLegs(ground, new ProfileTour(ground), graph, NullLogSink.Instance);
         foreach (var cellId in ground.Tour.Where(c => graph.RoomFrame(c) is not null).Distinct().Take(MaxLegs))
         {
-            var goal = NavGoal.ToPoint(new NavPoint(cellId & 0xFFFF0000u, graph.RoomFrame(cellId)!.Value.Origin), cellId);
+            if ((plateGoals is null ? graph.RoomFrame(cellId) : plateGoals.GoalOutOfAvoid(cellId, walker.Position.Origin)) is not { } frame)
+            {
+                output.WriteLine($"0x{cellId & 0xFFFF:X4} no leg: no floor of the cell stands outside its plate's wall");
+                continue;
+            }
+
+            var goal = NavGoal.ToPoint(new NavPoint(cellId & 0xFFFF0000u, frame.Origin), cellId);
             using var runner = new NavRunner(h.Api.Move, new ControllerNavBody(walker.Controller), source, confirmer, audit, new NavRunnerOptions { Name = "leg-" + (cellId & 0xFFFF).ToString("X4", CultureInfo.InvariantCulture), PredictiveSteering = predictive });
             runner.Start(goal, now);
             var end = now + 120;

@@ -350,9 +350,11 @@ public sealed class WardrobeTests
         var terms = AbodeTerms();
         Assert.True(CantripRoom.IsUsefulGreatPiece(rig.State, cap, spells));
 
-        // Before: the cap's cantrip is worth nothing to the pick's terms, the plain cap's armour is a gain, and the pick took the Major Endurance off her head.
+        // Before: the cap's cantrip was worth nothing to the pick's terms, the plain cap's armour was a gain, and the pick took the Major Endurance off her head. M6 cantrips first (the owner, 2026-11-20: a lit major
+        // cantrip beats armour differences): the score alone keeps it on now, with no session read
         var before = new SelfEquipJudge([], 0, id => spells.TryGetValue(id, out var row) ? row.Name : null, [0x4]).WithWear(terms).Judge(Held(rig, plain), worn, new Skills());
-        Assert.True(before.Kind == SelfEquipKind.Replace, before.Why);
+        Assert.True(before.Kind == SelfEquipKind.None, before.Why);
+        Assert.Contains("it would put out Major Endurance", before.Why, StringComparison.Ordinal);
 
         // Now: the owner's rule is asked of the pieces themselves.
         var now = Wardrobe.For(rig.State).JudgeOn(ground, spells).WithWear(terms).Judge(Held(rig, plain), worn, new Skills());

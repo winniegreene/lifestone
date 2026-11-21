@@ -7,6 +7,7 @@ using Lifestone.Client.Movement.Wayfinding;
 using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.Session.Scenarios;
 using Lifestone.Client.Tests.Session;
+using Lifestone.Client.Tests.Session.Grounds;
 using Lifestone.Data.Animation;
 using Lifestone.Data.Motion;
 using Lifestone.Data.Physics.Geometry;
@@ -21,9 +22,10 @@ namespace Lifestone.Client.Tests.Movement.Wayfinding;
 
 /// <summary>
 /// M6 14 holding plates (the owner, 2026-11-14: in the Tusker Holding the climber must avoid the Tusker's Friend pressure plates, and where one blocks the way, she can jump), on the dats with the client's own physics (an
-/// <see cref="OfflineWalker"/> under the real runner): every standing long jump the room graph derives over the plates lands past their walls on the far floor and no sphere of her body touches a plate's sphere on the way; the
-/// position she reports last before each Jump message is her take-off, so the server's own flight of the jump starts where hers does; the walk of the Holding's tour with the plates as walls reaches every one of its 102 upper-level
-/// slots, 10 of them on foot from the arrival and 92 over at least one plate jump; and a plate that fires on a jump ends it by name and takes the jump out of the rest of the run. Exhaustive tier, skipped without the dats.
+/// <see cref="OfflineWalker"/> under the real runner): every standing long jump the room graph derives over the plates lands past their walls on the far floor and no sphere of her body reaches a plate's box on the way (the shape ACE
+/// fires on, <see cref="HoldingPlateBoxes"/>); the position she reports last before each Jump message is her take-off, so the server's own flight of the jump starts where hers does; the walk of the Holding's tour with the plates as
+/// walls reaches 101 of its 102 upper-level slots, 10 of them on foot from the arrival and 91 over at least one plate jump (the slot in 0x5B4802B2 has no floor outside its plate's wall); a round of the tour keeps her off every box; a
+/// plate that fires on a jump ends it by name and takes the jump out of the rest of the run; and the model the climber ran with until 2026-11-20 is held to the box. Exhaustive tier, skipped without the dats.
 /// </summary>
 [Trait("Tier", "Exhaustive")]
 public sealed class HoldingPlateJumpDatTests(DatSetFixture fixture, ITestOutputHelper output) : IClassFixture<DatSetFixture>
@@ -35,19 +37,20 @@ public sealed class HoldingPlateJumpDatTests(DatSetFixture fixture, ITestOutputH
 
     private const int BuffedJump = 178;
 
-    /// <summary>The plate's sphere (Setup 0x02000550): radius 0.1 m, its centre 0.1375 m off the origin seen from above and 0.073 m up.</summary>
-    private const float PlateSphere = 0.1f;
-
-    private const float PlateOffset = 0.1375f;
-
-    private const float PlateSphereUp = 0.073f;
-
-    /// <summary>Her lower sphere (Setup 0x02000001): radius 0.48 m at 0.475 m.</summary>
-    private const float BodySphere = 0.48f;
-
-    private const float BodySphereUp = 0.475f;
-
     private static HuntingGround Holding => GroundCatalog.Get("tusker-holding");
+
+    /// <summary>The box ACE fires a plate on (its Setup's physics part in the dats, the profile's <c>setup</c>; <see cref="HoldingPlateBoxes"/>).</summary>
+    private (Vector3 Min, Vector3 Max) PlateBox => HoldingPlateBoxes.Box(fixture.Dats, Holding.Plates!.SetupId);
+
+    /// <summary>Her spheres (Setup 0x02000001 in the dats).</summary>
+    private IReadOnlyList<Data.Physics.Primitives.PhysSphere> BodySpheres => Data.Physics.Objects.PhysicsSetup.Load(fixture.Dats, OfflineWalker.HumanSetupId)!.Spheres;
+
+    /// <summary>Her least gap to any plate's box with her feet at <paramref name="feet"/> (landblock-local), and the plate.</summary>
+    private Func<Vector3, (float Margin, string Plate)> BoxMargin()
+    {
+        var (plates, box, body) = (HoldingPlateBoxes.Plates(Holding), PlateBox, BodySpheres);
+        return feet => HoldingPlateBoxes.Margin(feet, plates, box, body);
+    }
 
     private LandblockCellSet CellsOf(HuntingGround ground)
     {
@@ -67,7 +70,7 @@ public sealed class HoldingPlateJumpDatTests(DatSetFixture fixture, ITestOutputH
 
     /// <summary>
     /// Every standing jump over the plates, the runner's own procedure (walk to the take-off, stop, turn to the landing, charge the bar standing still, run forward on the standing long jump, release): it lands past the far edge of
-    /// the walls on the far floor, her lower sphere stays clear of every plate's sphere at every frame of the walk and the flight, and the last position she reported before the Jump message is the take-off (the server flies the jump
+    /// the walls on the far floor, her spheres stay clear of every plate's box at every frame of the walk and the flight, and the last position she reported before the Jump message is the take-off (the server flies the jump
     /// from there; its sweep between her reports on the ground keeps out of every plate's touch too).
     /// </summary>
     [RequiresDatsFact]
@@ -76,7 +79,7 @@ public sealed class HoldingPlateJumpDatTests(DatSetFixture fixture, ITestOutputH
         var ground = Holding;
         var graph = BuffedGraph(ground);
         var jumps = graph.AllPlateJumps();
-        Assert.Equal(13, jumps.Count);
+        Assert.Equal(11, jumps.Count);
         foreach (var jump in jumps.OrderBy(j => j.Name, StringComparer.Ordinal))
         {
             var result = JumpOver(ground, jump, witness: null);
@@ -85,7 +88,7 @@ public sealed class HoldingPlateJumpDatTests(DatSetFixture fixture, ITestOutputH
             Assert.Equal((1, 1), (result.Taken, result.Landed));
             Assert.True(result.PastFarEdge >= 0f, $"{jump.Name}: {result.PastFarEdge:0.00} m past the far edge");
             Assert.InRange(result.FloorRise, -0.1f, 0.1f);
-            Assert.True(result.SphereMargin > 0f, $"{jump.Name}: her sphere came {result.SphereMargin:0.00} m from a plate's");
+            Assert.True(result.BoxMargin > 0f, $"{jump.Name}: her sphere came {result.BoxMargin:0.00} m from a plate's box");
             Assert.True(result.ReportToTakeOff <= NavRunner.StandStillMetres, $"{jump.Name}: the last report before the Jump stood {result.ReportToTakeOff:0.00} m from the take-off");
             Assert.True(result.ReportedChordMargin > 0f, $"{jump.Name}: a chord between her reports passed {result.ReportedChordMargin:0.00} m inside a plate's touch");
         }
@@ -93,7 +96,8 @@ public sealed class HoldingPlateJumpDatTests(DatSetFixture fixture, ITestOutputH
 
     /// <summary>
     /// The tour with the plates as walls, on the room graph the fight walks (the buffed climber's speed and flight): every one of the 102 upper-level slots' cells is planned from the arrival, its leg's goal moved off a plate's wall
-    /// where its room frame stands in one (0x5B4802B2 and 0x5B4802D3); 10 slots in 7 cells are reached on foot, the other 92 in 76 cells over at least one plate jump, and none is dropped. No walked step of any plan comes within a wall.
+    /// where its room frame stands in one (0x5B4802D3 and 0x5B480388); 10 slots in 7 cells are reached on foot, 91 in 75 cells over at least one plate jump, and the one slot in 0x5B4802B2 is dropped: its plate stands on the cell's
+    /// centre and no floor of the cell lies outside the plate's wall (<c>FightWalk.GoalOffPlate</c>). No walked step of any plan comes within a wall.
     /// </summary>
     [RequiresDatsFact]
     public void The_tour_with_plates_as_walls_reaches_every_slot_and_names_the_jumps()
@@ -137,20 +141,110 @@ public sealed class HoldingPlateJumpDatTests(DatSetFixture fixture, ITestOutputH
         output.WriteLine($"{slots.Count} slots: {Count(foot)} on foot ({foot.Count} cells), {Count(jumped)} over a plate jump ({jumped.Count} cells), {Count(dropped)} dropped; goals moved off a wall: {string.Join(" ", moved.Select(c => $"0x{c:X8}"))}");
         output.WriteLine("on foot: " + string.Join(" ", foot.Select(c => $"0x{c:X8}")));
         output.WriteLine("jumps used: " + string.Join("; ", named));
-        Assert.Empty(dropped);
-        Assert.Equal((10, 92), (Count(foot), Count(jumped)));
-        Assert.Equal(new uint[] { 0x5B4802B2, 0x5B4802D3 }, moved.Order()); // the room frames inside a wall (0x5B48026B's stands outside its plate's wall)
+        Assert.Equal(new uint[] { 0x5B4802B2 }, dropped);
+        Assert.Equal((10, 91, 1), (Count(foot), Count(jumped), Count(dropped)));
+        Assert.Equal(new uint[] { 0x5B4802D3, 0x5B480388 }, moved.Order()); // the room frames inside a wall that a floor of the cell stands past
     }
 
     /// <summary>
     /// End to end: the body walks one round of the Holding's tour from the arrival on the fight's legs (<see cref="RunnerLegs"/>, the profile's order) with the plates as walls: every leg arrives, every jump it takes lands, her body on
-    /// the ground never comes within a plate's touch, and no chord between two of her reports on the ground passes within one.
+    /// the ground never comes within a plate's touch, no chord between two of her reports on the ground passes within one, and at no frame of the walks and the flights does a sphere of hers reach a plate's box (the shape ACE fires on).
     /// </summary>
     [RequiresDatsFact]
     public void A_round_of_the_tour_keeps_off_every_plate_and_lands_every_jump()
     {
+        var graph = BuffedGraph(Holding);
+        var round = Round(graph);
+        output.WriteLine(round.Line);
+        Assert.Empty(round.Failed);
+        Assert.True(round.Taken > 0 && round.Taken == round.Landed, $"{round.Taken} taken, {round.Landed} landed");
+        Assert.True(round.Nearest > PlateKeepOff.TouchOf(graph.Plates!.Plates[0]), $"the body came {round.Nearest:0.00} m from a plate");
+        Assert.True(round.Chord > 0f, $"a chord between her reports passed {round.Chord:0.00} m inside a plate's touch");
+        Assert.True(round.Box > 0f, $"her spheres came {-round.Box:0.00} m into {round.BoxPlate}'s box");
+        Assert.DoesNotContain(round.Log, l => l.Contains("inside a pressure plate's touch", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// <c>TODO(maps-plate-setup)</c>'s question on the live code: the model the climber ran with until 2026-11-20 (the profile's <c>shape_m</c> 0.24 and <c>top_m</c> 0.18, typed from Setup 0x02000550, a short frost sword's), against the
+    /// box ACE fires the plate on (<see cref="HoldingPlateBoxes"/>). Its walls round each plate at its own heading: how far her spheres stand from the box with her feet on a wall's edge (the plan's line) and at its touch (the line less
+    /// her whole stop, the most she carries past it); its 13 standing jumps, each flown by the runner, at every frame; and one round of the tour on its walls. Report and pin.
+    /// </summary>
+    [RequiresDatsFact]
+    public void The_model_until_2026_11_20_against_the_box_ACE_fires_on()
+    {
         var ground = Holding;
+        var old = ground.KeptPlatesOf(fixture.Dats).Select(p => p with { ShapeMetres = 0.24f, TopMetres = 0.18f }).ToList();
         var graph = BuffedGraph(ground);
+        graph.PlateList = old;
+        var walls = graph.Plates!;
+        var boxMargin = BoxMargin();
+        (float Margin, string Plate) Around(float metres)
+        {
+            var least = (float.PositiveInfinity, string.Empty);
+            foreach (var p in walls.Plates.Where(p => ground.IsWalkable(p.Cell)))
+            {
+                for (var degree = 0; degree < 360; degree++)
+                {
+                    var a = degree * MathF.PI / 180f;
+                    if (boxMargin(p.Point + new Vector3(metres * MathF.Cos(a), metres * MathF.Sin(a), 0f)) is var (m, plate) && m < least.Item1)
+                    {
+                        least = (m, plate);
+                    }
+                }
+            }
+
+            return least;
+        }
+
+        var reach = walls.ReachOf(walls.Plates[0]);
+        var touch = PlateKeepOff.TouchOf(walls.Plates[0]);
+        var (onWall, wallPlate) = Around(reach);
+        var (onTouch, touchPlate) = Around(touch);
+        output.WriteLine(string.Create(CultureInfo.InvariantCulture, $"its walls: {reach:0.000} m (touch {touch:0.000} m and her stop {walls.StopMetres:0.000} m); her spheres from the nearest box: {onWall:0.000} m on a wall's edge ({wallPlate}), {onTouch:0.000} m at its touch ({touchPlate})"));
+
+        var jumps = graph.AllPlateJumps();
+        var into = new List<string>();
+        foreach (var jump in jumps.OrderBy(j => j.Name, StringComparer.Ordinal))
+        {
+            var result = JumpOver(ground, jump, witness: null, graph);
+            output.WriteLine(result.Line);
+            if (result.BoxMargin <= 0f)
+            {
+                into.Add(jump.Crossing.Name);
+            }
+        }
+
+        output.WriteLine($"{into.Count} of {jumps.Count} jumps reach into a box: {string.Join("; ", into)}");
+        var fresh = BuffedGraph(ground);
+        fresh.PlateList = old;
+        var round = Round(fresh);
+        output.WriteLine("its round: " + round.Line);
+
+        // Its walls were thinner than the box's touch at a corner: her spheres on a wall's edge reach into a box, and a round of the tour on them walks into the box of the plate in 0x5B480388. Its 13 jumps clear every box: the
+        // box is 0.075 m high, and every take-off and landing stood outside its touch.
+        Assert.True(onWall < 0f && onTouch < 0f, $"{onWall:0.000} m on the edge, {onTouch:0.000} m at the touch");
+        Assert.Equal(13, jumps.Count);
+        Assert.Empty(into);
+        Assert.Empty(round.Failed);
+        Assert.True(round.Box < 0f, round.Line);
+        Assert.Equal("the plate 0x75B480C8 in 0x5B480388", round.BoxPlate);
+    }
+
+    /// <param name="Failed">The legs that did not arrive.</param>
+    /// <param name="Taken">The jumps taken.</param>
+    /// <param name="Landed">The jumps landed.</param>
+    /// <param name="Nearest">The nearest her body stood to a plate's origin on the ground (the runner's own watch).</param>
+    /// <param name="Chord">The least margin outside a plate's touch of a chord between her reports on the ground.</param>
+    /// <param name="Box">The least gap between her spheres and a plate's box at any frame; negative when one reached into it.</param>
+    /// <param name="BoxPlate">That plate.</param>
+    /// <param name="Log">The run's log.</param>
+    /// <param name="Line">The report.</param>
+    private sealed record RoundResult(IReadOnlyList<string> Failed, int Taken, int Landed, float Nearest, float Chord, float Box, string BoxPlate, IReadOnlyList<string> Log, string Line);
+
+    /// <summary>One round of the Holding's tour from the arrival on the fight's legs over <paramref name="graph"/>, the body's spheres measured against the plates' boxes at every frame.</summary>
+    private RoundResult Round(RoomGraph graph)
+    {
+        var ground = Holding;
         var sink = new RecordingMovementSink();
         var (world, walker) = BodyIn(ground, new CellFrame(ground.Arrival.Cell, new AcFrame(ground.Arrival.Origin, Quaternion.Identity)), sink);
         var h = new ActionHarness(offline: true);
@@ -162,9 +256,16 @@ public sealed class HoldingPlateJumpDatTests(DatSetFixture fixture, ITestOutputH
         var now = 0.0;
         sink.Clock = () => now;
         var (arrived, failed, nearest, where) = (0, new List<string>(), float.PositiveInfinity, string.Empty);
+        var boxMargin = BoxMargin();
+        var (box, boxPlate, boxAt) = (float.PositiveInfinity, string.Empty, string.Empty);
         for (var leg = 0; leg < ground.Tour.Count; leg++)
         {
-            Assert.True(legs.Begin(runner, walker.Position, now, now, out var description), legs.Failure);
+            if (!legs.Begin(runner, walker.Position, now, now, out var description))
+            {
+                failed.Add($"leg {leg} not begun: {legs.Failure}");
+                break;
+            }
+
             var status = FightWalkStatus.Walking;
             var end = now + 120;
             while (status == FightWalkStatus.Walking && now < end)
@@ -173,6 +274,10 @@ public sealed class HoldingPlateJumpDatTests(DatSetFixture fixture, ITestOutputH
                 walker.Controller.Tick(now);
                 status = legs.Step(walker.Position, now, now);
                 h.Tick(1.0 / Fps);
+                if (boxMargin(walker.Position.Origin) is var (m, plate) && m < box)
+                {
+                    (box, boxPlate, boxAt) = (m, plate, $"{description}, at {walker.Position}");
+                }
             }
 
             if (runner.PlateNearestMetres < nearest)
@@ -190,18 +295,10 @@ public sealed class HoldingPlateJumpDatTests(DatSetFixture fixture, ITestOutputH
             }
         }
 
-        var chord = ChordMargin(sink.Calls, ground);
-        output.WriteLine(string.Create(CultureInfo.InvariantCulture, $"{arrived} of {ground.Tour.Count} legs arrived in {now:0} s; jumps taken {legs.Runner!.JumpsTaken}, landed {legs.Runner.JumpsLanded}; nearest a plate on the ground {nearest:0.00} m ({where}); the reports' chords {chord:0.00} m outside the touch"));
-        foreach (var f in failed)
-        {
-            output.WriteLine("  failed: " + f);
-        }
-
-        Assert.Empty(failed);
-        Assert.True(runner.JumpsTaken > 0 && runner.JumpsTaken == runner.JumpsLanded, $"{runner.JumpsTaken} taken, {runner.JumpsLanded} landed");
-        Assert.True(nearest > PlateKeepOff.TouchOf(graph.Plates!.Plates[0]), $"the body came {nearest:0.00} m from a plate ({where})");
-        Assert.True(chord > 0f, $"a chord between her reports passed {chord:0.00} m inside a plate's touch");
-        Assert.DoesNotContain(log.Lines, l => l.Contains("inside a pressure plate's touch", StringComparison.Ordinal));
+        var chord = ChordMargin(sink.Calls, graph.Plates!.Plates);
+        var line = string.Create(CultureInfo.InvariantCulture, $"{arrived} of {ground.Tour.Count} legs arrived in {now:0} s; jumps taken {legs.Runner!.JumpsTaken}, landed {legs.Runner.JumpsLanded}; nearest a plate on the ground {nearest:0.00} m ({where}); the reports' chords {chord:0.00} m outside the touch; her spheres {box:0.00} m from the nearest plate's box ({boxPlate}: {boxAt})");
+        line += string.Concat(failed.Select(f => Environment.NewLine + "  failed: " + f));
+        return new RoundResult(failed, legs.Runner.JumpsTaken, legs.Runner.JumpsLanded, nearest, chord, box, boxPlate, log.Lines, line);
     }
 
     /// <summary>
@@ -251,10 +348,10 @@ public sealed class HoldingPlateJumpDatTests(DatSetFixture fixture, ITestOutputH
 
     /// <param name="PastFarEdge">How far past the far edge of the walls, along the jump, the body came to rest.</param>
     /// <param name="FloorRise">The body's height over the take-off's at rest.</param>
-    /// <param name="SphereMargin">The least gap between her lower sphere and a plate's sphere over the walk and the flight.</param>
+    /// <param name="BoxMargin">The least gap between her spheres and a plate's box (<see cref="HoldingPlateBoxes"/>) over the walk and the flight; negative when one reached into it.</param>
     /// <param name="ReportToTakeOff">How far the last position she reported before the Jump stood from the take-off.</param>
     /// <param name="ReportedChordMargin">The least margin, outside a plate's touch, of a chord between two of her reports on the ground (the jump's own flight is the server's, from the take-off).</param>
-    private sealed record JumpResult(NavRunState State, string? Why, int Taken, int Landed, float PastFarEdge, float FloorRise, float SphereMargin, float ReportToTakeOff, float ReportedChordMargin, string Line);
+    private sealed record JumpResult(NavRunState State, string? Why, int Taken, int Landed, float PastFarEdge, float FloorRise, float BoxMargin, float ReportToTakeOff, float ReportedChordMargin, string Line);
 
     /// <summary>A body with the climber's buffed skills, 2.5 m short of the jump's take-off (or at it), runs the jump to its landing under the runner, the path forced through the jump (a walk round may exist in a room).</summary>
     private JumpResult JumpOver(HuntingGround ground, DirectedJump jump, IJumpWitness? witness, RoomGraph? shared = null)
@@ -297,14 +394,18 @@ public sealed class HoldingPlateJumpDatTests(DatSetFixture fixture, ITestOutputH
         var now = 0.0;
         sink.Clock = () => now;
         runner.Start(NavGoal.ToPoint(new NavPoint(jump.To.Cell & 0xFFFF0000u, jump.To.Landing), jump.To.Cell), now);
-        var margin = float.PositiveInfinity;
+        var (margin, nearestPlate) = (float.PositiveInfinity, string.Empty);
+        var boxMargin = BoxMargin();
         while (!runner.IsDone && now < 30)
         {
             now += 1.0 / Fps;
             walker.Controller.Tick(now);
             runner.Step(now);
             h.Tick(1.0 / Fps);
-            margin = MathF.Min(margin, SphereMargin(walker.Position.Origin, graph.Plates!));
+            if (boxMargin(walker.Position.Origin) is var (m, plate) && m < margin)
+            {
+                (margin, nearestPlate) = (m, plate);
+            }
         }
 
         var at = walker.Position.Origin;
@@ -313,10 +414,10 @@ public sealed class HoldingPlateJumpDatTests(DatSetFixture fixture, ITestOutputH
         var jumpCall = sink.Calls.FindIndex(c => c.Kind == RecordingMovementSink.Kind.Jump);
         var lastReport = jumpCall > 0 ? sink.Calls.Take(jumpCall).LastOrDefault(c => c.Kind != RecordingMovementSink.Kind.Jump) : default;
         var toTakeOff = jumpCall > 0 ? Vector3.Distance(lastReport.Position.Origin, sink.Calls[jumpCall].Position.Origin) : float.PositiveInfinity;
-        var chord = ChordMargin(sink.Calls, ground);
+        var chord = ChordMargin(sink.Calls, graph.Plates!.Plates);
         var line = string.Create(
             CultureInfo.InvariantCulture,
-            $"{jump.Name}: {runner.State} in {now:0.0} s, body 0x{walker.Position.CellId:X8} ({at.X:0.00}, {at.Y:0.00}, {at.Z:0.00}), {pastFar:0.00} m past the far edge, sphere margin {margin:0.00} m, last report {toTakeOff:0.00} m from the take-off, chords {chord:0.00} m clear; {runner.LastJump}{(runner.FailureReason is { } why ? " -- " + why : string.Empty)}");
+            $"{jump.Name}: {runner.State} in {now:0.0} s, body 0x{walker.Position.CellId:X8} ({at.X:0.00}, {at.Y:0.00}, {at.Z:0.00}), {pastFar:0.00} m past the far edge, box margin {margin:0.00} m ({nearestPlate}), last report {toTakeOff:0.00} m from the take-off, chords {chord:0.00} m clear; {runner.LastJump}{(runner.FailureReason is { } why ? " -- " + why : string.Empty)}");
         var reason = runner.FailureReason is { } r ? (r.IndexOf("jump-", StringComparison.Ordinal) is var i and >= 0 ? r[i..] : r) : null;
         if (runner.State != NavRunState.Arrived)
         {
@@ -326,25 +427,11 @@ public sealed class HoldingPlateJumpDatTests(DatSetFixture fixture, ITestOutputH
         return new JumpResult(runner.State, reason, runner.JumpsTaken, runner.JumpsLanded, pastFar, at.Z - jump.From.Brink.Z, margin, toTakeOff, chord, line);
     }
 
-    /// <summary>The least gap between her lower sphere at <paramref name="body"/> and any plate's sphere (its offset taken toward her), metres.</summary>
-    private static float SphereMargin(Vector3 body, PlateKeepOff walls)
-    {
-        var least = float.PositiveInfinity;
-        foreach (var p in walls.Plates)
-        {
-            var planar = MathF.Max(0f, Vector2.Distance(new Vector2(body.X, body.Y), new Vector2(p.Point.X, p.Point.Y)) - PlateOffset);
-            var up = (body.Z + BodySphereUp) - (p.Point.Z + PlateSphereUp);
-            least = MathF.Min(least, MathF.Sqrt((planar * planar) + (up * up)) - (PlateSphere + BodySphere));
-        }
-
-        return least;
-    }
-
     /// <summary>
     /// The least margin outside a plate's touch (<see cref="PlateKeepOff.TouchOf"/>) of the chords between consecutive positions she reported standing on the ground (the server's sweep, Player_Tick.cs:411-479); a chord across a Jump
     /// message is the server's own flight from the take-off, left out.
     /// </summary>
-    private static float ChordMargin(IReadOnlyList<RecordingMovementSink.Sent> calls, HuntingGround ground)
+    private static float ChordMargin(IReadOnlyList<RecordingMovementSink.Sent> calls, IReadOnlyList<KeptPlate> plates)
     {
         var least = float.PositiveInfinity;
         RecordingMovementSink.Sent? last = null;
@@ -358,7 +445,7 @@ public sealed class HoldingPlateJumpDatTests(DatSetFixture fixture, ITestOutputH
 
             if (last is { } a)
             {
-                foreach (var p in ground.KeptPlates)
+                foreach (var p in plates)
                 {
                     if (MathF.Abs(p.Point.Z - a.Position.Origin.Z) > PlateKeepOff.StoreyMetres)
                     {

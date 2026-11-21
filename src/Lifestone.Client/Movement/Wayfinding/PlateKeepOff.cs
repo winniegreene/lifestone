@@ -1,10 +1,13 @@
 using System.Globalization;
 using System.Numerics;
+using System.Runtime.CompilerServices;
+using Lifestone.Data.Dat;
 using Lifestone.Data.Physics;
+using Lifestone.Data.Physics.Objects;
 
 namespace Lifestone.Client.Movement.Wayfinding;
 
-/// <summary>A pressure plate a walk keeps off (M6 14 holding plates): its name, cell and landblock-local origin, and its shape's footprint and top (the profile's facts, read from the dats).</summary>
+/// <summary>A pressure plate a walk keeps off (M6 14 holding plates): its name, cell and landblock-local origin (the profile's facts), and its shape's footprint and top (read from its Setup in the dats: <see cref="PlateKeepOff.ShapeOf(DatSet, uint)"/>).</summary>
 /// <param name="Name">The plate's name for the log and a failure.</param>
 /// <param name="Cell">The cell it stands in.</param>
 /// <param name="Point">Its origin, landblock-local.</param>
@@ -21,10 +24,15 @@ public readonly record struct KeptPlate(string Name, uint Cell, Vector3 Point, f
 /// <para><b>What fires a plate</b> (ACE @95ef426d): <c>PressurePlate.OnCollideObject</c> activates it for a player (PressurePlate.cs:52-94: players only, at most once in 2 s, then its reset interval), and the collision is the server's
 /// sweep of her two spheres against the plate's shape (<c>PhysicsObj.FindObjCollisions</c>, PhysicsObj.cs:381-454: an ethereal object is reported and passed through, except in the step-down), between the positions she reports
 /// (<c>Player.UpdatePlayerPosition</c>, Player_Tick.cs:411-479; <c>UpdateObjectInternalServer</c>, PhysicsObj.cs:1766-1781) and along the server's own flight of a jump (<c>Player.HandleActionJump</c>, Player.cs:866-935;
-/// <c>UpdateObjectPhysics</c>, Player_Tick.cs:303-313). Plate 22719's Setup 0x02000550 is one sphere of radius 0.1 m, 0.1375 m off its origin, 0.073 m up; her Setup 0x02000001 two spheres of 0.48 m (the dats).</para>
-/// <para><b>The reach.</b> The plate's footprint (<see cref="KeptPlate.ShapeMetres"/>, its sphere's offset and radius), her body's radius (<see cref="BodyRadiusMetres"/>) and her stop (<see cref="StopMetres"/>): how far she carries past
+/// <c>UpdateObjectPhysics</c>, Player_Tick.cs:303-313). The shape is the plate's own Setup: ACE gives a non-creature object the physics of its Setup (<c>WorldObject.InitPhysicsObj</c>, WorldObject.cs:139-160), and tests a body against
+/// its parts' physics BSP when the Setup has one, its spheres only when it has none (PhysicsObj.cs:412-447), so <see cref="ShapeOf(PhysicsSetup, PhysicsSetup)"/> reads that shape from the dats where the walls are made, never from a
+/// typed number. The Tusker Holding's plate 22719 is Setup 0x02000450 (the world SQL's <c>weenie_properties_d_i_d</c> type 1, the Setup of all 68 PressurePlates of the world that use it): flag 0x8 set, one part 0x0100125E whose physics BSP
+/// is a closed box 2.258 m square from 0.005 to 0.075 m over the plate's origin (six polygons), and a sphere of 1.125 m at 1.125 m that ACE therefore never tests; her Setup 0x02000001 is two spheres of 0.48 m at 0.475 and 1.35 m (the dats).
+/// The plates stand at several headings (the world SQL's angles), so the footprint is the box's half-diagonal, 1.596 m, and the top 0.08 m (her lower sphere's bottom 0.005 m under her feet). Pinned by <c>HoldingPlatesTests</c>.</para>
+/// <para><b>The reach.</b> The plate's footprint (<see cref="KeptPlate.ShapeMetres"/>), her body's radius (<see cref="BodyRadiusMetres"/>) and her stop (<see cref="StopMetres"/>): how far she carries past
 /// the line of her plan at her live speed, the runner's own brake: one physics step and the coast (<see cref="StopAt"/>), as the own portal's reach adds her stop (<see cref="PortalKeepOff.OwnReach"/>). The runner sets the
-/// speed from her live Run skill at each plan (<see cref="RoomGraph.PlateSpeedMetresPerSecond"/>). Not retail: Lifestone's own.</para>
+/// speed from her live Run skill at each plan (<see cref="RoomGraph.PlateSpeedMetresPerSecond"/>). The footprint and her radius make a touch that stands for every heading of the plate and every height of her body (a cylinder round the
+/// shape): 2.076 m for the Holding's box, where her lower sphere, her feet at the plate's origin, meets it 0.265 m past its edge (1.394 m off its centre on a side, 1.862 m at a corner), on the safe side. Not retail: Lifestone's own.</para>
 /// </remarks>
 public sealed class PlateKeepOff
 {
@@ -39,6 +47,9 @@ public sealed class PlateKeepOff
     /// is no body's run, and the walls it makes are wider than any body's. Not retail: Lifestone's own.
     /// </summary>
     public const float UnknownSpeedMetresPerSecond = 15f;
+
+    /// <summary>The shapes read so far, by dat set and Setup (<see cref="ShapeOf(DatSet, uint)"/>).</summary>
+    private static readonly ConditionalWeakTable<DatSet, Dictionary<uint, (float, float)>> Shapes = new();
 
     private readonly KeptPlate[] _plates;
 
@@ -68,6 +79,76 @@ public sealed class PlateKeepOff
     {
         var v = MathF.Max(0f, speed);
         return (v * (float)PhysicsGlobals.MinQuantum) + MathF.Max(NavRunner.CornerStopMetres, NavRunner.CornerBrakeSeconds * v);
+    }
+
+    /// <summary>
+    /// The footprint and top of a plate whose Setup is <paramref name="plate"/>, for a body whose Setup is <paramref name="body"/>, on the shape ACE collides her with (<c>PhysicsObj.FindObjCollisions</c>, PhysicsObj.cs:412-447 @95ef426d): the
+    /// physics BSP of its parts when it has one (its state's HasPhysicsBSP, from the Setup's flag 0x8: <c>CalculatedPhysicsState</c>, WorldObject_Networking.cs:665-669; its Setup's sphere is then never tested), else its spheres. The
+    /// footprint is the farthest the shape reaches from the plate's origin seen from above, whatever its heading (a polygon's corner at its part's rest frame and scale; a sphere's offset and radius); the top, the height of her feet
+    /// over its origin at which her lowest sphere passes over the shape's highest point. The Setups are the dats'.
+    /// </summary>
+    /// <param name="plate">The plate's Setup.</param>
+    /// <param name="body">Her Setup (0x02000001).</param>
+    /// <exception cref="NotSupportedException">The shape ACE would test is cylinders, which this model does not read (<c>TODO(m6-plate-shape)</c>), or there is none.</exception>
+    public static (float ShapeMetres, float TopMetres) ShapeOf(PhysicsSetup plate, PhysicsSetup body)
+    {
+        ArgumentNullException.ThrowIfNull(plate);
+        ArgumentNullException.ThrowIfNull(body);
+        if (body.Spheres.Count == 0)
+        {
+            throw new NotSupportedException(string.Create(CultureInfo.InvariantCulture, $"TODO(m6-plate-shape): her Setup 0x{body.Id:X8} has no sphere"));
+        }
+
+        var lowest = body.Spheres.Min(s => s.Center.Z - s.Radius);
+        if (plate.HasPhysicsBsp)
+        {
+            var (shape, top) = (0f, float.NegativeInfinity);
+            foreach (var part in plate.Parts)
+            {
+                foreach (var polygon in part.Shape.Physics?.Polygons ?? [])
+                {
+                    foreach (var v in polygon.Vertices)
+                    {
+                        var at = Vector3.Transform(v * part.DefaultScale, part.RestFrame.Orientation) + part.RestFrame.Origin;
+                        (shape, top) = (MathF.Max(shape, new Vector2(at.X, at.Y).Length()), MathF.Max(top, at.Z));
+                    }
+                }
+            }
+
+            return float.IsNegativeInfinity(top)
+                ? throw new NotSupportedException(string.Create(CultureInfo.InvariantCulture, $"TODO(m6-plate-shape): the plate's Setup 0x{plate.Id:X8} has a physics BSP and no physics polygon"))
+                : (shape, top - lowest);
+        }
+
+        if (plate.CylSpheres.Count > 0 || plate.Spheres.Count == 0)
+        {
+            throw new NotSupportedException(string.Create(
+                CultureInfo.InvariantCulture,
+                $"TODO(m6-plate-shape): the plate's Setup 0x{plate.Id:X8} has no physics BSP, {plate.CylSpheres.Count} cylinders and {plate.Spheres.Count} spheres; the plate walls read a BSP or spheres"));
+        }
+
+        return (plate.Spheres.Max(s => new Vector2(s.Center.X, s.Center.Y).Length() + s.Radius), plate.Spheres.Max(s => s.Center.Z + s.Radius) - lowest);
+    }
+
+    /// <summary>The footprint and top (<see cref="ShapeOf(PhysicsSetup, PhysicsSetup)"/>) of the plate whose Setup is <paramref name="setupId"/> in <paramref name="dats"/>, for her body (Setup 0x02000001); read once a dat set.</summary>
+    /// <param name="dats">The dats.</param>
+    /// <param name="setupId">The plate's Setup (the world SQL's <c>weenie_properties_d_i_d</c> type 1 of its weenie).</param>
+    /// <exception cref="InvalidDataException">The Setup, or hers, is not in the dats.</exception>
+    public static (float ShapeMetres, float TopMetres) ShapeOf(DatSet dats, uint setupId)
+    {
+        ArgumentNullException.ThrowIfNull(dats);
+        var known = Shapes.GetOrCreateValue(dats);
+        lock (known)
+        {
+            if (known.TryGetValue(setupId, out var found))
+            {
+                return found;
+            }
+
+            var plate = PhysicsSetup.Load(dats, setupId) ?? throw new InvalidDataException(string.Create(CultureInfo.InvariantCulture, $"the plate's Setup 0x{setupId:X8} is not in the dats"));
+            var body = PhysicsSetup.Load(dats, OfflineWalker.HumanSetupId) ?? throw new InvalidDataException(string.Create(CultureInfo.InvariantCulture, $"her Setup 0x{OfflineWalker.HumanSetupId:X8} is not in the dats"));
+            return known[setupId] = ShapeOf(plate, body);
+        }
     }
 
     /// <summary>How near, seen from above, her body and <paramref name="plate"/>'s shape touch: the footprint and her radius.</summary>

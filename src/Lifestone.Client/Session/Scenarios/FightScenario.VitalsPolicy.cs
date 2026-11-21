@@ -23,6 +23,7 @@ public sealed partial class FightScenario
     private readonly FillLevel[] _policyPresses = new FillLevel[8];
     private readonly FillLevel[] _policyHealthDrains = new FillLevel[FightDrain.MaxLevels];
     private readonly FillLevel[] _policyStaminaDrains = new FillLevel[1];
+    private readonly BoostLevel[] _policyRevitalizes = new BoostLevel[8];
     private string? _policyNoted;
     private string? _policyPullNoted;
 
@@ -304,6 +305,7 @@ public sealed partial class FightScenario
         var healthGuid = 0u;
         var fullestHealth = 0.0;
         var healthDefence = -1; // M6 heal spend: the source's Magic Defense, for the drain's landing chance (-1: not read)
+        var healthResist = 1.0; // M6 undrainable fills: the source's share of a health drain's take (DrainResist.Of, the emergency's own read)
         if (engaged && _drain.Count > 0)
         {
             healthGuid = FullestDrainTarget(session, in here, q, _target);
@@ -311,6 +313,7 @@ public sealed partial class FightScenario
             {
                 fullestHealth = ReadHealth(session.State.Objects, healthGuid, clock, out var f, out _, out _, Threat.HealthReader.FightPolicy) ? f * max : max; // a source never told is taken whole (FightScenario.Drain.cs's rule)
                 healthDefence = sourceDefence;
+                healthResist = DrainResistOf(source.Weenie.WeenieClassId, source.Name);
             }
         }
 
@@ -335,8 +338,10 @@ public sealed partial class FightScenario
             if (drainRow is { } spell && q.TryGetSkill(MageTemplate.LifeMagic, out var lifeSkill))
             {
                 staminaGuid = FullestStamina(session, in here, CastRange(_spells[spell.Id], lifeSkill.Init + lifeSkill.Ranks), clock, out fullestStamina);
-                var staminaDefence = staminaGuid != 0 && session.State.Objects.TryGet(staminaGuid, out var staminaSource) ? TargetStatsOf(staminaSource.Weenie.WeenieClassId).Defence : -1;
-                _policyStaminaDrains[0] = new FillLevel(index, spell.Level, spell.BaseMana, spell.Power, rules.OtherSeconds(spell.Level), new TransferRow(spell.Id, BuffStatMods.Stamina, BuffStatMods.Stamina, (float)spell.Proportion, (float)spell.LossPercent, spell.TransferCap), CastChanceOf(lifeNow, spell.Power), LandsOn(lifeNow, staminaDefence));
+                var staminaWcid = staminaGuid != 0 && session.State.Objects.TryGet(staminaGuid, out var staminaSource) ? staminaSource.Weenie.WeenieClassId : 0u;
+                var staminaDefence = staminaWcid != 0 ? TargetStatsOf(staminaWcid).Defence : -1;
+                var staminaResist = staminaWcid != 0 ? DrainResist.StaminaOf(staminaWcid) : 1.0; // M6 undrainable fills: FullestStamina offers no kind that lets nothing through; a partial share is priced
+                _policyStaminaDrains[0] = new FillLevel(index, spell.Level, spell.BaseMana, spell.Power, rules.OtherSeconds(spell.Level), new TransferRow(spell.Id, BuffStatMods.Stamina, BuffStatMods.Stamina, (float)spell.Proportion, (float)spell.LossPercent, spell.TransferCap), CastChanceOf(lifeNow, spell.Power), LandsOn(lifeNow, staminaDefence), staminaResist);
                 staminaCount = 1;
             }
         }
@@ -368,7 +373,23 @@ public sealed partial class FightScenario
             }
 
             var number = DrainLevelNumber(levels[i].Info.Id);
-            _policyHealthDrains[healthDrains++] = new FillLevel(i, number, levels[i].Info.BaseMana, levels[i].Info.Power, rules.OtherSeconds(number), levels[i].Row, CastChanceOf(lifeNow, levels[i].Info.Power), LandsOn(lifeNow, healthDefence));
+            _policyHealthDrains[healthDrains++] = new FillLevel(i, number, levels[i].Info.BaseMana, levels[i].Info.Power, rules.OtherSeconds(number), levels[i].Row, CastChanceOf(lifeNow, levels[i].Info.Power), LandsOn(lifeNow, healthDefence), healthResist);
+        }
+
+        // M6 stamina dance (docs/session.md section 121): the refill's Revitalize Self levels (the book's, at the cast chance, the pack's scarabs: FightRefill.Fill), while the refill is on and not set aside: what a stamina point a press
+        // takes costs her to put back (VitalsPolicy.RefillPrice). Each level's number by its id in the boost rows, its seconds the ladder's self table, its chance her live Life Magic's.
+        var revitalizes = 0;
+        if (_refill.PercentAt(clock) > 0)
+        {
+            var refill = _refill.Levels;
+            for (var i = 0; i < refill.Length && revitalizes < _policyRevitalizes.Length; i++)
+            {
+                var number = RevitalizeLevelNumber(refill[i].SpellId);
+                if (number > 0 && BuffStatMods.BoostOf(refill[i].SpellId) is { } boost)
+                {
+                    _policyRevitalizes[revitalizes++] = new BoostLevel(i, number, refill[i].BaseMana, refill[i].Power, rules.SelfSeconds(number), boost, CastChanceOf(lifeNow, refill[i].Power));
+                }
+            }
         }
 
         // M6 14 upkeep mana: in the fight, with the way out armed (its guard is what a recast under fire must pass), the kept lines and their numbers; and the mana drink she would drink (the biggest held that fits whole).
@@ -412,6 +433,7 @@ public sealed partial class FightScenario
             Presses = _policyPresses.AsMemory(0, presses),
             StaminaDrains = _policyStaminaDrains.AsMemory(0, staminaCount),
             HealthDrains = _policyHealthDrains.AsMemory(0, healthDrains),
+            Revitalizes = _policyRevitalizes.AsMemory(0, revitalizes),
             Upkeep = _policyUpkeep.AsMemory(0, upkeep),
             UpkeepReserve = _wayOut is { } wayOut ? wayOut.Line : 0,
             ManaDrinkGive = drinkGive,
@@ -447,6 +469,21 @@ public sealed partial class FightScenario
         }
 
         return 1;
+    }
+
+    /// <summary>M6 stamina dance: a Revitalize Self level's number (1 to 8) by its spell id (<see cref="BuffStatMods.Revitalize"/>), or 0 when the boost rows lack it.</summary>
+    private static int RevitalizeLevelNumber(uint spellId)
+    {
+        var rows = BuffStatMods.Revitalize;
+        for (var i = 0; i < rows.Count; i++)
+        {
+            if (rows[i].Id == spellId)
+            {
+                return i + 1;
+            }
+        }
+
+        return 0;
     }
 
     /// <summary>A Drain Health Other level's number (1 to 7) by its spell id (<see cref="DrainPicker.Ids"/>).</summary>

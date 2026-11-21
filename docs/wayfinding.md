@@ -291,7 +291,11 @@ person's key before they report it); Failed (over 10 m in one step). An intent t
 NotImplemented is Blocked, with its summary and kind.
 
 **Arrival.** A point goal arrives within `StopTolerance` (0.5 m; the keys are released) or `PassTolerance` (1 m; the keys are
-kept when `Stop` is false), and an indoor goal also within 1.5 m of height. An object goal arrives within its `Range`; then,
+kept when `Stop` is false), and an indoor goal also within 1.5 m of height. An object goal arrives within its `Range` of the
+object's live place (the body feed's `TryPlace`, else the planned point; the planned point also counts), measured on the drawn
+body every step before any stuck rung; when the goal names a room, the body is in it or nothing walls it off (`WallBetween`,
+which passes creatures), and a contact with the goal object under the run's keys is an arrival whatever the range (M6 sprint,
+`m6-vendor-reach`); the reason is logged (`arrived: the object is in reach reason=`). Then,
 when it needs sight, `SweepViewer` (radius 0.3 m) runs from the eye (1.5 m) to the chest (1.0 m above the target point), then
 the two tangents (0.5 m either side). That is Arrived, else ArrivedWithoutSight. No physics confirms the sight yet
 (TODO(nav-sight-no-physics)).

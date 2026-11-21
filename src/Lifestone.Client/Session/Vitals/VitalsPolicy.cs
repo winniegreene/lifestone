@@ -62,7 +62,25 @@ public readonly record struct VitalsUpkeep(uint Target, uint Wanted, int Lines, 
 /// <param name="Chance">M6 heal spend: the chance the cast does not fizzle, on her live skill (1: taken as sure, not read). A fizzle gives nothing and costs <see cref="ManaConversionModel.FizzleMana"/> (ACE <c>Player_Magic.cs</c>
 /// <c>CalculateManaUsage</c>, 566-572 @95ef426d), so the policy prices a level at its expected give and cost; 0 or less: not offered.</param>
 /// <param name="Lands">M6 heal spend: of the casts that do not fizzle, the share that lands: for a drain, the source's failing its resist (1: a self cast, or not read). A resisted cast gives nothing and costs its whole mana.</param>
-public readonly record struct FillLevel(int Index, int Level, uint BaseMana, uint Power, double Seconds, TransferRow Row, double Chance = 1, double Lands = 1);
+/// <param name="DrainMod">
+/// M6 undrainable fills (live state 2026-11-20, the Tusker Armory at level 50: an Armored Tusker's ResistHealthDrain, ResistStaminaDrain and ResistManaDrain are 0, world DB weenie_properties_float 125, 72, 74 of 11540 and 22611):
+/// the source's drain resistance, the share of the take ACE lets through (WorldObject_Magic.cs 719 @95ef426d, <c>drainMod</c>; <see cref="BuffStatMods.Transfer"/>'s <c>drainMod</c>). 1: a self cast, or a source that resists
+/// nothing; 0: the drain takes and gives nothing, so the level is never offered. The emergency read it since M6 14 drain resistance (<see cref="DrainPicker"/>); the policy priced every drain as if it were 1.
+/// </param>
+public readonly record struct FillLevel(int Index, int Level, uint BaseMana, uint Power, double Seconds, TransferRow Row, double Chance = 1, double Lands = 1, double DrainMod = 1);
+
+/// <summary>
+/// M6 stamina dance (<c>docs/session.md</c> section 121): one level of Revitalize Self her fight's refill may cast (in her book, at the cast chance, paid for by the pack): what a point of stamina costs her to put back, so the policy prices the
+/// stamina a press takes (<see cref="VitalsPolicy.RefillPrice"/>).
+/// </summary>
+/// <param name="Index">The caller's index of the level.</param>
+/// <param name="Level">The spell's level (1 to 8).</param>
+/// <param name="BaseMana">The spell's base mana (the most it costs).</param>
+/// <param name="Power">The spell's power (Mana Conversion's difficulty).</param>
+/// <param name="Seconds">The cast's seconds (the ladder's measured self table).</param>
+/// <param name="Row">The spell's boost row: a uniform integer in [Boost, Boost + Variance] (ACE <c>HandleCastSpell_Boost</c>, <c>WorldObject_Magic.cs</c> 474 @95ef426d; <see cref="BuffStatMods.Revitalize"/>).</param>
+/// <param name="Chance">The chance the cast does not fizzle, on her live skill (1: taken as sure); 0 or less: not offered.</param>
+public readonly record struct BoostLevel(int Index, int Level, uint BaseMana, uint Power, double Seconds, BoostRow Row, double Chance = 1);
 
 /// <summary>What <see cref="VitalsPolicy.Decide"/> reads: every number live from her character, the fight's own measurements and the target; nothing fixed but the ladder's <see cref="LadderVitalsPolicy"/>.</summary>
 public readonly record struct VitalsPolicyFacts
@@ -160,6 +178,9 @@ public readonly record struct VitalsPolicyFacts
     /// <summary>The Drain Health Other levels she may cast now.</summary>
     public ReadOnlyMemory<FillLevel> HealthDrains { get; init; }
 
+    /// <summary>M6 stamina dance: the Revitalize Self levels her fight's refill may cast (empty: none, or the refill is off or set aside; the stamina is then priced as before).</summary>
+    public ReadOnlyMemory<BoostLevel> Revitalizes { get; init; }
+
     /// <summary>M6 14 upkeep mana: the kept buff lines the fight recasts under fire (empty: none, or no way out armed: no guard to meet).</summary>
     public ReadOnlyMemory<UpkeepLine> Upkeep { get; init; }
 
@@ -208,7 +229,8 @@ public readonly record struct VitalsLines(uint ManaFloor, uint HealthFloor, uint
 
 /// <summary>The seconds a point of each thing is worth (<see cref="VitalsPolicy.Prices"/>).</summary>
 /// <param name="Damage">A point of damage by the bolt: its seconds over its expected damage.</param>
-/// <param name="Stamina">A point of stamina: the best stamina drain's seconds over its give while stamina runs short, else 0.</param>
+/// <param name="Stamina">A point of stamina while stamina runs short over a kill: the cheaper of the best stamina drain's seconds over its give and (M6 stamina dance) the best Revitalize Self level's seconds and mana over its expected restore
+/// (<see cref="VitalsPolicy.RefillPrice"/>); else 0.</param>
 /// <param name="Mana">A point of mana: the best press's seconds over its net from a full bar while mana runs short, else 0 (a drain's own mana is priced at it).</param>
 /// <param name="HealMana">M6 heal spend: the mana a point of health costs her through the health drain the policy prices best at the fullest source (its expected cost over its whole give; 0: no drain offered).</param>
 public readonly record struct VitalsPrices(double Damage, double Stamina, double Mana = 0, double HealMana = 0);
@@ -395,7 +417,10 @@ public static class VitalsPolicy
     /// <param name="f">The facts.</param>
     public static double DamagePrice(in VitalsPolicyFacts f) => f.BoltMeanDamage * f.BoltLandChance > 0 ? f.BoltSeconds / (f.BoltMeanDamage * f.BoltLandChance) : 0;
 
-    /// <summary>The prices: a point of damage by the bolt; a point of stamina by the best stamina drain while stamina runs short over a kill (else 0: it comes back by itself).</summary>
+    /// <summary>
+    /// The prices: a point of damage by the bolt; a point of stamina while stamina runs short over a kill (else 0: it comes back by itself) by the cheaper of the best stamina drain and (M6 stamina dance, <c>docs/session.md</c> section 121)
+    /// the refill's Revitalize Self (<see cref="RefillPrice"/>): a press's stamina is put back by one or the other, so a press that takes more stamina for the same mana is dearer by that much.
+    /// </summary>
     /// <param name="f">The facts.</param>
     /// <param name="budget">The budget.</param>
     public static VitalsPrices Prices(in VitalsPolicyFacts f, in VitalsBudget budget)
@@ -406,6 +431,11 @@ public static class VitalsPolicy
             var source = f.FullestStamina > 0 ? f.FullestStamina : f.KillStamina;
             var drain = BestTransfer(f.StaminaDrains.Span, source, uint.MaxValue, 0, 0, f.ManaConversion, health: false);
             stamina = drain.Give > 0 ? drain.Price : 0;
+            var refill = RefillPrice(in f, in budget);
+            if (refill > 0 && (stamina <= 0 || refill < stamina))
+            {
+                stamina = refill;
+            }
         }
 
         var mana = 0.0;
@@ -417,6 +447,80 @@ public static class VitalsPolicy
 
         var heal = BestTransfer(f.HealthDrains.Span, (uint)Math.Max(0, f.FullestHealth > 0 ? f.FullestHealth : f.KillHealth), uint.MaxValue, DamagePrice(in f), 0, f.ManaConversion, health: true);
         return new VitalsPrices(DamagePrice(in f), stamina, mana, heal.Index >= 0 && heal.ExpectedGive > 0 ? heal.Cost / heal.ExpectedGive : 0);
+    }
+
+    /// <summary>
+    /// The rounds of <see cref="RefillPrice"/>'s fixed point (Lifestone's own bound: each round shrinks the error by the share of a Revitalize's restore that its own mana costs in pressed stamina, well under one on her rows;
+    /// <c>StaminaDanceWholeGivesTests</c> checks the fixed point to four places on run 9's numbers).
+    /// </summary>
+    public const int RefillPriceRounds = 4;
+
+    /// <summary>
+    /// M6 stamina dance (<c>docs/session.md</c> section 121; run 9, <c>cache/m6/sprint/run9/step3-levelup.log</c>: the policy priced stamina at 0 with no stamina drain's source in reach and picked Stamina to Mana III to V from a full bar, 1.1 to
+    /// 1.35 mana a stamina point against VI's 1.5): the seconds a point of stamina costs her to put back by the refill's Revitalize Self, at the best level: its cast seconds and its mana at the mana's price over its expected restore.
+    /// The restore is the boost row's mean (ACE's uniform roll, <c>HandleCastSpell_Boost</c>, <c>WorldObject_Magic.cs</c> 474 @95ef426d) at the cast chance; the mana its expected cost after Mana Conversion, a fizzle's 5 counted
+    /// (<c>Player_Magic.cs</c> 566-572). Only a level whose top roll fits her bar is priced (the refill casts a level only when its whole roll fits, <see cref="ManaOrder.RevitalizeLevelOf(ReadOnlySpan{RevitalizeLevel}, uint, uint, uint, uint, uint, out RefillFit)"/>),
+    /// unless none does. The mana's price is the press's (<see cref="Prices"/>), which carries the stamina's: the two are solved together (<see cref="RefillPriceRounds"/> rounds); while the mana does not run short over a kill its price
+    /// is 0, as in <see cref="Prices"/>. 0: no level offered. Allocation-free.
+    /// </summary>
+    /// <param name="f">The facts.</param>
+    /// <param name="budget">The budget.</param>
+    public static double RefillPrice(in VitalsPolicyFacts f, in VitalsBudget budget)
+    {
+        var levels = f.Revitalizes.Span;
+        var price = BestRefill(levels, f.StaminaMax, f.ManaConversion, 0);
+        if (price <= 0 || budget.ManaShort <= 0)
+        {
+            return price;
+        }
+
+        for (var i = 0; i < RefillPriceRounds; i++)
+        {
+            var press = BestTransfer(f.Presses.Span, f.StaminaMax, uint.MaxValue, 0, price, f.ManaConversion, health: false, mana: true);
+            if (press.Index < 0 || double.IsInfinity(press.Price))
+            {
+                break;
+            }
+
+            price = BestRefill(levels, f.StaminaMax, f.ManaConversion, press.Price);
+        }
+
+        return price;
+    }
+
+    /// <summary>The fewest seconds a point of stamina of <paramref name="levels"/> at <paramref name="manaPrice"/> (see <see cref="RefillPrice"/>); 0 when none is offered.</summary>
+    private static double BestRefill(ReadOnlySpan<BoostLevel> levels, uint staminaMax, uint manaConversion, double manaPrice)
+    {
+        var any = false;
+        foreach (var level in levels)
+        {
+            any |= level.Chance > 0 && level.Row.Max <= staminaMax;
+        }
+
+        var best = 0.0;
+        foreach (var level in levels)
+        {
+            if (level.Chance <= 0 || (any && level.Row.Max > staminaMax))
+            {
+                continue;
+            }
+
+            var chance = Math.Min(1, level.Chance);
+            var restore = chance * Math.Min(staminaMax, level.Row.Boost + (level.Row.Variance / 2.0));
+            var cost = (chance * ManaConversionModel.ExpectedCost(level.BaseMana, level.Power, manaConversion)) + ((1 - chance) * ManaConversionModel.FizzleMana);
+            if (restore <= 0)
+            {
+                continue;
+            }
+
+            var price = (level.Seconds + (manaPrice * cost)) / restore;
+            if (best <= 0 || price < best)
+            {
+                best = price;
+            }
+        }
+
+        return best;
     }
 
     /// <summary>
@@ -613,13 +717,24 @@ public static class VitalsPolicy
         return new VitalsUpkeep(Math.Min(wantedMana, f.ManaMax), wantedMana, taken, first.Name, first.TimeToDue, lead, stand);
     }
 
+    /// <summary>The reason the upkeep's press toward its target waits (<see cref="UpkeepChoice"/>), the log's key.</summary>
+    public const string UpkeepPressWaitsWhy = "upkeep: the press toward the target waits: the best-priced level's whole give does not fit the missing mana";
+
+    /// <summary>The reason of the upkeep's press toward its target, the log's key.</summary>
+    public const string UpkeepPressTowardWhy = "upkeep: the press toward the target: its whole give fits";
+
     /// <summary>
     /// M6 14 upkeep mana: the move toward a line's recast, or null when none is due or none can be made (the rules after it decide). The heal first, when a line is due now and standing for it would leave her under the heal line; then, under the
     /// target, the cheapest fill: the press from the stamina she holds when it reaches the target, else a stamina drain whose whole give fits (the press after it gives more), else the press toward it while it gives at least what a
     /// drink would, else a mana drink that fits whole (the potions' own rule: <see cref="ManaDrinks.Fitting"/>, never while they are set aside).
+    /// <para>M6 stamina dance (<c>docs/session.md</c> section 121; run 9, <c>cache/m6/sprint/run9/step3-levelup.log</c> 01:37:31 to 01:38:01 UTC: Stamina to Mana Self II pressed at 340, 363, 369 and 372 of 375 mana for 35, 12, 6 and 3,
+    /// toward a target of 375 whose wanted 379 was over her maximum): the press toward the target waits as the policy's own press does (<see cref="LadderVitalsPolicy.PressWaitsForBest"/>): only the best-priced level at its whole give, and
+    /// only when that give fits the missing mana, so a small gap is not topped up a cast at a time (ACE cuts the give to the missing mana and charges the whole cost, <c>WorldObject_Magic.cs:737-746</c>). While it waits
+    /// (<paramref name="waited"/>) no drink stands in for it: a drink goes only when no press is offered or the press that fits gives less.</para>
     /// </summary>
-    private static VitalsChoice? UpkeepChoice(in VitalsPolicyFacts f, in VitalsPrices prices, in VitalsUpkeep upkeep, uint healthMissing, uint manaMissing, uint staminaMissing, uint healthSource, uint staminaSource)
+    private static VitalsChoice? UpkeepChoice(in VitalsPolicyFacts f, in VitalsPrices prices, in VitalsUpkeep upkeep, uint healthMissing, uint manaMissing, uint staminaMissing, uint healthSource, uint staminaSource, out bool waited)
     {
+        waited = false;
         if (upkeep.StandHealth > f.Health && healthSource > 0)
         {
             var heal = BestTransfer(f.HealthDrains.Span, healthSource, healthMissing, prices.Damage, 0, f.ManaConversion, health: true, fitsOnly: true, manaPrice: prices.Mana);
@@ -655,19 +770,21 @@ public static class VitalsPolicy
             }
         }
 
-        var press = BestTransfer(f.Presses.Span, f.Stamina, manaMissing, 0, prices.Stamina, f.ManaConversion, health: false, mana: true);
+        var press = BestTransfer(f.Presses.Span, f.Stamina, uint.MaxValue, 0, prices.Stamina, f.ManaConversion, health: false, mana: true); // the best-priced level at its whole give (the policy's own press, PressWaitsForBest)
         var presses = press.Index >= 0;
+        var fits = presses && press.Give <= manaMissing;
         var drink = f.ManaDrinkGive > 0 && f.ManaDrinkGive <= manaMissing ? f.ManaDrinkGive : 0u;
-        if (presses && press.Give >= drink)
+        if (fits && press.Give >= drink)
         {
-            return new VitalsChoice(VitalsMove.Press, press.Index, press.Give, press.Price, "upkeep: the press toward the target", Upkeep: true);
+            return new VitalsChoice(VitalsMove.Press, press.Index, press.Give, press.Price, UpkeepPressTowardWhy, Upkeep: true);
         }
 
-        if (drink > 0)
+        if (drink > 0 && (!presses || fits))
         {
             return new VitalsChoice(VitalsMove.DrinkMana, -1, drink, 0, presses ? "upkeep: the press from her stamina gives less than a drink: a drink toward the target" : "upkeep: no press fits: a drink toward the target", Upkeep: true);
         }
 
+        waited = presses && !fits;
         return null;
     }
 
@@ -721,7 +838,8 @@ public static class VitalsPolicy
             return new VitalsChoice(VitalsMove.Bolt, -1, 0, 0, "the next bolt likely kills");
         }
 
-        if (upkeep.Active && UpkeepChoice(in f, in prices, in upkeep, healthMissing, manaMissing, staminaMissing, healthSource, staminaSource) is { } fill)
+        var upkeepWaited = false;
+        if (upkeep.Active && UpkeepChoice(in f, in prices, in upkeep, healthMissing, manaMissing, staminaMissing, healthSource, staminaSource, out upkeepWaited) is { } fill)
         {
             return fill; // M6 14 upkeep mana: a line due within the window: its fill before the optional fills and the bolt (the current kill's finishing bolt went above)
         }
@@ -760,7 +878,7 @@ public static class VitalsPolicy
             }
         }
 
-        return new VitalsChoice(VitalsMove.Bolt, -1, 0, 0, healthWaited ? HealthTopUpWaitsWhy : budget.ManaShort > 0 && f.Stamina < lines.StaminaReady ? "no fill is due: the stamina is not ready for a press" : "no fill is due");
+        return new VitalsChoice(VitalsMove.Bolt, -1, 0, 0, healthWaited ? HealthTopUpWaitsWhy : upkeepWaited ? UpkeepPressWaitsWhy : budget.ManaShort > 0 && f.Stamina < lines.StaminaReady ? "no fill is due: the stamina is not ready for a press" : "no fill is due");
     }
 
     /// <summary>
@@ -775,13 +893,14 @@ public static class VitalsPolicy
         foreach (var level in levels)
         {
             var row = level.Row;
-            BuffStatMods.Transfer(in row, source, uint.MaxValue, out var takenFull, out var giveFull);
+            var drainMod = (float)Math.Clamp(level.DrainMod, 0, 1); // M6 undrainable fills: the source's share, as ACE applies it before the cap
+            BuffStatMods.Transfer(in row, source, uint.MaxValue, out var takenFull, out var giveFull, drainMod);
             if (giveFull == 0 || (fitsOnly && giveFull > missing))
             {
                 continue;
             }
 
-            BuffStatMods.Transfer(in row, source, missing, out var taken, out var give);
+            BuffStatMods.Transfer(in row, source, missing, out var taken, out var give, drainMod);
             if (give == 0)
             {
                 continue;

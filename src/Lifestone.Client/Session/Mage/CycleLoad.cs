@@ -67,6 +67,35 @@ public static class CycleLoadLine
     }
 }
 
+/// <summary>
+/// M6 safe load (the owner, 2026-11-20: up to 150% burden where she is safe): the highest load at which her running jump still clears a ground's longest jump, from her Run and Jump skills, buffs counted, by
+/// <see cref="Lifestone.Client.Movement.Routes.JumpReach.FlightMetres(int, int, float)"/> (retail's run rate and jump height under the load modifier, <c>EncumbranceSystem::LoadMod</c> 11.6096 0x004FD810: 1 up to the capacity, then
+/// 2 - load). Pure. At Run 100 and Jump 178 she flies 11.43 m at 100%, and the pit of the Abode and the Holding (need 10.75 m, the profiles' <c>need_m</c>) is cleared up to 106%; at 150% she flies 6.15 m (her Run from
+/// <c>tools\fight-sim.ps1 her --her Qwinnie</c>, 2026-11-20; Jump 178 the profiles' own reading of 2026-11-13; <c>JumpLoadCapTests</c> pins the numbers).
+/// </summary>
+public static class JumpLoadCap
+{
+    /// <summary>The highest whole percent of the capacity (100 to <see cref="CycleLoadSettings.MaxTopPercent"/>) at which the flight is at least <paramref name="needMetres"/>, or null when even 100% falls short.</summary>
+    /// <param name="runSkill">The Run skill, buffs counted.</param>
+    /// <param name="jumpSkill">The Jump skill, buffs counted.</param>
+    /// <param name="needMetres">The longest jump's need.</param>
+    public static int? Percent(int runSkill, int jumpSkill, float needMetres)
+    {
+        if (Lifestone.Client.Movement.Routes.JumpReach.FlightMetres(runSkill, jumpSkill, 1f) < needMetres)
+        {
+            return null;
+        }
+
+        var percent = CycleLoadSettings.MinTopPercent;
+        while (percent < CycleLoadSettings.MaxTopPercent && Lifestone.Client.Movement.Routes.JumpReach.FlightMetres(runSkill, jumpSkill, (percent + 1) / 100f) >= needMetres)
+        {
+            percent++;
+        }
+
+        return percent;
+    }
+}
+
 /// <summary>What <see cref="ComfortRule.Decide"/> answers.</summary>
 public enum ComfortKind
 {
@@ -101,7 +130,10 @@ public enum ComfortKind
 /// <param name="HealPerSecond">The heal she sustains (the vitals guard's race read), or null when not read; logged, not judged: it swings with her mana now (live ladder40 2026-11-16: 0.97 a second at 18:14:24 UTC, 0.32 at 18:15:24).</param>
 /// <param name="BasePercent">The loot's base line on this ground (<see cref="MageLootThresholds.LoadLineOf"/>).</param>
 /// <param name="TopPercent">The line at the hour: the settings' top, held to the ground's burden trip line (a trip is due strictly over it, <see cref="LogisticsCounters.BurdenTripPercent"/>).</param>
-public readonly record struct ComfortInput(string Ground, int GroundJumps, string? WayHome, bool Trial, bool Approach, int Retreats, int SurvivalLeaves, int Deaths, int RacesLost, CycleHealth Health, double IncomingPeak, double IncomingMean, double? HealPerSecond, int BasePercent, int TopPercent);
+/// <param name="Safe">M6 safe load (the owner, 2026-11-20): true when she is safe: in a known dungeon (a catalog ground of the dungeon kind) on the level-up job (the ladder's rung ground, no trial). Safe, the line rises whatever her deaths,
+/// retreats, races and health this cycle; only what the body cannot do holds it (the way home, the jumps).</param>
+/// <param name="JumpCapPercent">M6 safe load: on a ground with jumps, the highest load at which her flight clears the longest (<see cref="JumpLoadCap.Percent"/>), or null when it is not read or even 100% falls short.</param>
+public readonly record struct ComfortInput(string Ground, int GroundJumps, string? WayHome, bool Trial, bool Approach, int Retreats, int SurvivalLeaves, int Deaths, int RacesLost, CycleHealth Health, double IncomingPeak, double IncomingMean, double? HealPerSecond, int BasePercent, int TopPercent, bool Safe = false, int? JumpCapPercent = null);
 
 /// <summary>
 /// M6 14 hour load: her health this cycle against the vitals policy's health floor (<see cref="Vitals.VitalsLines.HealthFloor"/>: the biggest hit and the burst over a bolt and a drain, worked out from the fight's measured hits at each of its
@@ -146,6 +178,11 @@ public static class ComfortRule
     public static ComfortVerdict Decide(in ComfortInput input)
     {
         var c = CultureInfo.InvariantCulture;
+        if (input.Safe)
+        {
+            return Safe(in input);
+        }
+
         if (input.GroundJumps > 0)
         {
             return new(ComfortKind.Uncomfortable, string.Create(c, $"the ground's walk takes {input.GroundJumps} running jump(s): the jump hold keeps the line at {input.BasePercent}% (M6 14 pit-hold)"));
@@ -193,6 +230,54 @@ public static class ComfortRule
         }
 
         return new(ComfortKind.Comfortable, string.Create(c, $"no jump, home by Lifestone Recall, no trial, no death, retreat, leave or losing race this cycle, and her lowest health {h.Lowest} of {h.Max} stayed over the vitals policy's health floor ({h.FloorAtLowest} then, {h.Floor} now)"));
+    }
+
+    /// <summary>
+    /// M6 safe load (the owner, 2026-11-20: up to 150% burden when she is safe, safe being inside a known dungeon where she is only levelling): the rule on a safe ground. Her deaths, retreats, leaves, losing races and health this cycle no
+    /// longer hold the line; what the body cannot do still does, in this order: nothing to rise to; a ground with jumps whose cap is not read (unread) or is at or under the base line (her flight clears the longest jump only up to it);
+    /// the way home not read (unread) or not Lifestone Recall; an approach (unread). Else comfortable: the line rises to the top, held to the jump's cap on a ground with jumps (<see cref="CycleLoad.LineAt"/>).
+    /// </summary>
+    /// <param name="input">The read.</param>
+    private static ComfortVerdict Safe(in ComfortInput input)
+    {
+        var c = CultureInfo.InvariantCulture;
+        if (input.TopPercent <= input.BasePercent)
+        {
+            return new(ComfortKind.Uncomfortable, string.Create(c, $"safe, but the top {input.TopPercent}% is at or under the base line {input.BasePercent}% (the ground's burden trip line holds it): nothing to rise to"));
+        }
+
+        if (input.GroundJumps > 0)
+        {
+            if (input.JumpCapPercent is not { } cap)
+            {
+                return new(ComfortKind.Unread, string.Create(c, $"safe, but the ground's walk takes {input.GroundJumps} running jump(s) and her Run and Jump are not read, or her flight falls short of the longest even at 100%"));
+            }
+
+            if (cap <= input.BasePercent)
+            {
+                return new(ComfortKind.Uncomfortable, string.Create(c, $"safe, but the ground's walk takes {input.GroundJumps} running jump(s) and her flight clears the longest only up to {cap}%, at or under the base line {input.BasePercent}%: the jump hold keeps the line there (M6 14 pit-hold)"));
+            }
+        }
+
+        if (input.WayHome is null)
+        {
+            return new(ComfortKind.Unread, "the way home is not read yet");
+        }
+
+        if (input.WayHome is not ("recall-home" or "at-home"))
+        {
+            return new(ComfortKind.Uncomfortable, $"safe, but the way home is '{input.WayHome}', not Lifestone Recall: its legs would be walked at the top's load and the travel file records no jumps on them (TODO(m6-hour-load-route-jumps))");
+        }
+
+        if (input.Approach)
+        {
+            return new(ComfortKind.Unread, "the fight stands in for a travel or recovery state (an approach): not the ground's fight, this read is skipped");
+        }
+
+        var held = input.GroundJumps > 0 && input.JumpCapPercent is { } jumpCap && jumpCap < input.TopPercent
+            ? string.Create(c, $", held to {jumpCap}% by her flight over the ground's longest jump")
+            : string.Empty;
+        return new(ComfortKind.Comfortable, string.Create(c, $"safe: a known dungeon on the level-up job (the owner, 2026-11-20): the line rises to {input.TopPercent}%{held}, home by Lifestone Recall"));
     }
 
     /// <summary>The read as the log prints it (every number).</summary>
@@ -326,6 +411,16 @@ public sealed class CycleLoad
     /// <summary>The highest line the loot was given this cycle (<see cref="LineFor"/>), in percent.</summary>
     public int HighestLine { get; private set; }
 
+    /// <summary>
+    /// M6 safe load: the highest load at which her flight clears the ground's longest jump (<see cref="JumpLoadCap.Percent"/>), as the last comfort read found it; null when not read, or on a ground without jumps. On a ground with jumps
+    /// the rising line is held to it, and without it the line stays at the base.
+    /// </summary>
+    public int? JumpCapPercent { get; private set; }
+
+    /// <summary>M6 safe load: notes the jump's cap read now (<see cref="JumpCapPercent"/>).</summary>
+    /// <param name="percent">The cap, or null.</param>
+    public void NoteJumpCap(int? percent) => JumpCapPercent = percent;
+
     /// <summary>The cycle begins at its first fight frame on the ground: the burden and the capacity then, the settings and the top.</summary>
     /// <param name="ground">The ground's key.</param>
     /// <param name="clock">The session clock.</param>
@@ -336,7 +431,7 @@ public sealed class CycleLoad
     public void Begin(string ground, double clock, int burden, int capacity, CycleLoadSettings settings, int topPercent)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        (Begun, Ground, StartClock, StartBurden, StartCapacity, Settings, TopPercent) = (true, ground, clock, burden, capacity, settings, topPercent);
+        (Begun, Ground, StartClock, StartBurden, StartCapacity, Settings, TopPercent, JumpCapPercent) = (true, ground, clock, burden, capacity, settings, topPercent, null);
         (InForce, InForceWhy, Latched, IncomingPeak, Rose, HourCalled, HighestLine) = (settings.On ? ComfortKind.Unread : ComfortKind.Off, settings.On ? "not read yet" : "the settings are off", false, 0, false, false, 0);
         (_incomingSum, _incomingSamples) = (0, 0);
         (_floorRead, _floor, _lowest, _lowestMax, _floorAtLowest, _breached, _breachHealth, _breachFloor, RacesLost) = (false, 0u, uint.MaxValue, 0u, 0u, false, 0u, 0u, 0);
@@ -414,7 +509,8 @@ public sealed class CycleLoad
     }
 
     /// <summary>
-    /// The line the loot keeps under for a corpse planned now: the rising line (<see cref="CycleLoadLine.Percent"/>) while the verdict in force is comfortable, the ground has no jump and the cycle has begun; else <paramref name="basePercent"/>.
+    /// The line the loot keeps under for a corpse planned now: the rising line (<see cref="CycleLoadLine.Percent"/>) while the verdict in force is comfortable and the cycle has begun, held to the jump's cap on a ground with jumps
+    /// (<see cref="JumpCapPercent"/>; M6 safe load: only a safe ground's verdict is comfortable there); else <paramref name="basePercent"/>.
     /// </summary>
     /// <param name="basePercent">The loot's own line (its thresholds').</param>
     /// <param name="hasJumps">True when the ground's walk takes a running jump (never past the base line there).</param>
@@ -436,13 +532,24 @@ public sealed class CycleLoad
     /// <param name="clock">The session clock.</param>
     public int LineAt(int basePercent, bool hasJumps, double clock)
     {
-        if (!Begun || !Settings.On || InForce != ComfortKind.Comfortable || hasJumps || basePercent <= 0)
+        if (!Begun || !Settings.On || InForce != ComfortKind.Comfortable || basePercent <= 0)
         {
             return basePercent;
         }
 
+        var top = TopPercent;
+        if (hasJumps)
+        {
+            if (JumpCapPercent is not { } cap || cap <= basePercent)
+            {
+                return basePercent; // M6 14 pit-hold: no line past what her flight clears
+            }
+
+            top = Math.Min(top, cap);
+        }
+
         var ramp = Math.Max(1, RampEndClock - StartClock);
-        return CycleLoadLine.Percent(basePercent, StartPercent, TopPercent, Elapsed(clock), ramp);
+        return CycleLoadLine.Percent(basePercent, StartPercent, top, Elapsed(clock), ramp);
     }
 
     /// <summary>The words behind <see cref="LineFor"/>'s answer, for the plan's line.</summary>

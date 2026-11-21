@@ -39,7 +39,10 @@ public sealed partial class FightScenario
         _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"stance: check before: the mode is {mode}, not magic ({why}); act: the magic stance is asked (ask {StanceAsks} of this fight); the casts wait for its answer (m6-stance-after-read)"));
     }
 
-    /// <summary>True while a stance ask is in flight, or under <see cref="StanceGapSeconds"/> since it: the fight casts nothing. The ask's end is logged once (check after).</summary>
+    /// <summary>
+    /// True while a stance ask is in flight, or under <see cref="StanceGapSeconds"/> since it: the fight casts nothing. The ask's end is logged once (check after), when the fight next chooses a cast: run 6's first
+    /// line read "15.5 s after the ask" for an answer the server gave in 0.8 s (2026-11-19 21:54:19 to 21:54:34 UTC, a 17 s walk between), so the line says what its number measures.
+    /// </summary>
     private bool StanceHold(IGameSessionView session, double clock)
     {
         if (_stanceAsk is { } ask)
@@ -50,7 +53,7 @@ public sealed partial class FightScenario
             }
 
             _stanceAsk = null;
-            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"stance: check after: {(ask.Outcome is { } outcome ? outcome.Kind.ToString() : "no answer in " + StanceAskSeconds.ToString("0", CultureInfo.InvariantCulture) + " s")}; the mode is {session.State.Self.Qualities.CombatMode} {clock - _stanceAskAt:0.0} s after the ask (m6-stance-after-read)"));
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"stance: check after: {(ask.Outcome is { } outcome ? outcome.Kind.ToString() : "no answer in " + StanceAskSeconds.ToString("0", CultureInfo.InvariantCulture) + " s")}; the mode is {session.State.Self.Qualities.CombatMode}, read when the fight next chose a cast, {clock - _stanceAskAt:0.0} s after the ask (a walk or a loot between them counts; the server's answer time is the SetCombatMode action line's ms) (m6-stance-after-read)"));
         }
 
         return clock - _stanceAskAt < StanceGapSeconds && session.State.Self.Qualities.CombatMode != CombatModes.Magic;

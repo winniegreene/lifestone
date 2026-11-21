@@ -198,8 +198,12 @@ public sealed class ScrivenerCatalogTests(DatSetFixture fixture, ITestOutputHelp
         var balcony = outskirts.VendorOf(20216)!;
         Assert.Equal(0xA9B3003Cu, balcony.StopCell); // his own cell: the street under his balcony is a point request too (ResupplyRun.RoomRequest)
         Assert.NotNull(balcony.StopPoint);
-        Assert.Null(outskirts.VendorOf(20215)!.StopPoint); // a walk that stands keeps his own cell and point
-        Assert.Equal(outskirts.VendorOf(20215)!.Cell, outskirts.VendorOf(20215)!.StopCell);
+        var foci = outskirts.VendorOf(20215)!; // M6 sprint (run 6): the Foci of Artifice's seller behind his counter, reached from the front room (HoltburgScrivenerWalkDatTests)
+        Assert.Equal(0xA9B30101u, foci.Cell);
+        Assert.Equal(0xA9B30100u, foci.StopCell);
+        Assert.Equal(new Vector3(182.2f, 81.5f, 116.005f), foci.StopPoint);
+        Assert.Null(outskirts.VendorOf(20213)!.StopPoint); // a walk that stands keeps his own cell and point
+        Assert.Equal(outskirts.VendorOf(20213)!.Cell, outskirts.VendorOf(20213)!.StopCell);
     }
 
     [Theory]

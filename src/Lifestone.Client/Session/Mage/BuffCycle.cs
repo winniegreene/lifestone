@@ -1806,6 +1806,17 @@ public sealed class BuffCycle
             return false;
         }
 
+        // M6 stamina dance (docs/session.md section 121; run 9, cache/m6/sprint/run9/step3-levelup.log 19:58:30 UTC: mana 261 of 368 under 300, and Stamina to Mana Self VI from 348 stamina, a whole give of 261, was cut to the 107
+        // missing): while the mana pays the line itself, the press is the reserve's, and it waits for its whole give to fit the missing mana, as the fight's press does (ACE cuts a transfer to the missing mana and charges the
+        // whole cost, WorldObject_Magic.cs:737-746 @95ef426d). The line goes on with the mana it has; the press comes at a later line, whole. Under the line's own cost the press is the line's and goes as before.
+        var whole = Vitals.ManaOrder.Give(_danceLevels[decision.DanceIndex].Row, stamina);
+        if (mana >= need && whole > max - mana)
+        {
+            _passDanceDue = false;
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"reserve: mana {mana} of {max} is under {want} ({need} for {info.Name} and {_passReserve} kept for the next Stamina to Mana press), stamina {stamina} of {staminaMax}; the press's whole give {whole} does not fit the {max - mana} missing: no press yet (it waits for its whole give), the line goes on with the mana it has"));
+            return false;
+        }
+
         if (_awayFromMagic)
         {
             result = BeginMode(CombatMode.Magic, Phase.ModeBack); // the next step decides again, in the magic mode
@@ -1833,12 +1844,18 @@ public sealed class BuffCycle
     /// <summary>
     /// M5 7 (D88): after the pass's first dance landed, the mage's stamina under <see cref="Scenarios.FightOptions.DefaultStaminaFullPercent"/> is refilled with Revitalize Self, the highest payable level whose cost leaves the first buff's mana in hand, one cast
     /// a look until the stamina is back or the mana cannot pay another. A fighter's profile never does (it spends the stamina). True when a cast was sent.
+    /// <para>M6 stamina dance (<c>docs/session.md</c> section 121; run 9, <c>cache/m6/sprint/run9/step3-levelup.log</c> 19:58:33 UTC: mana 368 of 368 kept the 240 Piercing Bane VI's ceiling and the 60 reserve, so the 68 left paid
+    /// Revitalize Self V and not VI, 70; 20 of the window's 29 such casts were V or III): the line's mana kept is its expected cost after Mana Conversion (<see cref="ManaConversionModel.ExpectedCost"/>, the upkeep's own number,
+    /// <c>FightScenario.UpkeepLines</c>), not its ceiling, so the best level she knows is payable; the line's own cast keeps its try floor and its tries. The level is the fight refill's by whole rolls
+    /// (<see cref="Vitals.ManaOrder.RevitalizeLevelOf(ReadOnlySpan{Vitals.RevitalizeLevel}, uint, uint, uint, uint, uint, out Vitals.RefillFit)"/>): the best level's whole roll fits what she is missing, or the stamina is under D88's floor
+    /// for the dearest press (<see cref="Vitals.ManaOrder.StaminaFloorOf"/>); never a top-up into a nearly full bar. Each look that waits says why.</para>
     /// </summary>
     private bool PassRevitalize(double now, SpellInfo info, uint mana, uint max, uint need)
     {
         _reviveDue = false;
         var q = _state.Self.Qualities;
-        var keep = need + _passReserve; // P7c: a start's pass keeps the next press's mana too
+        var expected = (uint)Math.Ceiling(ManaConversionModel.ExpectedCost(need, info.Power, _manaConversion, (info.Flags & SpellFlags.IgnoresManaConversion) != 0));
+        var keep = Math.Min(need, expected) + _passReserve; // P7c: a start's pass keeps the next press's mana too
         if (Profile.TransfersAhead || _passRevives >= PassRevitalizeLimit || mana <= keep || !q.TryGetVitalLevels(MageTemplate.MaxStamina, out var stamina, out var staminaMax)
             || !Vitals.ManaOrder.StaminaUnder(stamina, staminaMax, Scenarios.FightOptions.DefaultStaminaFullPercent) || !GearCasts.TryCurrentSkill(q, MageTemplate.LifeMagic, out var skill, out _))
         {
@@ -1847,18 +1864,45 @@ public sealed class BuffCycle
 
         _lifeSkill = skill;
         EnsurePayable();
-        var index = PickMana(_boostLine, _boostInfos, _boostPayable, skill, mana - keep);
-        if (index < 0)
+        Span<Vitals.RevitalizeLevel> levels = stackalloc Vitals.RevitalizeLevel[8];
+        Span<int> lineIndex = stackalloc int[8];
+        var count = 0;
+        for (var i = 0; i < _boostLine.Spells.Count && count < levels.Length; i++)
         {
+            if (_boostInfos[i] is { } boost && _boostPayable[i] && GearCasts.Chance(skill, _boostLine.Spells[i].Power) >= _options.CastChance && InBook(_boostLine, i))
+            {
+                lineIndex[count] = i;
+                levels[count++] = new Vitals.RevitalizeLevel(boost.Id, GearCasts.ManaCeiling(boost, 0), boost.Power);
+            }
+        }
+
+        var presses = FillDanceLevels(skill);
+        var floor = presses > 0 && count > 0 ? Vitals.ManaOrder.StaminaFloorOf(_danceLevels[presses - 1].Row, staminaMax, _danceLevels[presses - 1].BaseMana, levels[count - 1].BaseMana) : 0u;
+        var at = Vitals.ManaOrder.RevitalizeLevelOf(levels[..count], mana, keep, stamina, staminaMax, floor, out var fit);
+        if (at < 0)
+        {
+            if (fit == Vitals.RefillFit.Waits)
+            {
+                _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: no Revitalize after the {(_reserveDances > 0 ? "reserve" : "pre-pass")} dance: stamina {stamina} of {staminaMax} is under {Scenarios.FightOptions.DefaultStaminaFullPercent}%, but the best level's whole roll does not fit the {staminaMax - stamina} missing and the stamina is over D88's floor {floor}: it waits (no top-up into a nearly full bar)"));
+            }
+
             return false;
         }
 
         _passRevive = true;
         _passRevives++;
-        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: Revitalize after the {(_reserveDances > 0 ? "reserve" : "pre-pass")} dance: stamina {stamina} of {staminaMax} is under {Scenarios.FightOptions.DefaultStaminaFullPercent}%, mana {mana} of {max} keeps the {need} {info.Name} needs{(_passReserve > 0 ? $" and the {_passReserve} reserve" : string.Empty)}"));
-        SendMana(ManaKind.Boost, index, mana, max, need, now);
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"mana: Revitalize after the {(_reserveDances > 0 ? "reserve" : "pre-pass")} dance: stamina {stamina} of {staminaMax} is under {Scenarios.FightOptions.DefaultStaminaFullPercent}%, mana {mana} of {max} keeps the {Math.Min(need, expected)} {info.Name} is expected to cost (up to {need}){(_passReserve > 0 ? $" and the {_passReserve} reserve" : string.Empty)} ({fit}: {FitWords(fit, floor)})"));
+        SendMana(ManaKind.Boost, lineIndex[at], mana, max, need, now);
         return true;
     }
+
+    /// <summary>M6 stamina dance: the words of a refill's fit for the log.</summary>
+    private static string FitWords(Vitals.RefillFit fit, uint floor) => fit switch
+    {
+        Vitals.RefillFit.PressNeedsIt => string.Create(CultureInfo.InvariantCulture, $"the stamina is under D88's floor {floor}"),
+        Vitals.RefillFit.WholeRoll => "the best level's whole roll fits",
+        _ => "no payable level's roll fits her bar whole: the highest payable",
+    };
 
     /// <summary>The owner's ruling, 2026-11-08: pick by the sum. The ladder's character picks every press's level by its net (<see cref="CharacterPolicy.ManaBySum"/>); a cycle told it is climbing does too.</summary>
     private bool PicksByNet => _climbing || CharacterPolicy.For(_state.Self.Name).ManaBySum;

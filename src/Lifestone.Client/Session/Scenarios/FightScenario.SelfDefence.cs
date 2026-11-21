@@ -1,6 +1,7 @@
 using System.Globalization;
 using Lifestone.Client.Diagnostics;
 using Lifestone.Client.Session.Contracts;
+using Lifestone.Client.Session.Creatures;
 using Lifestone.Client.Session.Grounds;
 using Lifestone.Client.World;
 using Lifestone.Data.World;
@@ -28,8 +29,12 @@ namespace Lifestone.Client.Session.Scenarios;
 /// it holds, the fight steps: a short leg (<see cref="IFightWalk.BeginLegTo"/>, over the walkable cells only) to the nearest room middle of the floor (<see cref="IFightWalk.FloorSpots"/>) within <see cref="DefendStepMaxMetres"/>
 /// that has a clear line to the attacker within the cast range, else to the nearest one out of its reach. At most <see cref="MaxDefenceSteps"/> steps an attacker, each decision logged; past them, or with no such spot, the hold
 /// and its bound stand as before.</para>
-/// <para><b>M6 14 (<c>m6-life-through</c>, the owner's rule of 2026-11-12).</b> Before any of the walks, the step and the hold: an attacker no bolt reaches from here that stands within the life spells' range is cast at where
+/// <para><b>M6 14 (<c>m6-life-through</c>, the owner's rule of 2026-11-12).</b> Before the tour's walk, the step and the hold: an attacker no bolt reaches from here that stands within the life spells' range is cast at where
 /// she stands, with Drain Health Other or Harm Other (<see cref="DefenceMove.Life"/>; <c>FightScenario.LifeThrough.cs</c>): ACE asks no line of a spell with no projectile.</para>
+/// <para><b>M6 fight targeting (run 9, 2026-11-20 19:51 to 2026-11-21 04:58 UTC; docs/session.md section 120).</b> Who struck: a damage or evasion notice with no swing order is pinned only on a creature that can have
+/// struck her (<see cref="BlowCanBeFrom"/>, <c>m6-blow-unpinned</c>), never on a far one by its name. What first: an attacker with no shot from here is moved to before any life spell, a sidestep and then a walk to a spot
+/// with a line (<see cref="DefenceLineSpot"/>, <c>m6-line-first</c>), at most <see cref="MaxDefenceWalksTo"/> searches; the life spell is cast when neither finds a spot, the leg to it cannot be planned, or the searches
+/// are spent (the owner's rule of 2026-11-16: a creature no move reaches is fought with Life Magic).</para>
 /// </remarks>
 public sealed partial class FightScenario
 {
@@ -412,6 +417,11 @@ public sealed partial class FightScenario
             return;
         }
 
+        if (how is HeardDamage or HeardEvasion && !BlowCanBeFrom(guid, name, how, in at))
+        {
+            return; // M6 fight targeting (m6-blow-unpinned): the nearest of that name cannot have struck her; the hitter is not known, and nothing far is taken by its name
+        }
+
         var now = _view.Clock.Now;
         foreach (var known in _attackers)
         {
@@ -432,6 +442,88 @@ public sealed partial class FightScenario
             _defenceLogged.Add(guid);
             _log.Info(LogCategory, $"self-defence: {name} 0x{guid:X8} attacked ({how}); fighting it before the targets");
         }
+    }
+
+    /// <summary>
+    /// ACE's <c>MissileRangeCap</c>, the farthest a creature's missile flies: 85 yards over ACE's <c>MetersToYards</c> 1.094 (<c>Creature_Missile.cs:402-403</c>, applied in <c>GetMaxMissileRange</c> :406-416 @95ef426d), 77.7 m.
+    /// </summary>
+    public const double AceMissileRangeCapMetres = 85.0 / 1.094;
+
+    /// <summary>The blow notices with no swing order whose nearest creature of the name stood past where its blow can come from (report-only count, <c>m6-blow-unpinned</c>).</summary>
+    public int BlowsUnpinned { get; private set; }
+
+    /// <summary>Which rule says how far a creature's kind can strike from (<see cref="BlowCanBeFrom"/>).</summary>
+    private enum BlowReach : byte
+    {
+        /// <summary>A melee blow: the far-blow measure's reach, <see cref="LivePositionBlowMetres"/>.</summary>
+        Melee,
+
+        /// <summary>A thrown weapon whose range a ground profile records (<see cref="Grounds.GroundRanged.RangeMetres"/>, through the bestiary).</summary>
+        RecordedThrow,
+
+        /// <summary>A thrown weapon or a launcher by the world database's creature table, its range not recorded: ACE's cap, <see cref="AceMissileRangeCapMetres"/>.</summary>
+        MissileCap,
+    }
+
+    /// <summary>The farthest a blow of <paramref name="o"/>'s kind can come from, in metres, and the rule (<see cref="BlowReach"/>). One read of the bestiary (a dictionary read once it is loaded).</summary>
+    private static double BlowReachOf(WorldObject o, out BlowReach rule)
+    {
+        var kind = Bestiary.Find(o.Weenie.WeenieClassId);
+        if (kind?.Offence.Ranged is { Spell: false, RangeMetres: > 0 } thrown)
+        {
+            rule = BlowReach.RecordedThrow;
+            return Math.Max(LivePositionBlowMetres, thrown.RangeMetres);
+        }
+
+        if (kind?.Timing is { } timing && (timing.Thrown || timing.Launcher))
+        {
+            rule = BlowReach.MissileCap;
+            return AceMissileRangeCapMetres;
+        }
+
+        rule = BlowReach.Melee;
+        return LivePositionBlowMetres;
+    }
+
+    /// <summary>
+    /// M6 fight targeting (<c>m6-blow-unpinned</c>; run 9, 2026-11-20 19:51 to 2026-11-21 04:58 UTC, the Tusker Holding): a damage or evasion notice names its attacker by name alone, and with no swing order of that name in the last
+    /// <see cref="SwingBlowSeconds"/> the fight took the nearest living creature of the name. In run 9 that was 32 Tusker Slaves 9.6 to 32.7 m off (stuck on ledges and lower floors), and 253 Harm Other and drain decisions went at
+    /// them while the Slaves at her went on striking; no swing order named her from any of them in the 10 s before any of those casts. A blow is now pinned on that nearest creature only when it can have struck her: it stands
+    /// within its kind's reach by the fight's record (<see cref="BlowReachOf"/>: a melee blow's <see cref="LivePositionBlowMetres"/>, the far-blow measure's own; a thrower's recorded range; a launcher's or an unrecorded
+    /// thrower's ACE cap). Else the hitter is not known: nothing is pinned, the fight keeps its target and fights what is near, and one line says so with the numbers.
+    /// </summary>
+    private bool BlowCanBeFrom(uint guid, string name, string how, in CellFrame mage)
+    {
+        if (!_view!.State.Objects.TryGet(guid, out var o))
+        {
+            return false;
+        }
+
+        var reach = BlowReachOf(o, out var rule);
+        var away = StandsAt(_view, o) is { } it ? it.ToGlobal().DistanceTo(mage.ToGlobal()) : double.PositiveInfinity;
+        if (away <= reach)
+        {
+            return true;
+        }
+
+        if (_view.State.Objects.LivingCreaturesNamed(name, _view.State.Self.Guid, _view.Live) == 1)
+        {
+            // The only living creature of the name: the server's notice names its attacker, so the name is its identity, wherever its record has it (a sticky creature's stale record, TODO(m6-sticky-walk-back);
+            // a missile). No other creature can have struck her. Logged, so a record this far off is seen.
+            _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"self-defence: a blow of {name} ({how}) with no swing order: 0x{guid:X8}, {(double.IsPositiveInfinity(away) ? "with no position" : string.Create(CultureInfo.InvariantCulture, $"{away:0.0} m off by the fight's record"))}, past the {reach:0.#} m a blow of its kind comes from, is the only living {name} in the table: the notice is its (m6-blow-unpinned: the name is an identity)"));
+            return true;
+        }
+
+        BlowsUnpinned++;
+        var reachText = rule switch
+        {
+            BlowReach.RecordedThrow => string.Create(CultureInfo.InvariantCulture, $"its recorded throw's {reach:0.#} m (the bestiary's ranged attack)"),
+            BlowReach.MissileCap => string.Create(CultureInfo.InvariantCulture, $"ACE's missile cap {reach:0.#} m (it throws or shoots by the world database's creature table; Creature_Missile.cs:403)"),
+            _ => string.Create(CultureInfo.InvariantCulture, $"a melee blow's reach {reach:0.#} m (the far-blow measure's, FightScenario.LivePositionBlowMetres; ACE's MaxMeleeRange 0.75 m and the two bodies, Monster_Navigation.cs:28)"),
+        };
+        var place = double.IsPositiveInfinity(away) ? "has no position the fight can read" : string.Create(CultureInfo.InvariantCulture, $"stands {away:0.0} m off by the fight's record");
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"self-defence: a blow of {name} ({how}) came with no swing order of that name in the last {SwingBlowSeconds:0} s, and the nearest {name} 0x{guid:X8} {place}, past {reachText}: it cannot have struck her, so the hitter is not known; nothing is pinned by the name, the fight keeps its target 0x{_target:X8} and fights what is near (m6-blow-unpinned, {BlowsUnpinned} this fight)"));
+        return false;
     }
 
     /// <summary>The attackers the struck proof let the fight cast at with no line by the test (<see cref="StruckProof"/>; report-only count).</summary>
@@ -483,7 +575,7 @@ public sealed partial class FightScenario
             return false;
         }
 
-        if (Shots.IsDropped(a.Guid, clock))
+        if (ShotDropHoldsAt(a.Guid, clock, in here, in it)) // M6 fight targeting: the drop from where it was measured (m6-shot-drop-place)
         {
             // Live 2026-11-12 13:00 to 13:07 UTC, the Cave: the proof named a tusker 2.5 m off by its record whose bolts came to nothing (a ledge between them, or another tusker of the same name was the one striking);
             // the shot rule dropped it after two wasted casts, the close-attacker rule took the drop back at once, and she cast at it for minutes with three kills in seven. The shot rule's drop outranks the proof:
@@ -520,6 +612,12 @@ public sealed partial class FightScenario
     private DefenceMove DefenceStep(IGameSessionView session, double clock, in CellFrame here, bool announce, out uint guid)
     {
         guid = 0;
+        if (announce)
+        {
+            (_walkToReady, _walkToSearched) = (0, 0); // this pick's search for a spot with a line (DefenceLineSpot) starts clean
+            _castableAttackers.Clear(); // M6 one target (FightScenario.OneTarget.cs): this pick's attackers in range with a line, for the kill order
+        }
+
         if (_attackers.Count == 0)
         {
             return DefenceMove.None;
@@ -559,6 +657,11 @@ public sealed partial class FightScenario
             if (distance <= _range && (_options.IgnoreLine || LineIsClear(session, in here, a.Guid) || StruckProof(a, clock, distance, in here, in p)))
             {
                 a.HoldSince = double.NaN;
+                if (announce)
+                {
+                    _castableAttackers.Add((a.Guid, distance));
+                }
+
                 if (distance < castDistance)
                 {
                     (cast, castDistance) = (a, distance);
@@ -582,10 +685,16 @@ public sealed partial class FightScenario
         }
 
         guid = other.Guid;
+        if (announce && DefenceLineSpot(session, clock, other, in here, in otherAt))
+        {
+            other.HoldSince = double.NaN;
+            return DefenceMove.Walk; // M6 fight targeting (m6-line-first; the owner's rule after run 9: she moves to the creature for a line before she harms it through the obstacle): a sidestep or a walk to a spot with a line, before a life spell
+        }
+
         if (announce && LifeThroughPlans(session, clock, in here, other.Guid))
         {
             other.HoldSince = double.NaN;
-            return DefenceMove.Life; // M6 14 (m6-life-through): before the walk, the step and the hold: a life spell needs no line
+            return DefenceMove.Life; // M6 14 (m6-life-through): no spot with a line (or the bound spent): before the tour's walk, the step and the hold: a life spell needs no line
         }
 
         if (_options.ArenaHere || !_ground.IsNoGo(otherCell))
@@ -755,10 +864,78 @@ public sealed partial class FightScenario
         return _range;
     }
 
+    /// <summary>The attacker <see cref="DefenceLineSpot"/> chose a spot for in this pick (0: none): <see cref="StartDefenceWalk"/> walks to <see cref="_walkToSpot"/> for it.</summary>
+    private uint _walkToReady;
+
+    /// <summary>The attacker <see cref="DefenceLineSpot"/> searched for in this pick and found no spot for (0: none), and why (<see cref="_walkToNone"/>).</summary>
+    private uint _walkToSearched;
+
+    private string _walkToNone = string.Empty;
+
+    /// <summary>The attacker the self-defence leg under way walks for a line to (0: none), for the check after it (<see cref="DefenceLegArrived"/>).</summary>
+    private uint _defenceLegFor;
+
+    /// <summary>The searches for a spot with a line that found one (report-only count, <c>m6-line-first</c>).</summary>
+    public int LineSpotsFound { get; private set; }
+
+    /// <summary>The searches for a spot with a line that found none, so a life spell was asked (report-only count, <c>m6-line-first</c>).</summary>
+    public int LineSpotsNone { get; private set; }
+
     /// <summary>
-    /// M6 6 B2 (<c>m5-defend-walk-to</c>, D88): the pick's walk arm. No attacker can be cast at from here and the nearest (<paramref name="guid"/>) is not in a no-go cell: a leg toward it, to the spot <see cref="WalkToSpot"/> chose
-    /// (purpose <c>self-defence</c>, named), dropped the moment an attacker is in range with a clear line (<see cref="DefenceDropsWalk"/>). A refusal, no spot, a leg that cannot be planned, or <see cref="MaxDefenceWalksTo"/>
-    /// legs spent on this attacker fall back to today's walk, the tour's next leg, named and logged.
+    /// M6 fight targeting (<c>m6-line-first</c>; run 9, 2026-11-20 19:51 to 2026-11-21 04:58 UTC: 355 Harm Other and drain decisions at Tusker Slaves no bolt was sent at, and the move for a line ran 0 times, because the life rule
+    /// came first whenever Harm Other was known, in range and paid for). An attacker that cannot be cast at from here is first moved to: a sidestep for a line (<see cref="SidestepSpot"/>, an attacker within
+    /// <see cref="SidestepReachMetres"/>), else the walk to the spot on the line to it with range and a line (<see cref="WalkToSpot"/>). Each search counts as one of its <see cref="MaxDefenceWalksTo"/> legs, so a spot
+    /// that brought no line is not walked to for ever. Before: the crossing the tour owes keeps its ground (<see cref="CrossingOwed"/>), and the bound spent ends the search; neither is logged here
+    /// (<see cref="StartDefenceWalk"/> says it when the walk is reached). True with the spot in <see cref="_walkToSpot"/> and <see cref="_walkToReady"/> set; false with why in <see cref="_walkToNone"/>, logged, and the life
+    /// rule is asked next (<see cref="LifeThroughPlans"/>: no spot found, or the creature cannot be reached at all).
+    /// </summary>
+    private bool DefenceLineSpot(IGameSessionView session, double clock, Attacker who, in CellFrame here, in CellFrame it)
+    {
+        (_walkToReady, _walkToSearched, _walkToNone) = (0, 0, string.Empty);
+        if (_walk is null || CrossingOwed(session, clock, out _) || who.WalksTo >= MaxDefenceWalksTo)
+        {
+            return false; // no walk, the crossing's ground, or the bound spent: the life rule, then StartDefenceWalk names which
+        }
+
+        who.WalksTo++;
+        var side = SidestepSpot(who, in here, in it);
+        var line = side is null ? null : WalkToSpot(who, in here, in it);
+        if (side is null || line is null)
+        {
+            LineSpotsFound++;
+            _walkToReady = who.Guid;
+            return true;
+        }
+
+        LineSpotsNone++;
+        (_walkToSearched, _walkToNone) = (who.Guid, side + "; " + line);
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"self-defence: no spot with a line to {who.Name} 0x{who.Guid:X8} ({it.ToGlobal().DistanceTo(here.ToGlobal()):0.#} m off, no shot from here; search {who.WalksTo} of {MaxDefenceWalksTo}): {_walkToNone}; a life spell is asked next (m6-line-first)"));
+        return false;
+    }
+
+    /// <summary>
+    /// M6 fight targeting: the shot rule's drop stands on <paramref name="guid"/>, an attacker the line test calls castable, from where she stands: a spot with a line is searched for it as for any attacker no bolt reaches
+    /// (<see cref="DefenceLineSpot"/>). The line test cannot tell such a spot from here (it called this place clear), so the move is what re-measures: once she has moved, the drop is hers to take back
+    /// (<see cref="ShotDropHolds"/>) and the shot check is asked again before any bolt.
+    /// </summary>
+    private bool DropLineSpot(IGameSessionView session, double clock, in CellFrame here, uint guid)
+    {
+        foreach (var a in _attackers)
+        {
+            if (a.Guid == guid)
+            {
+                return session.State.Objects.TryGet(guid, out var o) && StandsAt(session, o) is { } it && DefenceLineSpot(session, clock, a, in here, in it);
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// M6 6 B2 (<c>m5-defend-walk-to</c>, D88): the pick's walk arm. No attacker can be cast at from here and the nearest (<paramref name="guid"/>) is not in a no-go cell, or a spot with a line was found for it
+    /// (<see cref="DefenceLineSpot"/>): a leg to the spot that search chose (purpose <c>self-defence</c>, named), dropped the moment an attacker is in range with a clear line (<see cref="DefenceDropsWalk"/>), and checked when it
+    /// arrives (<see cref="DefenceLegArrived"/>). A leg that cannot be planned is no walkable path: the life rule is asked where she stands (<c>m6-line-first</c>), else the tour's next leg. No spot, the crossing owed, or
+    /// <see cref="MaxDefenceWalksTo"/> searches spent on this attacker fall back to today's walk, the tour's next leg, named and logged.
     /// </summary>
     private ScenarioStatus StartDefenceWalk(IGameSessionView session, double clock, uint guid)
     {
@@ -770,6 +947,36 @@ public sealed partial class FightScenario
                 who = a;
                 break;
             }
+        }
+
+        if (who is not null && _walkToReady == guid && _walk is not null)
+        {
+            _walkToReady = 0;
+            if (_walk.BeginLegTo(session, clock, in _walkToSpot, out var leg))
+            {
+                _walks++;
+                NoteLegFrom(session); // M5 7 P7i
+                _missesInARow = 0;
+                _target = 0;
+                _holdingLogged = false;
+                (_legPurpose, _legNote, _legGuid) = (TourPurpose.None, _walkToNote, 0);
+                _walkBackCorpse = 0;
+                _lootWalkCorpse = 0;
+                _defenceLegFor = guid;
+                _log.Info(LogCategory, $"walking: purpose=self-defence ({_walkToNote}); D88: an attacker out of range or line is walked toward; {leg}");
+                _phase = Phase.Walk;
+                return ScenarioStatus.Running;
+            }
+
+            // No walkable path to the spot: the creature cannot be reached from here, so the life spell is the answer (the owner's rule of 2026-11-16 for a creature no move reaches), else the tour's leg.
+            _log.Info(LogCategory, $"self-defence: the leg to the spot with a line to {who.Name} 0x{guid:X8} could not be planned (no walkable path: {leg}); a life spell is asked where she stands (m6-line-first)");
+            if (session.State.Self.Position is { } stand && LifeThroughPlans(session, clock, in stand, guid))
+            {
+                return LifeThroughBegin(session, clock, in stand);
+            }
+
+            _log.Info(LogCategory, $"self-defence: the walk toward {who.Name} 0x{guid:X8} falls back to the tour's next leg (as before m5-defend-walk-to): the leg could not be planned: {leg}");
+            return StartWalk(session, clock, SelfDefenceNoLine);
         }
 
         if (who is not null && CrossingOwed(session, clock, out var storeyOwed))
@@ -785,9 +992,13 @@ public sealed partial class FightScenario
         }
 
         string why;
-        if (who is null || _walk is null || session.State.Self.Position is not { } here || !session.State.Objects.TryGet(guid, out var o) || StandsAt(session, o) is not { } it)
+        if (who is null || _walk is null)
         {
             why = _walk is null ? "the fight has no walk" : "the attacker or the mage has no position";
+        }
+        else if (_walkToSearched == guid)
+        {
+            why = _walkToNone; // DefenceLineSpot searched in this pick and logged it; the life rule had nothing to cast
         }
         else if (who.WalksTo >= MaxDefenceWalksTo)
         {
@@ -801,38 +1012,37 @@ public sealed partial class FightScenario
         }
         else
         {
-            who.WalksTo++;
-            why = WalkToSpot(who, in here, in it) ?? string.Empty;
-            if (why.Length != 0)
-            {
-                var none = SidestepSpot(who, in here, in it); // M6 14: an attacker at her with something between them: a step to the side for a line, before the tour's leg
-                why = none is null ? string.Empty : why + "; " + none;
-            }
-
-            if (why.Length == 0)
-            {
-                if (_walk.BeginLegTo(session, clock, in _walkToSpot, out var leg))
-                {
-                    _walks++;
-                    NoteLegFrom(session); // M5 7 P7i
-                    _missesInARow = 0;
-                    _target = 0;
-                    _holdingLogged = false;
-                    (_legPurpose, _legNote, _legGuid) = (TourPurpose.None, _walkToNote, 0);
-                    _walkBackCorpse = 0;
-                    _lootWalkCorpse = 0;
-                    _log.Info(LogCategory, $"walking: purpose=self-defence ({_walkToNote}); D88: an attacker out of range or line is walked toward; {leg}");
-                    _phase = Phase.Walk;
-                    return ScenarioStatus.Running;
-                }
-
-                why = "the leg could not be planned: " + leg;
-            }
+            why = "TODO(m6-line-first-unsearched): the pick reached the walk with no search for a spot with a line to it in this pick";
+            _log.Warn(LogCategory, $"self-defence: {why} ({who.Name} 0x{guid:X8})");
         }
 
+        _walkToSearched = 0;
         var name = who is null ? string.Create(CultureInfo.InvariantCulture, $"0x{guid:X8}") : string.Create(CultureInfo.InvariantCulture, $"{who.Name} 0x{guid:X8}");
         _log.Info(LogCategory, $"self-defence: the walk toward {name} falls back to the tour's next leg (as before m5-defend-walk-to): {why}");
         return StartWalk(session, clock, SelfDefenceNoLine);
+    }
+
+    /// <summary>
+    /// M6 fight targeting (<c>m6-line-first</c>), the check after the act: a self-defence leg for a line to <see cref="_defenceLegFor"/> has arrived. One line says whether the line test now finds it clear from where she
+    /// stands, with the distance; the next pick decides from there (a clear line: the bolt, after the shot check; none: the second search or the life rule). Nothing else changes here.
+    /// </summary>
+    private void DefenceLegArrived(IGameSessionView session)
+    {
+        var guid = _defenceLegFor;
+        _defenceLegFor = 0;
+        if (guid == 0 || session.State.Self.Position is not { } here)
+        {
+            return;
+        }
+
+        if (!session.State.Objects.TryGet(guid, out var o) || StandsAt(session, o) is not { } it || _killed.Contains(guid))
+        {
+            _log.Info(LogCategory, $"self-defence: the leg for a line to 0x{guid:X8} arrived: it is dead or gone (m6-line-first)");
+            return;
+        }
+
+        var clear = _options.IgnoreLine || LineIsClear(session, in here, guid);
+        _log.Info(LogCategory, string.Create(CultureInfo.InvariantCulture, $"self-defence: the leg for a line to {o.Name} 0x{guid:X8} arrived at 0x{here.CellId:X8} [{here.Origin.X:0.#} {here.Origin.Y:0.#} {here.Origin.Z:0.#}], {it.ToGlobal().DistanceTo(here.ToGlobal()):0.#} m from it: the line test finds it {(clear ? "clear: the bolt next, after the shot check" : "still blocked: the next search or the life rule")} (m6-line-first)"));
     }
 
     /// <summary>
@@ -985,6 +1195,7 @@ public sealed partial class FightScenario
         }
 
         _walk?.Abandon();
+        _defenceLegFor = 0; // the check after a leg for a line: the line came during it (m6-line-first)
         _log.Info(LogCategory, $"self-defence: the walk is dropped; 0x{guid:X8} is in range with a clear line");
         _phase = Phase.Choose;
         return true;
@@ -1021,6 +1232,7 @@ public sealed partial class FightScenario
     private void PruneDefence(WorldObjectTable objects)
     {
         PruneLifeThrough(objects); // M6 14
+        PruneHitByHer(objects); // M6 one target
         for (var i = _defenceDropped.Count - 1; i >= 0; i--)
         {
             if (!objects.TryGet(_defenceDropped[i], out _))

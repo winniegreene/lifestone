@@ -278,6 +278,93 @@ public sealed class HoltburgScrivenerWalkDatTests(DatSetFixture fixture, ITestOu
         Assert.InRange(Distance(at.CellId, at.Origin, 0xA9B30107, new Vector3(176.79f, 82.19f, 119.005f)), 0, Reach);
     }
 
+    /// <summary>
+    /// M6 sprint (run 6, 2026-11-19 22:53 to 2026-11-20 00:08 UTC): the walk to the Apprentice Scrivener of Item and War Magic 20215 (0x7A9B3008 in his counter's cell 0xA9B30101 at (183.749, 79.945, 116.005), the Foci of
+    /// Artifice's only seller, create-list row 77964), an object goal in his cell, ended "stuck after 3 plans and 12 rungs" five times: the body pressed on his body 1.0 m from his point, in the front room 0xA9B30100, which
+    /// the runner does not count as his room. The Foci of Artifice waited two hours. Here, on the dats with his body in the walker's physics: the object-goal walk as live arrives in the front room within his reach (the pin
+    /// inverted by M6 sprint m6-vendor-reach: an object goal arrives within its range when nothing walls her off from him, or on a contact with him, not only in his room; <see cref="StoneholdVendorReachDatTests"/>), and his
+    /// stop in the front room is planned, confirmed and walked from the lifestone, ending within his reach and clear of his body.
+    /// </summary>
+    [RequiresDatsFact]
+    public void The_foci_of_artifice_seller_is_reached_at_his_stop_in_the_front_room_with_his_body_in_the_physics()
+    {
+        const uint sellerGuid = 0x7A9B3008;
+        var rig = Rig();
+        var seller = Holtburg().Single(v => v.Guid == sellerGuid);
+        Assert.Equal(0xA9B30101u, seller.Cell);
+        Assert.NotNull(seller.StopPoint);
+        new ServerObjectPhysicsHost(rig.World, Dats).Create(new ServerObjectDescription(sellerGuid, OfflineWalker.HumanSetupId, 1f, ItemMagicPhysicsState, IsCreature: true, IsSelf: false, DescriptionFlags: 0x200), new CellFrame(seller.Cell, new AcFrame(seller.Point, Quaternion.Identity)));
+        var him = NavMap.FromCellFrame(new CellFrame(seller.Cell, new AcFrame(seller.Point, Quaternion.Identity))).Global;
+
+        var old = Walk(rig, rig.PlanObject(seller).Goal, seller.Name + " (as live: the object goal in his cell)", null, him);
+        var reached = Distance(old.At.CellId, old.At.Origin, seller.Cell, seller.Point);
+        output.WriteLine($"as live: {old.State} at 0x{old.At.CellId:X8} {old.At.Origin}, {reached:F2} m from him; nearest his centre {old.Nearest:F2} m");
+        Assert.Equal(NavRunState.Arrived, old.State); // before m6-vendor-reach: Blocked against his body, as live
+        Assert.Equal(0xA9B30100u, old.At.CellId); // the front room: outside his cell, within his range, nothing between
+        Assert.InRange(reached, BodyClearMetres, Reach);
+
+        var stop = seller.StopPoint!.Value;
+        var (path, goal) = rig.Plan(seller.StopCell, stop, 0);
+        Assert.Equal(NavPathStatus.Found, path.Status);
+        Assert.Equal(RouteConfirmStatus.Confirmed, rig.Confirmer.ConfirmAll(path.Waypoints, goal.StopTolerance));
+        var walk = Walk(rig, goal, seller.Name + " (his stop)", null, him);
+        var distance = Distance(walk.At.CellId, walk.At.Origin, seller.Cell, seller.Point);
+        output.WriteLine($"{seller.Name}: stop 0x{seller.StopCell:X8} {stop}: {walk.State} at 0x{walk.At.CellId:X8} {walk.At.Origin}, {distance:F2} m from him; nearest {walk.Nearest:F2} m");
+        Assert.Equal(NavRunState.Arrived, walk.State);
+        Assert.Equal(0xA9B30100u, walk.At.CellId);
+        Assert.InRange(distance, BodyClearMetres, Reach);
+    }
+
+    /// <summary>
+    /// M6 sprint (run 6, 2026-11-20 03:16:39 to 03:16:47 UTC, the video's 5:38:25): Lifestone Recall lands on the lifestone's own point (81.3304, 11.7974, 94.005) (ACE WorldObject_Magic.cs 1087-1095 @95ef426d), and the walk
+    /// to Archmage Cindrue left it to the north-east: two touches of the stone, two stuck rungs, then a touch of Alcott, who stands 3.0 m from its centre (landblock_instance 0x7A9B4073 at (83.3001, 14.0365, 94.005),
+    /// the human Setup). The planner knew no lifestone: the body feed counted creatures only. Here, on the dats, with the stone and Alcott both in the walker's physics and both on the plan as the feed counts them now
+    /// (<see cref="NpcBodyFeed.IsBody"/>, the stone's radius by <see cref="NpcBodyFeed.BodyRadius"/> over its Setup 0x020002EE): from the recall's arrival the walker reaches Cindrue's stop with both on the plan and never comes inside Alcott's disc.
+    /// </summary>
+    [RequiresDatsFact]
+    public void From_the_recall_arrival_on_the_lifestone_the_walk_to_Cindrue_keeps_clear_of_Alcott_with_the_stone_on_the_plan()
+    {
+        const uint stoneGuid = 0x7A9B404F;
+        const uint stoneSetup = 0x020002EE;
+        const uint alcottGuid = 0x7A9B4073;
+        var stoneAt = new Vector3(81.3304f, 11.7974f, 94.005f);
+        var alcottAt = new Vector3(83.3001f, 14.0365f, 94.005f);
+        var lookup = HostileCreatureFeed.SetupRadii(Dats);
+        var shapes = SetupShapes.Of(lookup)!;
+        var stoneRadius = NpcBodyFeed.BodyRadius(lookup(stoneSetup)!.Value, shapes.ShapeRadius(stoneSetup));
+        var alcottRadius = NpcBodyFeed.BodyRadius(lookup(OfflineWalker.HumanSetupId)!.Value, shapes.ShapeRadius(OfflineWalker.HumanSetupId));
+        output.WriteLine($"the lifestone: bounds {lookup(stoneSetup):F2} m, collision shape {shapes.ShapeRadius(stoneSetup)?.ToString("F2") ?? "none"} m, the body {stoneRadius:F2} m (disc {NpcBodies.DiscRadius(stoneRadius):F2} m); Alcott {alcottRadius:F2} m (disc {NpcBodies.DiscRadius(alcottRadius):F2} m)");
+
+        var cindrue = GroundCatalog.Get(Den).Vendors.Single(v => v.Name == "Archmage Cindrue");
+        var arrival = new CellFrame(0xA9B40019, new AcFrame(stoneAt, new Quaternion(0f, 0f, -0.543991f, 0.839091f)));
+        var alcott = NavMap.FromCellFrame(new CellFrame(0xA9B40019, new AcFrame(alcottAt, Quaternion.Identity))).Global;
+        var stone = NavMap.FromCellFrame(new CellFrame(0xA9B40019, new AcFrame(stoneAt, Quaternion.Identity))).Global;
+        var alcottBody = new NavBody(alcottGuid, "Alcott", alcott, alcottRadius, alcottAt.Z, Outdoor: true);
+        var stoneBody = new NavBody(stoneGuid, "Life Stone", stone, stoneRadius, stoneAt.Z, Outdoor: true);
+
+        // Each walk on a fresh world: the stone and Alcott in the physics, the body placed on the stone's point by the client's sliding placement (live, the stone's create came 1.0 s after the
+        // teleport, 03:16:30.478, 2.7 m from her). Offline the walk from that placement touches neither in either case, so this pins that the stone on the plan keeps the walk whole and clear of
+        // Alcott; the live touches themselves are not reproduced here.
+        (NavRunState State, CellFrame At, float Nearest, int Stamped, int Plans) Run(string name, params NavBody[] bodies)
+        {
+            var rig = Rig();
+            var host = new ServerObjectPhysicsHost(rig.World, Dats);
+            host.Create(new ServerObjectDescription(alcottGuid, OfflineWalker.HumanSetupId, 1f, ItemMagicPhysicsState, IsCreature: true, IsSelf: false, DescriptionFlags: 0), new CellFrame(0xA9B40019, new AcFrame(alcottAt, Quaternion.Identity)));
+            var (path, goal) = rig.Plan(cindrue.StopCell, cindrue.StopPoint ?? cindrue.Point, 0);
+            Assert.Equal(NavPathStatus.Found, path.Status);
+            host.Create(new ServerObjectDescription(stoneGuid, stoneSetup, 1f, (uint)PhysicsState.ReportCollisions, IsCreature: false, IsSelf: false, DescriptionFlags: 0x4000), new CellFrame(0xA9B40019, new AcFrame(stoneAt, Quaternion.Identity)));
+            return Walk(rig, goal, name, new FixedBodies(bodies), alcott, arrival);
+        }
+
+        var blind = Run("Cindrue from the recall (Alcott only, as live: the stone off the plan)", alcottBody);
+        output.WriteLine($"as live: {blind.State} at 0x{blind.At.CellId:X8} {blind.At.Origin}; nearest Alcott's centre {blind.Nearest:F2} m; plans {blind.Plans}");
+        var walk = Run("Cindrue from the recall (the stone and Alcott on the plan)", stoneBody, alcottBody);
+        output.WriteLine($"with the stone: {walk.State} at 0x{walk.At.CellId:X8} {walk.At.Origin}; nearest Alcott's centre {walk.Nearest:F2} m (disc {NpcBodies.DiscRadius(alcottRadius):F2} m); stamped {walk.Stamped}; plans {walk.Plans}");
+        Assert.Equal(NavRunState.Arrived, walk.State);
+        Assert.True(walk.Stamped >= 2, $"the stone and Alcott are both on the plan: stamped {walk.Stamped}");
+        Assert.True(walk.Nearest > NpcBodies.DiscRadius(alcottRadius) - NpcBodies.MeetSlackMetres, $"the walker came {walk.Nearest:F2} m from Alcott's centre, inside his disc");
+    }
+
     private const uint ItemMagicGuid = 0x7A9B301B;
     private const uint ItemMagicCell = 0xA9B3003C;
     private const uint ItemMagicPhysicsState = 0x200418;

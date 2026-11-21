@@ -24,12 +24,24 @@ public interface INavBodyFeed
 {
     /// <summary>Clears <paramref name="into"/> and fills it with every body within <paramref name="maxMetres"/> of <paramref name="from"/> (global metres).</summary>
     void Fill(Vector2 from, float maxMetres, List<NavBody> into);
+
+    /// <summary>
+    /// M6 sprint (<c>m6-vendor-reach</c>): the live place of the object <paramref name="guid"/>, as the client holds it (its object table's position: what the client draws), whether or not it is a body on the plan (a hostile
+    /// creature, a chest), so an object goal's arrival is measured to where the object is now (<c>NavRunner.CheckArrival</c>). False when it is not in view; a feed that does not say returns false and the goal's planned point stands.
+    /// </summary>
+    /// <param name="guid">The object's id.</param>
+    /// <param name="at">Its cell and frame.</param>
+    bool TryPlace(uint guid, out CellFrame at)
+    {
+        at = default;
+        return false;
+    }
 }
 
 /// <summary>
 /// The NPCs' bodies from the client's object table (M6 4 W2): every creature (ItemType bit 0x10) that is placed, not the player or another player (0x8), not
 /// ethereal (PhysicsState 0x4: the physics lets the body through), not known dead, and that <see cref="HostileCreatureFeed.IsHostile"/> leaves out (not attackable,
-/// or a vendor, 0x200): the Scrivener of Item Magic before Holtburg's scriveners' door is one. Its radius is its Setup's radius (retail <c>CSetup::radius</c>,
+/// or a vendor, 0x200): the Scrivener of Item Magic before Holtburg's scriveners' door is one; and every lifestone and bind stone (<see cref="StoneFlags"/>, M6 sprint), which is no creature. Its radius is its Setup's radius (retail <c>CSetup::radius</c>,
 /// <see cref="HostileCreatureFeed.SetupRadii"/>) times its scale, and beyond a person's width only what its collision shape blocks (<see cref="BodyRadius"/>, M6 item 14); <see cref="NavCreatures.UnknownCreatureRadiusMetres"/> when there is no lookup or no Setup id (logged once).
 /// A creature whose Setup the lookup cannot read (not in the dats, or of no radius) is not a body (M6 4 f3, logged once by name, <c>npc-setup-unread</c>): the player's physics has no shape for it either,
 /// so the walker never meets it. Live (M6 4 round 1, Holtburg): the "Bottle" in 0xA9B40155 is a creature to the client (ACE weenie 40526 <c>ace40526-bottle</c>, ItemType 16, WeenieType 10,
@@ -46,17 +58,32 @@ public sealed class NpcBodyFeed(WorldObjectTable objects, uint self, ILogSink? l
     private bool _radiusLogged;
     private bool _unreadLogged;
 
-    /// <summary>Whether <paramref name="o"/> is a body as the feed counts one: a placed, solid, living creature that is neither the player nor hostile.</summary>
+    /// <summary>
+    /// The ObjectDescriptionFlags bits of a lifestone (<c>BF_LIFESTONE</c> 0x4000) and of an allegiance bind stone (<c>BF_BINDSTONE</c> 0x8000000), as <see cref="Lifestone.Client.Avatars.WorldContentCensus"/> reads them: solid fixed
+    /// objects the server places, which the player's physics meets (<see cref="Lifestone.Client.Physics.ServerObjectPhysicsHost"/>: "creatures stop at each other, the player, doors and lifestones") and which are no creature.
+    /// </summary>
+    public const uint StoneFlags = 0x4000 | 0x8000000;
+
+    /// <summary>
+    /// Whether <paramref name="o"/> is a body as the feed counts one: placed, solid, not the player or another player, and either a living creature that is not hostile, or a lifestone or bind stone
+    /// (<see cref="StoneFlags"/>). M6 sprint (run 6, 2026-11-20 03:16:39 UTC, the video's 5:38:25): Lifestone Recall lands on the tied lifestone's own point (ACE WorldObject_Magic.cs 1087-1095 @95ef426d,
+    /// <c>LinkedLifestone</c>, which Lifestone Tie sets to the lifestone's location, 974), so every trip home starts inside Holtburg's lifestone 0x7A9B404F; the planner did not know the lifestone (no creature),
+    /// planned the walk to Archmage Cindrue straight out of it to the north-east, and the body pressed along the stone (two touches, two stuck rungs) into Alcott, who stands 3.0 m from its centre. The stone touched
+    /// the walker on 9 of the run's 27 arrivals there. A start inside a body's disc may leave it, moving outward (<see cref="NavScars.SetBodies"/>), so the walk out of the stone stays planned.
+    /// </summary>
     /// <param name="o">The object.</param>
     /// <param name="self">The player's id.</param>
     public static bool IsBody(WorldObject o, uint self)
     {
         ArgumentNullException.ThrowIfNull(o);
-        return o.Guid != self && !o.IsSelf && o.Position is not null
-            && (o.ItemType & HostileCreatureFeed.CreatureItemType) != 0 && (o.DescriptionFlags & WorldObjectTable.PlayerFlag) == 0
-            && (o.State & PhysicsState.Ethereal) == 0
-            && o.Health is not <= 0f && o.Motion is not { Forward: WorldObjectTable.DeadMotionLowWord }
-            && !HostileCreatureFeed.IsHostile(o, self);
+        if (o.Guid == self || o.IsSelf || o.Position is null || (o.DescriptionFlags & WorldObjectTable.PlayerFlag) != 0 || (o.State & PhysicsState.Ethereal) != 0)
+        {
+            return false;
+        }
+
+        return (o.ItemType & HostileCreatureFeed.CreatureItemType) != 0
+            ? o.Health is not <= 0f && o.Motion is not { Forward: WorldObjectTable.DeadMotionLowWord } && !HostileCreatureFeed.IsHostile(o, self)
+            : (o.DescriptionFlags & StoneFlags) != 0;
     }
 
     /// <inheritdoc/>
@@ -86,6 +113,19 @@ public sealed class NpcBodyFeed(WorldObjectTable objects, uint self, ILogSink? l
 
             into.Add(new NavBody(o.Guid, o.Name, centre, radius, at.Origin.Z, LandDefs.IsOutdoorCell(at.CellId)));
         }
+    }
+
+    /// <inheritdoc/>
+    public bool TryPlace(uint guid, out CellFrame at)
+    {
+        if (guid != 0 && _objects.TryGet(guid, out var o) && o.Position is { } p && p.CellId != 0)
+        {
+            at = p;
+            return true;
+        }
+
+        at = default;
+        return false;
     }
 
     /// <summary>
